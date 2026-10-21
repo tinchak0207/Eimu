@@ -10,8 +10,8 @@ import { spawn } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { vlmAskJson } from "./img-orchestrate"
 
-const CP_ENV = "/opt/eimu-control-plane/.env.control-plane"
-const WORKSPACE = "/opt/eimu-harness/workspace"
+const CP_ENV = "/opt/image-control-plane/.env.control-plane"
+const WORKSPACE = "/opt/agent-harness/workspace"
 const RUN_DIR = WORKSPACE + "/.run"
 const LIB_DIR = WORKSPACE + "/.opencode/lib"
 // 中英混排标题（例「drama-visual-2 镜头拆解」）：Droid Fallback 无拉丁字形→豆腐块；文泉驿微米黑两者皆含。
@@ -172,7 +172,7 @@ function spawnPython(
     const child = spawn("python3", [file], {
       cwd: tmpDir,
       env: {
-        PATH: "/opt/eimu-harness/bin:/usr/local/bin:/usr/bin:/bin",
+        PATH: "/opt/agent-harness/bin:/usr/local/bin:/usr/bin:/bin",
         HOME: WORKSPACE,
         TMPDIR: tmpDir,
         LANG: "C.UTF-8",

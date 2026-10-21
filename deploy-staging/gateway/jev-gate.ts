@@ -277,7 +277,7 @@ export interface JevRouteDecision {
  * 刀3：权威路由。回 null＝Jev 挂（呼叫端 fail-open 用点名值）。
  * 呼叫端须对回传 id 再过 expert-ids.json 白名单（Jev 建议域外的保守回退）。
  *
- * 2026-10-02 项目负责人裁定修正（S02 预览转存事故）：ROUTE_OVERRIDE 废除——点名 expert＝最终
+ * 2026-10-02 暴君裁定修正（S02 预览转存事故）：ROUTE_OVERRIDE 废除——点名 expert＝最终
  * 裁决，Jev 只记异议（ROUTE_DISSENT）不改派。事故链：orchestrator 点名 video-director 的
  * 「S02 单镜预览转存」被 Jev 以 0.96 置信强改派 editor（「转存/上传」表面词汇命中 editor
  * 判据），editor 域无带鉴权工具、四路全 401 白跑一趟。表面关键词无法反映各域工具持有面，
@@ -356,12 +356,12 @@ const TEMPLATE_QUESTIONS = {
 /** 三模板 key。 */
 export type JevSpecTemplateKey = "research" | "creation" | "critique"
 
-// ── 0920 项目负责人裁定：模板选择接 System One（机器判定，不交模型自由心证）─────────
+// ── 0920 暴君裁定：模板选择接 System One（机器判定，不交模型自由心证）─────────
 // 事故：野兽模式下 orchestrator 无 workflow_*（能力断路），8 个 Expert 有却没人
 // 负责「选模板」→ 60s 百合 OP MV 裸跑（无角色设定卡/美术卡等约束环节）＝业余。
 // 裁定：模板选择＝机器判定（System One choice），随派遣任务书硬注入 Expert，
 // 模型可跳过确实不适用的环节，但必须明说跳过哪环与原因。
-// 0920 晚（项目负责人裁定）：7 个领域重模板入池。分区闸＝beast mode——两个调用点
+// 0920 晚（暴君裁定）：7 个领域重模板入池。分区闸＝beast mode——两个调用点
 // （messages-gw prompt 骨架路径 `beastOn ?` 分支、subagent Expert 派遣路径）
 // 都只在 beast ON 才走到这里；轻请求在 beast OFF 时根本不会问这题。重模板
 // 判准写「领域关键词＋交付物形态」，与泛用骨架（single/feature/novel）互斥：
@@ -656,7 +656,7 @@ export async function classifyDispatchGuards(spec: string): Promise<JevDispatchG
 }
 
 /**
- * H9 内容守卫。2026-10-02 项目负责人裁定修正：跨域关键词翻转已移除——关键词计数无法反映
+ * H9 内容守卫。2026-10-02 暴君裁定修正：跨域关键词翻转已移除——关键词计数无法反映
  * 各域工具持有面（「转存/上传」词汇曾把点名 video-director 的任务翻成 editor，域内
  * 无鉴权工具全 401），点名域一律保留。仅存 critic 研究降级（critic 是昂贵审核域，
  * 研究任务降通用子代理不会让任务无路可走）。

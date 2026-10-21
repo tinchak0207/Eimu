@@ -3,8 +3,8 @@
 // 发 OpenAI 相容 /chat/completions。key 仅在进程内使用，严禁写入任何返回值/日志/输出。
 // 失败一律回 {ok:false, reason}，不降级编造。
 
-const MODELS_PATH = "/opt/eimu-harness/agent-models.json"
-const CONFIG_PATH = "/opt/eimu-harness/workspace/.opencode/opencode.json"
+const MODELS_PATH = "/opt/agent-harness/agent-models.json"
+const CONFIG_PATH = "/opt/agent-harness/workspace/.opencode/opencode.json"
 
 interface Channel {
   base: string

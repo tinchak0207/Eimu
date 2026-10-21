@@ -5,7 +5,7 @@
 // Response），外加两个独立来源的 oracle：①`HARNESS_TOOL_IDS`（harness 注册表，
 // 非本档资料）②`CAMERA_MOVE_TO_PROMPT`（既有轨迹映射表，用来反证本档没有复制它）。
 // 未验：任一条预设在生产 harness 上「跑得动」（toolId 合法 ≠ 该工具可用），
-// 以及运镜结果的视觉品质——那是生成端与项目负责人验收的事。
+// 以及运镜结果的视觉品质——那是生成端与暴君验收的事。
 
 import test from "node:test";
 import assert from "node:assert/strict";

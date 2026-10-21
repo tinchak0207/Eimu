@@ -124,7 +124,7 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
         const items = Array.isArray(input.artifacts) ? input.artifacts : []
         if (items.length !== urls.length || new Set(items.map((a: any) => a.url)).size !== items.length)
           return Response.json({ ok: false, error: "download ACK requires every URL/path/hash receipt" }, { status: 400 })
-        const workspace = await realpath(process.env.WORKSPACE_ROOT || "/opt/eimu-harness/workspace")
+        const workspace = await realpath(process.env.WORKSPACE_ROOT || "/opt/agent-harness/workspace")
         verified = []
         for (const artifact of receipt.artifacts) {
           const item = items.find((a: any) => a.url === artifact.url)

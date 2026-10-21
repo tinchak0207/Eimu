@@ -109,8 +109,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(seedRequested ? { seedMode: true } : {}),
       docs: Array.isArray(body.docs) ? body.docs.map(mapDoc) : [],
     });
-    // 响应形状 = MemoryIngestResult：{ accepted, proposals?, rejected, stats{received,accepted,index_lines,seed_accepted} }（契约 §3.1）。
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    // 响应形状 = MemoryIngestResult 原有字段 + `accepted_refs`（契约新增）：
+    // accepted 的 id 已是确定性身份 id，batch 不能再靠 `${batchId}-${slug}` 推算归属。
+    const { acceptedRefs, ...rest } = result;
+    return NextResponse.json(
+      { ...rest, accepted_refs: acceptedRefs ?? [] },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }

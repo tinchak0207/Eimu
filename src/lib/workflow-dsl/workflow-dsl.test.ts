@@ -263,7 +263,14 @@ test("round-trip 幂等：decompile 反推再编译 → 全 update_node、id 与
   assert.equal(s0.steps[1].tool, "image_generate");
   assert.equal(s0.steps[1].size, "1024x1024");
   assert.equal(s0.steps[1].count, 2);
-  assert.deepEqual(s0.steps[1].meta, { custom_tag: "keep_me" }, "meta 透传 = 白名单外剩余");
+  // 运输键（8063be17）：反推器对每个步骤塞 meta._origin_node_id = 原节点 id，
+  // 供 compile 收编第三路回写原节点；它不属于用户 meta，但反推结果里必须明确存在。
+  const shotANodeId = addOpOfStep(first.ops, "shot_a").node.id;
+  assert.deepEqual(
+    s0.steps[1].meta,
+    { custom_tag: "keep_me", _origin_node_id: shotANodeId },
+    "meta 透传 = 白名单外剩余 + 运输键 _origin_node_id",
+  );
   assert.equal(s0.steps[2].gate, true);
   assert.equal(s0.steps[2].prompt, "柴犬画家第二幕");
 
@@ -282,6 +289,11 @@ test("round-trip 幂等：decompile 反推再编译 → 全 update_node、id 与
   assert.ok(shotAUpdate);
   if (shotAUpdate.type !== "update_node") throw new Error("unreachable");
   assert.equal((shotAUpdate.patch.metadata as WorkflowNodeMetadata).custom_tag, "keep_me", "meta 经 round-trip 不丢");
+  // 运输键只供收编匹配，compile 必须扣下、不得写进产物节点 metadata（否则会污染画布真相）。
+  for (const op of again.ops) {
+    if (op.type !== "update_node" || !op.patch.metadata) continue;
+    assert.equal("_origin_node_id" in op.patch.metadata, false, "编译产物不得落运输键");
+  }
 });
 
 // ─────────────────────────── ⑥ tool 校验用真 registry
@@ -356,7 +368,7 @@ test("validateWorkflowDsl：steps 空清单、坏 workflow 名、id 不合规均
   if (emptySteps.ok) throw new Error("unreachable");
   const stepsErr = emptySteps.errors.find((e) => e.field === "steps");
   assert.ok(stepsErr);
-  assert.ok(stepsErr.message.includes("1..24"), "message 说明边界");
+  assert.ok(stepsErr.message.includes("1..256"), "message 说明边界");
 
   const badNs = validateWorkflowDsl({ workflow: "Demo WF!", steps: [{ id: "a", title: "A" }] });
   assert.equal(badNs.ok, false);

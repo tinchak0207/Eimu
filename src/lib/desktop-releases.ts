@@ -16,8 +16,8 @@
  *
  * 托管（2026-10-05 迁移）：产物不再放 Vercel Blob——原 store `GFy3GwthV6OA8bB7` 被
  * 平台封锁（每条 URL 均 403 `Your store is blocked`），发行档改由自家 nginx 直发于
- * `https://store.eimu.dev/downloads/desktop/`（宿主目录
- * `/opt/eimu-site/nginx/downloads/desktop`，只读挂进 imagesite-nginx）。同一目录另放
+ * `https://store.tinchak0207.xyz/downloads/desktop/`（宿主目录
+ * `/opt/imagesite/nginx/downloads/desktop`，只读挂进 imagesite-nginx）。同一目录另放
  * `latest.yml`（Windows）与 `latest-linux.yml`，供桌面壳 electron-updater 取 feed。
  *
  * Linux 范式（2026-10-11 换回）：`tar.gz` → `AppImage`。10-05 曾把 Linux 换成 tar.gz（「解压即可跑、
@@ -39,7 +39,7 @@ export const DESKTOP_RELEASES = {
     // size/sha256 为上传后实测值；feed（本目录 `latest-linux.yml`）逐字与之对帐。
     // 执行方式：`chmod +x` 后直接跑（要免 libfuse2 可 `--appimage-extract`）。
     version: "0.3.5",
-    url: "https://store.eimu.dev/downloads/desktop/Eimu-0.3.5-linux-x86_64.AppImage",
+    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.5-linux-x86_64.AppImage",
     size: 125986491,
     ext: "AppImage",
     sha256: "3026f417c62891dc8a8ff3436b478ae4e97af2eac22a95b22207c8ebb6d2ab84",
@@ -48,7 +48,7 @@ export const DESKTOP_RELEASES = {
     // 该平台产物版本：0.3.3，于 2026-10-04 同批重建并上传（2026-10-05 原档原样迁到 VPS，
     // 位元组未变，故 sha256 不变）。
     version: "0.3.3",
-    url: "https://store.eimu.dev/downloads/desktop/Eimu-0.3.3-windows-x64-setup.exe",
+    url: "https://store.tinchak0207.xyz/downloads/desktop/Eimu-0.3.3-windows-x64-setup.exe",
     size: 112182968,
     ext: "exe",
     sha256: "13694addaa85dd8f39017c95c682d58afe4d5e430bec8838a90b5720b3aebe3e",

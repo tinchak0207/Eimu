@@ -109,7 +109,7 @@ test("Adobe2API is selected before Sub2API for supported partner image and video
 
   assert.equal(buildModelQueue("gpt-image-2", env, [], {})[0]?.label, "adobe2api");
   assert.equal(buildModelQueue("gemini-3.1-flash-image", env, [], {})[0]?.label, "adobe2api");
-  // 2026-09-27 项目负责人裁定「adobe2api 留图、停视频」（视频唯一权威＝xiaoyxiao）：
+  // 2026-09-27 暴君裁定「adobe2api 留图、停视频」（视频唯一权威＝xiaoyxiao）：
   // adobe2api 不再承接任何视频 model（ADOBE2API_MODEL_IDS 只留图像；对应 capability
   // 由 seed 的 retireUnclaimedCapabilities 退役）。
   assert.notEqual(buildModelQueue("seedance-2.0", env, [], {})[0]?.label, "adobe2api");

@@ -142,7 +142,11 @@ test("/mcp 页真渲染：五个客户端名与可复制片段在场", () => {
 test("漂移探针：/mcp 页与 llms.txt 的工具清单＝src/lib/mcp/tools.ts 的真实工具集", () => {
   // tools.ts 是工具名的单一真源（另一路负责）；发现面列少、列旧就是对外说谎。
   // 这不是能力断言（真实行为由 /api/mcp 的测试负责），是清单一致性守卫。
-  const toolsSrc = readFileSync(join(process.cwd(), "src/lib/mcp/tools.ts"), "utf8");
+  // <1000 行重构：工具名实体在 tools/tools-definitions.ts（tools.ts 只剩 re-export）。
+  const toolsSrc = readFileSync(
+    join(process.cwd(), "src/lib/mcp/tools/tools-definitions.ts"),
+    "utf8",
+  );
   const parsed = [...toolsSrc.matchAll(/^\s{6}name: "([a-z][a-z0-9_]*)",$/gm)].map((match) => match[1]);
   assert.equal(
     parsed.length,

@@ -83,7 +83,20 @@ function read(relPath: string) {
 }
 
 const panel = read("src/components/agent-chat/AgentChatPanel.tsx");
-const composer = read("src/components/agent-chat/AgentComposer.tsx");
+// <1000 行重构把输入区的交互/上传/送出/菜单拆成同目录子模组（原 AgentComposer.tsx
+// 降为 barrel + 组件本体）。断言仍锁同一批源码事实，只是要读全模组集合。
+const composer = [
+  "AgentComposer.tsx",
+  "AgentComposer.attachments.ts",
+  "AgentComposer.interaction.ts",
+  "AgentComposer.menus.tsx",
+  "AgentComposer.local-file-mode.tsx",
+  "AgentComposer.placeholder.ts",
+  "AgentComposer.send-pipeline.ts",
+  "AgentComposer.upload-limits.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const transcript = read("src/components/agent-chat/AgentTranscript.tsx");
 const bubble = read("src/components/agent-chat/AgentMessageBubble.tsx");
 const toolCard = read("src/components/agent-chat/AgentToolCard.tsx");
@@ -94,18 +107,49 @@ const confirmCard = read("src/components/agent-chat/AgentConfirmCard.tsx");
 const questionCard = read("src/components/agent-chat/AgentQuestionCard.tsx");
 const noticeRow = read("src/components/agent-chat/AgentNoticeRow.tsx");
 const subagentReportCard = read("src/components/agent-chat/AgentSubagentReportCard.tsx");
-const surface = read("src/components/agent-chat/AgentChatSurface.tsx");
+// 同 <1000 行重构：Surface 的会话动作/纯 helper 已拆出为同目录子模组，
+// 三档合读才等于重构前的「surface 源码」断言面。
+const surface = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const anchorCard = read("src/components/agent-chat/AgentAnchorCard.tsx");
 const batchProgress = read("src/components/agent-chat/AgentBatchProgress.tsx");
 const disclosure = read("src/components/agent-chat/AgentParamDisclosure.tsx");
 const chatCss = read("src/components/agent-chat/agent-chat.css");
 const promptInput = read("src/components/PromptInput.tsx");
+// <1000 行重构把 useAgentChat 拆成 hooks/use-agent-chat/{commands,connection,core,types}.ts，
+// 顶层 hook 档只留组合与状态 hookup。
+const agentChatHookSource = [
+  "src/hooks/use-agent-chat.ts",
+  ...["commands", "connection", "core", "types"].map((m) => `src/hooks/use-agent-chat/${m}.ts`),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 // Task 3：高度锁 / 无描述框模式集合抽到 hooks；Task 9：动作列抽到 ActionRow —— 断言按「旧档＋新档」拼接读取。
 const promptInputHeightLock = read("src/components/prompt-input/use-height-lock.ts");
 const actionRow = read("src/components/prompt-input/ActionRow.tsx");
-const playground = read("src/components/ImagePlayground.tsx");
+// ImagePlayground 的 query 交接已抽到 image-playground/query-handoff.tsx。
+const playground = [
+  read("src/components/ImagePlayground.tsx"),
+  read("src/components/image-playground/query-handoff.tsx"),
+  read("src/components/image-playground/floating-overlays.tsx"),
+].join("\n");
 const navbar = read("src/components/Navbar.tsx");
 const agentRoute = read("src/app/agent/page.tsx");
+// <1000 行重构把传输层拆成 src/lib/agent-chat-client/{auth,session,settings,transport,types}.ts，
+// 顶层档只剩 re-export。源码断言必须读到子模组本体，否则「barrel 全绿」是假绿。
+const agentChatClientSource = [
+  "src/lib/agent-chat-client.ts",
+  ...["auth", "session", "settings", "transport", "types"].map(
+    (m) => `src/lib/agent-chat-client/${m}.ts`,
+  ),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 
 /**
  * 去掉注释后的源码。doesNotMatch 一律要走这里——
@@ -170,7 +214,11 @@ test("composer is disabled only when the panel says so, and trims before sending
   assert.match(composer, /disabled=\{disabled \|\| !canSend\}/);
   // 罪状 2a：只附文件不打字也发得出去——canSend = 有文本 || 有已传成功的附件，
   // 且没有仍在 uploading/extracting 的附件（computeCanSend 抽成纯函数，见下方回归测试）。
-  assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
+  // 重构后 canSend 在 send-pipeline 子模组里，参数经 P.* props 解构传入（同一表达式）。
+  assert.match(
+    composer,
+    /const canSend = computeCanSend\(P\.trimmed, readyRefs\.length, P\.attachments\);/,
+  );
   // 空消息必须被拒绝：发送前 trim。
   assert.match(composer, /\.trim\(\)/);
   // 决策卡在场的新提示：composer 上缘 2px 蓝提示条（不锁输入的替代回馈）。
@@ -284,10 +332,10 @@ test("audio card plays via native <audio> and keeps the disabled action contract
 
 test("思维链串流中展开、结算后收合，没有 reasoning 就不渲染 details", () => {
   /*
-   * 2026-09-27 项目负责人裁定 supersede 下方 09-20 裁定：思考中展开，结算后收合成
+   * 2026-09-27 暴君裁定 supersede 下方 09-20 裁定：思考中展开，结算后收合成
    *「已思考 · N 秒」一行（展开的内部推理占半屏）。
    *
-   * 2026-09-20 项目负责人同日再裁定：把「预设收合」（当日上午随 Grok 极简骨架预览
+   * 2026-09-20 暴君同日再裁定：把「预设收合」（当日上午随 Grok 极简骨架预览
    * 批准）再推翻回「预设展开」——思考过程开门见山，不要人再点一次。静态 markup
    * 就是「首次渲染」的字面证据：React 把 open 布林属性序列化成 open=""，
    * 预设展开＝序列化结果里 details 带 open=""。
@@ -363,13 +411,15 @@ test("D-24 half sentence is carried into the composer, never auto-sent", () => {
   assert.match(surface, /const continueDraft = useCallback/);
   assert.match(surface, /setPrefill\(\{ text, nonce: Date\.now\(\) \}\)/);
   assert.doesNotMatch(surface, /onClick=\{sendDraft\}/);
-  // 续写信号一路透传到输入区。
-  assert.match(surface, /prefill=\{prefill\}/);
+  // 续写信号一路透传到输入区。2026-10-19 账号隔离（95a27106）：Surface 只在
+  // 账号内容仍是当前账号时下传 prefill，避免切换账号后旧状态被注入新会话；
+  // 通路本身不变（Panel 仍逐字透传 prefill）。
+  assert.match(surface, /prefill=\{contentIsCurrent \? prefill : null\}/);
   assert.match(panel, /prefill=\{prefill\}/);
   assert.match(panel, /onPrefillConsumed=\{onPrefillConsumed\}/);
 
   // 靠 nonce 去重，不靠文本比较：同一句话点第二次也要能重新填进来。
-  assert.match(composer, /consumedNonceRef\.current === prefill\.nonce/);
+  assert.match(composer, /consumedNonceRef\.current === P\.prefill\.nonce/);
   // 框里已有内容时接在后面，不覆盖用户刚打的字。
   assert.match(composer, /return base \? `\$\{base\} \$\{incoming\}` : incoming/);
   // 光标落到末尾，下一个动作就是继续打字。
@@ -386,7 +436,7 @@ test("D-24 half sentence is carried into the composer, never auto-sent", () => {
 test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   /*
    * hook 在有存档时故意不自动建号（use-agent-chat.ts: `if (existing && !forceNewRef.current) return`），
-   * 所以外壳必须替使用者把决定做掉。进页默认新聊天（项目负责人裁定 2026-09-01）：
+   * 所以外壳必须替使用者把决定做掉。进页默认新聊天（暴君裁定 2026-09-01）：
    * 不静默续旧——旧对话留在网关历史下拉，随时切回。同一次访问 toggle 往返
    * 仍静默续上（sessionTouchedInThisVisit 时 resumable 根本不会被设置）。
    */
@@ -401,15 +451,15 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /didAutoFreshStartRef/);
   assert.doesNotMatch(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
   assert.doesNotMatch(surface, /void resume\(\)/);
-  assert.match(surface, /void startNewSession\(\)/);
-  assert.match(surface, /if \(initialSessionId\) return;/);
+  assert.match(surface, /void P\.startNewSession\(\)/);
+  assert.match(surface, /if \(P\.initialSessionId\) return;/);
   // 存档信息收进一颗默认折起来的按钮，想看的人自己点。
   assert.match(surface, /对话历史/);
   assert.match(surface, /aria-expanded=\{showHistory\}/);
   // 2026-08-21（第三版）：Header 重排——拖拽手柄 + 「AI 助理」+ 呼吸绿点 +
   // 右侧图标组（历史记录/开新对话/收起）。对话流里不再有散落的「对话历史」
   // 文字链接和常驻「已连接」状态行；开新对话留在历史里可切回（留旧开新）。
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   assert.match(hook, /startNewSession/);
   assert.match(surface, /onStartNewSession/);
   /*
@@ -419,7 +469,7 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
    * 2026-09-22 首屏翻面后第三颗钮语义改写：它不是「收起助理、回到原本的地方」
    * （已经没有原本的地方了），而是「走另一条路：自己选模型和参数直接出图」。
    *
-   * 2026-09-27 项目负责人纠正定版（两轮）：先是「AI 助理 / 随时待命」那两行被指为废话，
+   * 2026-09-27 暴君纠正定版（两轮）：先是「AI 助理 / 随时待命」那两行被指为废话，
    * 接著标题与星芒圆标整组被要求拆掉——顶栏现在是纯图示列、零文字：那个位置放
    * 资产 / 历史 两颗图示（原本埋在 ⋯ 选单里），右侧 新会话 / 直接生成 / 设置。
    * ⋯（MoreHorizontal）连同收纳选单整组退役，原位换成齿轮。连线异常态文字不再由
@@ -444,7 +494,7 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /onClick=\{openSettings\}/);
   // 右簇要自己顶到最右——中间已没有 flex-1 的标题块可以撑。
   assert.match(surface, /ml-auto flex items-center gap-0\.5/);
-  // 2026-09-05 项目负责人裁定：多功能栏弹窗水平置中（fixed left-1/2 + -translate-x-1/2），
+  // 2026-09-05 暴君裁定：多功能栏弹窗水平置中（fixed left-1/2 + -translate-x-1/2），
   // 不再挂在按钮右下角（旧 absolute top-full right-0 作废）。
   assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);
   assert.doesNotMatch(surface, /top-full right-0/);
@@ -493,7 +543,7 @@ test("composer textarea grows with content and collapses after send", () => {
 });
 
 /**
- * 2026-09-18 送出在途（项目负责人原话：「发送按钮要有一个loading态，用于点击模板/发送文字/
+ * 2026-09-18 送出在途（暴君原话：「发送按钮要有一个loading态，用于点击模板/发送文字/
  * 点击这些按钮时的等待态」）。
  *
  * 「本轮尚未开始」的真相源在 AgentChatPanel（它同时知道 turnActive 与 onSend 的
@@ -631,7 +681,7 @@ test("09-18 面板掌握「本轮尚未开始」：模板 chip 与输入区两�
 
 test("D-26 first-image anchor is offered, and never offered when it cannot hold", () => {
   // 锚定卡真的被接上，不是造了个孤儿组件。
-  assert.match(surface, /deriveBatchAnchor\(state\.items\)/);
+  assert.match(surface, /deriveBatchAnchor\(P\.state\.items\)/);
   assert.match(surface, /buildAnchorMessage\(anchor\)/);
   assert.match(surface, /buildReanchorMessage\(anchor\)/);
   assert.match(panel, /<AgentAnchorCard/);
@@ -655,7 +705,7 @@ test("D-26 stop button promises only what the gateway can deliver", () => {
   assert.match(surface, /onStopGeneration=\{state\.turnActive \? onStopGeneration : undefined\}/);
   // 停止按钮接到 abort 端点（hook 的 abort），不是往对话里送一句停止指令。
   assert.match(surface, /const onStopGeneration = useCallback/);
-  assert.match(surface, /void abort\(\)/);
+  assert.match(surface, /void P\.abort\(\)/);
 });
 
 test("batch progress does not announce a denominator it does not have", () => {
@@ -716,7 +766,9 @@ test("D-1 AI 助理 is a toggle beside 改图/放大, not a page takeover", () =
   assert.match(code, /onModeChange\(mode === "upscale" \? "generate" : "upscale"\)/);
   assert.match(code, /onModeChange\(mode === "agent" \? "generate" : "agent"\)/);
   // 选中态也要跟邻居一致：未选中时是灰的，不许自己常亮蓝底冒充「已开启」。
-  assert.match(code, /mode === "agent"\s*\?\s*"bg-\[rgba\(0,122,255,0\.12\)\] text-\[#007AFF\]/);
+  // 2026-10-04 全站规格对齐（2320dd1c）：底色改走品牌 token bg-ios-blue/[0.12]，
+  // 仍是「12% 蓝底 + 蓝字 + 细环」的选中态，不常亮实心蓝。
+  assert.match(code, /mode === "agent"\s*\?\s*"bg-ios-blue\/\[0\.12\] text-\[#007AFF\]/);
   assert.match(code, /aria-pressed=\{mode === "agent"\}/);
 
   // 聊天区长在模式控件区里（和 edit / upscale 两块同级），不是另一层壳。
@@ -800,7 +852,7 @@ test("nothing routes users to a standalone /agent page", () => {
  * 仍存活，职责收窄：压住重开面板时的存档快照提示。
  */
 test("entering the agent never creates a session: send() owns the lazy create", () => {
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   // 自动建号的三个源头全部拆干净：autoStart、预建取用、过期自动开新。
   assert.doesNotMatch(hook, /autoStart/);
   assert.doesNotMatch(hook, /precreated|PrecreatedSession/);
@@ -810,7 +862,7 @@ test("entering the agent never creates a session: send() owns the lazy create", 
   // send() 的 ensure 必须钉在乐观插入之前，且判空在 ensure 之后（防幽灵回声）。
   assert.match(
     hook,
-    /if \(!sessionIdRef\.current\) \{\s*forceNewRef\.current = true;\s*await start\(\);\s*\}[\s\S]*?const sid = sessionIdRef\.current;[\s\S]*?dispatch\(\{ type: "user"/,
+    /if \(!sessionIdRef\.current\) \{\s*forceNewRef\.current = true;[\s\S]*?await start\(\);[\s\S]*?\n\s*const sid = sessionIdRef\.current;[\s\S]*?dispatch\(\{ type: "user"/,
   );
   // 标记仍是模块级（组件卸载 ref 一起死，ref 存不住这件事）。
   assert.match(hook, /^let sessionTouchedInThisVisit = false;/m);
@@ -824,11 +876,11 @@ test("entering the agent never creates a session: send() owns the lazy create", 
   // 模板注入不再等 connection open——等它就饿死（空态永不连线）。
   assert.match(
     readCode(surface),
-    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,120}void send\(agentInjection\.text/,
+    /injectedNonceRef\.current = P\.agentInjection\.nonce;[\s\S]{0,200}void P\.send\(P\.agentInjection\.text/,
   );
   assert.doesNotMatch(
     readCode(surface),
-    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,200}if \(connection !== "open"\)/,
+    /injectedNonceRef\.current = P\.agentInjection\.nonce;[\s\S]{0,200}if \(connection !== "open"\)/,
   );
 });
 
@@ -848,7 +900,7 @@ test("a handoff sentence from /history expires when the agent face is left", () 
  * 于是已登录用户开 AI 助理必 401。两个头必须成对送。
  */
 test("the agent transport sends token and user id together, never half", () => {
-  const client = read("src/lib/agent-chat-client.ts");
+  const client = agentChatClientSource;
   const code = readCode(client);
 
   // 单一出口：身份头只有一处产生，不许各个 fetch 自己拼。
@@ -903,7 +955,7 @@ test("a 401 says which kind of 401 it is", () => {
   }
 
   // 客户端把它当「没登录」处理：关连线提示登录，而不是无穷重连。
-  const client = readCode(read("src/lib/agent-chat-client.ts"));
+  const client = readCode(agentChatClientSource);
   assert.match(client, /if \(code === "agent_not_signed_in"\) return "not_authenticated";/);
   assert.match(client, /mapErrorCode\(data, res\.status\)/);
   // 裸 401/403（token 过期但网关没回专门 body code）会被 mapHttpStatus 映成
@@ -914,7 +966,7 @@ test("a 401 says which kind of 401 it is", () => {
     client,
     /export function isTerminalAuthError\(err: unknown\): boolean \{\s*return err instanceof AgentChatError && \(err\.code === "not_authenticated" \|\| err\.code === "unauthorized"\);/,
   );
-  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  const hook = readCode(agentChatHookSource);
   assert.match(hook, /isTerminalAuthError\(err\)[\s\S]{0,80}closedRef\.current = true;/);
 });
 
@@ -1067,7 +1119,7 @@ test("subagent started→done settles the card, turn.done retires it into an exp
   assert.ok(report);
   assert.equal(report.text, "找到 3 张候选图");
   assert.equal(report.status, "ok");
-  // 2026-09-19 项目负责人裁定：置顶三卡 + 弹出面板两套重复 UI 合并为一份内联列表，
+  // 2026-09-19 暴君裁定：置顶三卡 + 弹出面板两套重复 UI 合并为一份内联列表，
   // pickVisibleSubagents 名额裁剪随置顶卡一起下线。
   const mk = (i: number, status: AgentSubagentItem["status"]): AgentSubagentItem => ({
     kind: "subagent",
@@ -1098,7 +1150,7 @@ test("F2 工具卡人话化：默认渲染只有人话，函数名与 raw JSON �
   assert.equal(toolArgPreview('{"async":false,"label":"视频牌价预检","prompt":"..."}'), "视频牌价预检");
   assert.equal(toolArgPreview('{"async":false,"count":4}'), undefined, "没人话栏位就不端 JSON");
   assert.equal(toolArgPreview('{"label":"被网关截断的半截 JSON…'), "被网关截断的半截 JSON…", "半截 JSON 只摘白名单值");
-  assert.equal(toolArgPreview("ls -la /opt/eimu-harness"), "ls -la /opt/eimu-harness");
+  assert.equal(toolArgPreview("ls -la /opt/agent-harness"), "ls -la /opt/agent-harness");
   assert.equal(toolArgPreview("{broken"), undefined);
 
   // SSR 默认渲染（2026-09-20 R2 对版预览）：行＝类型图标 + 人话标题 + 状态词，
@@ -1131,7 +1183,7 @@ test("F2 工具卡人话化：默认渲染只有人话，函数名与 raw JSON �
 });
 
 test("T1 工具名映射全量表：关键映射逐字正确、未知工具回落原名、video_gen 空指针已删", () => {
-  // 项目负责人逐条核准的显示名（简体）：抽 8 条关键映射逐字断言，防止后续被润色改字。
+  // 暴君逐条核准的显示名（简体）：抽 8 条关键映射逐字断言，防止后续被润色改字。
   const expected: Array<[string, string]> = [
     ["bash", "终端命令"],
     ["quote_bundle", "整包报价"],
@@ -1177,7 +1229,7 @@ test("F3/F4 产出卡：截断预览 + 整行展开全文（渲染层才截断�
 
 test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、折叠头默认折叠可展开（2026-09-11 逐字滑窗合同；09-19 去重；G3 R2 默认折叠）", () => {
   const src = read("src/components/agent-chat/AgentSubagentBar.tsx");
-  // 2026-09-10 项目负责人裁定：卡片级展开语义下线（单行卡无展开按钮）。
+  // 2026-09-10 暴君裁定：卡片级展开语义下线（单行卡无展开按钮）。
   assert.ok(!/aria-expanded=\{expanded\}/.test(src), "单行卡不再有展开语义");
   // 两套被否决的做法都不得回魂：循环跑马灯（9s linear infinite + translateX(-50%)）
   // 语义相反；「尾部跟随 + 逐帧插值」与文字增长两套运动打架＝使用者看到的
@@ -1279,7 +1331,7 @@ test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、�
   assert.match(noActivityMarkup, /第一段 第二段 收尾/, "没有 activity 时回落 text");
   // 空输出诚实文案，不假造内容（running 卡的 fallback「正在输出…」）。
   assert.match(src, /正在输出…/);
-  // 2026-09-19 项目负责人裁定：「折叠头放列表上方，可收合；
+  // 2026-09-19 暴君裁定：「折叠头放列表上方，可收合；
   // 弹出面板（lg-sheet/关闭钮/Esc）与置顶名额裁剪两套重复 UI 下线。
   // 2026-09-20 Route B：折叠头文案改「派出 N 个子代理」（无底色细行语言）。
   // G3 R2（2026-10-10）：默认折叠——用户面靠 turn.status，展开才见细节噪音。
@@ -1552,7 +1604,9 @@ test("刀3 回到底部钮：44×44 玻璃圆钮、仅窄屏渲染、显隐两�
   assert.match(shown, /opacity-100/);
   assert.match(shown, /lucide-arrow-down/, "向下箭头真渲染（lucide ArrowDown）");
   assert.match(shown, /active:scale-95/, "active 压感回馈");
-  assert.match(shown, /duration-\[140ms\]/, "140ms 淡入淡出");
+  // 2026-10-04（20712427）：Tailwind 对 duration-[...] 有歧义不产 CSS，
+  // 实算退回 150ms；改用 duration-150 让「150ms 淡入淡出」真正生效。
+  assert.match(shown, /duration-150/, "150ms 淡入淡出");
 
   // 隐藏态：透明＋不吃事件＋不可聚焦（隐形钮不许被 Tab 到、不许挡点击）。
   const hidden = renderToStaticMarkup(

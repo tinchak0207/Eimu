@@ -75,7 +75,7 @@ function runOnce(
 
 export default tool({
   description:
-    "通用 Python 资料加工脚本逃生舱。输入 code（Python 3 原始码），在沙箱 .run 目录以受限环境执行一次，回传 {ok, exit_code, duration_ms, stdout, stderr}。用途：确定型资料统计/清洗/格式转换，一次呼叫完成，取代多轮 awk/grep 链。沙箱无网路（需要下载/上传请用原生工具）；只能读写工作区与本会话附件；程序逾时会被 SIGKILL。stdout+stderr 合计超过 64KB 会截断并标 truncated。沙箱 PATH 已含 ffmpeg/ffprobe（/opt/eimu-harness/bin，静态二进制）：可做视频裁剪/拼接/转码/字幕/音频混音等本地媒体处理（免费不扣费）。",
+    "通用 Python 资料加工脚本逃生舱。输入 code（Python 3 原始码），在沙箱 .run 目录以受限环境执行一次，回传 {ok, exit_code, duration_ms, stdout, stderr}。用途：确定型资料统计/清洗/格式转换，一次呼叫完成，取代多轮 awk/grep 链。沙箱无网路（需要下载/上传请用原生工具）；只能读写工作区与本会话附件；程序逾时会被 SIGKILL。stdout+stderr 合计超过 64KB 会截断并标 truncated。沙箱 PATH 已含 ffmpeg/ffprobe（/opt/agent-harness/bin，静态二进制）：可做视频裁剪/拼接/转码/字幕/音频混音等本地媒体处理（免费不扣费）。",
   args: {
     code: tool.schema.string().min(1).describe("要执行的 Python 3 原始码（一次呼叫内自足）"),
     timeout_seconds: tool.schema

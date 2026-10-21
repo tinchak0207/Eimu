@@ -94,7 +94,7 @@ export class TaskValidationError extends Error {
 let connection: Database | undefined
 function db(): Database {
   if (connection) return connection
-  const next = new Database(process.env.SESSIONS_DB_PATH || "/opt/eimu-harness/state/sessions.db", { create: true })
+  const next = new Database(process.env.SESSIONS_DB_PATH || "/opt/agent-harness/state/sessions.db", { create: true })
   next.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
   next.exec(`CREATE TABLE IF NOT EXISTS agent_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

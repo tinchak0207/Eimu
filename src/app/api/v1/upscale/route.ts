@@ -5,7 +5,7 @@
 // 与 admin 覆写层同源。
 // 错误体与 trace id 与 /v1/images/generations 对齐。
 //
-// ── 后端（2026-09-30 项目负责人指令「4k超分可以走 gpt image 2 执行超分」）────────────
+// ── 后端（2026-09-30 暴君指令「4k超分可以走 gpt image 2 执行超分」）────────────
 // 事实：① PixAI 渠道已死（当日裁定，站点风控），legacy 后端只会回 502；
 //      ② 4K 档位在 legacy 后端上本来就卡 `factor=4` 未校准（fail-closed）。
 // 新后端＝**gpt-image-2 生成式重绘**：把原图当参考图、走 durable `image_edit` 任务，
@@ -18,7 +18,7 @@
 //
 // **默认仍是 legacy（PixAI bridge）**；切换＝控面设 `UPSCALE_BACKEND=gpt-image-2`。
 //
-// ── 钱的边界（违反＝事故；2026-10-01 项目负责人授权「4K放大后端你自己决定 做好就行」）────
+// ── 钱的边界（违反＝事故；2026-10-01 暴君授权「4K放大后端你自己决定 做好就行」）────
 // **收费跟后端、档位走**：后端从 legacy 的一口价换成 gpt-image-2 的一次生成式重绘
 // （有真实上游成本），收费就按 gpt-image-2 在该档位的 **catalog 价**（`imageCredits`
 // 1k=10／2k=20／4k=80 credits ⇒ `generationCoins` 1／2／8 币）；`pixai-bridge`（legacy）
@@ -62,6 +62,7 @@ import type { GenerationArtifactResult, GenerationReference } from "@/lib/genera
 import type { BizApiKey } from "@/lib/biz-api-keys";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge, type SyncCharge } from "@/lib/generation-core/sync-charge";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
+import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -114,6 +115,8 @@ export async function POST(req: NextRequest) {
     submission = resolveUpscaleSubmission({
       declaredTiers: declaredUpscaleTiers(PIXAI_UPSCALE_MODEL_ID),
       modelId: PIXAI_UPSCALE_MODEL_ID,
+      // 4K 校准开关只在服务端提交端读取并注入；默认关闭＝fail-closed。
+      fourKEnabled: upscaleFourKUpstreamEnabled(),
       input: body,
     });
   } catch (error) {

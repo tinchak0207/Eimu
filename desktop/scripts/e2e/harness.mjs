@@ -101,7 +101,7 @@ export async function launchShell(opts = {}) {
   const homeDir = opts.homeDir || path.join(outDir, "home");
   fs.mkdirSync(homeDir, { recursive: true });
 
-  // 只读复制项目负责人的真实 profile（红线：绝不修改 ~/.config/Eimu）。
+  // 只读复制暴君的真实 profile（红线：绝不修改 ~/.config/Eimu）。
   if (opts.seedProfileFrom) {
     const dest = path.join(homeDir, ".config", "Eimu");
     if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });

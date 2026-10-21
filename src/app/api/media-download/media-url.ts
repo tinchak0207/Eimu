@@ -1,6 +1,6 @@
 import { AGENT_GATEWAY_DEFAULT_ORIGIN } from "@/lib/agent-gateway";
 
-/** 白名单主机：agent 媒体真源（store.eimu.dev）由 gateway origin 推导，不硬编第二份。 */
+/** 白名单主机：agent 媒体真源（store.tinchak0207.xyz）由 gateway origin 推导，不硬编第二份。 */
 const ALLOWED_MEDIA_HOST = new URL(AGENT_GATEWAY_DEFAULT_ORIGIN).hostname;
 
 /**

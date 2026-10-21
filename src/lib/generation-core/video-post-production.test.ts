@@ -8,7 +8,7 @@
  * 没有任何真实网路出口。
  *
  * 真单未验：本档不提交任何上游请求；`VIDEO_POST_PRODUCTION_UPSTREAM` 的正式开通
- * 与真单校准待项目负责人逐次报备。
+ * 与真单校准待暴君逐次报备。
  */
 
 import assert from "node:assert/strict";
@@ -574,7 +574,7 @@ test("成本闸：形状坏／未知 mode 的后期 workflow 也在 fetch 之前
  * `parseVideoPostProduction` 对「栏位存在但形状不是物件」（字串／数字／阵列）回 null，
  * 与「栏位不存在」同义 ⇒ 客户端送 `video_post_production: "extend_video"` 这种形状时，
  * 建单端会把它当普通生成建单收费（静默降级），与档头「绝不静默降级成一般生成」相冲。
- * 本测试**固化现况**（不是宣称它正确），缺口是否要改成具名拒收由 orchestrator／项目负责人裁定。
+ * 本测试**固化现况**（不是宣称它正确），缺口是否要改成具名拒收由 orchestrator／暴君裁定。
  */
 test("契约缺口（现况固化）：非物件形状的后期栏位被当成『没有后期』＝普通生成", () => {
   for (const malformed of ["extend_video", "edit_video", 42, [], ["extend_video"]]) {

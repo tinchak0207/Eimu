@@ -9,7 +9,7 @@
  *
  * Eimu 味（2026-10-01）：版面常驻零装饰（顶栏纯图标）；品牌只靠 Navbar 同款
  * 玻璃 E 图标（/icon.png）在两处出场——空态迎接、助理回合抬头/思考中。
- * 红线：助理界面禁用人物形象（public/mascot/* 看板娘一律不用，项目负责人已否决）。
+ * 红线：助理界面禁用人物形象（public/mascot/* 看板娘一律不用，暴君已否决）。
  *
  * 红线：不 import 任何现有 agent-chat 组件；IME Enter 守卫逐字复刻
  * AgentComposer.tsx 的既有契约（isComposing / keyCode 229，且在

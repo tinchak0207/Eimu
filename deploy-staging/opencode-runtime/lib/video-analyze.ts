@@ -8,7 +8,7 @@
 //                本机无 VLM 时一律回 {ok:false, code:"vlm_unavailable"} 并列出 probed，
 //                **绝不编造反推结果、绝不假装成功**（照 lib/asr.ts 的 asr_unavailable/probed 模式）。
 //                付费中控通道（new-api）预设 fail-closed，只有呼叫端显式传 allow_paid_vision
-//                （＝项目负责人逐次报备后）才会被使用；本轮验证全程未开启。
+//                （＝暴君逐次报备后）才会被使用；本轮验证全程未开启。
 //
 // 本档不是 tool，不得 export tool 定义。
 
@@ -88,7 +88,7 @@ const LOOPBACK_CANDIDATES: readonly { url: string; what: string; path: string }[
 ]
 
 const LOCAL_VLM_BINARIES = ["ollama", "llama-server", "llama-cli", "vllm", "lmstudio"] as const
-const MODEL_SCAN_ROOTS = ["/opt/eimu-harness", "/home/ubuntu", "/usr/local/share"] as const
+const MODEL_SCAN_ROOTS = ["/opt/agent-harness", "/home/ubuntu", "/usr/local/share"] as const
 
 async function scanLocalWeights(): Promise<string[]> {
   const found: string[] = []
@@ -112,7 +112,7 @@ export interface VlmProbe {
   local_vlm_available: boolean
   /** 探测过但不可用的通道（照 lib/asr.ts 的 probed 模式：白名单外的通道一律不试打）。 */
   probed: string[]
-  /** 付费中控通道是否就绪（本轮预设不使用；需项目负责人逐次报备）。 */
+  /** 付费中控通道是否就绪（本轮预设不使用；需暴君逐次报备）。 */
   paid_channel_present: boolean
   note: string
 }
@@ -163,14 +163,14 @@ export async function vlmProbe(): Promise<VlmProbe> {
     note:
       "本机无零付费 VLM 通道（已逐项探测：执行档、权重档、loopback 服务）。"
       + "唯一的视觉模型通道是 new-api 中控（127.0.0.1:3001，gemini-3-flash 等）＝付费上游转发，"
-      + "依成本闸预设停用；要启用须项目负责人逐次报备后由呼叫端传 allow_paid_vision=true。",
+      + "依成本闸预设停用；要启用须暴君逐次报备后由呼叫端传 allow_paid_vision=true。",
   }
 }
 
 // ─────────────────────────────────────────── 提示词反推
 
 export interface ReversePromptOptions {
-  /** 只有在项目负责人逐次报备并同意后才可为 true（付费上游）。 */
+  /** 只有在暴君逐次报备并同意后才可为 true（付费上游）。 */
   allow_paid_vision?: boolean
   /** 额外背景（例如已知题材）。 */
   hint?: string
@@ -442,7 +442,7 @@ export async function analyzeVideo(source: string, opts: AnalyzeOptions): Promis
         ok: false, code: reversed.code, reason: reversed.reason, probed: reversed.probed,
         note:
           "提示词反推需要视觉语言模型；本机无零付费 VLM 通道，故**明确失败而不是编造**。"
-          + "要启用付费中控通道须项目负责人逐次报备。",
+          + "要启用付费中控通道须暴君逐次报备。",
       }
 
   return {

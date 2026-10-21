@@ -27,6 +27,7 @@ import type {
   AgentAssistantTextItem,
   AgentImageItem,
   AgentAudioItem,
+  AgentSubagentReportItem,
   AgentToolCallItem,
   AgentTranscriptItem,
   AgentUserTurnItem,
@@ -125,6 +126,59 @@ function toolErrorText(raw: unknown): string | undefined {
     if (msg) return msg;
   }
   return undefined;
+}
+
+// ─────────────────────────── 子代理唤醒（历史回放的 system 角色）
+
+// 真源 gateway/index.ts wakeSessionForSubagent；历史读路径
+// （sessions-http.ts slimHistoryMessages / session-read.ts handleTranscript）
+// 已把这类讯息的 role 改写成 "system"，归一化必须在这一侧把它还原成
+// subagent_result 产出卡，否则刷新后子代理完成／失败报告整条消失。
+/** 子代理唤醒讯息骨架（label 可能带引号，严格骨架失败时走兜底解析）。 */
+const SUBAGENT_WAKE_RE =
+  /^【子代理(完成|失败)·系统自动唤醒】subagent\s+([0-9A-Za-z]+)（label="([^"]*)"）已(?:完成|失败)。(?:结果摘要|失败原因)：/;
+
+/** 唤醒讯息尾部固定的续跑指令行（给模型的指令，不是产出内容）。 */
+const SUBAGENT_WAKE_TAIL = "请基于以上真实结果继续推进";
+
+/**
+ * 解析子代理唤醒讯息。命中回 {status, subagentId, label, text(产出正文)}；
+ * 标记对但骨架漂移（label 含引号等）走兜底尽力提取——总之绝不冒充用户气泡。
+ */
+function parseSubagentWake(
+  text: string,
+): { status: "ok" | "error"; subagentId: string; label: string; text: string } | null {
+  if (!text.startsWith("【子代理完成·系统自动唤醒】") && !text.startsWith("【子代理失败·系统自动唤醒】")) {
+    return null;
+  }
+  const fallback = (): { status: "ok" | "error"; subagentId: string; label: string; text: string } => ({
+    status: text.startsWith("【子代理失败") ? "error" : "ok",
+    subagentId: /subagent\s+([0-9A-Za-z]+)/.exec(text)?.[1] ?? "",
+    label: /label="([^"]*)"/.exec(text)?.[1] ?? "",
+    text,
+  });
+  const m = SUBAGENT_WAKE_RE.exec(text);
+  if (m === null) return fallback();
+  let body = text.slice(m[0].length);
+  const cut = body.indexOf(SUBAGENT_WAKE_TAIL);
+  if (cut >= 0) body = body.slice(0, cut);
+  return { status: m[1] === "完成" ? "ok" : "error", subagentId: m[2] ?? "", label: m[3] ?? "", text: body.trim() };
+}
+
+/** 子代理唤醒 → 产出卡（占 order seq 保时序，不占 userCount）。 */
+function subagentReportItem(
+  wake: { status: "ok" | "error"; subagentId: string; label: string; text: string },
+  order: number,
+): AgentSubagentReportItem {
+  return {
+    kind: "subagent_result",
+    id: `subagent-report-h${order}`,
+    seq: order,
+    subagentId: wake.subagentId,
+    label: wake.label,
+    status: wake.status,
+    text: wake.text,
+  };
 }
 
 /** 内部框架段标题行（live 路径真源 gateway/outbound-sanitize.ts + e2e 实锤的 Progress Summary）。 */
@@ -263,6 +317,16 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         drop(type);
       }
       const text = texts.join("\n");
+
+      // 旧版网关历史里唤醒讯息仍是 user role（431b39b5 前）：同样还原成产出卡，
+      // 绝不画成用户气泡。新网关已改 system role（下方分支），此处保留兼容。
+      const wake = parseSubagentWake(text);
+      if (wake !== null) {
+        order += 1;
+        items.push(subagentReportItem(wake, order));
+        continue;
+      }
+
       if (text.length === 0 && attachments.length === 0) continue; // 全丢光的空轮不留言
       order += 1;
       userCount += 1;
@@ -276,6 +340,36 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
       };
       if (attachments.length > 0) item.attachments = attachments;
       items.push(item);
+      continue;
+    }
+
+    if (role === "system") {
+      // 历史读路径把「子代理完成／失败·系统自动唤醒」的 role 改写成 system
+      // （sessions-http.ts / session-read.ts）。这里只认唤醒骨架 → subagent_result；
+      // 其余 system 讯息是机制注入，绝不冒充用户气泡，逐 part 计数丢弃。
+      const texts: string[] = [];
+      for (const rawPart of parts) {
+        const part = asRecord(rawPart);
+        const type = asString(part?.type) ?? "malformed";
+        if (!part) {
+          drop(type);
+          continue;
+        }
+        if (type === "text") {
+          const t = asString(part.text);
+          if (t && t.trim().length > 0) texts.push(t);
+          continue;
+        }
+        drop(type);
+      }
+      const text = texts.join("\n");
+      const wake = parseSubagentWake(text);
+      if (wake !== null) {
+        order += 1;
+        items.push(subagentReportItem(wake, order));
+        continue;
+      }
+      if (text.trim().length > 0) drop("system-message");
       continue;
     }
 

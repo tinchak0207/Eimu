@@ -5,7 +5,7 @@ export const preferredRegion = "sfo1";
 
 // worker 的动态 QR：每次请求触发产生全新 QR（扫码即建立新 bot 实体，必须最新）。
 const WORKER_NEW_QR_URL =
-  process.env.WECHAT_WORKER_NEW_QR_URL?.trim() || "http://127.0.0.1:8780/new-qr";
+  process.env.WECHAT_WORKER_NEW_QR_URL?.trim() || "http://43.172.85.76:8780/new-qr";
 // 无 worker 时的兜底（通常留空，确保 QR 永远来自 worker）。
 const FALLBACK_QR_URL = process.env.WECHAT_BOT_QR_URL?.trim() || "";
 

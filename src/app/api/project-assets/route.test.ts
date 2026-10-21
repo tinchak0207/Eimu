@@ -104,19 +104,35 @@ test("B2b 变更探针（不计入已验证）：路由回 localCopyId/localCopy
   }
 });
 
-test("B2b 变更探针（不计入已验证）：面板把副本 id 交给 onCopyChange，CanvasEmbed 接到 hook 的 applyMountCopyChange", () => {
-  // 这是本刀生效的硬接线：挂用拿到 localCopyIds 却不锁进 cardIds = 画面说已挂用、生成仍注入来源。
+test("B2b 变更探针（不计入已验证）：面板标签变更走 onTagsChange，CanvasEmbed 接到 hook 的 refreshCharacterCards", () => {
+  // 5c8f87b0 起面板只剩「打项目标签／只看本项目标签」：挂用/分享交互已删除，
+  // 「打标签立即进生成」的硬接线改为 onTagsChange → refreshCharacterCards 重读卡库。
   const panel = code(PANEL_PATH);
-  assert.match(panel, /localCopyIds/, "面板必须读 localCopyIds（不是只读 localCopyId）");
-  assert.match(panel, /onCopyChange\?\.\(\{\s*locked:/, "面板必须把副本 id 作为 locked 上报");
-  assert.match(panel, /res\.data\.localCopyIds/, "上报的必须是回应里的副本 id");
-  const embed = code(EMBED_PATH);
-  assert.match(embed, /onCopyChange=\{canvas\.applyMountCopyChange\}/, "CanvasEmbed 必须把面板接到 hook 的副本锁入口");
+  assert.match(panel, /onTagsChange\?\.\(\)/, "标签落库后必须通知父层重读（否则打标签不进生成）");
+  assert.match(panel, /assignAssetProjectTags\(/, "面板必须走项目标签写入接口");
+  // <1000 行重构：CanvasEmbed 的视图装配在 embed/CanvasEmbedView.tsx。
+  const embed = code(EMBED_PATH) + "\n" + code("src/components/canvas/embed/CanvasEmbedView.tsx");
+  assert.match(
+    embed,
+    /onTagsChange=\{canvas\.refreshCharacterCards\}/,
+    "CanvasEmbed 必须把面板接到 hook 的卡库重读入口",
+  );
 });
 
 test("B2b 变更探针（不计入已验证）：锁定卡读取端过作用域闸（filterLockedCardsForProjectUse）", () => {
   // 行为断言：asset-mount-copy.test.ts 的「读取闸」一节（a 类剔除 / b 类零回归 / 与裁决函数同结论）。
   const hook = code(CARDS_HOOK_PATH);
   assert.match(hook, /filterLockedCardsForProjectUse\(/, "生成注入读的 activeCharacterCards 必须先过作用域闸");
-  assert.match(hook, /return filterLockedCardsForProjectUse\(locked/, "闸必须作用在锁定卡集合上");
+  // 闸必须作用在「锁定集」（可能并入同创作项目标签卡）的集合上，而不是原始全量卡库。
+  assert.match(
+    hook,
+    /const locked = characterCards\.filter\(\(c\) => activeCardIds\.includes\(c\.id\)\)/,
+    "先算出锁定卡集合",
+  );
+  assert.match(hook, /let merged = locked;/, "注入集必须以锁定卡集合为基底");
+  assert.match(
+    hook,
+    /return filterLockedCardsForProjectUse\(\s*merged\s*,/,
+    "闸必须作用在锁定卡集合（merged）上",
+  );
 });

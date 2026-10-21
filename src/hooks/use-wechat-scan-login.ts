@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { setStoredToken, type NewApiUser } from "@/lib/new-api-client";
 
 /**
- * 微信「扫码即登入」（2026-09-30 项目负责人裁定：取消验证码，检测到扫码的用户直接登入）。
+ * 微信「扫码即登入」（2026-09-30 暴君裁定：取消验证码，检测到扫码的用户直接登入）。
  *
  * 链路：/api/auth/wechat/start 签一个一次性 state，并向 VPS mp-qr-server 换一张
  * 带参数二维码（scene=state）→ 使用者用微信扫 → 公众号推 SCAN/subscribe 事件到

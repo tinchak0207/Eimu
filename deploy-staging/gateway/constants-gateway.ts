@@ -5,7 +5,7 @@
 import path from "node:path"
 
 // 抖动重试参数：免费上游模型约三至四成 turn 异常早死（finish=unknown、零文本）。
-// 2026-09-21 项目负责人裁定：重试预算 4→10——重试期间只播「重试中 (x/N)」进度行、丑错帧
+// 2026-09-21 暴君裁定：重试预算 4→10——重试期间只播「重试中 (x/N)」进度行、丑错帧
 // 不外泄，多换几条线对用户只是进度数字，把「一次事故就吐错误原文」换成「尽量救活」。
 export const TURN_MAX_RETRIES = Number.parseInt(process.env.TURN_MAX_RETRIES || "10", 10) || 10
 export const TURN_RETRY_DELAY_MS = Number.parseInt(process.env.TURN_RETRY_DELAY_MS || "1500", 10) || 1500
@@ -127,7 +127,7 @@ export const RESTORED_TURN_REAP_MS =
 export const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
 export const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""
 export const PORT = Number.parseInt(process.env.GATEWAY_PORT || "8081", 10) || 8081
-export const PLATFORM_BASE = (process.env.PLATFORM_BASE || "https://image.eimu.dev").replace(/\/+$/, "")
+export const PLATFORM_BASE = (process.env.PLATFORM_BASE || "https://image.tinchak0207.xyz").replace(/\/+$/, "")
 export const QUOTA_URL = process.env.QUOTA_URL || `${PLATFORM_BASE}/v1/quota`
 // ── 全局记忆 env（契约 §8 八条，默认值照表）──────────────────────────────
 // 语义解析（envBool/envInt）与 memory-batch.ts 内部保持一致，避免两侧漂移。
@@ -180,6 +180,12 @@ export const MEMORY_RECALL_LINK_ITERATIONS = (() => {
   if (!Number.isFinite(n)) return 2
   return Math.max(1, Math.min(5, n))
 })()
+// 追加链接节点所需最低质量，夹 [0,1]；默认 0.1（旧值 0.15 会把默认两跳的 ~0.125 丢掉）。
+export const MEMORY_RECALL_LINK_MIN_MASS = (() => {
+  const n = Number.parseFloat(process.env.MEMORY_RECALL_LINK_MIN_MASS ?? "0.1")
+  if (!Number.isFinite(n)) return 0.1
+  return Math.max(0, Math.min(1, n))
+})()
 // 0918 前缀快取修复：尾端注入 payload 的同 byte 去重开关。默认 ON（不重贴）；
 // SYSTEM_PAYLOAD_TAIL_DEDUPE=0 时每轮照旧重贴（回退钮，行为回到「每轮都在」）。
 export const SYSTEM_PAYLOAD_TAIL_DEDUPE = process.env.SYSTEM_PAYLOAD_TAIL_DEDUPE !== "0"
@@ -189,7 +195,7 @@ export const MEMORY_VERIFIER_MODEL = (process.env.MEMORY_VERIFIER_MODEL || "").t
 export const MEMORY_ORACLE_MODEL = (process.env.MEMORY_ORACLE_MODEL || "").trim()
 // 【契约外新增】批次/召回打 Vercel repo 端点（/api/agent/memory/*）的前缀。契约 §8 没有
 // 这条（§3 端点只在 repo 侧定义）；默认值与 PLATFORM_BASE 同构，属本片新增接线参数。
-export const MEMORY_INGEST_BASE_URL = (process.env.MEMORY_INGEST_BASE_URL || "https://image.eimu.dev").replace(/\/+$/, "")
+export const MEMORY_INGEST_BASE_URL = (process.env.MEMORY_INGEST_BASE_URL || "https://image.tinchak0207.xyz").replace(/\/+$/, "")
 // How long a spend confirmation stays answerable. 15 minutes, not 90 seconds:
 // the user may be reading the parameter card, checking their balance, or simply
 // away from the tab, and a spend prompt that silently expires under them is
@@ -227,7 +233,7 @@ export const SESSION_IDLE_TTL_MS = Number.parseInt(process.env.SESSION_IDLE_TTL_
 // 未设/0 = 永不删；>0 恢复旧的「N 天未更新即连根删」能力（env 逃生口）。
 export const SESSION_SWEEP_DAYS = Number.parseInt(process.env.SESSION_SWEEP_DAYS || "0", 10) || 0
 export const SESSION_REAP_INTERVAL_MS = 60_000
-export const LEDGER_PATH = process.env.LEDGER_PATH || "/opt/eimu-harness/ledger.jsonl"
+export const LEDGER_PATH = process.env.LEDGER_PATH || "/opt/agent-harness/ledger.jsonl"
 // 画布事件白名单：opencode canvas_* 工具透过 emitEvent 推送的画布动作/成果事件。
 // 这组事件由前端 reducer 接住，驱动画布渲染（建节点/连线/显示图片/预算）。
 export const CANVAS_EMIT_ALLOWED = new Set([
@@ -247,12 +253,12 @@ export const CANVAS_EMIT_ALLOWED = new Set([
 // 内网（VPS ufw 8081/tcp ALLOW 172.16.0.0/12，非公网可达）。
 export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
 
-export const WORKSPACE_DIR = "/opt/eimu-harness/workspace"
+export const WORKSPACE_DIR = "/opt/agent-harness/workspace"
 export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
 // TTS 音频落盘与对外 URL 基址：文件存 gateway 本地静态目录，
-// 公网走 nginx 已有的 /agent/ 反代（store.eimu.dev/agent/* → 本网关）。
+// 公网走 nginx 已有的 /agent/ 反代（store.tinchak0207.xyz/agent/* → 本网关）。
 export const TTS_AUDIO_DIR = path.join(WORKSPACE_DIR, "tts-audio")
-export const TTS_PUBLIC_BASE = (process.env.TTS_PUBLIC_BASE || "https://store.eimu.dev/agent/v1/audio").replace(/\/+$/, "")
+export const TTS_PUBLIC_BASE = (process.env.TTS_PUBLIC_BASE || "https://store.tinchak0207.xyz/agent/v1/audio").replace(/\/+$/, "")
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024 // 4MB per file
 export const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（浏览器原片直传）
 export const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])

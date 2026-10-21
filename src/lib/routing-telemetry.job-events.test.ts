@@ -74,7 +74,7 @@ test("buildJobRoutingEvent maps a delivered job (fail then succeed) into a user 
         latencyMs: 1000,
         failureClass: "rate_limited",
         supplierLabel: "pixai",
-        supplierBaseUrl: "https://store.eimu.dev",
+        supplierBaseUrl: "https://store.tinchak0207.xyz",
       }),
       attempt({
         attemptNo: 2,
@@ -98,7 +98,7 @@ test("buildJobRoutingEvent maps a delivered job (fail then succeed) into a user 
   assert.equal(event.attempts[0].status, 429);
   assert.equal(event.attempts[0].reason, "rate_limited");
   assert.deepEqual(event.queue.map((entry) => entry.label), ["pixai", "sub2api-1"]);
-  assert.deepEqual(event.queue.map((entry) => entry.host), ["store.eimu.dev", "sub2api.example"]);
+  assert.deepEqual(event.queue.map((entry) => entry.host), ["store.tinchak0207.xyz", "sub2api.example"]);
   assert.equal(event.pipeline, "user");
   assert.equal(event.requestId, "job-route-1");
   assert.equal(event.modelId, "gpt-image-2");
@@ -119,7 +119,7 @@ test("buildJobRoutingEvent marks a single failed attempt as exhausted with a ref
         latencyMs: 800,
         failureClass: "upstream_unavailable",
         supplierLabel: "pixai",
-        supplierBaseUrl: "https://store.eimu.dev",
+        supplierBaseUrl: "https://store.tinchak0207.xyz",
       }),
     ],
     "exhausted",

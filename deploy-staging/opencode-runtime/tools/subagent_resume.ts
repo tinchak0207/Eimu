@@ -6,7 +6,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const EXAMPLE_ARGS = {
   subagent_id: "latest",
   payload: {
-    video_url: "https://store.eimu.dev/rendered/video_933.mp4",
+    video_url: "https://store.tinchak0207.xyz/rendered/video_933.mp4",
     status: "completed",
   },
 }

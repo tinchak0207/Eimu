@@ -9,7 +9,7 @@ const DOC_EXTS = new Set([".md", ".txt", ".json", ".csv", ".pdf"]);
 
 export default tool({
   description:
-    "把工作区文稿（研究笔记／剧本／分镜／蓝图等 md·txt·json·csv·pdf）入库平台存储（免费），返回平台公网 URL（https://store.eimu.dev/image-data/files/uploads/...）。用户网页点得开；禁止把裸 VPS workspace 路径说成「可随时查看」。path＝workspace 内绝对路径（与 video_upload 同通道／同契约，只是接受文稿扩展名）。拿到 URL 后用 markdown 链接交付（链接文字用人话标题，如 [护肤短片剧本](url)）；画布已打开时可另用 workflow_add_node type=text 把全文放进 text 节点。",
+    "把工作区文稿（研究笔记／剧本／分镜／蓝图等 md·txt·json·csv·pdf）入库平台存储（免费），返回平台公网 URL（https://store.tinchak0207.xyz/image-data/files/uploads/...）。用户网页点得开；禁止把裸 VPS workspace 路径说成「可随时查看」。path＝workspace 内绝对路径（与 video_upload 同通道／同契约，只是接受文稿扩展名）。拿到 URL 后用 markdown 链接交付（链接文字用人话标题，如 [护肤短片剧本](url)）；画布已打开时可另用 workflow_add_node type=text 把全文放进 text 节点。",
   args: {
     path: tool.schema
       .string()
@@ -69,7 +69,7 @@ export default tool({
       content_type: data.content_type,
       title: linkTitle,
       markdown_link: `[${linkTitle}](${data.url})`,
-      note: "已入库平台存储（免费）。请把 markdown_link 写进交付文（用户可点开）；禁止再报 /opt/eimu-harness/workspace 裸路径或声称「工作区可随时查看」。画布已开时可另加 text 节点承接全文。",
+      note: "已入库平台存储（免费）。请把 markdown_link 写进交付文（用户可点开）；禁止再报 /opt/agent-harness/workspace 裸路径或声称「工作区可随时查看」。画布已开时可另加 text 节点承接全文。",
     });
   },
 });

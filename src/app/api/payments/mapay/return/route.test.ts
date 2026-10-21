@@ -211,25 +211,27 @@ test("unavailable channel redirects to ?mapay=pending without opening a second d
   }
 });
 
-test("upstream did not move (failed) falls back to the legacy cdk redirect", async () => {
+test("upstream did not move (failed) redirects pending without creating a code (return is read-only)", async () => {
   state = freshState();
   state.adjustFails = true;
   const res = await mapayReturn(returnRequest("IMG-RETURN-FAILED", BOUND_PARAM));
   const location = locationOf(res);
 
-  assert.equal(location.searchParams.get("cdk"), "CDK-MPIMG-RETURN-FAILED");
-  assert.equal(location.searchParams.get("mapay"), null);
-  assert.deepEqual(state.redemptionCreates, ["MPIMG-RETURN-FAILED"]);
+  // 回跳只读：不入帐、不创建兑换码。failed 也交给 notify/sweep 发放，不在此开第二条通道。
+  assert.equal(location.searchParams.get("mapay"), "pending");
+  assert.equal(location.searchParams.get("cdk"), null);
+  assert.deepEqual(state.redemptionCreates, [], "发放权只在 notify/sweep");
 });
 
-test("legacy param keeps the old cdk redirect and never touches the credit channel", async () => {
+test("legacy param redirects pending without creating a code (return is read-only)", async () => {
   state = freshState();
   const res = await mapayReturn(returnRequest("IMG-RETURN-LEGACY", "popular"));
   const location = locationOf(res);
 
-  assert.equal(location.searchParams.get("cdk"), "CDK-MPIMG-RETURN-LEGACY");
-  assert.equal(state.rows.size, 0, "旧格式不占位");
-  assert.deepEqual(state.redemptionCreates, ["MPIMG-RETURN-LEGACY"]);
+  // 旧格式同样只读：已存在的兑换码才回显，绝不在这里创建。
+  assert.equal(location.searchParams.get("mapay"), "pending");
+  assert.equal(location.searchParams.get("cdk"), null);
+  assert.deepEqual(state.redemptionCreates, [], "回跳不创建兑换码");
 });
 
 test("second return visit after a direct credit still shows credited (no cdk, no double credit)", async () => {

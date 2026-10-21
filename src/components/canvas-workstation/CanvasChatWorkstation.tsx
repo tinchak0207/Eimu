@@ -101,7 +101,7 @@ export function CanvasChatWorkstation({
     </button>
   );
 
-  // 2026-09-24 项目负责人裁定「header 往右退缩，让 AI 助理占上来，吃满天花板」＋
+  // 2026-09-24 暴君裁定「header 往右退缩，让 AI 助理占上来，吃满天花板」＋
   // 同刀「首秒零回缩」根治：expanded 态的退缩量不再由 JS 回写像素——
   // Navbar 的 --ws-navbar-inset fallback 已直接消费 calc(var(--ws-panel-w)+12px)
   // （单一真相源，拖宽即时跟随、SSR 首帧即退缩终态）。本 effect 只负责
@@ -168,7 +168,7 @@ export function CanvasChatWorkstation({
   return (
     <>
       {/* 画布工作站样式：面板 fixed 浮于画布上、两态宽度过渡、行动端改底部抽屉。
-          2026-09-20 拆覆盖层（项目负责人批准的 agent-chat-preview 视觉）：面板壳不再
+          2026-09-20 拆覆盖层（暴君批准的 agent-chat-preview 视觉）：面板壳不再
           压纯白实底——壳退为形状宿主（圆角＋阴影），让内层 PromptInput 的
           section.lg-card 自己的玻璃材质（0.72 白玻璃＋blur＋顶缘 specular 亮线）
           透出来，画布在背后可折射。08-25「白壳唯一卡」裁定由 09-20 预览裁定取代。
@@ -182,30 +182,30 @@ export function CanvasChatWorkstation({
           · @keyframes canvas-ws-panel-in 未接线（全站无规则引用），入场动画只有
             canvas-ws-fade 与 canvas-ws-fab-in，两者已全收进 settled 闸。
           · backdrop 高度由 #global-navbar 写进 --site-header-offset；其渐层与
-            body::after 同配方（项目负责人裁定 09-20：进助理应看见同款渐层）。
+            body::after 同配方（暴君裁定 09-20：进助理应看见同款渐层）。
           · 入场渐显/dock 偏移过度/面板宽度过度/FAB 入场弹现 一律只在 settled 后
             生效（html[data-ws-settled]，工作站 settled 后写）＝首秒零回缩。
           · Navbar 退缩过度原挂在 <nav> 的 tailwind 类别上＝每次载入都播「全宽
             320ms 退缩」回缩动画（病灶①），移进本档并只在 data-ws-settled 下生效。
-          · 面板吃满天花板（项目负责人裁定 2026-09-24）；navbar 改由 --ws-navbar-inset
-            右退让位（见组件顶部 useEffect 与 Navbar.tsx）。2026-10-03 项目负责人
+          · 面板吃满天花板（暴君裁定 2026-09-24）；navbar 改由 --ws-navbar-inset
+            右退让位（见组件顶部 useEffect 与 Navbar.tsx）。2026-10-03 暴君
             「桌面端两个大组件顶部没对齐，以右边为基准」：面板顶 0.75rem → 0.5rem，
             max-height 同步改 1.25rem。
           · 壳退为形状宿主：底色/边框交给内层 section.lg-card 的玻璃材质，画布在
             背后可折射；--agent-pop-top 吃 Navbar 实测的 --site-header-offset。
-          · 收起态 FAB（项目负责人裁定 2026-08-25；2026-08-27 尺寸锁死修复：面板基础规则
+          · 收起态 FAB（暴君裁定 2026-08-25；2026-08-27 尺寸锁死修复：面板基础规则
             的拉伸定位 + width/height:auto 会让 FAB 在移动端撑满整屏）；此态壳自身
             给玻璃外观（无 lg-card 内层可依赖）；canvas-ws-was-rail 由工作站于
             settled 当帧侦测（见 tsx）。
-          · 面板态聊天区滚动收进 transcript 内部（项目负责人终裁 2026-09-24：一律吃满
+          · 面板态聊天区滚动收进 transcript 内部（暴君终裁 2026-09-24：一律吃满
             全高，旧 :has() 分流作废）。
           · 卡片减法阴影（用户版面方案 2026-09-24）；卡面 0.72 实白 → 0.56
-            （项目负责人 2026-10-01「背景像水泥砖」，让首页环境光透进来）。
-          · 2026-10-03 项目负责人「桌面端按钮 y 座标没对齐，以右边为基准」：≥768px 卡片顶
+            （暴君 2026-10-01「背景像水泥砖」，让首页环境光透进来）。
+          · 2026-10-03 暴君「桌面端按钮 y 座标没对齐，以右边为基准」：≥768px 卡片顶
             内距收回 4px、消掉 Tailwind space-y-4 的幽灵外距，图示列顶对齐基准线 39px。
           · prefers-reduced-motion 选择器权重要盖得过 settled 闸规则。
-          · 手机端（≤767px）agent 态 = 全萤幕聊天（项目负责人裁定 2026-09-05）；2026-10-01
-            项目负责人「AI 助理背景没覆满全屏」：面板从视口 0 铺到底；展开态内容全 fixed，
+          · 手机端（≤767px）agent 态 = 全萤幕聊天（暴君裁定 2026-09-05）；2026-10-01
+            暴君「AI 助理背景没覆满全屏」：面板从视口 0 铺到底；展开态内容全 fixed，
             故锁死整页滚动只留 transcript 自己滚；FAB 态靠左上角。 */}
       <style>{`
             :root {
@@ -424,7 +424,7 @@ export function CanvasChatWorkstation({
               Navbar 量出的 --site-shell-left/right 推导；页壳 max-w-[1440px] 在
               >1440 视口会把整个工作站夹成置中窄壳、两侧大片留白。工作站态解除
               导览列页壳上限（pro 态仍 1440，与其内容栏对齐）。SSR 首帧即生效。
-              同刀·等比缩放：设计基准视口＝项目负责人本机 1274×664 CSS px。工作站全部
+              同刀·等比缩放：设计基准视口＝暴君本机 1274×664 CSS px。工作站全部
               尺寸走 rem（面板宽/间隙/圆角/FAB 已改 rem），根字级按 min(宽比,高比)
               放大 → 大萤幕上间距、呼吸感、字级与视口的比例和基准机一致；下限
               16px（基准机及更小视口零变化），上限 26px（≈1.6 倍）。 */}
@@ -468,7 +468,7 @@ export function CanvasChatWorkstation({
             "canvas-ws-was-rail",
         )}
       >
-        {/* FAB 态（2026-08-25 项目负责人裁定：收起形态 = 左上角聊天气泡，不是长条 rail）：
+        {/* FAB 态（2026-08-25 暴君裁定：收起形态 = 左上角聊天气泡，不是长条 rail）：
             一颗 44px 圆形聊天气泡按钮，图标即语义（MessageCircle=打开对话）。
             载入中蓝色 pulse 提示「助理在跑」。expanded 态不渲染：收合按钮
             并入聊天 header（chatHeaderExtra），触发前后同一个 UI。 */}
@@ -496,7 +496,7 @@ export function CanvasChatWorkstation({
           // 不卸载＝SSE 会话／输入框内容／滚动位置零丢失（2026-10-09 P0-W2）。
           style={showProjectsPanel ? { display: "none" } : undefined}
         >
-          {/* 2026-09-05 项目负责人裁定：header 的「收起对话面板」钮删掉，退出只走右边 X。
+          {/* 2026-09-05 暴君裁定：header 的「收起对话面板」钮删掉，退出只走右边 X。
               2026-10-09 P0-W2：同一 chatHeaderExtra 通道改回傳「项目」入口钮——它落在
               AgentChatSurface 顶栏右簇（headerExtra，见 AgentChatSurface.tsx:1206），
               AgentChatSurface 一行都不用改。projectPanel 缺省时不产出钮。 */}

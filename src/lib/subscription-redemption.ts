@@ -12,7 +12,7 @@
 //
 // 本档与 `lib/mapay-redemption.ts` 同一族（同一个上游端点与同一个「先搜后建」幂等姿势），
 // 差别只在白名单栏位：`name` 由 `subscriptionCodeName(sku, orderId)` 产生。
-// 未接线到任何结帐流程（哪个 SKU 对应哪个付费方案＝定价决策，需项目负责人定调）：本档先把
+// 未接线到任何结帐流程（哪个 SKU 对应哪个付费方案＝定价决策，需暴君定调）：本档先把
 // 「发码能力」备好，入帐端已可认。
 
 import type { GatewayRedemption } from "@/lib/gateway-admin";
@@ -49,7 +49,7 @@ export interface SubscriptionRedemptionPlan {
 
 function gatewayBaseUrl(env: EnvLike): string {
   // [riskclose 2026-09-27] TLS gateway channel (bare-IP plaintext /api closed).
-  return env.GATEWAY_BASE_URL ?? (env.NODE_ENV === "production" ? "https://store.eimu.dev/newapi" : "http://localhost:3001");
+  return env.GATEWAY_BASE_URL ?? (env.NODE_ENV === "production" ? "https://store.tinchak0207.xyz/newapi" : "http://localhost:3001");
 }
 
 function bearer(value: string): string {

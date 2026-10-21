@@ -1,0 +1,311 @@
+diff --git a/internal/service/accounts.go b/internal/service/accounts.go
+index 2f92648..29bf4d2 100644
+--- a/internal/service/accounts.go
++++ b/internal/service/accounts.go
+@@ -106,6 +106,9 @@ func (s *AccountService) RefreshAccount(ctx context.Context, id int64) (*domain.
+ 		if updated.ATExpires != nil {
+ 			fields["at_expires"] = nullableTimeArg(updated.ATExpires)
+ 		}
++		if strings.TrimSpace(updated.Cookies) != "" && updated.Cookies != account.Cookies {
++			fields["cookies"] = updated.Cookies
++		}
+ 		_ = s.db.UpdateAccountFields(ctx, id, fields)
+ 		return account, err
+ 	}
+@@ -410,26 +413,33 @@ func (s *AccountService) refreshAccountByProtocol(ctx context.Context, account d
+ 	return s.refreshAccountByAvailableCredentials(ctx, account)
+ }
+ 
+-func (s *AccountService) refreshAccountByAvailableCredentials(ctx context.Context, account domain.Account) (domain.Account, error) {
+-	if strings.TrimSpace(account.RefreshToken) != "" {
+-		refreshed, err := s.client.RefreshSupabase(ctx, account)
+-		if err == nil {
+-			return refreshed, nil
+-		}
+-		account = refreshed
+-		if strings.TrimSpace(account.ProviderToken) == "" && strings.TrimSpace(account.ProviderRefreshToken) == "" {
+-			return account, err
+-		}
+-	}
+-	if strings.TrimSpace(account.ProviderToken) != "" || strings.TrimSpace(account.ProviderRefreshToken) != "" {
+-		return s.refreshWithProviderCredentials(ctx, account)
+-	}
+-	if strings.TrimSpace(account.Cookies) != "" {
+-		return s.client.RefreshFromCookies(ctx, account)
+-	}
+-	return account, fmt.Errorf("account has no refresh_token, provider_token, or cookie protocol credentials")
+-}
+-
++func (s *AccountService) refreshAccountByAvailableCredentials(ctx context.Context, account domain.Account) (domain.Account, error) {
++	var supabaseErr error
++	if strings.TrimSpace(account.RefreshToken) != "" {
++		refreshed, err := s.client.RefreshSupabase(ctx, account)
++		if err == nil {
++			return refreshed, nil
++		}
++		account = refreshed
++		supabaseErr = err
++		if strings.TrimSpace(account.ProviderToken) == "" && strings.TrimSpace(account.ProviderRefreshToken) == "" {
++			return account, supabaseErr
++		}
++	}
++	if strings.TrimSpace(account.ProviderToken) != "" || strings.TrimSpace(account.ProviderRefreshToken) != "" {
++		updated, providerErr := s.refreshWithProviderCredentials(ctx, account)
++		if providerErr != nil && supabaseErr != nil {
++			// Keep the real Supabase cause visible: the provider 401 used to
++			// overwrite it and hide the root failure in last_refresh_result.
++			return updated, fmt.Errorf("supabase refresh failed: %w; provider fallback failed: %v", supabaseErr, providerErr)
++		}
++		return updated, providerErr
++	}
++	if strings.TrimSpace(account.Cookies) != "" {
++		return s.client.RefreshFromCookies(ctx, account)
++	}
++	return account, fmt.Errorf("account has no refresh_token, provider_token, or cookie protocol credentials")
++}
+ func (s *AccountService) refreshWithProviderCredentials(ctx context.Context, account domain.Account) (domain.Account, error) {
+ 	providerWasRefreshed := false
+ 	if strings.TrimSpace(account.ProviderToken) == "" {
+diff --git a/internal/service/flowmusic.go b/internal/service/flowmusic.go
+index 617dda4..da901d7 100644
+--- a/internal/service/flowmusic.go
++++ b/internal/service/flowmusic.go
+@@ -162,6 +162,13 @@ func (c *FlowMusicClient) RefreshSupabase(ctx context.Context, account domain.Ac
+ 	if supabaseJWT := getString(payload, "access_token"); supabaseJWT != "" {
+ 		account.AT = supabaseJWT
+ 	}
++	// Rebuild the Supabase auth cookie from the rotated session BEFORE the
++	// provider_token guard. Generation authenticates with this JWT (see
++	// applyFlowHeaders), so a missing/expired provider_token must never discard
++	// the fresh cookie.
++	if cookieValue := buildSupabaseAuthCookie(payload, &account); cookieValue != "" {
++		account.Cookies = cookieValue
++	}
+ 	if account.ProviderToken == "" {
+ 		return account, fmt.Errorf("supabase refresh succeeded but provider_token is missing; cannot update FlowMusic bearer")
+ 	}
+@@ -198,6 +205,12 @@ func (c *FlowMusicClient) RefreshSupabase(ctx context.Context, account domain.Ac
+ 	} else {
+ 		account.LastRefreshResult = "supabase_refresh_and_flow_bearer_success"
+ 	}
++	if strings.TrimSpace(flowBearer) == "" {
++		// SaveGoogle failed and provider_token is unusable: keep any existing
++		// flow_bearer instead of clobbering it with an empty string. Generation
++		// uses the Supabase JWT cookie anyway (applyFlowHeaders).
++		flowBearer = strings.TrimSpace(firstNonEmpty(account.FlowBearer, account.AT))
++	}
+ 	account.FlowBearer = flowBearer
+ 	// AT stores the Supabase JWT (which FlowMusic's API validates)
+ 	// instead of the provider token. This ensures API calls use the
+@@ -425,6 +438,12 @@ func (c *FlowMusicClient) RefreshFromCookies(ctx context.Context, account domain
+ 				now := time.Now().UTC()
+ 				account.LastRefreshAt = &now
+ 				account.LastRefreshResult = "cookie_supabase_jwt_success"
++				// Advance expiry from the JWT exp claim so cookie-mode refreshes
++				// do not look permanently frozen to shouldRefreshAccount().
++				if exp := extractJWTExpiry(supabaseJWT); exp != nil {
++					account.ExpiresAt = exp
++					account.ATExpires = exp
++				}
+ 				return account, nil
+ 			}
+ 			// JWT expired; try extracting refresh_token from JWT payload for RefreshSupabase fallback
+@@ -1188,6 +1207,30 @@ func extractRefreshTokenFromJWT(jwt string) string {
+ 	return strings.TrimSpace(payload.RefreshToken)
+ }
+ 
++func extractJWTExpiry(jwt string) *time.Time {
++	parts := strings.SplitN(jwt, ".", 3)
++	if len(parts) < 2 {
++		return nil
++	}
++	raw := parts[1]
++	data, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "="))
++	if err != nil {
++		pad := (4 - len(raw)%4) % 4
++		data, err = base64.StdEncoding.DecodeString(raw + strings.Repeat("=", pad))
++		if err != nil {
++			return nil
++		}
++	}
++	var claims struct {
++		Exp int64 `json:"exp"`
++	}
++	if err := json.Unmarshal(data, &claims); err != nil || claims.Exp <= 0 {
++		return nil
++	}
++	t := time.Unix(claims.Exp, 0).UTC()
++	return &t
++}
++
+ func normalizeBearerToken(value string) string {
+ 	value = strings.TrimSpace(value)
+ 	if value == "" {
+diff --git a/internal/service/flowmusic_test.go b/internal/service/flowmusic_test.go
+index 9178df8..307cd46 100644
+--- a/internal/service/flowmusic_test.go
++++ b/internal/service/flowmusic_test.go
+@@ -3228,3 +3228,163 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
+ 		t.Fatalf("json encode error = %v", err)
+ 	}
+ }
++
++// P1: a Supabase refresh failure must not be masked by the provider_token 401
++// that the fallback chain produces afterwards.
++func TestRefreshAccountSurfacesSupabaseCauseWhenProviderFallbackFails(t *testing.T) {
++	ctx := context.Background()
++
++	supabaseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		http.Error(w, "supabase_invalid_grant", http.StatusBadRequest)
++	}))
++	t.Cleanup(supabaseServer.Close)
++
++	flowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Path != "/__api/auth/google/save" {
++			t.Fatalf("unexpected FlowMusic path: %s", r.URL.Path)
++		}
++		http.Error(w, "provider_unauthorized", http.StatusUnauthorized)
++	}))
++	t.Cleanup(flowServer.Close)
++
++	dir := t.TempDir()
++	cfg := config.Config{
++		DataDir:              dir,
++		DatabaseDriver:       "sqlite",
++		DatabaseURL:          filepath.Join(dir, "flowmusic2api.db"),
++		FlowMusicBaseURL:     flowServer.URL,
++		SupabaseBaseURL:      supabaseServer.URL,
++		SupabaseAnonKey:      "anon-key",
++		UpstreamTimeout:      time.Second,
++		GenerationTimeout:    time.Second,
++		TokenRefreshLead:     time.Minute,
++		TokenRefreshInterval: time.Hour,
++		DefaultAdminUser:     "admin",
++		DefaultAdminPassword: "admin",
++		DefaultAPIKey:        "test-api-key",
++	}
++	db, err := store.New(ctx, cfg)
++	if err != nil {
++		t.Fatalf("store.New() error = %v", err)
++	}
++	t.Cleanup(func() { _ = db.Close() })
++	if err := db.Migrate(ctx); err != nil {
++		t.Fatalf("Migrate() error = %v", err)
++	}
++	if err := db.EnsureDefaults(ctx); err != nil {
++		t.Fatalf("EnsureDefaults() error = %v", err)
++	}
++	id, err := db.CreateAccount(ctx, domain.Account{
++		Email:              "masked-cause@example.test",
++		ProtocolMode:       "refresh_token",
++		RefreshToken:       "expired-refresh-token",
++		ProviderToken:      "stale-provider-token",
++		AutoRefreshEnabled: true,
++	})
++	if err != nil {
++		t.Fatalf("CreateAccount() error = %v", err)
++	}
++
++	accounts := NewAccountService(cfg, db, NewFlowMusicClient(cfg))
++	if _, err := accounts.RefreshAccount(ctx, id); err == nil {
++		t.Fatalf("RefreshAccount() error = nil, want failure")
++	} else {
++		msg := err.Error()
++		if !strings.Contains(msg, "supabase_invalid_grant") {
++			t.Fatalf("supabase root cause was masked: %q", msg)
++		}
++		if !strings.Contains(msg, "provider_unauthorized") {
++			t.Fatalf("provider fallback cause missing from error: %q", msg)
++		}
++	}
++	stored, err := db.GetAccount(ctx, id)
++	if err != nil {
++		t.Fatalf("GetAccount() error = %v", err)
++	}
++	if !strings.Contains(stored.LastRefreshResult, "supabase_invalid_grant") {
++		t.Fatalf("last_refresh_result = %q, want supabase root cause", stored.LastRefreshResult)
++	}
++}
++
++// P2: when Supabase rotation succeeds but provider_token is unusable, the
++// rotated Supabase JWT cookie must be persisted (and generation must be able to
++// authenticate with it) even though the FlowMusic bearer update is skipped.
++func TestRefreshAccountPersistsRotatedJWTCookieWhenProviderTokenMissing(t *testing.T) {
++	ctx := context.Background()
++
++	supabaseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		writeTestJSON(t, w, map[string]any{
++			"access_token":  "supabase-access",
++			"refresh_token": "rotated-refresh-token",
++			"expires_in":    3600,
++			"user":          map[string]any{"email": "jwt-only@example.test"},
++		})
++	}))
++	t.Cleanup(supabaseServer.Close)
++
++	dir := t.TempDir()
++	cfg := config.Config{
++		DataDir:              dir,
++		DatabaseDriver:       "sqlite",
++		DatabaseURL:          filepath.Join(dir, "flowmusic2api.db"),
++		// FlowMusic is intentionally unreachable: the JWT cookie must survive
++		// regardless of whether the FlowMusic bearer can be refreshed.
++		FlowMusicBaseURL:     "http://127.0.0.1:1",
++		SupabaseBaseURL:      supabaseServer.URL,
++		SupabaseAnonKey:      "anon-key",
++		UpstreamTimeout:      time.Second,
++		GenerationTimeout:    time.Second,
++		TokenRefreshLead:     time.Minute,
++		TokenRefreshInterval: time.Hour,
++		DefaultAdminUser:     "admin",
++		DefaultAdminPassword: "admin",
++		DefaultAPIKey:        "test-api-key",
++	}
++	db, err := store.New(ctx, cfg)
++	if err != nil {
++		t.Fatalf("store.New() error = %v", err)
++	}
++	t.Cleanup(func() { _ = db.Close() })
++	if err := db.Migrate(ctx); err != nil {
++		t.Fatalf("Migrate() error = %v", err)
++	}
++	if err := db.EnsureDefaults(ctx); err != nil {
++		t.Fatalf("EnsureDefaults() error = %v", err)
++	}
++	id, err := db.CreateAccount(ctx, domain.Account{
++		Email:              "jwt-only@example.test",
++		ProtocolMode:       "refresh_token",
++		RefreshToken:       "old-refresh-token",
++		AutoRefreshEnabled: true,
++	})
++	if err != nil {
++		t.Fatalf("CreateAccount() error = %v", err)
++	}
++
++	accounts := NewAccountService(cfg, db, NewFlowMusicClient(cfg))
++	if _, err := accounts.RefreshAccount(ctx, id); err == nil {
++		t.Fatalf("RefreshAccount() error = nil, want the provider_token signal error (kept by contract)")
++	}
++	stored, err := db.GetAccount(ctx, id)
++	if err != nil {
++		t.Fatalf("GetAccount() error = %v", err)
++	}
++	if stored.RefreshToken != "rotated-refresh-token" {
++		t.Fatalf("rotated refresh token not persisted: %q", stored.RefreshToken)
++	}
++	if stored.ExpiresAt == nil || !stored.ExpiresAt.After(time.Now().UTC()) {
++		t.Fatalf("expires_at did not advance: %+v", stored.ExpiresAt)
++	}
++	if got := extractSupabaseJWT(stored.Cookies); got != "supabase-access" {
++		t.Fatalf("rotated JWT cookie not persisted: %q", stored.Cookies)
++	}
++	// Behavioural oracle: generation headers must carry the fresh Supabase JWT.
++	req, err := http.NewRequest(http.MethodGet, "http://example.test/", nil)
++	if err != nil {
++		t.Fatalf("NewRequest() error = %v", err)
++	}
++	NewFlowMusicClient(cfg).applyFlowHeaders(req, stored)
++	if auth := req.Header.Get("Authorization"); auth != "Bearer supabase-access" {
++		t.Fatalf("generation Authorization = %q, want Bearer supabase-access", auth)
++	}
++}

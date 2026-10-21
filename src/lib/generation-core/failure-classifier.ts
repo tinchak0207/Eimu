@@ -190,7 +190,7 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   if (status === 429 || containsAny(normalized, ["rate limit", "too many requests"])) {
     return { failureClass: "rate_limited", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: retryAfterDate(requestError?.retryAfter, now), detail, httpStatus: status };
   }
-  // 项目负责人裁定（2026-08-29 事故）：上游欠费重试无意义。旧词表只有英文，metaso 的
+  // 暴君裁定（2026-08-29 事故）：上游欠费重试无意义。旧词表只有英文，metaso 的
   // 中文文案「H3 积分余额不足 (1008)」匹配不到 → 502 掉进下方 overloaded 桶，
   // 任务在退避循环里空转到 deadline，真话只躺在 attempt 表。扩成中英双语 +
   // hailuo 错误码带括号形态（避免裸数字误配）。改为 fail-fast：retryable=false，

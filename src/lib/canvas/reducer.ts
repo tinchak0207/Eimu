@@ -2,7 +2,7 @@
 //
 // 纯函式、无副作用，前端（画布 store）直接呼叫。每个事件对应一个 reduce 步骤，
 // 与 gateway 的 autoCreateCanvasUnit 产出契约一一对齐。node 位置由前端 reducer
-// 自动排版（瀑布流/阶梯），gateway 不给座标——它不懂版面，版权归项目负责人前端。
+// 自动排版（瀑布流/阶梯），gateway 不给座标——它不懂版面，版权归暴君前端。
 import type {
   CanvasConnection,
   CanvasNode,

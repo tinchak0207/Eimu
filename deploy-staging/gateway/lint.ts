@@ -5,7 +5,7 @@
  * 全部检测对 clip 的 trim 窗口 [inSec,outSec] 跑 ffmpeg 滤镜（-ss/-t 精确 seek），
  * 结果座标为**时间线系**（timeline 偏移 = 前序 clip 有效时长累加，口径同 B1 clipLength）。
  * 语义层（越轴/动作连续性/光不一致/角色脸一致性/口型同步）当前行业无可复现检测
- * → 诚实写进 skipped，不谎报（项目负责人已批准妥协）。
+ * → 诚实写进 skipped，不谎报（暴君已批准妥协）。
  *
  * 契约输入：./timeline getTimeline（B1 生命周期层）；ffmpeg 真源 detectFfmpeg
  * （./editor/canvas/videoCompose，候选表第一位 ~/.kunpeng/bin/ffmpeg，7.0.2 静态）。
@@ -40,7 +40,7 @@ import { detectFfmpeg } from "./editor/canvas/videoCompose"
 import { shouldThrottleFfmpeg, acquireFfmpegSlot, releaseFfmpegSlot } from "./ffmpeg-limiter"
 
 // 与 timeline.ts L28 / index.ts L446 同值；env 可覆盖（测试用）。
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/eimu-harness/workspace"
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 
 // ── 检测常数（PRD REQ-EDIT-03 信号层，全部可复现） ────────────────────────────
 const CONCURRENCY = 3            // clip 级并发上限（VPS 2 核）
@@ -89,7 +89,7 @@ export interface LintResult {
   skipped: string[]
 }
 
-/** 语义层妥协清单（PRD 项目负责人已批准）：固定写进每次结果，不谎报 */
+/** 语义层妥协清单（PRD 暴君已批准）：固定写进每次结果，不谎报 */
 const SEMANTIC_SKIPS: string[] = [
   "cross_axis 越轴：语义层，当前行业无可复现检测，诚实跳过",
   "action_continuity 动作连续性：语义层，当前行业无可复现检测，诚实跳过",

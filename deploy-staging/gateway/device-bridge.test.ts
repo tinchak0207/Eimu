@@ -62,7 +62,7 @@ test("isSensitivePath: Claude Code 敏感清单逐条命中", () => {
     "~/.pgpass",
     "~/.bash_history",
     "~/.zsh_history",
-    "/home/user/.ssh/id_ed25519",
+    "/home/lenovo/.ssh/id_ed25519",
     "/root/.aws/config",
   ]
   for (const p of hits) assert.equal(isSensitivePath(p), true, p)

@@ -13,6 +13,16 @@ description: 3D/Blender 任务路由与执行配方库入口：委托单含 prev
 
 **委托单含 previz / 3D / 模型 / 场景 / 机位 / 运镜 / 骨架 / turntable / 分镜预演 关键词时，必须走本 SKILL 的 blender_* 三工具（blender_exec / blender_render / blender_export_gltf），禁止以 gpt-image-2、seedream 等二维生成顶替 3D previz。** 报价前先核对工具清单：3D 任务预算单只允许 blender_* 工具链（或 asset_search/asset_get 复用），出现二维图像模型 = 路由错误，重读本节。
 
+## 能力闸门（2026-10-20 现场）
+
+本 SKILL 的五阶段是 **Blender 可用时**的权威配方；当前生产席位可能拿不到 `blender_*`，也不是每台桥主机都装了 Blender。开工前必须过这道闸：
+
+1. **先查真实工具表**：确认 `blender_exec` / `blender_render` / `blender_export_gltf` 在当前席位真的可用（看 live 工具清单，不看本 SKILL 宣称、不看工具文件存在）；再查桥主机 `command -v blender`。
+2. **不可用就不要调用 blender_\***，改走「自建几何 + 光栅渲染」兜底：用 bash（纯 Python/Node 都行）自建相机与物体几何，代码算投影后光栅化出图，产出首/中/尾关键帧、GLB，以及每帧对应的机位/动作参数。`.blend` 标缺。
+3. **交付卡六栏里 `blend_path` 允许为 null**，但必须写明原因（如「本席位无 blender，.blend 未交付」）；截图/帧与 GLB 不能伪造，必须是真几何渲染产物。
+4. 本节**优先于上方「3D 任务路由硬规则」**：blender_* 不可用时按本节降级，不得为了守路由而虚构 3D 能力或用二维文生图顶替。
+5. 本节只加能力闸门与降级顺序，不改五阶段配方本身。
+
 ## 执行环境契约（先读）
 
 1. **执行通道**：所有 bpy 脚本通过 bridge HTTP 执行 —— `POST /v1/execute`（blender-mcp 同构协议，Blender headless）。禁止在回复里口述 UI 操作步骤。

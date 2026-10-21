@@ -40,8 +40,26 @@ import {
 } from "./statistics-projection";
 import { generationDatabaseConfigured, type GenerationSql } from "./database";
 
+// <1000 行重构：statistics-projection.ts 降为 barrel，查询/投影拆到同目录子模组。
+const STATISTICS_PROJECTION_FILES = [
+  "src/lib/generation-core/statistics-projection.ts",
+  ...["project-activation", "project-consumption", "project-revenue", "queries", "types"].map(
+    (m) => `src/lib/generation-core/statistics-projection/${m}.ts`,
+  ),
+];
+
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
+}
+
+function readStatisticsProjection(): string {
+  return STATISTICS_PROJECTION_FILES.map(read).join("\n");
+}
+
+function readStatisticsProjectionCode(): string {
+  return readStatisticsProjection()
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 /** 去注解后才做负向断言：解释禁令的注解不该误触守门件。 */
@@ -299,7 +317,7 @@ test("unknown 不被折叠成 0 / success：渠道三态第三态原样保留", 
 
 test("渠道判活与执行侧同一把尺：判据只在 supplier-health-signal 一处定义，统计层不自造健康度", () => {
   const signal = read("src/lib/supplier-health-signal.ts");
-  const projection = read("src/lib/generation-core/statistics-projection.ts");
+  const projection = readStatisticsProjection();
 
   assert.match(signal, /export async function readSupplierHealthSignal/);
   assert.match(signal, /export async function readSupplierChannelHealth/);
@@ -310,8 +328,8 @@ test("渠道判活与执行侧同一把尺：判据只在 supplier-health-signal
   assert.match(signal, /capability\.is_current AND capability\.enabled/);
   // 统计层只调用轮子，不自己写 supplier_capability 查询、也不造健康分
   assert.match(projection, /readSupplierChannelHealth/);
-  assert.doesNotMatch(readCode("src/lib/generation-core/statistics-projection.ts"), /FROM\s+supplier_capability/);
-  assert.doesNotMatch(readCode("src/lib/generation-core/statistics-projection.ts"), /health_score/);
+  assert.doesNotMatch(readStatisticsProjectionCode(), /FROM\s+supplier_capability/);
+  assert.doesNotMatch(readStatisticsProjectionCode(), /health_score/);
 });
 
 test("统计层只读：投影层/路由/管理组件三层都没有任何写语句，路由必须验管理员 session", () => {
@@ -334,11 +352,14 @@ test("统计层只读：投影层/路由/管理组件三层都没有任何写语
 
   // 判活三类文案都在展示层（话术只许存在于展示层）；文案收进展示层单一来源后，
   // 元件只引用键——投影层照样不得出现这几句话术。
+  // 账本来源标签（billing_operation）不是静态文案：它由投影层 sources 生成、管理组件渲染，
+  // 故断言投影层有该数据源标签且元件确实渲染 payload.sources，而不是误读 ui-strings。
   const ui = read("src/components/admin/AdminStatistics.tsx");
   const copy = read("src/lib/ui-strings.ts");
   assert.match(copy, /资料不足/);
   assert.match(copy, /无法判定/);
-  assert.match(copy, /billing_operation/);
+  assert.match(readStatisticsProjection(), /billing_operation/);
+  assert.match(ui, /payload\.sources\.map/);
   assert.match(ui, /stats\.rate\.insufficient/);
   assert.match(ui, /stats\.liveness\.unknown/);
   assert.match(ui, /stats\.card\.ledgerSource/);
@@ -568,7 +589,7 @@ test("C2-1 纯退款无 commit（边界）：净额为负且如实画负，不�
 });
 
 test("C2-1 取数面覆盖退款行：净额口径的 SQL 必须同时读 commit 与 refund（源级守门）", () => {
-  const code = readCode("src/lib/generation-core/statistics-projection.ts");
+  const code = readStatisticsProjectionCode();
   assert.match(code, /operation\.operation IN \('commit', 'refund'\)/, "读法漏 refund = 退款仍算消耗");
   assert.match(code, /operation_kind/, "没有 operation 栏位就无从区分扣费与退款");
   // 未归因桶不得再接退款（全额退款必须离开未归因）：锚点仍只在非零净额组里选

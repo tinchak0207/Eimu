@@ -7,12 +7,12 @@
  * 除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 `npx tsx tools/export-vision-tools-staging.ts` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/vision_impl.ts
- * env：NEWAPI_API_KEY（Bearer 鉴权，VPS /opt/eimu-control-plane/.env.control-plane
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
+ * env：NEWAPI_API_KEY（Bearer 鉴权，VPS /opt/image-control-plane/.env.control-plane
  * 已有同名对，harness 侧同步注入）；NEWAPI_VISION_MODEL 可选覆盖（默认
  * gemini-3-flash）。通路唯一 = new-api 中控 {NEWAPI_BASE_URL}/chat/completions
- * （项目负责人铁律 vision-must-route-newapi-not-direct，R2c 起直连双通路已删）。
- * 薄入口：/opt/eimu-harness/workspace/.opencode/tools/vision_analyze.ts
+ * （暴君铁律 vision-must-route-newapi-not-direct，R2c 起直连双通路已删）。
+ * 薄入口：/opt/agent-harness/workspace/.opencode/tools/vision_analyze.ts
  */
 
 /**
@@ -22,7 +22,7 @@
  * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
  * output 为 JSON 字串）。
  *
- * 模型通路（R2c 迁移，项目负责人铁律「模型调用禁直连必走 new-api」记忆
+ * 模型通路（R2c 迁移，暴君铁律「模型调用禁直连必走 new-api」记忆
  * vision-must-route-newapi-not-direct）：唯一通路 = new-api 中控端点
  * POST {NEWAPI_BASE_URL}/chat/completions（OpenAI chat 形状），Bearer 鉴权
  * env NEWAPI_API_KEY。多上游冗余由中控渠道池原生承担（failover/计费/冷却），
@@ -81,7 +81,7 @@ function asString(v: unknown): string | undefined {
 
 /**
  * new-api 中控 chat 端点（唯一模型通路；R2c 定案）。
- * 公网闸道 image.eimu.dev/v1 无 chat/completions 路由（站点自营
+ * 公网闸道 image.tinchak0207.xyz/v1 无 chat/completions 路由（站点自营
  * 图/视频 API，/v1/models 为站点自营清单 46 模型），视觉审核走 VPS 内网
  * http://127.0.0.1:3001/v1（与 new-api 内核同机，controller/worker 同款）。
  */

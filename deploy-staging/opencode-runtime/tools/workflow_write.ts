@@ -153,12 +153,12 @@ export default tool({
       return fail("canvas_ops_failed", outcome.error || (outcome.status ? `HTTP ${outcome.status}` : "下发失败"))
     }
     const result = outcome.result ?? {}
-    // 2026-10-11 假成功修正：用户画布页在线（有 SSE 客户端）却 30s 未回执＝ops 到了浏览器但没渲染，
+    // 2026-10-11 假成功修正：有 SSE 连接（不等同画布页）却 30s 未回执＝ops 到了浏览器但没渲染，
     // 如实报错（节点已写穿快照，workflow_write 幂等，可原样重试）；gateway 旧版回 OPS_TIMEOUT 同判。
     if (result.queued_reason === "ack_timeout" || outcome.code === "OPS_TIMEOUT") {
       return fail(
         "canvas_ack_timeout",
-        "用户画布页在线但 30s 内未回执渲染结果：节点已写入画布快照，但用户眼前的画布未确认显示。如实告知用户画布可能未刷新（刷新页面会从快照恢复），不得声称已上画布。",
+        "检测到画布连接但 30s 内未收到渲染回执（也可能是纯 API/脚本会话，没有画布页）：节点已写入画布快照，但无法确认用户眼前已显示。如实告知用户画布可能未刷新（刷新页面会从快照恢复），不得声称已上画布。",
         { request_id: outcome.request_id, created_node_ids: result.created_node_ids ?? [], new_production_line: newProductionLine, summary },
       )
     }

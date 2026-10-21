@@ -259,7 +259,7 @@ async function B0() {
     let putSettled = false;
     while (Date.now() < deadline) {
       commitSeen = net.since(t0).some((e) => e.url && /\/api\/uploads\/commit/.test(e.url) && !e.console);
-      putSettled = net.since(t0).some((e) => e.url && /store\.eimu\.xyz\/image-data\/api\/blob\//.test(e.url) && e.status != null);
+      putSettled = net.since(t0).some((e) => e.url && /store\.tinchak0207\.xyz\/image-data\/api\/blob\//.test(e.url) && e.status != null);
       const body = await shell.page.evaluate(() => document.body.innerText).catch(() => "");
       nodeCreated = body.includes("e2e-finalb-big");
       if (nodeCreated || (commitSeen && putSettled)) break;
@@ -275,7 +275,7 @@ async function B0() {
     }, "e2e-finalb-big");
     const alerts = await readAlerts(shell);
     const sign = net.pick(/\/api\/uploads\/sign/, t0).map((e) => ({ method: e.method, status: e.status, failed: e.failed }));
-    const put = net.pick(/store\.eimu\.xyz\/image-data\/api\/blob\//, t0).map((e) => ({ method: e.method, status: e.status, failed: e.failed, failure: e.failure || null, reqBytes: e.reqBytes }));
+    const put = net.pick(/store\.tinchak0207\.xyz\/image-data\/api\/blob\//, t0).map((e) => ({ method: e.method, status: e.status, failed: e.failed, failure: e.failure || null, reqBytes: e.reqBytes }));
     const commit = net.pick(/\/api\/uploads\/commit/, t0).map((e) => ({ method: e.method, status: e.status, failed: e.failed }));
     const scene3d = net.pick(/\/api\/canvas\/scene-3d/, t0).map((e) => ({ method: e.method, status: e.status }));
     const apiAll = net.pick(/\/api\//, t0).map((e) => ({ method: e.method, url: e.url.replace(/\?.*/, "?…"), status: e.status, failed: e.failed }));
@@ -289,7 +289,7 @@ async function B0() {
       status: pass ? "pass" : "fail",
       title: "3D >4MB 直传真链路：sign 200 → PUT(store) 200 → commit 200、建出节点、无 Illegal invocation",
       observations: {
-        evidenceStrength: "真后端（生产 /api/uploads/sign ＋ store.eimu.dev PUT ＋ /api/uploads/commit，真 auth）",
+        evidenceStrength: "真后端（生产 /api/uploads/sign ＋ store.tinchak0207.xyz PUT ＋ /api/uploads/commit，真 auth）",
         bigFileBytes: fs.statSync(big).size,
         setFileInputMethod: setHow,
         firstAlert,
@@ -391,7 +391,7 @@ async function B2() {
 
     const mediaReqs = net
       .since(tBulk)
-      .filter((e) => e.url && !e.console && /store\.eimu\.xyz/.test(e.url))
+      .filter((e) => e.url && !e.console && /store\.tinchak0207\.xyz/.test(e.url))
       .map((e) => ({ method: e.method, hasDl: /[?&]dl=1/.test(e.url), status: e.status, failed: e.failed, failure: e.failure || null }));
     const anyFailed = mediaReqs.some((r) => r.failed);
     const allDl = mediaReqs.length > 0 && mediaReqs.every((r) => r.hasDl);
@@ -422,7 +422,7 @@ async function B2() {
     }
     const singleReqs = net
       .since(tSingle)
-      .filter((e) => e.url && !e.console && /store\.eimu\.xyz/.test(e.url))
+      .filter((e) => e.url && !e.console && /store\.tinchak0207\.xyz/.test(e.url))
       .map((e) => ({ method: e.method, hasDl: /[?&]dl=1/.test(e.url), status: e.status, failed: e.failed }));
     const singleShot = await shell.screenshot("B2-single-download");
 
@@ -435,7 +435,7 @@ async function B2() {
       status: pass ? "pass" : "fail",
       title: "历史页批量汇出真 CDN：exported≥2 / skipped=0 / 真 zip 含媒体+manifest / 无 ERR_FAILED / 带 ?dl=1",
       observations: {
-        evidenceStrength: "真网路（store.eimu.dev 真图、不注入媒体替身）＋真 zip 位元组（unzip -l）＋元件层 notice",
+        evidenceStrength: "真网路（store.tinchak0207.xyz 真图、不注入媒体替身）＋真 zip 位元组（unzip -l）＋元件层 notice",
         cardCount,
         selected,
         notice,

@@ -5,7 +5,7 @@
  * 硬规则（改本档前先读）：
  * 1. **这是外部适配版，不是内部派遣手册的复制**。内部那套依赖平台侧调度层的执行面
  *    （子代理派遣、强制交付闸与自动重派、会话记忆／画像注入、事后量测硬检的强制执行）
- *    在外部不存在；本档只提供「八域交付契约＋验收纪律」，并在正文开头诚实声明。
+ *    在外部不存在；本档只提供「九域交付契约＋验收纪律」，并在正文开头诚实声明。
  * 2. **工具名只能用 MCP 的真名**（与 `src/lib/mcp/tools.ts` 同源）。指南正文以反引号
  *    包住工具的识别名；漂移探针会解析全部反引号 snake_case 并断言其 ⊆ tools.ts 真名集。
  *    因此**任何非工具名的识别字（契约栏位、分数来源等）一律不得用反引号包裹**。
@@ -90,10 +90,11 @@ export function renderQualityPolicyTable(): string {
 /** 政策表最终字串（模组载入时生成；`HARNESS_GUIDE_TEXT` 直接内嵌它）。 */
 export const HARNESS_QUALITY_POLICY_TABLE: string = renderQualityPolicyTable();
 
-// ─────────────────────────────────────────── 八域交付契约（真源＝expert-delivery-contracts.json）
+// ─────────────────────────────────────────── 九域交付契约（真源＝expert-delivery-contracts.json）
 
 const DELIVERY_CONTRACTS = {
   director3d: { requiredFields: ["turntable", "stills", "blend", "glb"], qcSignatureRequired: true },
+  lyricist: { requiredFields: ["title", "lyrics", "hook", "prosody_notes", "qc"], qcSignatureRequired: true },
   music: {
     requiredFields: ["emotion_contract", "lyrics", "melody_notation", "audio_url", "duration_source", "qc"],
     qcSignatureRequired: true,
@@ -106,7 +107,7 @@ const DELIVERY_CONTRACTS = {
   critic: { requiredFields: ["verdict", "issues", "evidence", "qc"], qcSignatureRequired: true },
 } as const;
 
-/** 八域契约的 JSON 字串（与 expert-delivery-contracts.json 逐域逐栏位一致）。 */
+/** 九域契约的 JSON 字串（与 expert-delivery-contracts.json 逐域逐栏位一致）。 */
 export const HARNESS_DELIVERY_CONTRACTS: string = JSON.stringify(DELIVERY_CONTRACTS, null, 2);
 
 // ─────────────────────────────────────────── 指南全文（外部适配版）
@@ -125,7 +126,7 @@ export const HARNESS_GUIDE_TEXT: string = `# Eimu 生成品质 Harness 指南（
 3. **会话记忆与画像注入**：内部会把长期记忆与专家画像注入系统提示；外部没有这层注入，上下文由你自己维护。
 4. **事后量测硬检的强制执行**：内部对标记为独立量测来源的分数有代码级强制返工；外部不会有人替你跑这一步。
 
-因此外部版只提供两件事：**八个域的交付契约**与**验收纪律**。它们是规则，不是保证——要靠你自己的回圈遵守。
+因此外部版只提供两件事：**九个域的交付契约**与**验收纪律**。它们是规则，不是保证——要靠你自己的回圈遵守。
 
 ## 一、基本诚实条款（先于一切技巧）
 
@@ -135,11 +136,12 @@ export const HARNESS_GUIDE_TEXT: string = `# Eimu 生成品质 Harness 指南（
 - **同一错误重试 2 次仍未过 → 停止并回报事实**，禁止无限试错。卡死也要收尾：已尝试清单＋卡点事实。
 - 凡交付物含数字，验收要**算**不要**读**：把每个数字代入算式核对，算不出来或数字缺项＝退回。
 
-## 二、八域交付契约（缺栏＝未交付）
+## 二、九域交付契约（缺栏＝未交付）
 
-任何域的交付物都必须带齐该域的必填栏位；缺整栏一律视为未交付，不是「部分成功」。八域全部要求 QC 签名。栏位的真源是结构化物件：呼叫 \`check_delivery_contract\` 时，payload 物件里的栏位名要逐字对上该域契约的 requiredFields，且每一栏的值必须非空——空字串、空阵列、null 一律算缺。
+任何域的交付物都必须带齐该域的必填栏位；缺整栏一律视为未交付，不是「部分成功」。九域全部要求 QC 签名。栏位的真源是结构化物件：呼叫 \`check_delivery_contract\` 时，payload 物件里的栏位名要逐字对上该域契约的 requiredFields，且每一栏的值必须非空——空字串、空阵列、null 一律算缺。
 
 - **director3d**（3D 导演）：必填「turntable」「stills」「blend」「glb」；QC 签名必需。
+- **lyricist**（歌词专家）：必填「title」「lyrics」「hook」「prosody_notes」「qc」；QC 签名必需。
 - **music**（音乐导演）：必填「emotion_contract」「lyrics」「melody_notation」「audio_url」「duration_source」「qc」；QC 签名必需。
 - **video-director**（视频导演）：必填「shots」「duration_sec」「model_hint」「qc」；QC 签名必需。
 - **editor**（剪辑师）：必填「timeline_ops」「duration_sec」「qc」；QC 签名必需。
@@ -200,7 +202,7 @@ ${HARNESS_QUALITY_POLICY_TABLE}
 - 生成前先用 \`list_models\` 取模型 id，再呼叫对应生成工具；不要凭记忆写模型名。
 - 生成类工具若回非同步任务 id，用 \`get_result\` 轮询，不要假设同步完成。
 - 影片、图片生成会在帐本上真实扣费：先确认额度（\`get_quota\`），不要为探测反覆触发付费生成。
-- 需要既有画布产线现况时先 \`canvas_get_state\` 或 \`workflow_read\`：回传的 dsl 就是画布产线的权威骨架，已自动覆盖存量画布产线节点（含未带产线身份键的提示词与生成配置节点），每步 meta._origin_node_id 由读面填好、原样带回，直接改其 steps 再用 \`workflow_write\` 整份交回即可；改提示词要改生成步（kind=image/video）的 prompt——生成面板与重跑读的是生成节点自身的 metadata.prompt；上游提示词节点步若持同一段提示词（画布把提示词存了两份），两处一起改。**铺新产线＝有意动作**：交回会新建节点的 source 时，若 \`source.workflow\` 不在当前画布 \`dsl\` 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），工具先回 \`confirm_new_line\` 要你确认——确认前画布不动。确为有意（用户要铺这条线／你在规划另一张画布）就带 \`confirm_new_line: true\` 重交同一份 source；若它只是记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（\`created_node_ids\`）必须如实转述，不得声称「无新建」。** dsl 为空有两种原因：①画布上确实没有任何产线节点；②画布太大，骨架超出快照预算（此时摘要带 dsl_omitted: \"budget\"，不代表没有产线）——只有原因①才需自己按现状写一份完整声明。回退用 \`workflow_rollback\`（先 \`workflow_history\` 查版本）。
+- 需要既有画布产线现况时先 \`canvas_get_state\` 或 \`workflow_read\`：回传的 dsl 就是画布产线的权威骨架，已自动覆盖存量画布产线节点（含未带产线身份键的提示词与生成配置节点），每步 meta._origin_node_id 由读面填好、原样带回，直接改其 steps 再用 \`workflow_write\` 整份交回即可；改提示词要改生成步（kind=image/video）的 prompt——生成面板与重跑读的是生成节点自身的 metadata.prompt；上游提示词节点步若持同一段提示词（画布把提示词存了两份），两处一起改。**铺新产线＝有意动作**：交回会新建节点的 source 时，若 \`source.workflow\` 不在当前画布 dsl 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），工具先回 confirm_new_line 要你确认——确认前画布不动。确为有意（用户要铺这条线／你在规划另一张画布）就带 \`confirm_new_line: true\` 重交同一份 source；若它只是记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（created_node_ids）必须如实转述，不得声称「无新建」。** dsl 为空有两种原因：①画布上确实没有任何产线节点；②画布太大，骨架超出快照预算（此时摘要带 dsl_omitted: \"budget\"，不代表没有产线）——只有原因①才需自己按现状写一份完整声明。回退用 \`workflow_rollback\`（先 \`workflow_history\` 查版本）。
 - 需要把整件事交给站内代理跑一轮时用 \`run_agent\`（会真实消耗额度）；逾时用 \`get_agent_session\` 续查，必要时 \`abort_agent_session\` 中止。
 - 技能与风格配方先查 \`list_skills\` 再 \`get_skill\` 取全文。
 - **契约齐不齐自己查**：交付物逐栏对完表后，用 \`check_delivery_contract\` 对 Expert 交付物做契约栏位层校验。呼叫形状：expert_id、kind、payload（三者必填）＋ evidence、qc_signature（选填）；payload 是结构化物件，该域契约 requiredFields 的每一栏都必须存在且值非空（空字串、空阵列、null 一律算缺）。它会一并重算 qc 签名比对并回期望值；回 ok:true 只代表栏位层合格，**不代表品质好**。
@@ -223,19 +225,19 @@ export interface HarnessResource {
   text: string;
 }
 
-/** 两个固定资源：指南全文与八域契约 JSON。 */
+/** 两个固定资源：指南全文与九域契约 JSON。 */
 export const HARNESS_RESOURCES: readonly HarnessResource[] = [
   {
     uri: "eimu://harness/guide",
     name: "Eimu Harness 指南（外部适配版）",
-    description: "生成品质 harness 的外部适配版全文：诚实声明、八域交付契约、验收纪律、品质政策与 MCP 工具对映。",
+    description: "生成品质 harness 的外部适配版全文：诚实声明、九域交付契约、验收纪律、品质政策与 MCP 工具对映。",
     mimeType: "text/markdown",
     text: HARNESS_GUIDE_TEXT,
   },
   {
     uri: "eimu://harness/delivery-contracts",
-    name: "Eimu 八域交付契约",
-    description: "八个域的交付契约 JSON：每域的必填栏位与是否要求 QC 签名（缺栏＝未交付）。",
+    name: "Eimu 九域交付契约",
+    description: "九个域的交付契约 JSON：每域的必填栏位与是否要求 QC 签名（缺栏＝未交付）。",
     mimeType: "application/json",
     text: HARNESS_DELIVERY_CONTRACTS,
   },
@@ -260,7 +262,7 @@ export interface HarnessPrompt {
 /** 提示的固定规则区（指南全文＋契约 JSON）；呼叫方提供的内容一律只接在这之后。 */
 const HARNESS_PROMPT_FIXED = `${HARNESS_GUIDE_TEXT}
 
-## 附录：八域交付契约（机器可读 JSON）
+## 附录：九域交付契约（机器可读 JSON）
 
 ${HARNESS_DELIVERY_CONTRACTS}`;
 
@@ -287,7 +289,7 @@ export const HARNESS_PROMPTS: readonly HarnessPrompt[] = [
     name: "eimu-harness",
     title: "Eimu 生成品质 Harness（外部适配版）",
     description:
-      "载入 Eimu 生成品质 harness 的外部适配版：八域交付契约、验收纪律与品质政策。呼叫方可用 task 在末尾附加本次任务描述。",
+      "载入 Eimu 生成品质 harness 的外部适配版：九域交付契约、验收纪律与品质政策。呼叫方可用 task 在末尾附加本次任务描述。",
     arguments: [
       {
         name: "task",

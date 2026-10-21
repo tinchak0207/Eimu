@@ -31,8 +31,8 @@ const persistence = await import("./persistence")
 const gate = await import("./delivery-gate.ts")
 persistence.initPersistence()
 
-const AUDIO_URL = "https://store.eimu.dev/image-data/files/uploads/demo.mp3"
-const VIDEO_URL = "https://store.eimu.dev/image-data/files/uploads/demo.mp4"
+const AUDIO_URL = "https://store.tinchak0207.xyz/image-data/files/uploads/demo.mp3"
+const VIDEO_URL = "https://store.tinchak0207.xyz/image-data/files/uploads/demo.mp4"
 
 function okVideoProbe(): MediaProbe {
   return {

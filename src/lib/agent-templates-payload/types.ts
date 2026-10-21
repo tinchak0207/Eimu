@@ -35,7 +35,7 @@ export interface AgentPipelineStepPayload {
   /**
    * 工具链要求（2026-08-25，2026-08-31 诚实稽核改真源）：该步真正可调用的 harness 工具。
    * 每个 id 必须存在于 harness 真实工具面（harness-tool-registry.ts 的
-   * HARNESS_TOOL_IDS，真源 = VPS /opt/eimu-harness/workspace/.opencode/tools/）；
+   * HARNESS_TOOL_IDS，真源 = VPS /opt/agent-harness/workspace/.opencode/tools/）；
    * unsupported=true 表示 harness 尚无 upstream，agent 须明说不可用，
    * 禁止用 prompt 冒充工具成功。
    */

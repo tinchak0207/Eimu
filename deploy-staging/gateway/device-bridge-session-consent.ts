@@ -67,7 +67,7 @@ export function sessionConsentTtlMs(env: NodeJS.ProcessEnv = process.env): numbe
  *   1. `EIMU_DEVICE_BRIDGE_CONSENT_FILE`（明确覆写，测试／维运用）。
  *   2. `MEMORY_STATE_DIR/device-bridge-session-consent.json`（若设）。
  *   3. `dirname(realpath(SESSIONS_DB_PATH))`——生产 `sessions.db` 是「release 目录 →
- *      状态目录」的 symlink，realpath 后即 `/opt/eimu-harness/state`（与代码目录分离、
+ *      状态目录」的 symlink，realpath 后即 `/opt/agent-harness/state`（与代码目录分离、
  *      不在 web 可服务目录、不随部署换版消失）。取不到（开发／尚未建库）退回设定路径目录。
  */
 export function defaultConsentFilePath(env: NodeJS.ProcessEnv = process.env): string {
@@ -75,7 +75,7 @@ export function defaultConsentFilePath(env: NodeJS.ProcessEnv = process.env): st
   if (explicit) return explicit
   const stateDir = String(env.MEMORY_STATE_DIR ?? "").trim()
   if (stateDir) return join(stateDir, FILE_NAME)
-  const dbPath = String(env.SESSIONS_DB_PATH ?? "").trim() || "/opt/eimu-harness/state/sessions.db"
+  const dbPath = String(env.SESSIONS_DB_PATH ?? "").trim() || "/opt/agent-harness/state/sessions.db"
   let dir = dirname(dbPath)
   try {
     dir = dirname(realpathSync(dbPath))

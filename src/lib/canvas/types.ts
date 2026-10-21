@@ -3,7 +3,7 @@
 // 角色 owner：reference 节点的 referenceRole 直接引用 image-types 的
 // ReferenceImageRole（type-only import），不建第二套枚举。
 //
-// 架构（项目负责人立场定稿 2026-08-12）：
+// 架构（暴君立场定稿 2026-08-12）：
 //   deepseek（opencode agent）不思考画布的事。它只提交 image_* 生成请求。
 //   VPS gateway 拦截每个 image_* 工具的参数与结果，自动产生「画布单元」，
 //   并以 canvas.* 事件推送到前端。前端 reducer 接住事件自动渲染画布。

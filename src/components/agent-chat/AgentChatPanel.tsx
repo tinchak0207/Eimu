@@ -409,7 +409,7 @@ function AgentChatPanelComponent({
     ? { label: "等你选择上面的对话", dotClass: "bg-ios-blue" }
     : CONNECTION_META[connection];
   /*
-   * 2026-09-20 行为变更（项目负责人批准，agent-chat-preview 已验收）：决策卡在场
+   * 2026-09-20 行为变更（暴君批准，agent-chat-preview 已验收）：决策卡在场
    * 不再锁输入框。旧契约（R9-3 死线 4）用 disabled + 「等待卡片选择…」表达
    * 优先级；新设计改为 composer 上缘一条 2px ios-blue 细提示条＋提示性
    * placeholder——用户在决策卡在场时发送的文字照常走 onSend（gateway 侧本
@@ -563,7 +563,7 @@ function AgentChatPanelComponent({
                 {EXAMPLES.map((ex) => {
                   // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
                   // 建号/首发在飞（sessionStarting/turnActive）＝全部强制禁用，
-                  // 但 DOM 与占位不动＝输入框零位移（09-20 项目负责人「移位也是劣化」）。
+                  // 但 DOM 与占位不动＝输入框零位移（09-20 暴君「移位也是劣化」）。
                   const chipState =
                     sessionStarting || turnActive ? "disabled" : exampleChipState(ex, pendingExample, sendPending);
                   return (
@@ -720,7 +720,7 @@ function AgentChatPanelComponent({
       )}
 
       {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。
-          2026-09-20 空态重构（项目负责人批准）：输入框在空态移进上方居中的空态区
+          2026-09-20 空态重构（暴君批准）：输入框在空态移进上方居中的空态区
           （composerNode），这里只在有讯息（或 reconnecting/closed 的非空态）
           时回落底部 sticky；两处共用同一份 JSX，行为契约零重复。
           决策卡在场不锁输入（行为变更）：用 composer 上缘 2px 蓝色细提示条＋

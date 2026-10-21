@@ -22,7 +22,7 @@ interface WalletBadgeProps {
 }
 
 /**
- * 余额胶囊（2026-08-27 项目负责人裁定）：余额 + 「+」合成一颗胶囊。
+ * 余额胶囊（2026-08-27 暴君裁定）：余额 + 「+」合成一颗胶囊。
  * 「+」点开两项菜单（充值 / 每日签到）：充值跳 /pricing，签到就地完成。
  * 2026-09-05 修正：「+」入口图标恒定不变——已签到状态只体现在菜单项里
  * （不可选 + 「已签到 · 明日再来」），不再把「+」换成绿勾。
@@ -155,7 +155,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
             aria-label="余额操作"
             className="flex w-6 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 sm:hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            {/* 2026-09-05 项目负责人裁定：「+」是充值/签到入口，恒为加号——
+            {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恒为加号——
                 签到完成态只反映在菜单项里，不侵占入口图标。 */}
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>

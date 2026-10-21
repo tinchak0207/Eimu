@@ -5,7 +5,7 @@
  * - 33 个事件名保留；首期只接 11 个（PreToolUse/PostToolUse/Stop/SessionStart/
  *   UserPromptSubmit/PreCompact/PostCompact/TaskCreated/TaskCompleted/SubagentStart/
  *   SubagentStop）。
- * - 配置 HARNESS_HOOKS_PATH（默认 /opt/eimu-harness/state/hooks.json）：
+ * - 配置 HARNESS_HOOKS_PATH（默认 /opt/agent-harness/state/hooks.json）：
  *   {hooks:{<event>:[{matcher?,hooks:[{type:"command"|"http",command?|url?,headers?,timeout?}]}]}}
  * - command 用 `bash -lc`，stdin 写 JSON；http 用 fetch；默认超时 60000ms；并行执行。
  * - 输出按 CC 契约截断：reason/stopReason 2000、additionalContext 8000、
@@ -71,7 +71,7 @@ export const ENABLED_HOOK_EVENTS = [
 
 export type EnabledHookEvent = (typeof ENABLED_HOOK_EVENTS)[number]
 
-export const DEFAULT_HOOKS_PATH = "/opt/eimu-harness/state/hooks.json"
+export const DEFAULT_HOOKS_PATH = "/opt/agent-harness/state/hooks.json"
 export const DEFAULT_HOOK_TIMEOUT_MS = 60000
 /** 单个 hook 的硬上限：任何配置/调用参数都不能超过 10 分钟。 */
 export const MAX_HOOK_TIMEOUT_MS = 600000

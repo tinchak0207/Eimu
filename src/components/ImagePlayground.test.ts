@@ -67,7 +67,7 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // The model picker moved onto the left rail, so the right column renders
   // ImageDisplay directly ??no wrapper card, identity header, or second status
   // badge on top of the one ImageDisplay already draws.
-  // 2026-08-16 项目负责人裁定「挤」：画布模式 = 全场画布工作站（canvas-ws-overlay），
+  // 2026-08-16 暴君裁定「挤」：画布模式 = 全场画布工作站（canvas-ws-overlay），
   // 不再有 compact 嵌右栏；聊天卡变左侧固定面板（canvas-chat-panel）。
   // 2026-08-21：overlay 向右 dock（right-0 + --ce-dock-left），面板不再盖住画布左缘节点。
   // 2026-08-25 canvas 常驻化：agent 模式右侧恒为 canvas（resultMode 由 displayMode
@@ -119,8 +119,10 @@ test("the model picker is wired into the left prompt panel", () => {
   // Task 9：<ModelPicker> JSX 抽到 GenerateControls —— 拼接读取，断言语义不变。
   const prompt = read("src/components/PromptInput.tsx") + "\n" + read("src/components/prompt-input/GenerateControls.tsx");
 
-  assert.match(source, /models=\{PROVIDERS\.image_eimu\.models\}/);
-  assert.match(source, /modelId=\{selectedModels\.image_eimu\}/);
+  // 2026-10-05 红队修复（5e46b701 入库）：渠道键改中性值 "primary"
+  // （src/lib/provider-key.ts 单一真源），不再把内部渠道名带进客户端 bundle。
+  assert.match(source, /models=\{PROVIDERS\.primary\.models\}/);
+  assert.match(source, /modelId=\{selectedModels\.primary\}/);
   assert.match(source, /onModelChange=\{userSetModel\}/);
   assert.match(source, /generateAudio=\{generateAudio\}/);
   assert.match(source, /onGenerateAudioChange=\{setGenerateAudio\}/);
@@ -164,14 +166,14 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   // transcript 的滚动接住，输入区会被推出面板外（用户截图：底部只见
   // 被裁掉的「思考过程」最后一行、输入框整体不可见）。加固规则：
   //  - 面板给 min-height:0 / max-height 兜底（bottom 已定界，双保险）
-  //  - section.lg-card 拿 flex:1 1 0%（2026-09-24 项目负责人纠正：聊天态吃满面板全高；
+  //  - section.lg-card 拿 flex:1 1 0%（2026-09-24 暴君纠正：聊天态吃满面板全高；
   //    前一刀把聊天态高度也压成 fit-content 属劣化）再显式 min-height:0 +
   //    overflow:hidden——内容超高时由内部滚动接手，不许 agent 面把卡片按内容
-  //    撑高到溢出面板；2026-09-24 项目负责人终裁：聊天态与空态一律吃满全高，旧
+  //    撑高到溢出面板；2026-09-24 暴君终裁：聊天态与空态一律吃满全高，旧
   //    :has() 空态分流作废，空态内容置中改由 transcript 内部 justify-center 负责
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
-  //  - 面板吃满天花板（2026-09-24 项目负责人裁定／2026-10-03 对齐修订）：top 固定
+  //  - 面板吃满天花板（2026-09-24 暴君裁定／2026-10-03 对齐修订）：top 固定
   //    0.5rem（与右侧导览岛顶 8px 同高起跑）、max-height 只扣上下留白
   //    1.25rem＋底部安全区，不再从 --site-header-offset 起算；
   //    navbar 改经 --ws-navbar-inset 右退让位（跨档契约见下）。
@@ -187,7 +189,7 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   // header 被盖住（写入端失联）或胶囊不让位（消费端失联）。
   assert.match(source, /--ws-navbar-inset/);
   assert.match(read("src/components/Navbar.tsx"), /--ws-navbar-inset/);
-  // 全高契约：lg-card 一律 flex:1 1 0%（2026-09-24 项目负责人终裁：聊天态与空态同标吃满全高）
+  // 全高契约：lg-card 一律 flex:1 1 0%（2026-09-24 暴君终裁：聊天态与空态同标吃满全高）
   assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 1 1 0%;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   // 拔除实锤：旧 :has() 空态分流与标记类必须两档全面退场（零命中），否则空态缩卡病灶回魂。
   assert.doesNotMatch(source, /agent-empty-state/);
@@ -196,7 +198,7 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
 });
 
-// 项目负责人裁定 2026-09-24：「reload 和初始载入时有一堆明显回缩的过程，破坏首秒体验」。
+// 暴君裁定 2026-09-24：「reload 和初始载入时有一堆明显回缩的过程，破坏首秒体验」。
 // 根治架构＝单一 CSS 变数真源（--ws-panel-w：默认 clamp 由纯 CSS 承担，SSR 首帧
 // 即新用户终态）＋ settled 闸（所有 width/left transition 与入场 @keyframes 只在
 // 首帧稳定后开启，载入零动画直出终态）。
@@ -246,7 +248,7 @@ test("first paint is the final state: --ws-panel-w single source + settled gate 
   assert.doesNotMatch(ws, /setProperty\("--ws-navbar-inset", `\$\{chatPanelWidth\}/);
 });
 
-// 项目负责人回报 2026-09-24：「Ctrl+Shift+R 时聊天框先占几乎半屏、秒缩回 30% 以下，
+// 暴君回报 2026-09-24：「Ctrl+Shift+R 时聊天框先占几乎半屏、秒缩回 30% 以下，
 // 非常恐怖」。根因＝冷载入首帧由 HTML+CSS 绘出 clamp 默认（40vw≈半屏），JS
 // chunk 下载完才在水合 useLayoutEffect 里读到旧 localStorage 垃圾值（v1 key：
 // useState(420) 时代 mount effect 无条件落盘的 420）并覆写变数——paint 之后的

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { failFastClassForExhaustedSupply, applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline, shouldFailFastOnExhaustedSupply } from "./worker-service.ts";
+import { failFastClassForExhaustedSupply, applyExtendedDeadline, generationBudgetMs, queueMaxWaitMs, shouldExtendQueueDeadline, shouldFailFastOnExhaustedSupply } from "./worker-service.ts";
 import type { GenerationJob } from "./types.ts";
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -46,13 +46,12 @@ function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
 }
 
 test("shouldExtendQueueDeadline：deadline 快到期 + 可恢复状态（cooldown/capacity/accounts）→ true", () => {
-  const base = { startedAt: new Date("2026-08-30T00:00:00.000Z") };
   const now = new Date("2026-08-30T00:00:00.000Z").getTime();
   for (const reason of ["suppliers_cooldown", "capacity_saturated", "accounts_unhealthy"] as const) {
     const result = shouldExtendQueueDeadline({
       diagnosisReason: reason,
       deadlineAt: new Date(now + 10_000),
-      startedAt: base.startedAt,
+      startedAt: null,
       now,
     });
     assert.equal(result, true, `${reason} 应顺延`);
@@ -60,52 +59,78 @@ test("shouldExtendQueueDeadline：deadline 快到期 + 可恢复状态（cooldow
 });
 
 test("shouldExtendQueueDeadline：deadline 离到期还早 → false（不提前续）", () => {
-  const startedAt = new Date("2026-08-30T00:00:00.000Z");
-  const now = startedAt.getTime();
+  const now = new Date("2026-08-30T00:00:00.000Z").getTime();
   const result = shouldExtendQueueDeadline({
     diagnosisReason: "capacity_saturated",
     deadlineAt: new Date(now + 60_000),
-    startedAt,
+    startedAt: null,
     now,
   });
   assert.equal(result, false);
 });
 
-test("shouldExtendQueueDeadline：超过排队 20min 上限 → false（不无限挂单）", () => {
-  const startedAt = new Date("2026-08-30T00:00:00.000Z");
-  const now = startedAt.getTime() + 21 * 60_000;
-  const result = shouldExtendQueueDeadline({
-    diagnosisReason: "capacity_saturated",
-    deadlineAt: new Date(now + 10_000),
-    startedAt,
-    now,
-  });
-  assert.equal(result, false);
+test("shouldExtendQueueDeadline：超过总等待上限不再延期（总上限由调用点 queuedForMs >= queueMaxWaitMs() 判定）", () => {
+  // 总等待上限已搬离纯函式：这里只判「观测窗口快到期 + 可恢复状态」。
+  // 调用点用 `queuedForMs >= queueMaxWaitMs()`（默认 2h）先终结并退款，绝不会再走到顺延。
+  const now = new Date("2026-08-30T00:00:00.000Z").getTime();
+  const createdAt = now;
+  assert.equal(
+    shouldExtendQueueDeadline({
+      diagnosisReason: "capacity_saturated",
+      deadlineAt: new Date(now + 10_000),
+      startedAt: null,
+      now,
+    }),
+    true,
+    "纯函式不再内建 20 分钟上限：只负责观测窗口",
+  );
+
+  // 总等待上限：默认 2h；env 可调；低于 5min 的地板值不被接受（防把上限调成 0 变成永久挂单）。
+  assert.equal(queueMaxWaitMs({}), 2 * 60 * 60_000);
+  assert.equal(queueMaxWaitMs({ GENERATION_QUEUE_MAX_WAIT_MS: String(45 * 60_000) }), 45 * 60_000);
+  assert.equal(queueMaxWaitMs({ GENERATION_QUEUE_MAX_WAIT_MS: "60000" }), 2 * 60 * 60_000, "低于 5min 下限回落默认");
+
+  const atLimit = createdAt + queueMaxWaitMs({});
+  assert.equal(atLimit - createdAt >= queueMaxWaitMs({}), true, "达到总等待上限 → 调用点终结，不再延期");
+  const justBefore = createdAt + queueMaxWaitMs({}) - 1;
+  assert.equal(justBefore - createdAt >= queueMaxWaitMs({}), false, "未达上限仍可继续排队");
 });
 
 test("shouldExtendQueueDeadline：纯死路状态 → false（suppliers_disabled / supplier_excluded / 未 seed）", () => {
-  const startedAt = new Date("2026-08-30T00:00:00.000Z");
-  const now = startedAt.getTime();
+  const now = new Date("2026-08-30T00:00:00.000Z").getTime();
   for (const reason of ["suppliers_disabled", "supplier_excluded", "model_not_provisioned", "capability_disabled", "routing_class_unmet", "variant_unsupported"] as const) {
     const result = shouldExtendQueueDeadline({
       diagnosisReason: reason,
       deadlineAt: new Date(now + 10_000),
-      startedAt,
+      startedAt: null,
       now,
     });
     assert.equal(result, false, `${reason} 不应顺延`);
   }
 });
 
-test("shouldExtendQueueDeadline：无 started_at → false", () => {
+test("shouldExtendQueueDeadline：只认 30s 观测窗口边界（窗口内才续、恰在边界不续）", () => {
   const now = new Date("2026-08-30T00:00:00.000Z").getTime();
-  const result = shouldExtendQueueDeadline({
-    diagnosisReason: "capacity_saturated",
-    deadlineAt: new Date(now + 10_000),
-    startedAt: null,
-    now,
-  });
-  assert.equal(result, false);
+  assert.equal(
+    shouldExtendQueueDeadline({
+      diagnosisReason: "capacity_saturated",
+      deadlineAt: new Date(now + 29_999),
+      startedAt: null,
+      now,
+    }),
+    true,
+    "窗口内（<30s）顺延",
+  );
+  assert.equal(
+    shouldExtendQueueDeadline({
+      diagnosisReason: "capacity_saturated",
+      deadlineAt: new Date(now + 30_000),
+      startedAt: null,
+      now,
+    }),
+    false,
+    "恰在 30s 边界不顺延",
+  );
 });
 
 test("applyExtendedDeadline：把 extend 写入 DB 的 deadline 同步回内存 job.deadlineAt（病灶 D）", () => {

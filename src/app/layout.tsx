@@ -137,7 +137,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased text-[0.9375rem] text-foreground flex min-h-dvh flex-col">
-        {/* 面板宽 pre-paint 同步套用（2026-09-24 项目负责人回报「Ctrl+Shift+R 聊天框
+        {/* 面板宽 pre-paint 同步套用（2026-09-24 暴君回报「Ctrl+Shift+R 聊天框
             先占几乎半屏、秒缩回 30% 以下」）：用户真拖过宽的 v2 存值必须在首个
             paint 前落到 --ws-panel-w，否则冷载入＝首帧画 CSS 默认 clamp（40vw
             半屏），JS chunk 下载完水合后才缩回存值宽——useLayoutEffect 救不了，

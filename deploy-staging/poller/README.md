@@ -6,7 +6,7 @@
 ## 为什么这里才有真源（历史，具名记录）
 
 **这个程式过去没有 repo 真源、没有任何部署文件。** 它只存在于 VPS 的
-`/opt/eimu-harness/poller/index.ts`，不在任何 git 仓库里：
+`/opt/agent-harness/poller/index.ts`，不在任何 git 仓库里：
 
 - `grep -rln "pendingTasks\|POLLER_REGISTER_PORT" .` 无命中
 - `git log --all -- '*poller*'` 无命中
@@ -36,7 +36,7 @@
 > 旧版站点）。**不要把命名空间当成 404 根因。**
 
 **自本目录起，`deploy-staging/poller/` 是本程式的唯一真源。** VPS 上的
-`/opt/eimu-harness/poller/` 是部署目标（活本），不是真源。任何对 poller 的修改
+`/opt/agent-harness/poller/` 是部署目标（活本），不是真源。任何对 poller 的修改
 都必须改这里、测试、提交，再部署。
 
 ## 档案
@@ -69,8 +69,8 @@
 - **service**：`agent-poller.service`（`systemctl cat` 实查）
   ```
   User=ubuntu
-  WorkingDirectory=/opt/eimu-harness/poller
-  EnvironmentFile=/opt/eimu-harness/.env
+  WorkingDirectory=/opt/agent-harness/poller
+  EnvironmentFile=/opt/agent-harness/.env
   ExecStart=/home/ubuntu/.bun/bin/bun run index.ts
   Restart=always
   RestartSec=5
@@ -83,12 +83,12 @@
 ## 部署命令
 
 ```bash
-cd /home/user/Desktop/image-app
+cd /home/lenovo/Desktop/image-app
 bash .pixai-refresh/start-ssh443.sh   # 幂等，确保 SSH-over-443 隧道在
 
 # 推送真源三档到生产（目标目录 owner 为 ubuntu，无需 sudo）
 for f in index.ts media-endpoints.ts package.json; do
-  node .dsh-ssh/exec-443.js "echo $(base64 -w0 deploy-staging/poller/$f) | base64 -d > /opt/eimu-harness/poller/$f"
+  node .dsh-ssh/exec-443.js "echo $(base64 -w0 deploy-staging/poller/$f) | base64 -d > /opt/agent-harness/poller/$f"
 done
 
 # 重启并看状态

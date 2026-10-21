@@ -25,7 +25,7 @@ import { notify } from "./internal-waiters.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
 // 或接收 path_b64 位元组（含文档 md/txt/json/csv/pdf）→
-// 平台存储（image-data uploads 目录，公网面 store.eimu.dev/image-data/files/）。
+// 平台存储（image-data uploads 目录，公网面 store.tinchak0207.xyz/image-data/files/）。
 // 外部 URL 直连常被 Cloudflare 403 挑战拦截、/v1/uploads 拒收 video——
 // 影片/音频素材一律先经此端点入库取得平台 URL，再注入工作流节点。
 // 文档同通道（F2 2026-10-10）：workspace 研究/剧本 md 经 document_upload 入库后，
@@ -150,7 +150,7 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
     console.error("[gateway] media upload persist failed:", e)
     return Response.json({ ok: false, error: "failed to persist media file" }, { status: 500 })
   }
-  const publicUrl = `https://store.eimu.dev/image-data/files/uploads/${name}`
+  const publicUrl = `https://store.tinchak0207.xyz/image-data/files/uploads/${name}`
   console.log(`[gateway] media upload: session=${sessionId} bytes=${total} type=${contentType} -> ${publicUrl}`)
   return Response.json({ ok: true, url: publicUrl, bytes: total, content_type: contentType })
 }
@@ -287,7 +287,7 @@ export async function handleCanvasOpsResultPublic(key: string, id: string, req: 
 // /opt/edge-tts/，Microsoft edge-tts 免 key 中文音色)；此前 Groq playai-tts 已下架、orpheus 被 org 条款锁死：
 // - Groq playai-tts 已 decommissioned；canopylabs/orpheus-* 需 org 条款接受
 //   且只有英文/阿拉伯文音色，无中文；
-// - 平台 image.eimu.dev /v1/models 无任何 TTS 条目（seed_audio、
+// - 平台 image.tinchak0207.xyz /v1/models 无任何 TTS 条目（seed_audio、
 //   qwen_audio_tts、text2speech_v2 只存在于 higgsfield 快照文档，未上线）；
 // - new-api 渠道表只有 gpt-image-2 / nano-banana-pro，无 TTS 渠道。
 // 所以本端点的上游调用路径是「探测 → 上游不存在 → 诚实报错」，不接任何
@@ -476,7 +476,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   if (racedResolved) return Response.json({ status: racedResolved.outcome, request_id })
   const racedPending = state.pendingConfirms.get(request_id)
   if (racedPending) {
-    if (autoApproved && racedPending.ledger) settleConfirm(state, request_id, "approved")
+    if (autoApproved && racedPending.ledger) settleConfirm(state, request_id, "approved", { auto: true })
     const resolved = state.resolvedConfirms.get(request_id)
     if (resolved) return Response.json({ status: resolved.outcome, request_id })
     return Response.json({ status: "pending", request_id }, { status: 202 })
@@ -487,7 +487,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
       timer: setTimeout(() => {}, 0),
       ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
     })
-    settleConfirm(state, request_id, "approved")
+    settleConfirm(state, request_id, "approved", { auto: true })
     return Response.json({ status: "approved", request_id })
   }
 
@@ -516,7 +516,7 @@ export async function approvePendingCharge(state: SessionState, requestId: strin
   if (!state.pendingConfirms.get(requestId)?.ledger) return false
   if (!await billingAutoApprovalEnabled(state)) return false
   // await 期间可能已由用户/过期处理结清，settleConfirm 本身保证只执行一次。
-  return settleConfirm(state, requestId, "approved")
+  return settleConfirm(state, requestId, "approved", { auto: true })
 }
 
 /** 用户切入 full：同租户已弹出的收费卡立即结清并复用原续跑链。 */
@@ -532,7 +532,12 @@ export async function approveTenantPendingCharges(tenant: string): Promise<void>
  * Single path for all three ways a confirm can end (user answer, expiry,
  * session teardown) so none of them can forget to emit confirm.resolved.
  */
-export function settleConfirm(state: SessionState, requestId: string, outcome: ConfirmOutcome): boolean {
+export function settleConfirm(
+  state: SessionState,
+  requestId: string,
+  outcome: ConfirmOutcome,
+  options?: { auto?: boolean },
+): boolean {
   const pending = state.pendingConfirms.get(requestId)
   if (!pending) return false
   clearTimeout(pending.timer)
@@ -549,7 +554,9 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
   notify(`confirm:${state.sessionId}:${requestId}`)
 
   const approved = outcome === "approved"
-  emitToSession(state, "confirm.resolved", { request_id: requestId, approved })
+  // auto=true 只出现在「互动模式=auto 自动放行」路径：前端据此收起确认卡但不追加
+  // notice（30 笔批量出图曾堆出 30 条「已同意该笔花费。」）。人工答复不传 auto 键。
+  emitToSession(state, "confirm.resolved", { request_id: requestId, approved, ...(options?.auto ? { auto: true } : {}) })
 
   if (approved) {
     if (pending.ledger) {

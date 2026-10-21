@@ -108,8 +108,8 @@ interface RecordedCall {
   body?: string;
 }
 
-const GATEWAY_EVENTS_URL = "https://store.eimu.dev/agent/v1/sessions/ses_abc/events";
-const GATEWAY_MESSAGES_URL = "https://store.eimu.dev/agent/v1/sessions/ses_abc/messages";
+const GATEWAY_EVENTS_URL = "https://store.tinchak0207.xyz/agent/v1/sessions/ses_abc/events";
+const GATEWAY_MESSAGES_URL = "https://store.tinchak0207.xyz/agent/v1/sessions/ses_abc/messages";
 const RELAY_MESSAGES_URL = "/api/agent/sessions/ses_abc/messages";
 
 /** 「已登入 + fetch 可窎」的最小浏览器环境：authHeaders 读 window/document/localStorage。 */
@@ -487,18 +487,56 @@ test("client_environment 发送方：web 送 surface=web；桌面壳由 window.e
   assert.equal("ffmpeg" in body.client_environment.local_capabilities, false, "非桌面壳不探 ffmpeg（未上报≠没有）");
   assert.equal(JSON.stringify(body.client_environment).includes("忽略"), false, "不得夹带自由文字");
 
-  // B) 桌面壳（window.eimuLocal 存在）→ surface=desktop-shell，capabilities() 探到 ffmpeg
-  const rec2 = recorder(async () => ok202());
+  // B) 桌面壳（window.eimuLocal 存在且形状完整）→ surface=desktop-shell，capabilities() 探到 ffmpeg
+  const rec2 = recorder(async (url) =>
+    url.includes("/api/agent/device-permissions")
+      ? new Response(JSON.stringify({ success: true, mode: "ask" }), { status: 200 })
+      : ok202(),
+  );
   await withClientEnv(rec2.fetchImpl as typeof fetch, async () => {
-    g.eimuLocal = { capabilities: async () => ({ ffmpeg: true }) };
+    // f6ab6475 硬闸：只认完整 DeviceBridgeApi（与 device-bridge-display.ts:85-96 同形）。
+    g.eimuLocal = {
+      capabilities: async () => ({ ffmpeg: true }),
+      pickFiles: async () => [],
+      onBridgeStatus: () => () => {},
+      bridge: {
+        status: async () => ({ enabled: false, state: "off", roots: [], deviceId: null, mode: "ask" }),
+        enable: async () => ({ enabled: true, state: "online", roots: [], deviceId: null, mode: "ask" }),
+        disable: async () => ({ enabled: false, state: "off", roots: [], deviceId: null, mode: "ask" }),
+      },
+    };
     try {
       await sendAgentMessage("ses_abc", "hi", undefined);
     } finally {
       delete g.eimuLocal;
     }
   });
-  const body2 = JSON.parse(rec2.calls[0].body!);
+  // 硬闸会先同步本机权限模式，再发消息；取真正的那条 messages 请求断言 payload。
+  const messagesCall = rec2.calls.find((call) => call.url === RELAY_MESSAGES_URL);
+  assert.ok(messagesCall, "桌面壳发送必须落到 messages 中继");
+  const body2 = JSON.parse(messagesCall.body!);
   assert.equal(body2.client_environment.surface, "desktop-shell");
   assert.equal(body2.client_environment.local_capabilities.window_eimu_local, true);
   assert.equal(body2.client_environment.local_capabilities.ffmpeg, true);
+});
+
+test("旧壳缺 bridge：eimuLocal 形状不全时明确拒绝发送，不静默当浏览器", async () => {
+  const g = globalThis as Record<string, unknown>;
+  const rec = recorder(async () => ok202());
+  await withClientEnv(rec.fetchImpl as typeof fetch, async () => {
+    // 旧桌面产物只注入 capabilities，没有 DeviceBridgeApi 的其余成员。
+    g.eimuLocal = { capabilities: async () => ({ ffmpeg: true }) };
+    try {
+      await assert.rejects(
+        sendAgentMessage("ses_abc", "hi", undefined),
+        (err: unknown) =>
+          err instanceof AgentChatError &&
+          err.code === "bad_request" &&
+          /无法读取桌面权限/.test(err.message),
+      );
+    } finally {
+      delete g.eimuLocal;
+    }
+  });
+  assert.equal(rec.calls.length, 0, "权限无法确认时消息不得发出");
 });

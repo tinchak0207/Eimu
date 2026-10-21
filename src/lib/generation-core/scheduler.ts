@@ -143,7 +143,7 @@ export type SupplierUnavailability = {
  * capacity is currently available.`，而实际成因至少有六种 —— 模型从未 seed、
  * capability 被停用、supplier 全部 disabled、全在 cooldown、账号健康门槛不过、
  * 并发位打满。这些的处置完全不同（跑 seed / 开渠道 / 等冷却 / 修账号 / 扩并发），
- * 但错误讯息把它们压成同一句，只能靠逐条连进 DB 查。
+ * 但错误讯息把它们压成同一句，只能靠人肉连进 DB 查。
  *
  * 这个函数按「从最外层条件往内收」的顺序逐段放宽 acquireSupplierLease 的
  * WHERE，第一个能查到行的层级就是真正的卡点。只在租约失败后跑，不在热路径上。

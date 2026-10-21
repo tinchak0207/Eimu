@@ -82,8 +82,8 @@ test("normalizeHistoryEntry 过滤掉无效的结果项并截断超量结果", (
       id: "a",
       generatedAt: 1_700_000_000_000,
       results: [
-        { provider: "image_eimu", modelId: "gpt-image-2", imageUrl: "https://x/1.png" },
-        { provider: "image_eimu" }, // 缺 modelId，应被丢弃
+        { provider: "image_tinchak", modelId: "gpt-image-2", imageUrl: "https://x/1.png" },
+        { provider: "image_tinchak" }, // 缺 modelId，应被丢弃
         null,
         "nonsense",
       ],
@@ -132,7 +132,7 @@ test("mergeHistoryEntries 按 id 精确去重，保留信息更全的源", () =>
     generatedAt: 1_000,
     prompt: "猫",
     source: "server",
-    results: [{ provider: "image_eimu", modelId: "m", image: null, imageUrl: "https://x/1.png" }],
+    results: [{ provider: "image_tinchak", modelId: "m", image: null, imageUrl: "https://x/1.png" }],
   });
   const poor = entry({ id: "same", generatedAt: 1_000, prompt: "猫", source: "local", results: [] });
 
@@ -159,7 +159,7 @@ test("mergeHistoryEntries 把本地与服务端的同一次生成合成一条", 
     generatedAt: 1_700_000_003_000,
     prompt: "一只戴帽子的猫",
     source: "server",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: "https://x/a.png" }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://x/a.png" }],
   });
 
   // 顺序不应影响结果

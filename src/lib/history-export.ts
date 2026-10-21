@@ -3,7 +3,7 @@
 // 历史记录的导出：ZIP（图片 + 清单）、JSON（完整档案）、CSV（表格）。
 //
 // 媒体取字节走浏览器 fetch，因此必须拿「允许跨域」的响应：本站 CDN
-// (store.eimu.dev) 的 /image-data/ 由 nginx 按 Origin 回 CORS 头，但被
+// (store.tinchak0207.xyz) 的 /image-data/ 由 nginx 按 Origin 回 CORS 头，但被
 // <img> no-cors 渲染过的同 URL 会命中无 CORS 的浏览器缓存。取图统一走
 // image-helpers.fetchImageResponse（?dl=1 换缓存键 + no-store），见 fetchAsBlob。
 // 仍取不到的那几张会被跳过并计入 skipped，而不是让整个导出失败。
@@ -55,7 +55,7 @@ export function entryFileName(entry: HistoryEntry): string {
 }
 
 /**
- * 取图。2026-10-04 缺陷 B：本站 CDN(store.eimu.dev) 的图被 <img> no-cors
+ * 取图。2026-10-04 缺陷 B：本站 CDN(store.tinchak0207.xyz) 的图被 <img> no-cors
  * 渲染后进了浏览器缓存，裸 fetch(URL) 会复用那份没有 Access-Control-Allow-Origin
  * 的缓存体 → 跨域被拦（net::ERR_FAILED），整个 zip 的媒体全被 skipped。这里不再
  * 自拼请求，直接走 image-helpers.fetchImageResponse——它补 ?dl=1 换缓存键并带

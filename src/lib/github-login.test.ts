@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { isStandalonePwa } from "./github-login.ts";
 
 /**
- * 桌面壳登入路径（2026-09-17 项目负责人实测回报）。
+ * 桌面壳登入路径（2026-09-17 暴君实测回报）。
  *
  * Electron 壳的 storage 与使用者常用浏览器隔离，且视窗没有网址栏：GitHub
  * 授权页若开在 App 内，使用者无从确认自己站在哪个站上，也用不到浏览器既有

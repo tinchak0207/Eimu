@@ -1,0 +1,232 @@
+{
+ "experiment": "lyric fidelity (char-level recall) vs brief lyrics, wsb idx0/15/100",
+ "evaluator": "faster-whisper small (cpu/int8); per-prompt language (idx0/15=zh, idx100=en)",
+ "ground_truth": "题面里 [Tags] 行与段落标记之后、逐行写给模型的歌词（去标点后逐字符比对）",
+ "metric": "difflib SequenceMatcher 匹配字符数 / ground-truth 字符数",
+ "note": "SongBench/SongEval 是「听起来好不好」的感知裁判，对「有没有照着题面唱」结构性失明；本条量的是那条被失明的轴。",
+ "arms": {
+  "A 裸Lyria": {
+   "idx0-take1": {
+    "recall": 0.2704,
+    "gt_chars": 318,
+    "asr_chars": 201,
+    "asr_head": "zitherharp玫瑰開的腳也有芬芳贏的蝴蝶繞著它飛翔刻造台上過彎再張望它填不薄空空的賭場白彩長的撲速又尋常站著泥土安"
+   },
+   "idx0-take2": {
+    "recall": 0.3522,
+    "gt_chars": 318,
+    "asr_chars": 208,
+    "asr_head": "zitherharp玫瑰凯的角焰有芬芳银的蝴蝶绕着它飞翔可早太伤过万再张望踏天不饱空空地赌场白彩长得朴素又寻常沾着泥土安"
+   },
+   "idx0-take3": {
+    "recall": 0.2799,
+    "gt_chars": 318,
+    "asr_chars": 163,
+    "asr_head": "zitherharp玫瑰開的腳也有芬芳贏的蝴蝶繞著它飛翔可早抬上過萬載掌望它填不包空空的賭場白菜長得撲速又尋常沾著泥土安"
+   },
+   "idx100-take1": {
+    "recall": 0.204,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 819,
+    "asr_head": "musicslapbassgroovewithpercussionslapbassgroovewithpercussio"
+   },
+   "idx100-take2": {
+    "recall": 0.0508,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 476,
+    "asr_head": "slapbassgroovewithpercussuhhuhitsmovingintheroomyeahfeelthes"
+   },
+   "idx100-take3": {
+    "recall": 0.136,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 601,
+    "asr_head": "musiclatenightlightsareflashingredelectricfeelinginmyheadyou"
+   },
+   "idx15-take1": {
+    "recall": 0.5136,
+    "gt_chars": 368,
+    "asr_chars": 367,
+    "asr_head": "歌樓目題只壓下灰塵在光裡飄蕩一隻舊木馬鞋靠牆祖貓褪成灰白模樣馬鞍連裂縫刻著兩個字撥聲悠長那是他名字的開框和父親手掌的重量"
+   },
+   "idx15-take2": {
+    "recall": 0.4728,
+    "gt_chars": 368,
+    "asr_chars": 384,
+    "asr_head": "歌樓目提紙雅巷灰塵在光裡飄蕩一隻舊木馬鞋靠牆縱茂褪塵灰白模樣馬鞍裂裂縫刻著兩個字撥身有長那是他名字的開框和父親手掌的重量"
+   },
+   "idx15-take3": {
+    "recall": 0.4891,
+    "gt_chars": 368,
+    "asr_chars": 374,
+    "asr_head": "歌樓目的紙牙巷灰塵在光裡飄蕩一隻舊木馬鞋靠牆縱茂退成灰白模樣馬鞍裂了粉刻著兩個字撥身又長那是他名字的開框和父親手掌的重量"
+   }
+  },
+  "B Eimu→FlowMusic": {
+   "idx0-take1": {
+    "recall": 0.3899,
+    "gt_chars": 318,
+    "asr_chars": 325,
+    "asr_head": "詞曲李宗盛玫瑰開的橋飄有芬芳映的蝴蝶繞著殘飛翔可然在上後面在眷望怕天不盡空空的轉繞白彩長的風速又曲長中著泥土暗戒裡天青山"
+   },
+   "idx0-take2": {
+    "recall": 0.4151,
+    "gt_chars": 318,
+    "asr_chars": 288,
+    "asr_head": "白彩长得翁后有群长人真理督安静自天主上情是一株飘起满热浪暖了钱也暖了心房玫瑰灯香在漂亮冰上双边窗台天晴分风光单路雨上前尘"
+   },
+   "idx0-take3": {
+    "recall": 0.5943,
+    "gt_chars": 318,
+    "asr_chars": 335,
+    "asr_head": "字幕製作人zitherharp玫瑰开的悄悄有粉纷引灯蝴蝶绕着阳飞翔客人台上目光再冲望踏天不填空空的酸沙白彩长得永远有群长"
+   },
+   "idx100-take1": {
+    "recall": 0.8368,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1134,
+    "asr_head": "musicyoutrustthatflylikeaquarterinthejukesayyourejustkilling"
+   },
+   "idx100-take2": {
+    "recall": 0.7434,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 977,
+    "asr_head": "inthisvelvethazeyoucantlookawayyouvebeenyourcolorliketherule"
+   },
+   "idx100-take3": {
+    "recall": 0.8323,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1197,
+    "asr_head": "youtossthatlinelikeaquarterinthedukesoyourejustkillingtimeti"
+   },
+   "idx15-take1": {
+    "recall": 0.3614,
+    "gt_chars": 368,
+    "asr_chars": 380,
+    "asr_head": "zitherharp日漏蜜吞風雅響灰塵在光裡飄響一支舊蜜巅吸烤圈上來退城會把模樣麻蜜漏了燈車刻著人格字幕聲悠長那是他名字"
+   },
+   "idx15-take2": {
+    "recall": 0.5082,
+    "gt_chars": 368,
+    "asr_chars": 421,
+    "asr_head": "优优独播剧场yoyotelevisionseriesexclusive鱼楼木舱朝亚香徽臣在光里飘香一支酒莫贪膝靠前山飞推"
+   },
+   "idx15-take3": {
+    "recall": 0.5408,
+    "gt_chars": 368,
+    "asr_chars": 402,
+    "asr_head": "作詞李宗盛作曲李宗盛編曲李宗盛作詞李宗盛演唱李宗盛演唱李宗盛作曲李宗盛演唱李宗盛環樓磨得悄啞嚇灰塵在光里飘干一枝酒磨天性"
+   }
+  },
+  "C Eimu→YuE2": {
+   "4d3862ef-idx0": {
+    "recall": 0.5031,
+    "gt_chars": 318,
+    "asr_chars": 383,
+    "asr_head": "lalalalalala加加了lalalalalala加加了lalalalalala加加了lalalalalala加加了"
+   },
+   "66db9f69-idx0": {
+    "recall": 0.5566,
+    "gt_chars": 318,
+    "asr_chars": 328,
+    "asr_head": "zitherharp玫瑰開的腳也有芬芳贏的蝴蝶繞著它飛翔可照台上過彎在掌望它填不包空空的肚臟白彩髒的樸素又尋常沾著泥土安"
+   },
+   "6aaf6e8c-idx0": {
+    "recall": 0.5566,
+    "gt_chars": 318,
+    "asr_chars": 329,
+    "asr_head": "zitherharp玫瑰開的腳也有芬芳贏的蝴蝶繞著它飛翔可張台上過萬再張望踏天步步抱公公的賭場白塞長的波蘇又尋常閃著泥土"
+   },
+   "6be99386-idx100": {
+    "recall": 0.9347,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1081,
+    "asr_head": "musicmusicmusicyoutossthatlinelikeaquarteringajukesayyoureju"
+   },
+   "7eca0247-idx100": {
+    "recall": 0.9093,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1077,
+    "asr_head": "youtossthatlinelikeaquarterinthejuiceyousayyourejustkillingt"
+   },
+   "86aa3e59-idx15": {
+    "recall": 0.4891,
+    "gt_chars": 368,
+    "asr_chars": 378,
+    "asr_head": "詞曲李宗盛可怒目聽夕陽下灰山在光裡飄蕩一隻舊木馬鞋靠牆絕貌褪成灰白模樣馬路裂了縫刻著兩個字幕伸悠長那是他名字的開頭和父親"
+   },
+   "dcd925ff-idx0": {
+    "recall": 0.5377,
+    "gt_chars": 318,
+    "asr_chars": 328,
+    "asr_head": "zitherharp玫瑰開的腳印有紛紛銀的蝴蝶繞著它飛翔可將它愛上過彎再掌握它填不包空空的賭場白彩長的暴速又尋常沾著泥土"
+   }
+  },
+  "D 裸YuE2": {
+   "idx0-take1": {
+    "recall": 0.5535,
+    "gt_chars": 318,
+    "asr_chars": 337,
+    "asr_head": "zitherharp玫瑰開的酒也有芬芳銀的蝴蝶繞著它飛翔刻葬台上過彎在掌望把天不包空空的都唱白彩長得不俗又尋常沾著泥土安"
+   },
+   "idx0-take2": {
+    "recall": 0.6572,
+    "gt_chars": 318,
+    "asr_chars": 320,
+    "asr_head": "玫瑰开的胶原有芬芳引的蝴蝶绕着它飞翔可早带相公玩在掌握它填不包空空的独场白彩上的部署有寻常站着你的玩具立天脸上清水一筑飘"
+   },
+   "idx0-take3": {
+    "recall": 0.5692,
+    "gt_chars": 318,
+    "asr_chars": 343,
+    "asr_head": "zitherharp玫瑰開的腳也有分房雲的蝴蝶繞著它飛翔可唱台上過彎在掌望踏天步包空空的賭場白彩牆的波速又尋常沾著泥土安"
+   },
+   "idx100-take1": {
+    "recall": 0.9229,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1073,
+    "asr_head": "youtossthatlinelikeaquarterinaqueuesayyourejustkillingtimeti"
+   },
+   "idx100-take2": {
+    "recall": 0.9338,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1094,
+    "asr_head": "yeahyeahyeahyeahohyeahyoutoastthatlimelikeaquarterinajukesay"
+   },
+   "idx100-take3": {
+    "recall": 0.9066,
+    "lang": "en",
+    "gt_chars": 1103,
+    "asr_chars": 1089,
+    "asr_head": "youtossthatlinelikeaquarterinthejukesayyourejustkillingtimet"
+   },
+   "idx15-take1": {
+    "recall": 0.4891,
+    "gt_chars": 368,
+    "asr_chars": 375,
+    "asr_head": "詞曲李宗盛河樓木亭依亞巷灰塵在光裡飄蕩一隻舊木馬鞋靠牆兩毛推成灰白模樣馬列了風隔著兩個字母聲誘章那是他名字的開頭和父親手"
+   },
+   "idx15-take2": {
+    "recall": 0.712,
+    "gt_chars": 368,
+    "asr_chars": 379,
+    "asr_head": "zitherharp歌落霧霧黑季雅巷灰尘在光里飘荡一只舊木马鞋靠墙卷茂顿成灰白模样爆裂了风刻着两个字幕深幽长那是它名字的"
+   },
+   "idx15-take3": {
+    "recall": 0.7418,
+    "gt_chars": 368,
+    "asr_chars": 368,
+    "asr_head": "歌楼目的街夜巷灰尘在光里飘荡一支舊木马鞋靠桥整毛腿成灰白模样馬鞋累了风刻着两个字幕声悠长那是他名字的开头和父亲手掌的重量"
+   }
+  }
+ }
+}

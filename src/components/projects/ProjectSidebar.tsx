@@ -87,7 +87,7 @@ export function ProjectSidebar({ currentSessionId, onPickChat, onClose }: Projec
 
   // 展开的项目（一次只开一个：ZCode 侧栏同款树状展开）。
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  // 「已归档」折叠区默认收起（项目负责人裁定：归档项目默认折叠）。
+  // 「已归档」折叠区默认收起（暴君裁定：归档项目默认折叠）。
   const [archivedOpen, setArchivedOpen] = useState(false);
   // 行内改名态：null＝没有在改名。
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -131,7 +131,7 @@ export function ProjectSidebar({ currentSessionId, onPickChat, onClose }: Projec
 
   const pickChat = (sessionId: string) => {
     onPickChat(sessionId);
-    // 点某条聊天＝回到聊天（项目负责人裁定）。
+    // 点某条聊天＝回到聊天（暴君裁定）。
     onClose();
   };
 

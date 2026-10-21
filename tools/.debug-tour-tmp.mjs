@@ -1,5 +1,5 @@
 import { chromium } from "playwright-core";
-const browser = await chromium.launch({ executablePath: "/home/user/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome", headless: true, args: ["--window-size=1440,900"] });
+const browser = await chromium.launch({ executablePath: "/home/lenovo/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome", headless: true, args: ["--window-size=1440,900"] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.addInitScript(() => { localStorage.removeItem("atc-tour-v1"); });
 await page.goto("http://localhost:3000/?agent=1", { waitUntil: "networkidle", timeout: 60000 });

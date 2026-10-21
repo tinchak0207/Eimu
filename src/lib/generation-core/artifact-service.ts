@@ -349,8 +349,13 @@ function extensionForMimeType(mimeType: string): string {
  * 平台把上游结果抓回本地校验／落库时的单档硬上限。
  * 原为 `outputBuffer` 内两处散落的 magic number（2026-09-29 P1-4 抽出成具名常数）：
  * 高阶档位（4K 超分）的产物体积上限必须由**同一条**真源判定，不能各处各写一份。
+ *
+ * 2026-10-20 按媒体类型分档（DMC auto-hd）：25 MiB 对视频太小——实测 4k 10s
+ * 成片已 28.5MB，会在超分成片落盘前把已经付费生成的结果判死。视频单列 512 MiB
+ * （覆盖 4k × 15s 高码率并留余量），仍是具名硬闸，不是无上限。
  */
 export const ARTIFACT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+export const ARTIFACT_MAX_DOWNLOAD_BYTES_VIDEO = 512 * 1024 * 1024;
 
 /**
  * 「上游回 URL」抓回产物的时间上限。原为单一 `AbortSignal.timeout(30_000)`
@@ -364,6 +369,12 @@ export const ARTIFACT_DOWNLOAD_HEADER_TIMEOUT_MS = 30_000;
 export const ARTIFACT_DOWNLOAD_MIN_BYTES_PER_SECOND = 256 * 1024;
 /** 主体读取时限的硬上界（毫秒）：任何情况都不得超过，禁止无上限等待。 */
 export const ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS = 180_000;
+/**
+ * 视频档主体读取硬上界（2026-10-20，图像/音频不变）：实测 4k 10s 成片 28.5MB
+ * 在 256 KiB/s 吞吐下限换算需 ~114s，长片超分产物更大；视频给 10 分钟硬上界，
+ * 仍具上界（禁止无上限等待）。
+ */
+export const ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS_VIDEO = 600_000;
 
 export interface ArtifactDownloadTimeouts {
   headerTimeoutMs: number;
@@ -377,8 +388,25 @@ export const DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS: ArtifactDownloadTimeouts = {
   maxTimeoutMs: ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS,
 };
 
-/**
- * 依 Content-Length 求主体读取上限：未知大小（chunked）时用硬上界，仍具上界；
+/** 单档下载闸（体积上限 + 三段时限）：按媒体类型取，call site 不得自写 magic number。 */
+export interface ArtifactDownloadLimits {
+  maxBytes: number;
+  timeouts: ArtifactDownloadTimeouts;
+}
+
+/** 图像/音频＝25 MiB + 180s 硬上界；视频＝512 MiB + 600s 硬上界。 */
+export function artifactDownloadLimits(mediaKind: "image" | "video" | "audio" = "image"): ArtifactDownloadLimits {
+  const video = mediaKind === "video";
+  return {
+    maxBytes: video ? ARTIFACT_MAX_DOWNLOAD_BYTES_VIDEO : ARTIFACT_MAX_DOWNLOAD_BYTES,
+    timeouts: {
+      ...DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS,
+      maxTimeoutMs: video ? ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS_VIDEO : ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS,
+    },
+  };
+}
+
+/** 依 Content-Length 求主体读取上限：未知大小（chunked）时用硬上界，仍具上界；
  * 小档不放大（下限＝标头上限），大档按 minBytesPerSecond 线性放大到硬上界为止。
  */
 export function artifactBodyTimeoutMs(
@@ -390,10 +418,24 @@ export function artifactBodyTimeoutMs(
   return Math.min(config.maxTimeoutMs, Math.max(config.headerTimeoutMs, scaled));
 }
 
+export interface OutputBufferOptions extends Partial<ArtifactDownloadTimeouts> {
+  /**
+   * 下载鉴权头（如 `Authorization: Bearer …`）。只进 fetch；**绝不落库／入日志**。
+   * 呼叫端（`persistOutputArtifact`）从 `SupplierGenerationOutput.downloadHeaders` 转传。
+   */
+  headers?: Record<string, string>;
+  /** 体积上限（字节）；缺省 25 MiB。应按 mediaKind 取 `artifactDownloadLimits`。 */
+  maxBytes?: number;
+}
+
+function describeDownloadCap(maxBytes: number): string {
+  return maxBytes > 0 && maxBytes % (1024 * 1024) === 0 ? `${maxBytes / (1024 * 1024)} MiB` : `${maxBytes} bytes`;
+}
+
 /** 抓回「上游回 URL」的产物；失败一律具名抛出，绝不以空／截断的成功回应收场。 */
 export async function outputBuffer(
   input: { base64: string | null; url: string | null },
-  timeouts: ArtifactDownloadTimeouts = DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS,
+  options: OutputBufferOptions = {},
 ): Promise<Buffer> {
   if (input.base64) {
     const decoded = Buffer.from(input.base64.replace(/^data:[^;,]*;base64,/, ""), "base64");
@@ -402,11 +444,19 @@ export async function outputBuffer(
   }
   if (!input.url) throw new Error("Supplier returned an empty image result.");
 
+  const maxBytes = options.maxBytes ?? ARTIFACT_MAX_DOWNLOAD_BYTES;
+  const timeouts: ArtifactDownloadTimeouts = {
+    headerTimeoutMs: options.headerTimeoutMs ?? ARTIFACT_DOWNLOAD_HEADER_TIMEOUT_MS,
+    minBytesPerSecond: options.minBytesPerSecond ?? ARTIFACT_DOWNLOAD_MIN_BYTES_PER_SECOND,
+    maxTimeoutMs: options.maxTimeoutMs ?? ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS,
+  };
+  const headers = options.headers && Object.keys(options.headers).length > 0 ? options.headers : null;
+
   const controller = new AbortController();
   let response: Response;
   const headerTimer = setTimeout(() => controller.abort(), timeouts.headerTimeoutMs);
   try {
-    response = await fetch(input.url, { signal: controller.signal });
+    response = await fetch(input.url, { signal: controller.signal, ...(headers ? { headers } : {}) });
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error(`Artifact download failed: no response within ${timeouts.headerTimeoutMs}ms.`);
@@ -417,7 +467,7 @@ export async function outputBuffer(
   }
   if (!response.ok) throw new Error(`Artifact download failed: HTTP ${response.status}.`);
   const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (contentLength > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: file exceeds 25 MiB.");
+  if (contentLength > maxBytes) throw new Error(`Artifact download failed: file exceeds ${describeDownloadCap(maxBytes)}.`);
 
   const bodyTimeoutMs = artifactBodyTimeoutMs(contentLength, timeouts);
   const bodyTimer = setTimeout(() => controller.abort(), bodyTimeoutMs);
@@ -432,7 +482,7 @@ export async function outputBuffer(
   } finally {
     clearTimeout(bodyTimer);
   }
-  if (!bytes.length || bytes.length > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: empty or oversized response.");
+  if (!bytes.length || bytes.length > maxBytes) throw new Error("Artifact download failed: empty or oversized response.");
   return bytes;
 }
 
@@ -448,11 +498,25 @@ export async function persistOutputArtifact(input: {
   providerRequestId?: string | null;
   originalHttpStatus?: number | null;
   mediaKind?: "image" | "video" | "audio";
+  /**
+   * 上游产物需鉴权下载时的请求头（2026-10-20 DMC auto-hd）。只进 `outputBuffer` 的
+   * fetch；**绝不写进 artifact.metadata／evidence／日志**，也不参与 objectKey。
+   */
+  downloadHeaders?: Record<string, string>;
   retentionExpiresAt?: Date | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<PersistedOutputArtifact> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error("BLOB_READ_WRITE_TOKEN is required to persist generation outputs.");
-  const buffer = await outputBuffer(input);
-  const validated = validateOutputMediaBuffer(buffer, input.mediaKind ?? "image");
+  const mediaKind = input.mediaKind ?? "image";
+  const limits = artifactDownloadLimits(mediaKind);
+  const buffer = await outputBuffer(
+    { base64: input.base64, url: input.url },
+    {
+      ...limits.timeouts,
+      maxBytes: limits.maxBytes,
+      ...(input.downloadHeaders ? { headers: input.downloadHeaders } : {}),
+    },
+  );
+  const validated = validateOutputMediaBuffer(buffer, mediaKind);
   if ("error" in validated) throw new Error(`Malformed generation output: ${validated.error}`);
   const objectKey = `generation/jobs/${input.jobId}/${String(input.outputIndex).padStart(3, "0")}-${validated.sha256.slice(0, 12)}.${extensionForMimeType(validated.mimeType)}`;
   const blob = await put(objectKey, buffer, {

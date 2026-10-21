@@ -335,7 +335,7 @@ async function main() {
   console.log(`
 收尾指引（脚本不做部署）：
 
-1. VPS /opt/eimu-control-plane/app/.env.control-plane 加：
+1. VPS /opt/image-control-plane/app/.env.control-plane 加：
    ${channel.baseUrlEnv}=${args.baseUrl}
    ${channel.apiKeyEnv}=<你的 key>   # key 值不落任何 log
    ${enabledLine}

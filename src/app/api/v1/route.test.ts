@@ -150,7 +150,9 @@ test("响应格式同时支持 b64_json 与 url", () => {
 
 test("hd / high 映射到内部的 quality 档", () => {
   const source = code(GENERATIONS);
-  assert.match(source, /body\.quality === "hd" \|\| body\.quality === "high"/);
+  // 生产现形状：先 toLowerCase 归一，再由 rawQuality 映射（hd/high → quality）。
+  assert.match(source, /const rawQuality = typeof body\.quality === "string" \? body\.quality\.toLowerCase\(\) : ""/);
+  assert.match(source, /rawQuality === "quality" \|\| rawQuality === "hd" \|\| rawQuality === "high" \? "quality" : "fast"/);
 });
 
 test("/v1/models 返回 OpenAI 的 list 结构，且只列该密钥有权的模型", () => {
@@ -190,7 +192,15 @@ test("/v1/models 报价前先同步 admin 覆写，避免报旧价扣新价", ()
 
 test("openapi 的 ModelObject 不得把 x_coins_per_image 列为必填", () => {
   // 视频模型没有这个字段，列必填会让严格校验的客户端把整张表判为不合规。
-  const source = read("src/app/api/v1/openapi.json/route.ts");
+  // <1000 行重构：ModelObject 的 SPEC 在 spec-components.ts。
+  const source = [
+    "src/app/api/v1/openapi.json/route.ts",
+    "src/app/api/v1/openapi.json/spec.ts",
+    "src/app/api/v1/openapi.json/spec-components.ts",
+    "src/app/api/v1/openapi.json/spec-paths.ts",
+  ]
+    .map(read)
+    .join("\n");
   const block = source.slice(source.indexOf("ModelObject:"), source.indexOf("ModelList:"));
   assert.doesNotMatch(block, /required: \[[^\]]*"x_coins_per_image"/);
   assert.match(block, /x_coins_per_second/, "契约必须描述视频的按秒单价");

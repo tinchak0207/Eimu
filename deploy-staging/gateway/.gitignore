@@ -1,6 +1,6 @@
 node_modules/
 
-# 执行时状态（不进版控）：release 会以 symlink 指向 /opt/eimu-harness/state/，
+# 执行时状态（不进版控）：release 会以 symlink 指向 /opt/agent-harness/state/，
 # 若这些档未列入 ignore，一次 `git add -A` 就会把 41MB 的 sessions.db 提交进 repo。
 sessions.db
 sessions.db-shm

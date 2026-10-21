@@ -1,6 +1,6 @@
 // workflow-dsl/decompile.ts — 画布真相 → DSL 源码的反向读取器（compileWorkflow 的逆操作）。
 //
-// 角色（项目负责人裁定 2026-09-02）：画布图为唯一运行时真相；本档按节点 metadata 的
+// 角色（暴君裁定 2026-09-02）：画布图为唯一运行时真相；本档按节点 metadata 的
 // workflow 运行期键（compile.ts 铺的 workflow_ns/stepId/stepIndex）把画布分组反推回
 // WorkflowDslSource，供 agent「看图改源码」或 round-trip 校验。
 //
@@ -19,7 +19,7 @@
 //      见 enforceCompileValidity；只对违规值动手，合法值逐字节不变。
 //
 // 四族收纳规则（2026-10-08 读面解锁，记忆 dsl-adoption-zero-audit：读面死锁根因；
-// 2026-10-09 补族4 扩面——项目负责人裁定「收编从靠模型自觉 → 系统默认给骨架」）：
+// 2026-10-09 补族4 扩面——暴君裁定「收编从靠模型自觉 → 系统默认给骨架」）：
 //   画布上真实存在四族产线节点，仅族3 带 workflow_ns+stepId 真键——本档按族收纳：
 //   - 族3（编译器产物，id wf-<16hex>）：workflow_ns+stepId 真键，走上述既有规则。
 //   - 族1（gateway 骨架，id 如 single_image-prompt-0）：metadata 无任何身份键，

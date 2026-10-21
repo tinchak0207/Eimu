@@ -6,7 +6,7 @@ export const preferredRegion = "sfo1";
 
 // VPS 上的带参数二维码服务（access_token 不过 Vercel；正式号白名单只需 VPS IP）
 const MP_QR_SERVER =
-  process.env.WECHAT_MP_QR_SERVER?.trim() || "http://127.0.0.1:8781";
+  process.env.WECHAT_MP_QR_SERVER?.trim() || "http://43.172.85.76:8781";
 
 async function fetchMpQrImgUrl(scene: string): Promise<string | null> {
   try {

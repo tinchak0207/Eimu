@@ -21,7 +21,7 @@ import { cutFrame, probeMedia, requireVideo, runProcess, type MediaProbe } from 
 
 // ─────────────────────────────────────────── 执行档（惯例同 lib/asr.ts / lib/video-evidence.ts）
 
-const BIN_DIR = "/opt/eimu-harness/bin"
+const BIN_DIR = "/opt/agent-harness/bin"
 const FFMPEG = process.env.FFMPEG_PATH || (existsSync(join(BIN_DIR, "ffmpeg")) ? join(BIN_DIR, "ffmpeg") : "ffmpeg")
 
 const FFMPEG_TIMEOUT_MS = 600_000

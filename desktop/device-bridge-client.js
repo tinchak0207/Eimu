@@ -21,9 +21,6 @@
 // session，**没有** biz key，也**不**在此硬编任何 key。改以 credentialProvider
 // 注入点接受凭证；回 null/空 → bridge 不启动并回报 credentials_unavailable。
 // 补法见 desktop/DEVICE-BRIDGE.md。
-// 401/凭证失效 → 主动向页面要新票，不得无限重试死票：闸道只把设备票放在进程内存
-// （auth-gw.ts deviceTickets，TTL 600s），闸道一重启旧票即刻作废；此时必须走
-// onCredentialRequired 让页面重铸票，而不是拿同一张死票退避重连到天荒地老。
 //
 // ── 安全边界（能力宁可少；执行器抽到 lib/bridge-executor.js，可测）────────
 //  1. 工具白名单＝list_dir/read_file/grep/stat（无写/删/执行）。
@@ -49,12 +46,12 @@ const { PERMISSION_MODES, allowRuleForRoot } = require("./lib/permission-rules.j
 const localWorker = require("./local-worker.js");
 
 const PREFIX = "/agent/v1/device-bridge";
-// 真闸道域名（2026-10-05 修正）：`image.eimu.dev` 的 /agent/healthz 是 404，
-// `/agent/v1/device-bridge/register` 也 404 —— 装置桥其实挂在 `store.eimu.dev`
+// 真闸道域名（2026-10-05 修正）：`image.tinchak0207.xyz` 的 /agent/healthz 是 404，
+// `/agent/v1/device-bridge/register` 也 404 —— 装置桥其实挂在 `store.tinchak0207.xyz`
 // （healthz 200、无鉴权 register 401）。旧值让「有凭证但没带 gatewayBaseUrl」的壳
 // 打到不存在的端点，等于永远连不上。页面换票路径会把闸道回的真值覆写进来，
 // 这里只是操作者/后备路径的预设值。
-const DEFAULT_GATEWAY_BASE_URL = "https://store.eimu.dev";
+const DEFAULT_GATEWAY_BASE_URL = "https://store.tinchak0207.xyz";
 const DEFAULT_POLL_WAIT_MS = 20000; // <= 闸道 DEVICE_POLL_MAX_WAIT_MS(25000)
 const DEFAULT_HEARTBEAT_MS = 30000;
 
@@ -205,10 +202,8 @@ const runtime = {
   //   persistConsentRoots — 收到 permanent 时落盘（由 main.js 并入 settings 并写回）。
   //   auditConsent        — 每接受一个**新的**同意根追加一行本机稽核（无 token/apiKey）。
   //   consentRootsProvider— 启动时读取已落盘的永久同意根（供 register 与放行）。
-  //   onCredentialRequired— 凭证缺失/失效（401/403）时主动向页面要新票的注入点。
   persistConsentRoots: null,
   auditConsent: null,
-  onCredentialRequired: null,
 };
 
 function snapshot() {
@@ -239,29 +234,6 @@ function setStatus(status, detail) {
 function errorCodeOf(status, json) {
   if (json && json.error && typeof json.error.code === "string") return json.error.code;
   return `http_${status}`;
-}
-
-/**
- * 凭证类错误判定（纯函式，大小写不敏感）。
- * 401/403 与闸道/上游会用的凭证错误码一律视为「票已死」：此时重试同一张票没有意义，
- * 必须回头向页面要新票（见 connect 的 catch）。
- * @param {unknown} code
- * @returns {boolean}
- */
-function isCredentialError(code) {
-  if (typeof code !== "string" || !code) return false;
-  const c = code.toLowerCase();
-  return (
-    c === "http_401" ||
-    c === "http_403" ||
-    c === "unauthorized" ||
-    c === "forbidden" ||
-    c === "invalid device ticket" ||
-    c === "invalid_ticket" ||
-    c === "invalid_credential" ||
-    c === "invalid_token" ||
-    c === "device_ticket"
-  );
 }
 
 async function post(pathname, body, transport = runtime) {
@@ -507,22 +479,7 @@ async function connect() {
     startHeartbeat();
     startPoll();
   } catch (err) {
-    const code = err && err.code ? err.code : "network_error";
-    // 401/凭证失效 → 主动向页面要新票，不得无限重试死票：闸道重启会让所有设备票
-    // 立刻失效（票在进程内存），此时保留退避重连只是空转；清掉死票并回调页面，
-    // 页面重新铸票后经 IPC setCredential → syncCurrentMode 重注册。
-    // 不停 runtime.running（桥仍在等票），退避重连照旧。
-    if (isCredentialError(code)) {
-      runtime.credential = null;
-      if (typeof runtime.onCredentialRequired === "function") {
-        try {
-          runtime.onCredentialRequired({ reason: code });
-        } catch {
-          /* 索取票失败不得影响重连排程 */
-        }
-      }
-    }
-    scheduleReconnect(code);
+    scheduleReconnect(err && err.code ? err.code : "network_error");
   }
 }
 
@@ -564,8 +521,6 @@ async function startDeviceBridge(opts = {}) {
   if (runtime.running) return snapshot();
   if (opts.gatewayBaseUrl) runtime.gatewayBaseUrl = String(opts.gatewayBaseUrl).replace(/\/+$/, "");
   if (typeof opts.onStatus === "function") runtime.onStatus = opts.onStatus;
-  runtime.onCredentialRequired =
-    typeof opts.onCredentialRequired === "function" ? opts.onCredentialRequired : null;
   runtime.enabled = opts.enabled === true;
 
   // W6c：注入点一律验型别（教训：跨界传错型别会被下游守卫静默降级）。
@@ -622,13 +577,12 @@ async function startDeviceBridge(opts = {}) {
     return snapshot();
   }
 
-  // H1：allowlist 必填（mode !== "full"）。无授权根（使用者尚未 pickFiles 挑过任何根）
-  // ⇒ 整条 bridge 拒绝服务并回明确状态，**不得**退回「只验 denylist」。这是正确且刻意的
-  // 结果。full 模式以家目录为隐式范围，空根照常启动（runtime.roots = [] 照实下发）。
+  // H1：allowlist 必填。无授权根（使用者尚未 pickFiles 挑过任何根）⇒ 整条 bridge
+  // 拒绝服务并回明确状态，**不得**退回「只验 denylist」。这是正确且刻意的结果。
   // 有效根 ＝ rootsProvider() ∪ 已落盘的同意根（永久授权在重启后仍能服务）。
   const baseRoots = typeof opts.rootsProvider === "function" ? opts.rootsProvider() : Array.from(localWorker.authorizedRoots);
   const roots = unionRoots(Array.isArray(baseRoots) ? baseRoots : [], runtime.consentRoots);
-  if (roots.length === 0 && runtime.mode !== "full") {
+  if (roots.length === 0) {
     runtime.credential = null;
     setStatus("no_authorized_roots", "no_authorized_roots");
     return snapshot();

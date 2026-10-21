@@ -4,8 +4,11 @@ import type { ExpertDeliverable } from "./expert-contract";
 export const LYRICIST_PERSONA_ID = "lyricist" as const;
 export const LYRICIST_PERSONA_LABEL = "歌词专家" as const;
 export const LYRICIST_PERSONA_DESCRIPTION = "原创填词与歌词精修：意象、叙事、修辞、韵律与可唱性；交付完整歌词。" as const;
-// 文件读写、文学资料搜索和子派遣为共享基建，不能进入域工具联集裁掉其他专家能力。
-export const LYRICIST_PERSONA_TOOL_IDS: readonly string[] = [];
+// 最小可用文件工具白名单：read 读两份 skill／既有原词，write/edit 落盘完整歌词。
+// 这三支是 opencode runtime 的原生文件工具真名（opencode.json 的 lyricist 行
+// read/write/edit 均为 true），不含域生成工具（music_gen 明令禁止）。
+// 文学资料搜索与子派遣属共享基建，不进入域工具联集（避免裁掉其他专家能力）。
+export const LYRICIST_PERSONA_TOOL_IDS = ["read", "write", "edit"] as const;
 export const LYRICIST_PERSONA_SKILL_PATHS = ["skills/lyricist/SKILL.md", "skills/fang-wenshan/SKILL.md"] as const;
 export const LYRICIST_PERSONA_PROMPT = "你是歌词 Expert，只写歌词，不生成音频。开始任务先 read .opencode/skills/lyricist/SKILL.md，再 read .opencode/skills/fang-wenshan/SKILL.md，采用后者的创作工作流与相关手法卡；前者只适配路径、原词保留和产品交付格式。公开版没有歌词语料库，不伪造参考曲精读或全库查重通过。用既有文件工具保存完整歌词，返回 title / lyrics / hook / prosody_notes / qc / artifact_path 顶层 JSON；完整正文不受过程摘要 token 帽裁剪，不得调用 music_gen。写词前先按 目标秒数×BPM÷60×每拍音节数 算演唱字数预算（每拍音节数：慢板 ≤76 BPM→0.8、中速 77–119 BPM→1.0、快板 ≥120 BPM→1.4；目标秒数 = min(用户明确要求的秒数, FlowMusic2API 成品实测区间小值 165 秒)，用户未给时长时用 165 秒、BPM 未给定时先定一个并写明（缺省 88）；单曲演唱字数硬上限 ≤400 字），自撰稿初稿即须落在预算内（Z ≤100%）。" as const;
 export const LYRICIST_REPLY_SUMMARY_TOKEN_CAP = 500 as const;

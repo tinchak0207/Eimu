@@ -4,7 +4,7 @@
 #
 # 用法：
 #   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force]
+#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force] [--fast]
 #   bash deploy/vps/gateway-release.sh rollback [--dry-run] [--force]
 #   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
 #
@@ -14,11 +14,14 @@
 #   opencode-release.sh 完全同套（gateway sessions.db lastTurnActiveAt / subagent_reworks
 #   ＋ opencode.db 未 completed 的流式 assistant 讯息）。
 #
+# --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即 build+重启。
+#   用于提示词/文案这类短改：目标 <60s，不再为在途回合等 180s。中断的回合由耐久续接处理。
+#
 # 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
 #   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
 #   「HEAD 已修」≠「生产在跑」是常态风险（memory uncommitted-deploy-production-fork-0920）。
 #   本脚本让每次闸道部署留下不可变的 release 目录，于是
-#   「哪一版在跑」= `readlink -f /opt/eimu-harness/gateway`，回滚 = 切 symlink 回上一版。
+#   「哪一版在跑」= `readlink -f /opt/agent-harness/gateway`，回滚 = 切 symlink 回上一版。
 #
 # 设计约束（来自现场，非发明）：
 #   1. 只上已 commit 的档：release 内容由 `git archive <sha> deploy-staging/gateway` 产生。
@@ -31,29 +34,29 @@
 #   4. 权限：gateway/ 为 ubuntu:ubuntu，但其下 workflow-templates/ 为 root:root
 #      → 远端一律经 /tmp 中转 + `sudo install -o ubuntu -g ubuntu -m 644 -D` 逐档落地，
 #      不直接 scp 进目标目录。
-#   5. 服务闸门重用既有轮子：`sudo /opt/eimu-harness/deploy.sh`
+#   5. 服务闸门重用既有轮子：`sudo /opt/agent-harness/deploy.sh`
 #      （flock 排他锁 + bun build 语法闸 + restart + healthz）。本脚本不重写它。
 #   6. 部署前必跑既有 recon：deploy-staging/vps-tools/vps-gateway-recon.sh
 #      （memory arch-debt-closeout-0920 铁律）。本脚本不重写它，只调用它。
 #
 # ⚠️ 未验证假设（本脚本只在本机做过 `bash -n` 与 `--dry-run`，从未对生产执行）：
-#   A. /opt/eimu-harness/gateway 推测是「实体目录」而非 symlink
+#   A. /opt/agent-harness/gateway 推测是「实体目录」而非 symlink
 #      → 首次使用需人工确认后跑 `adopt`（把现况封存成 baseline release 再换成 symlink）。
-#   B. deploy.sh 是否以硬编路径 /opt/eimu-harness/gateway 为工作根。若它 cd 进该路径或
+#   B. deploy.sh 是否以硬编路径 /opt/agent-harness/gateway 为工作根。若它 cd 进该路径或
 #      bun build 该路径下的 index.ts，symlink 不影响它；若它自行做目录归属/比对检查则需先读它。
 #   C. systemd unit（agent-gateway）的 WorkingDirectory / ExecStart 是否走同一路径。
-#   D. `mv -T` 需与目标同档案系统；releases 与 gateway 同在 /opt/eimu-harness 下，理应成立。
+#   D. `mv -T` 需与目标同档案系统；releases 与 gateway 同在 /opt/agent-harness 下，理应成立。
 #   E. 远端有 GNU coreutils（md5sum / mv -T / ln -sfn / install -D）与 curl。
-#   F. /opt/eimu-harness/deploy.sh 需 sudo，且会撞到 /tmp/deploy-gate-*.js 残档 EACCES
+#   F. /opt/agent-harness/deploy.sh 需 sudo，且会撞到 /tmp/deploy-gate-*.js 残档 EACCES
 #      （memory arch-debt-closeout-0920 的雷）；本脚本不代清，失败时人工依该记忆处理。
 #   G. `adopt` 的 mv→ln 之间有一个短暂视窗（该路径不存在）。未对生产验证。
 set -euo pipefail
 
 # ── 可覆写参数（env 前缀 GW_）────────────────────────────────────────────
-SSH_KEY="${GW_SSH_KEY:-$HOME/.ssh/id_ed25519}"
-SSH_TARGET="${GW_SSH_TARGET:-ubuntu@YOUR_SERVER_IP}"
+SSH_KEY="${GW_SSH_KEY:-$HOME/.ssh/new.pem}"
+SSH_TARGET="${GW_SSH_TARGET:-ubuntu@43.172.85.76}"
 SSH_PORT="${GW_SSH_PORT:-22443}"
-HARNESS_ROOT="${GW_HARNESS_ROOT:-/opt/eimu-harness}"
+HARNESS_ROOT="${GW_HARNESS_ROOT:-/opt/agent-harness}"
 GATEWAY_PATH="${GW_GATEWAY_PATH:-$HARNESS_ROOT/gateway}"
 RELEASES_DIR="${GW_RELEASES_DIR:-$HARNESS_ROOT/releases/gateway}"
 DEPLOY_GATE="${GW_DEPLOY_GATE:-sudo $HARNESS_ROOT/deploy.sh}"
@@ -125,15 +128,15 @@ run_drain_gate() {
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN drain gate（跳过远端只读探测）"; return 0; fi
   run_remote_stdin bash -s -- "$FORCE" \
     "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
-    "${OC_DRAIN_SESSIONS_DB:-/opt/eimu-harness/state/sessions.db}" \
-    "${OC_DRAIN_OPENCODE_DB:-/opt/eimu-harness/workspace/.local/share/opencode/opencode.db}" <<'REMOTE'
+    "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
+    "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" <<'REMOTE'
 set -euo pipefail
 DRAIN_FORCE="${1:-0}"
 DRAIN_MAX_SECS="${2:-180}"
 DRAIN_POLL_SECS="${3:-5}"
 DRAIN_WINDOW_MS="${4:-180000}"
-DRAIN_SESSIONS_DB="${5:-/opt/eimu-harness/state/sessions.db}"
-DRAIN_OPENCODE_DB="${6:-/opt/eimu-harness/workspace/.local/share/opencode/opencode.db}"
+DRAIN_SESSIONS_DB="${5:-/opt/agent-harness/state/sessions.db}"
+DRAIN_OPENCODE_DB="${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
 drain_inflight_count() {
   local now a b c v
   now=$(( $(date +%s) * 1000 ))
@@ -172,7 +175,7 @@ usage() {
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force]
+  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
                           → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
                           ⚠️ --files 不可用于本 gateway：release 目录必须是完整档案集，
@@ -180,7 +183,7 @@ usage() {
                           --force：跳过重启前 drain（仍有在途会话时也立即重启）
   rollback [--dry-run] [--force]
                           回滚：切 symlink 回上一个 release → drain + 同一道 deploy.sh 闸门 → 验证
-  adopt [--dry-run]       一次性：把实体 /opt/eimu-harness/gateway 封存成 baseline release
+  adopt [--dry-run]       一次性：把实体 /opt/agent-harness/gateway 封存成 baseline release
                           并换成受管 symlink（此后 release/rollback 才可用）
 
 环境可覆写：GW_SSH_KEY GW_SSH_TARGET GW_SSH_PORT GW_HARNESS_ROOT GW_GATEWAY_PATH
@@ -196,6 +199,7 @@ parse_flags() {
       --skip-recon) SKIP_RECON=1 ;;
       --skip-media-wf-coverage) SKIP_MEDIA_WF_COVERAGE=1 ;;
       --force) FORCE=1 ;;
+      --fast) SKIP_RECON=1; FORCE=1; SKIP_MEDIA_WF_COVERAGE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       --files)
         shift

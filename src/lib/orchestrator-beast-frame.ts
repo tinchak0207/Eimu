@@ -18,7 +18,7 @@
  * blender-tools 链本就 server-only，动态 import 在 tsx CJS 本地测试运行时
  * 解构不稳；VPS bun ESM 两态皆通）。
  *
- * 消费方：VPS /opt/eimu-harness/gateway（Orchestrator 主 prompt 组装真源，
+ * 消费方：VPS /opt/agent-harness/gateway（Orchestrator 主 prompt 组装真源，
  * 本地 repo 无活码，记忆片J）在组装 system prompt 时调 buildOrchestratorFrame；
  * 本档先在本地交付契约 + 测试钉死形状，VPS 落位走后续部署片。
  */

@@ -29,7 +29,7 @@ test("reference image previews are not revoked when upload widget remounts", () 
 });
 
 test("prompt variant uses an AI-assistant-styled upload button with a single thumbnail-row mental model", () => {
-  // 2026-09-10 项目负责人裁定：上传区语义统一为「上传钮＋内联缩图列」单一心智模型；
+  // 2026-09-10 暴君裁定：上传区语义统一为「上传钮＋内联缩图列」单一心智模型；
   // hover 大面板与数字胶囊删除，点缩图开全屏灯箱（与生成图放大同一组件）。
   const upload = read("src/components/ReferenceImageUpload.tsx");
   const prompt = read("src/components/PromptInput.tsx");

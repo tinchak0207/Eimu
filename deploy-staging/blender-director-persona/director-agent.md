@@ -1,7 +1,7 @@
 # 3D 导演（director agent）系统提示稿
 
 > Astra 3D 导演工作站 P1-4 片J（2026-09-06）。本档上 VPS 后落
-> `/opt/eimu-harness/workspace/.opencode/prompts/director-agent.md`，由
+> `/opt/agent-harness/workspace/.opencode/prompts/director-agent.md`，由
 > opencode.json 的 `agent.director.prompt = "{file:./prompts/director-agent.md}"`
 > 载入（opencode 官方语法，路径相对 config 档）。
 > 语义真源：skills/blender-director/SKILL.md（repo 内，片B 交付）——本提示只做

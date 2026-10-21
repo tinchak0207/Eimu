@@ -16,10 +16,10 @@ import { execFileSync } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 
-const DB_PATH = "/opt/eimu-harness/workspace/.local/share/opencode/opencode.db"
-const MODELS_PATH = "/opt/eimu-harness/agent-models.json"
-const ENV_PATH = "/opt/eimu-harness/.env"
-const RECALL_MODULE = "/opt/eimu-harness/gateway/memory-recall.ts"
+const DB_PATH = "/opt/agent-harness/workspace/.local/share/opencode/opencode.db"
+const MODELS_PATH = "/opt/agent-harness/agent-models.json"
+const ENV_PATH = "/opt/agent-harness/.env"
+const RECALL_MODULE = "/opt/agent-harness/gateway/memory-recall.ts"
 const REPORT_JSON = "/tmp/ab-memory-report.json"
 const REPORT_MD = "/tmp/ab-memory-report.md"
 const MODEL_ID = "deepseek-v4.1-flash"
@@ -543,12 +543,18 @@ async function runExperimentA(pair = PAIR_V1V2) {
       { system: null, user: mkPrompt(pair.left), maxTokens: 8000 },
       `A.${pair.leftLabel}.${id8}`,
     )
-    if (r1.budget) break
+    if (r1.budget) {
+      samples.push({ session: id8, user_messages: s.user_messages, error: "budget_skipped" })
+      break
+    }
     const r2 = await safeJson(
       { system: null, user: mkPrompt(pair.right), maxTokens: 8000 },
       `A.${pair.rightLabel}.${id8}`,
     )
-    if (r2.budget) break
+    if (r2.budget) {
+      samples.push({ session: id8, user_messages: s.user_messages, error: "budget_skipped" })
+      break
+    }
     const v1Parsed = r1.value
     const v2Parsed = r2.value
     const rec = {
@@ -607,7 +613,12 @@ async function runExperimentA(pair = PAIR_V1V2) {
     samples.push(rec)
   }
 
-  return { samples, metrics: aggregateA(samples), labels: { left: pair.leftLabel, right: pair.rightLabel } }
+  return {
+    selected: sessions.length,
+    samples,
+    metrics: aggregateA(samples),
+    labels: { left: pair.leftLabel, right: pair.rightLabel },
+  }
 }
 
 const A_DIMS = ["transferability", "evidence", "executability", "task_specificity_penalty"]
@@ -872,7 +883,7 @@ function buildMarkdown(report) {
   L.push("")
   L.push("## 实验 A：curator v1 vs v2")
   L.push("")
-  L.push(`- 样本量：选中 ${A.samples.length} 个会话，完成盲评 ${A.metrics.evaluated} 个`)
+  L.push(`- 样本量：选中 ${A.selected ?? A.samples.length} 个会话，记录 ${A.samples.length} 个，完成盲评 ${A.metrics.evaluated} 个`)
   L.push(`- 可用条数（description 与 body 非空）：v1 共 ${A.metrics.usable.v1_total}（均 ${fmt(A.metrics.usable.v1_mean)}/会话），v2 共 ${A.metrics.usable.v2_total}（均 ${fmt(A.metrics.usable.v2_mean)}/会话）`)
   L.push(`- 胜/平/负（v1 视角）：v1 胜 ${A.metrics.wins.v1}，平 ${A.metrics.wins.tie}，v2 胜 ${A.metrics.wins.v2}`)
   L.push("")
@@ -967,7 +978,7 @@ function buildMarkdownAOnly(report, pair) {
   lines.push("")
   lines.push(`## 实验 A：curator ${L} vs ${R}`)
   lines.push("")
-  lines.push(`- 样本量：选中 ${A.samples.length} 个会话，完成盲评 ${A.metrics.evaluated} 个`)
+  lines.push(`- 样本量：选中 ${A.selected ?? A.samples.length} 个会话，记录 ${A.samples.length} 个，完成盲评 ${A.metrics.evaluated} 个`)
   lines.push(`- 可用条数（description 与 body 非空）：${L} 共 ${A.metrics.usable.v1_total}（均 ${fmt(A.metrics.usable.v1_mean)}/会话），${R} 共 ${A.metrics.usable.v2_total}（均 ${fmt(A.metrics.usable.v2_mean)}/会话）`)
   lines.push(`- 胜/平/负（${L} 视角）：${L} 胜 ${A.metrics.wins.v1}，平 ${A.metrics.wins.tie}，${R} 胜 ${A.metrics.wins.v2}`)
   lines.push("")
@@ -1010,6 +1021,9 @@ function buildMarkdownAOnly(report, pair) {
     lines.push("- 无错误。")
   } else {
     for (const e of meta.errors) lines.push(`- ${e.where}: ${e.message}`)
+  }
+  for (const s of A.samples) {
+    if (s.error) lines.push(`- ${s.session}: ${s.error}`)
   }
   lines.push("")
   lines.push("> 报告不含任何原始对话或用户内容；会话 id 只保留 sha256 前 8 位。")

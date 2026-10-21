@@ -31,12 +31,12 @@
 部署机制是**逐档 SFTP**（`.gateway-work/sftp-put-443.js`），没有任何递回同步。
 目录结构不会被自动带上去，VPS 上必须：
 
-1. `mkdir -p /opt/eimu-harness/gateway/workflow-templates`
+1. `mkdir -p /opt/agent-harness/gateway/workflow-templates`
 2. 逐档上传（每个档一次 SFTP 调用，上传后比对 md5 `MATCH`）
-3. **删除或改名旧的 `/opt/eimu-harness/gateway/workflow-templates.ts`**——
+3. **删除或改名旧的 `/opt/agent-harness/gateway/workflow-templates.ts`**——
    extensionless 的 `./workflow-templates` 会优先命中 `.ts` 档而非目录，
    旧档留著会静默掩蔽整个新目录。
-4. 跑 `sudo /opt/eimu-harness/deploy.sh`（内含 `bun build` 语法闸；
+4. 跑 `sudo /opt/agent-harness/deploy.sh`（内含 `bun build` 语法闸；
    缺档会在闸就失败，不会带病重启）。
 
 ## 验证

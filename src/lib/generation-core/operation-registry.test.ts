@@ -123,7 +123,7 @@ test("FG-02：原生硬停（400/422/451）拒绝重放；暂时性原生状态�
   assert.equal(invalidRequest.allowed, false);
   assert.equal(invalidRequest.denialReason, "native_hard_stop");
 
-  // 402 = 项目负责人 2026-08-29 裁定 fail-fast（上游欠费重试无意义，立刻诚实失败＋退款；
+  // 402 = 暴君 2026-08-29 裁定 fail-fast（上游欠费重试无意义，立刻诚实失败＋退款；
   // 裁定原文见 failure-classifier.ts 的 quota_exhausted 分支）。D-4：registry 化不得
   // 静默把它改判成「可换道重放」——重放到预算/deadline 才退款是行为增量，且延后退款。
   const quota = planGenerationAttemptReplay({

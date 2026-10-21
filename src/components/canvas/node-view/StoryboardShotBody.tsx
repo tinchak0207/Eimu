@@ -16,7 +16,7 @@
 // 整组皆空则整组不渲染（组标题也不留），但 `shotNumber` 永远渲染（唯一键，契约保证非空）。
 //
 // 尺寸铁律：正文 ≥13px（DESIGN.md §4「正文不小于 13px」）；只有 eyebrow/label 走 11px。
-// 渲染验收权在项目负责人，本组件不做自我 UI 检查。
+// 渲染验收权在暴君，本组件不做自我 UI 检查。
 
 import { useState } from "react";
 import { Camera, Clock, Film, Link2, Link2Off, MessageSquareText } from "lucide-react";

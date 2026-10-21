@@ -102,7 +102,7 @@ test("carousel renders template cards with poster watermark and circular step se
   assert.match(source, /touch-none max-md:touch-pan-x/);
   // 键盘 click（detail=0）才在 onClick 切换。
   assert.match(source, /event\.detail !== 0/);
-  // 09-29 定稿（项目负责人两次否决「控件铺满卡面遮成片」）：卡面默认只有一行按钮，
+  // 09-29 定稿（暴君两次否决「控件铺满卡面遮成片」）：卡面默认只有一行按钮，
   // 环节收进「调整环节」展开的玻璃托盘（grid-rows 过渡，收起时 inert 不可聚焦）。
   assert.match(source, /const \[open, setOpen\] = useState\(false\)/);
   assert.match(source, /inert=\{!open\}/);

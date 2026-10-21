@@ -14,340 +14,17 @@
  *   - 批次报告  `memory-batches/{batch_id}.json`（镜像 §2 batches 路径语义）
  * 真正的存储权威写入仍只经 HMAC 端点（§3），本档不碰 blob。
  */
-import { createHmac } from "node:crypto"
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import {
-  applyMemoryGates,
-  stripJsonFence,
-  type AgentMemoryDocInput,
-  type CuratorCandidate,
-  type GateContext,
-} from "./memory-gate.ts"
 // 2026-10-19 批次审计：逐会话记 stored/no_docs（只记事件元资料，不改筛选/门禁/LLM 判定；
 // 审计失败只 warn，绝不影响批次）。
 // 2026-10-19 B1：批次同时是「该写记忆」信号队列的消费者——队列优先并入候选、
 // 会话产出后 markSignalDone、零产出则 attempts+1（≥5 次移入 failed/）。
-import {
-  appendMemoryAudit,
-  listPendingSignals,
-  markSignalDone,
-  recordSignalNoDocs,
-  type MemoryQueueRecord,
-} from "./memory-queue.ts"
-
-// ─────────────────────────── HMAC 签名工具（逐字比照 src/lib/memory-hmac.ts，契约 §3）
-// 为什么按 raw body bytes 验签：gateway 签的是它送出的那串位元组；repo 端一律
-// `await req.arrayBuffer()` 取原始位元组再算。GET（export）没有 body → 对「空 bytes」验签。
-// 凭据纪律：密钥与签名值永不写进 log／回应／记忆档。
-
-export const MEMORY_SIGNATURE_HEADER = "x-memory-signature"
-
-const SIGNATURE_PREFIX = "sha256="
-
-/** 产生 `sha256=<hex>` 签名（核心演算法逐字等同 repo 版 signMemoryBody）。 */
-export function signMemoryBody(rawBody: ArrayBuffer, secret: string): string {
-  const digest = createHmac("sha256", secret).update(new Uint8Array(rawBody)).digest("hex")
-  return `${SIGNATURE_PREFIX}${digest}`
-}
-
-/** gateway 包装：string/Uint8Array → 将送出的 raw bytes → 签名头值。 */
-export function signMemoryBytes(raw: string | Uint8Array, secret: string): string {
-  const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw
-  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-  return signMemoryBody(buffer, secret)
-}
-
-/** 签名 GET 用的空 bytes 签名（§3.3/3.4 召回语料拉取同此演算法）。 */
-export function signEmptyMemoryBody(secret: string): string {
-  return signMemoryBytes(new Uint8Array(0), secret)
-}
-
-// ─────────────────────────── 契约 §6 prompt（唯一真源，逐字，promptVersion="v1"）
-
-export const MEMORY_PROMPT_VERSION = "v3"
-
-export const CURATOR_PROMPT_V1 = `You are the memory curator for an AI image/video generation assistant.
-Input: one conversation transcript. Output: a single JSON object. Nothing else.
-
-You may propose memories of two scopes:
-- "private": facts about THIS user that help future sessions serve them (preferences, specs, recurring corrections, working habits). Only these may be private.
-- "shared": transferable DOMAIN KNOWLEDGE that any user of this product could benefit from - narrative structures, visual styles, cultural context, prompt techniques, industry conventions, domain facts learned from tool results. It MUST NOT contain anything identifying this user or this conversation.
-
-HARD RULES - a proposal violating any of these is discarded downstream by the system:
-- Every proposal MUST cite external evidence: a tool result, an explicit user confirmation, or a verbatim quote. Your own reasoning, inference, or pre-existing general knowledge is NOT evidence. If a statement is supported only by what you already knew, do not propose it.
-- "shared" proposals MUST NOT contain: user names, account ids, session ids, emails, URLs, file paths, prices, API keys, tokens, or any detail traceable to one user or one purchase.
-- Skip greetings, one-off requests, small talk, and anything derivable from the product itself (pricing tables, model lists, UI text).
-- Do not propose anything you cannot state in one sentence.
-- Write ONLY transferable long-term knowledge. Do NOT write the specific answer to this task, the output spec of this one request, or details of a single incident. For type="feedback", the body MUST state the cue (what signal triggered the correction), **Why:**, and **How to apply:**.
-- For failure/correction candidates, evidence MUST quote the failing tool result or the user's own words. If you only have reasoning and no evidence, do not propose it.
-- If the same knowledge already exists, do not propose it again in different words (the system deduplicates).
-- Only fill valid_to/supersedes when the conversation explicitly shows the old fact stopped being true or was replaced. Never guess. If unsure, leave empty.
-- observed_at must come from the conversation/tool result time, not from your own clock.
-
-Output schema (JSON only, no markdown fence):
-{"session_id":"<id>","candidates":[{"scope":"private|shared","domain":"<one-level domain>","slug":"<kebab-case>","description":"<one line, <=120 chars>","type":"user|feedback|project|domain|workflow","body":"<=2000 chars; for feedback/project include **Why:** and **How to apply:**","links":["<other-slug>"],"evidence":"<verbatim quote of the tool result or the user's words, <=200 chars>","evidence_kind":"tool_result|user_confirmed|verbatim","observed_at":"<ISO date when this fact was observed, or empty>","valid_from":"<ISO date when it became true, or empty>","valid_to":"<ISO date when it stopped being true, or empty>","supersedes":"<verbatim old fact this new fact replaces, or empty>","self_score":1-5,"self_score_reason":"<one line>"}],"rejected":[{"note":"<what you skipped>","reason":"one_off|greeting|derivable|no_evidence|sensitive"}]}`
-
-/** Verifier prompt（G8，仅 shared、换模型）——契约 §6 逐字；P1-1 本片接线进 runBatch。 */
-export const VERIFIER_PROMPT_V1 = `You are an independent fact-checker for a shared knowledge base used by an AI image/video generation assistant.
-Input: one candidate knowledge item. Answer three questions about it.
-
-1. TRANSFERABLE: Is this knowledge useful to a different user with a different project, or is it specific to one user's situation?
-2. EVIDENCED: Is this knowledge actually supported by the quoted evidence, or is it the model's own inference or general knowledge?
-3. CLEAN: Is it free of any user-identifying trace (names, account ids, session ids, emails, URLs, file paths, prices, keys)?
-
-Output JSON only: {"transferable":true|false,"evidenced":true|false,"clean":true|false,"reason":"<one line>"}
-A candidate is admitted only if all three are true.`
-
-/**
- * Oracle prompt（PRD §5.6 抽检、换模型）——【契约外新增常量】（§6 只有 curator/verifier），
- * 依 PRD 判据逐字面「准确？可迁移？无用户痕迹？」，每条 0/1/2 分。
- */
-export const ORACLE_PROMPT_V1 = `You are an independent quality oracle auditing one item admitted into a shared knowledge base used by an AI image/video generation assistant.
-Judge the item on three questions: is it accurate, is it transferable to a different user's project, and is it free of any user-identifying trace (names, account ids, session ids, emails, URLs, file paths, prices, keys)?
-Score the item 0, 1, or 2: 2 = passes all three; 1 = minor doubt on one aspect; 0 = fails any aspect decisively.
-Output JSON only: {"score":0|1|2,"reason":"<one line>"}`
-
-// ─────────────────────────── 形状
-
-/** 入库 doc：promptVersion 由批次盖章补上。 */
-export interface IngestDocInput extends AgentMemoryDocInput {}
-
-/** 筛选用会话元资料（wiring 适配：opencode 目录行 parentID/time.updated、gateway hashKey(apiKey)、讯息/工具计数）。 */
-export interface MemorySessionRecord {
-  id: string
-  /** 非空即 subagent 子会话 → 剔除（PRD §5.2 条件⑤）。 */
-  parentId?: string | null
-  /** ISO 字串或 epoch ms（opencode time.*）；「当日 updated」判定用。 */
-  updatedAt?: string | number
-  /** SHA-256(apiKey) 前 12 bytes hex（契约 §1，与 gateway hashKey 同算法）。 */
-  ownerKey?: string
-  userMessages?: number
-  successfulToolCalls?: number
-  /** 知识型工具呼叫数：筛选加权排序用（PRD §5.2 条件③）。 */
-  knowledgeToolCalls?: number
-}
-
-export interface MemoryBatchEnv {
-  [key: string]: string | undefined
-  MEMORY_INGEST_SECRET?: string
-  MEMORY_BATCH_ENABLED?: string
-  MEMORY_BATCH_MAX_SESSIONS?: string
-  MEMORY_BATCH_MAX_LLM?: string
-  MEMORY_SHARED_ENABLED?: string
-  /** G8 verifier 模型（`provider/model`）；未配置 → G8 跳过并诚实记 g8_skipped（不放过不误杀）。 */
-  MEMORY_VERIFIER_MODEL?: string
-  /** §5.6 oracle 抽检模型；未配置 → 抽检跳过并诚实记 sampling.skipped。 */
-  MEMORY_ORACLE_MODEL?: string
-  /** 批次状态档目录（默认 "."，即 gateway 进程 cwd 旁）。 */
-  MEMORY_STATE_DIR?: string
-}
-
-export interface MemoryBatchDeps {
-  listSessions(): Promise<MemorySessionRecord[]>
-  transcriptOf(sessionId: string): Promise<string>
-  /** 一次性 LLM 呼叫（wiring 用 handleExtractLessons 回环：建 session→POST→取 text→finally DELETE，120s 超时）。 */
-  callLlm(prompt: string): Promise<string>
-  /** G8 verifier（换模型，契约 §5/PRD §5.4）：prompt + `provider/model`；未配置时本档不呼叫。 */
-  callVerifierLlm(prompt: string, model: string): Promise<string>
-  /** §5.6 oracle 抽检（换模型）：同 verifier 通道形态；未配置时本档不呼叫。 */
-  callOracleLlm(prompt: string, model: string): Promise<string>
-  /** 送 ingest：rawBody 是即将送出的精确位元组（本档已按其签名，不得在实作端重新序列化）。 */
-  postIngest(
-    path: string,
-    rawBody: string,
-    headers: Record<string, string>,
-  ): Promise<{ status: number; json: unknown }>
-  env: MemoryBatchEnv
-  now(): Date
-}
-
-export interface MemoryBatchOptions {
-  dryRun?: boolean
-  sessionIds?: string[]
-  /** YYYY-MM-DD（UTC）；默认取 deps.now() 当日。 */
-  date?: string
-}
-
-/**
- * §5.6 抽检报告段（**零正文**）。shared 堆为判据主体；private 同机制只记 badge。
- * avg 为有效分数均值；全错时 null（不灌水 0）。
- */
-export interface MemorySamplingReport {
-  /** shared 抽检样本数（实际拿到 oracle 判分的条数）。 */
-  sampled: number
-  avg: number | null
-  /** true = 平均 <1.5 或任一 0 分 → 该批 shared 已全部转 pending_review。 */
-  triggered: boolean
-  /** oracle 呼叫失败数（基础设施失败≠候选有罪；不计入 avg，诚实计数）。 */
-  errors: number
-  /** oracle 未配置／LLM 预算耗尽时「本应抽检而未抽」的条数（shared＋private）；诚实旗标。 */
-  skipped: number
-  /** private 抽检中得分 <2 的条数（badge only，PRD §5.6 不自动转 pending）。 */
-  private_badged: number
-}
-
-/** 批次报告（契约 §3.5 形状；**不含任何正文**）。 */
-export interface MemoryBatchReport {
-  batch_id: string
-  date: string
-  dry_run: boolean
-  candidates: number
-  passed: number
-  stored: number
-  /** 端点判定「与既有记忆重复已合并确认」的条数（noop，不重复写入）；不含在 stored。 */
-  noop: number
-  /** 端点判定「旧记忆已被新文档取代」的条数（superseded；新文档通常已 accepted）。 */
-  superseded: number
-  rejected: Record<string, number>
-  truncations: { sessions: number; llm_budget_hit: boolean }
-  /** G8 诚实旗标：shared 候选因 `MEMORY_VERIFIER_MODEL` 未配置而跳过验证的条数。 */
-  g8_skipped: number
-  /** G8 抽检段（入库后）；未送 ingest（dryRun／无候选）时各栏为 0／null。 */
-  sampling: MemorySamplingReport
-  /** B1 信号队列对账：batch 开始时的待处理数 vs 本批实际消费/无产出/丢弃数。 */
-  queue: {
-    pending: number
-    consumed: number
-    no_docs: number
-    failed: number
-  }
-  /** B3 账本：应处理 vs 实处理、LLM 次数、候选/入库/拒绝数；errors 为断言式自检结果。 */
-  ledger: {
-    sessions_selected: number
-    sessions_processed: number
-    llm_calls: number
-    docs_proposed: number
-    docs_stored: number
-    docs_rejected: number
-    budget_hit: boolean
-    errors: string[]
-  }
-  report_path?: string
-}
-
-interface PendingEnvelope {
-  batch_id: string
-  created_at: string
-  attempts: number
-  next_retry_at: number
-  /** 将送出的精确 raw JSON bytes（string），重试时原位元重发——签名必须对同一串。 */
-  raw_body: string
-}
-
-interface CursorState {
-  processed: Record<string, { at: string; produced: boolean }>
-}
-
-// ─────────────────────────── 常量
-
-const INGEST_PATH = "/api/agent/memory/ingest"
-const REVIEW_PATH = "/api/agent/memory/review"
-const CONCURRENCY = 3
-const MAX_ATTEMPTS = 5 // 指数退避上限（含跨 run 重试），超过落 memory-failed/
-const DEFAULT_MAX_SESSIONS = 50
-const DEFAULT_MAX_LLM = 150
-const CURSOR_FILE = "memory-cursor.json"
-const PENDING_DIR = "memory-pending"
-const FAILED_DIR = "memory-failed"
-const REPORTS_DIR = "memory-batches"
-// badcase 集（PRD §5.6）：【本地决定】比照 pending 目录系（见档头），落 `memory-badcases/`。
-const BADCASES_DIR = "memory-badcases"
-/** §5.6 抽检判据常量：30%、最少 3（不足全抽）、平均 <1.5 或任一 0 分触发。 */
-const SAMPLING_RATE = 0.3
-const SAMPLING_MIN = 3
-const SAMPLING_AVG_TRIGGER = 1.5
-
-const DEFAULTS = {
-  maxSessions: DEFAULT_MAX_SESSIONS,
-  maxLlm: DEFAULT_MAX_LLM,
-} as const
-
-// ─────────────────────────── 小工具（纯函式）
-
-function envInt(raw: string | undefined, fallback: number): number {
-  const n = Number.parseInt(String(raw ?? ""), 10)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
-function envBool(raw: string | undefined, fallback: boolean): boolean {
-  const v = String(raw ?? "").trim().toLowerCase()
-  if (v === "") return fallback
-  return v === "1" || v === "true" || v === "yes" || v === "on"
-}
-
-function isoDateOf(value: string | number | undefined): string {
-  if (value === undefined || value === null) return ""
-  const ms = typeof value === "number" ? value : Date.parse(value)
-  if (!Number.isFinite(ms)) return ""
-  return new Date(ms).toISOString().slice(0, 10)
-}
-
-function epochOf(value: string | number | undefined): number {
-  if (value === undefined || value === null) return 0
-  const ms = typeof value === "number" ? value : Date.parse(value)
-  return Number.isFinite(ms) ? ms : 0
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** 并发池（上限 limit；回呼自行 try/catch，永不抛出中断池）。 */
-async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
-  let cursor = 0
-  const workerCount = Math.max(1, Math.min(limit, items.length))
-  const workers: Promise<void>[] = []
-  for (let w = 0; w < workerCount; w += 1) {
-    workers.push(
-      (async () => {
-        while (cursor < items.length) {
-          const index = cursor
-          cursor += 1
-          await fn(items[index])
-        }
-      })(),
-    )
-  }
-  await Promise.all(workers)
-}
-
-/** 抽检量（§5.6）：30%，最少 3；不足 3 条全抽。 */
-function sampleSize(total: number): number {
-  if (total <= 0) return 0
-  if (total < SAMPLING_MIN) return total
-  return Math.min(total, Math.max(SAMPLING_MIN, Math.ceil(total * SAMPLING_RATE)))
-}
-
-/** Fisher–Yates 洗牌取前 k（随机抽样，原地不改输入）。 */
-function shuffleSample<T>(items: T[], k: number): T[] {
-  const pool = [...items]
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const tmp = pool[i]
-    pool[i] = pool[j]
-    pool[j] = tmp
-  }
-  return pool.slice(0, k)
-}
-
-/** 档名安全化（docId 理论上已是 `${batch}-${slug}`，防卫性剥分隔符）。 */
-function safeFileSegment(value: string): string {
-  return String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 120)
-}
-
-/** 均值保留 4 位小数（报告可读；比较用四舍五入后值，触发边界与原始判据一致）。 */
-function roundAvg(sum: number, count: number): number {
-  return Math.round((sum / count) * 1e4) / 1e4
-}
+import { applyMemoryGates, stripJsonFence, type CuratorCandidate, type GateContext } from "./memory-gate.ts"
+import { appendMemoryAudit, listPendingSignals, markSignalDone, recordSignalNoDocs, type MemoryQueueRecord } from "./memory-queue.ts"
+import { MEMORY_SIGNATURE_HEADER, signMemoryBytes } from "./memory-batch-http.ts"
+import { MEMORY_PROMPT_VERSION, CURATOR_PROMPT_V1, VERIFIER_PROMPT_V1, ORACLE_PROMPT_V1, type IngestDocInput, type MemoryAcceptedRef, type MemorySessionRecord, type MemoryBatchEnv, type MemoryBatchDeps, type MemoryBatchOptions, type MemorySamplingReport, type MemoryBatchReport, type PendingEnvelope, type CursorState } from "./memory-batch-types.ts"
+import { INGEST_PATH, REVIEW_PATH, CONCURRENCY, MAX_ATTEMPTS, DEFAULT_MAX_SESSIONS, DEFAULT_MAX_LLM, CURSOR_FILE, PENDING_DIR, FAILED_DIR, REPORTS_DIR, BADCASES_DIR, SAMPLING_AVG_TRIGGER, DEFAULTS, envInt, envBool, isoDateOf, epochOf, mapPool, sampleSize, shuffleSample, safeFileSegment, roundAvg, acceptedRefInputIdentity, parseAcceptedRefs, memoryIdentityKey } from "./memory-batch-store.ts"
 
 // ─────────────────────────── 工厂
 
@@ -416,7 +93,16 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
   }
 
   async function attemptPost(rawBody: string): Promise<{ ok: boolean; json: Record<string, unknown> | null }> {
-    return postSigned(INGEST_PATH, rawBody)
+    const result = await postSigned(INGEST_PATH, rawBody)
+    if (result.ok) {
+      // 仅 ingest 成功（批次首送与 pending 重放都经此处）：通知语料快取失效。异常吞掉。
+      try {
+        deps.onIngestSuccess?.()
+      } catch {
+        /* 快取失效失败不影响批次结果与账本 */
+      }
+    }
+    return result
   }
 
   function writePending(env: PendingEnvelope): void {
@@ -511,6 +197,9 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       stored: 0,
       noop: 0,
       superseded: 0,
+      accepted_refs_fallback: 0,
+      accepted_refs_unmatched: 0,
+      rejected_refs_unmatched: 0,
       rejected: {},
       truncations: { sessions: 0, llm_budget_hit: false },
       g8_skipped: 0,
@@ -599,9 +288,10 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
     report.ledger.sessions_selected = candidates.length
 
     const docs: IngestDocInput[] = []
-    // 审计（2026-10-19）：逐会话记录本轮产出的 slug，供 ingest 回执后换算 stored 数。
-    // 只影响审计，不参与筛选、门禁、预算或入库决策。用 Set 去重（同会话可产出同名 slug）。
-    const sessionDocSlugs = new Map<string, Set<string>>()
+    // 审计（2026-10-19）：逐会话记录本轮产出的文档身份键，供 ingest 回执后换算 stored 数。
+    // 只影响审计，不参与筛选、门禁、预算或入库决策。身份键＝scope|ownerKey|domain|slug：
+    // 同 slug 不同 domain / owner 必须分别计数（旧 slug Set 会少计）。
+    const sessionDocKeys = new Map<string, Set<string>>()
     // B3 账本：真正进入处理（transcript/LLM）的会话集合；预算跳过的不算。
     const processedSessions = new Set<string>()
     let llmUsed = 0
@@ -703,16 +393,60 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
      * 签名通道；repo 端预设只翻 shared，见 store reviewMemoryDocs）。
      * private 同机制判分但只记 badge 不翻转（PRD §5.6）。
      */
-    async function runSampling(acceptedIds: string[]): Promise<void> {
+    async function runSampling(acceptedIds: string[], acceptedRefs: MemoryAcceptedRef[] = []): Promise<void> {
       const sampling = report.sampling
       const acceptedSet = new Set(acceptedIds)
+      // 2026-10-19：store 改用确定性 id `mem-<hash>`，旧 `${batchId}-${slug}` 匹配会全部落空
+      // （stored=1 / sampled=0 / skipped=0，审计 no_docs）。优先按 refs 的
+      // scope|ownerKey|domain|slug 映射；同 key 取最后一条（与回执顺序一致）。
+      const refByKey = new Map<string, MemoryAcceptedRef>()
+      // 旧端点/部分回执可能不带 ownerKey（private 亦然）：记录 scope|domain|slug 组，
+      // 仅在「唯一」时作为弱匹配兜底，避免跨 owner 同名 slug 误配。
+      const weakByKey = new Map<string, MemoryAcceptedRef[]>()
+      for (const ref of acceptedRefs) {
+        if (!acceptedSet.has(ref.id)) continue
+        // shared 近重复合并：ref.domain/slug 是落盘 target（已存在），候选身份在 input*；
+        // 建映射时优先 input，缺 input 才用 target，确保抽检命中本批候选。
+        const identity = acceptedRefInputIdentity(ref)
+        refByKey.set(memoryIdentityKey({ scope: ref.scope, ownerKey: ref.ownerKey, ...identity }), ref)
+        const weakKey = `${ref.scope}|${identity.domain}|${identity.slug}`
+        const list = weakByKey.get(weakKey)
+        if (list) list.push(ref)
+        else weakByKey.set(weakKey, [ref])
+      }
       const pairs: Array<{ id: string; doc: IngestDocInput }> = []
       for (const doc of docs) {
-        // 服务端 id = `${batchId}-${slug}`。只认本批前缀的精确 id：旧的纯后缀兜底会让
-        // 跨会话同名 slug 命中别人的 accepted id，把抽检结果写到错误 id。
+        let ref = refByKey.get(memoryIdentityKey(doc))
+        if (!ref) {
+          const weak = weakByKey.get(`${doc.scope}|${doc.domain}|${doc.slug}`)
+          if (weak && weak.length === 1) ref = weak[0]
+        }
+        if (ref) {
+          pairs.push({ id: ref.id, doc })
+          continue
+        }
+        // fallback（refs 缺失/未覆盖该条时）：旧 `${batchId}-${slug}` 精确 id + 唯一后缀。
+        // 纯后缀兜底仅在唯一命中时采用，避免跨会话同名 slug 命中别人的 accepted id。
         const expected = `${batchId}-${doc.slug}`
-        if (acceptedSet.has(expected)) pairs.push({ id: expected, doc })
+        if (acceptedSet.has(expected)) {
+          pairs.push({ id: expected, doc })
+          report.accepted_refs_fallback = (report.accepted_refs_fallback ?? 0) + 1
+          continue
+        }
+        const suffixMatches = acceptedIds.filter((id) => id.endsWith(`-${doc.slug}`))
+        if (suffixMatches.length === 1) {
+          pairs.push({ id: suffixMatches[0], doc })
+          report.accepted_refs_fallback = (report.accepted_refs_fallback ?? 0) + 1
+        }
       }
+      // 3) 报告可见性：accepted id 既没有被 refs 命中、旧 fallback 也未命中 → 计数。
+      // 不计入 skipped（skipped 的语义固定为「无 oracle 模型/预算」），也绝不静默吞掉。
+      const matchedIds = new Set(pairs.map((pair) => pair.id))
+      let unmatched = 0
+      for (const id of acceptedIds) {
+        if (!matchedIds.has(id)) unmatched += 1
+      }
+      if (unmatched > 0) report.accepted_refs_unmatched = (report.accepted_refs_unmatched ?? 0) + unmatched
       const sharedPairs = pairs.filter((pair) => pair.doc.scope === "shared")
       const privatePairs = pairs.filter((pair) => pair.doc.scope === "private")
       if (!oracleModel) {
@@ -768,8 +502,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       llmUsed += 1
       // 进入逐会话处理（含后续 transcript/LLM 失败路径）才计入审计；预算跳过的不算「处理过」。
       processedSessions.add(session.id)
-      const sessionSlugs = new Set<string>()
-      sessionDocSlugs.set(session.id, sessionSlugs)
+      const sessionKeys = new Set<string>()
+      sessionDocKeys.set(session.id, sessionKeys)
       const mark = (produced: boolean) => {
         cursor.processed[session.id] = { at: nowDate.toISOString(), produced }
       }
@@ -845,7 +579,7 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         }
         report.passed += 1
         docs.push(doc)
-        sessionSlugs.add(doc.slug)
+        sessionKeys.add(memoryIdentityKey(doc))
         produced = true
       }
       mark(produced)
@@ -853,8 +587,10 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
 
     // 写入：只认端点回执 accepted（§3.1「真写入」）；非 dryRun 才发。
     const acceptedIds: string[] = []
-    // 服务端拒绝的 slug 集合（审计归属用；rejected 形状 {slug, reason}）。
-    const rejectedSlugs = new Set<string>()
+    /** store 确定性 id 回执（2026-10-19）；旧端点不返回时为空，后续走 legacy fallback。 */
+    let acceptedRefs: MemoryAcceptedRef[] = []
+    // 服务端拒绝的身份键集合（审计归属用；旧 rejected 形状只有 {slug, reason}）。
+    const rejectedKeys = new Set<string>()
     if (!dryRun && docs.length > 0) {
       const body = {
         batch_id: batchId,
@@ -865,6 +601,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       const { ok, json } = await attemptPost(rawBody)
       if (ok) {
         const accepted = Array.isArray(json?.accepted) ? (json?.accepted as unknown[]) : []
+        // 2026-10-19：确定性 id 回执（snake/camel 均可）；解析失败/缺省 → 空，保留旧匹配。
+        acceptedRefs = parseAcceptedRefs(json?.accepted_refs ?? json?.acceptedRefs)
         // proposals＝未提升的正文提案（live 未变），不是真写入：不计 stored、不进
         // acceptedIds、不参与抽检，也不参与 stored/no_docs 审计归属。
         const proposals = Array.isArray(json?.proposals) ? (json?.proposals as unknown[]) : []
@@ -877,18 +615,48 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
         report.superseded = superseded.length
         for (const id of accepted) acceptedIds.push(String(id))
         const rejected = Array.isArray(json?.rejected)
-          ? (json?.rejected as Array<{ slug?: unknown; reason?: unknown }>)
+          ? (json?.rejected as Array<{
+              slug?: unknown
+              reason?: unknown
+              scope?: unknown
+              domain?: unknown
+              ownerKey?: unknown
+              owner_key?: unknown
+            }>)
           : []
         for (const r of rejected) {
           const slug = typeof r?.slug === "string" ? r.slug : ""
-          if (slug) rejectedSlugs.add(slug)
+          if (slug) {
+            // 1) 新回执带 scope+domain（+ownerKey）→ 直接组完整身份键（权威归属）。
+            const rScope = typeof r?.scope === "string" ? r.scope : ""
+            const rDomain = typeof r?.domain === "string" ? r.domain : ""
+            const rOwner =
+              typeof r?.ownerKey === "string"
+                ? r.ownerKey
+                : typeof r?.owner_key === "string"
+                  ? r.owner_key
+                  : undefined
+            if (rScope && rDomain) {
+              rejectedKeys.add(memoryIdentityKey({ scope: rScope, ownerKey: rOwner, domain: rDomain, slug }))
+            } else {
+              // 2) 旧形状（只有 slug）：仅当该 slug 在本批是**唯一身份**时才标 rejected。
+              // 同 slug 多身份（含 mda accepted + mdb rejected）无法唯一确定 → 不标任何一条，
+              // 宁可少标不可误标（稍后 accepted 键还会从 rejectedKeys 中剔除），并计数可见。
+              const identityKeys = new Set(docs.filter((doc) => doc.slug === slug).map((doc) => memoryIdentityKey(doc)))
+              if (identityKeys.size === 1) {
+                rejectedKeys.add([...identityKeys][0])
+              } else {
+                report.rejected_refs_unmatched = (report.rejected_refs_unmatched ?? 0) + 1
+              }
+            }
+          }
           bump(`server_${typeof r?.reason === "string" ? r.reason : "unknown"}`)
         }
         if (accepted.length + proposals.length + noop.length < docs.length && rejected.length === 0) {
           bump("server_silent_loss") // 回执不齐：端点没给逐条原因（G7 截断除外），记帐不吞。
         }
         // §5.6：端点回执 accepted 之后才抽检（未写入的没有品质可审）。
-        await runSampling(accepted.map((id) => String(id)))
+        await runSampling(accepted.map((id) => String(id)), acceptedRefs)
       } else {
         // 非 2xx／网路失败 → 写 pending 档（指数退避重试由 drainPending 接手）。
         writePending({
@@ -911,8 +679,8 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       for (const sessionId of processedSessions) {
         const kinds = queuedKindsById.get(sessionId)
         if (!kinds) continue // 非队列会话：不碰队列。
-        const slugs = sessionDocSlugs.get(sessionId)
-        if (slugs && slugs.size > 0) {
+        const keys = sessionDocKeys.get(sessionId)
+        if (keys && keys.size > 0) {
           if (await markSignalDone(sessionId)) {
             report.queue.consumed += 1
             void appendMemoryAudit({ event: "drained", sessionId, kinds })
@@ -938,22 +706,45 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
       // stored 归属只按 accepted（真写入）计：proposals（未提升提案）不在 acceptedIds，
       // 天然不计入。G5 更新可能沿用旧批次 id：仅当该 id 在本批 docs 中对应唯一 slug
       // 后缀时才归属；跨会话同名后缀有歧义则不归属（宁缺勿错）。
-      const acceptedSlugs = new Set<string>()
+      const acceptedKeys = new Set<string>()
+      // 2026-10-19：优先按 accepted_refs 归属（确定性 id `mem-<hash>` 不含 slug）。
+      // 近重复合并时 ref.domain/slug 是已存在的 target，必须用 input*（候选身份）归属本批。
+      // 只认 acceptedSet 内的 ref；refs 未覆盖的 accepted id 才走旧前缀/唯一后缀匹配。
+      const acceptedSet = new Set(acceptedIds)
+      const refCoveredIds = new Set<string>()
+      for (const ref of acceptedRefs) {
+        if (!acceptedSet.has(ref.id)) continue
+        const identity = acceptedRefInputIdentity(ref)
+        acceptedKeys.add(memoryIdentityKey({ scope: ref.scope, ownerKey: ref.ownerKey, ...identity }))
+        // refs 未带 ownerKey：用本批候选唯一匹配补精确身份键（与抽检弱匹配同规则）。
+        // 两 owner 同 slug 时匹配不唯一 → 不归属（宁缺勿错，抽检侧另有 unmatched 计数）。
+        if (ref.ownerKey === undefined) {
+          const matches = docs.filter(
+            (doc) => doc.scope === ref.scope && doc.domain === identity.domain && doc.slug === identity.slug,
+          )
+          if (matches.length === 1) acceptedKeys.add(memoryIdentityKey(matches[0]))
+        }
+        refCoveredIds.add(ref.id)
+      }
       for (const id of acceptedIds) {
+        if (refCoveredIds.has(id)) continue
         const exact = docs.find((doc) => `${batchId}-${doc.slug}` === id)
         if (exact) {
-          acceptedSlugs.add(exact.slug)
+          acceptedKeys.add(memoryIdentityKey(exact))
           continue
         }
         const suffixMatches = docs.filter((doc) => id.endsWith(`-${doc.slug}`))
-        if (suffixMatches.length === 1) acceptedSlugs.add(suffixMatches[0].slug)
+        if (suffixMatches.length === 1) acceptedKeys.add(memoryIdentityKey(suffixMatches[0]))
       }
-      for (const [sessionId, slugs] of sessionDocSlugs) {
-        // 精确归属（P2-5）：只看本会话产出的 slug 集合里真正出现在 accepted 的条目；
-        // 未写入（含 proposals）与 rejected 一律不算 stored。
+      // accepted 优先：同批同 slug／同身份既有 accepted 又有 rejected 回执时（如 mda 写入、
+      // mdb time_range 被拒），不能因 rejected 键把已写入身份排除出 stored。
+      for (const key of acceptedKeys) rejectedKeys.delete(key)
+      for (const [sessionId, keys] of sessionDocKeys) {
+        // 精确归属（P2-5）：只看本会话产出的身份键里真正出现在 accepted 的条目；
+        // 未写入（含 proposals）与 rejected 一律不算 stored。同 slug 不同 domain 分别计数。
         let stored = 0
-        for (const slug of slugs) {
-          if (acceptedSlugs.has(slug) && !rejectedSlugs.has(slug)) stored += 1
+        for (const key of keys) {
+          if (acceptedKeys.has(key) && !rejectedKeys.has(key)) stored += 1
         }
         if (stored > 0) void appendMemoryAudit({ event: "stored", sessionId, stored })
         else void appendMemoryAudit({ event: "no_docs", sessionId })
@@ -988,3 +779,6 @@ export function createMemoryBatch(deps: MemoryBatchDeps) {
 
   return { runBatch, drainPending }
 }
+export { MEMORY_SIGNATURE_HEADER, signMemoryBody, signMemoryBytes, signEmptyMemoryBody } from "./memory-batch-http.ts"
+export { MEMORY_PROMPT_VERSION, CURATOR_PROMPT_V1, VERIFIER_PROMPT_V1, ORACLE_PROMPT_V1 } from "./memory-batch-types.ts"
+export type { IngestDocInput, MemoryAcceptedRef, MemorySessionRecord, MemoryBatchEnv, MemoryBatchDeps, MemoryBatchOptions, MemorySamplingReport, MemoryBatchReport } from "./memory-batch-types.ts"

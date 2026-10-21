@@ -28,7 +28,7 @@ const COLLAPSED_PREVIEW_CHARS = 40;
  * <button> 当唯一开关：全站已有一条「元件内禁止 <button> 嵌 <button>」的硬断言
  * （agent-chat-ui.test.ts 的 hasNestedButtons），这张卡不制造第二颗。
  *
- * 2026-09-20 项目负责人细化裁定：
+ * 2026-09-20 暴君细化裁定：
  *   ①「临时」进行中标记拔掉（provisional 旗标不再渲染，资料层原样保留）；
  *   ②正文不再另起宽块（旧版视觉上从中间开始），改与「计划」标签同行排——
  *     正文从标签紧邻右边开始，多行时在剩余宽度内折行；

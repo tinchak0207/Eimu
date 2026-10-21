@@ -41,13 +41,13 @@ test("语音库逐条对得上实查清单（id 全集与 Gender 都是清单原
     const entry = describeVoice(id);
     assert.ok(entry, `实查清单里的 ${id} 必须在语音库中可描述`);
     assert.equal(entry!.gender, gender, `${id} 的 Gender 必须是清单原值`);
-    assert.equal(entry!.route, "edge");
+    assert.equal(entry!.route, "fallback", "5e46b701 起 edge 音色是主路 SiliconFlow 的 fallback");
     assert.ok(entry!.name.length > 0, "每条都要有 Name");
     assert.ok(entry!.description?.length, `${id} 的 Description 由清单原值组成，不得为空`);
-    assert.ok(entry!.source.includes("edge_tts"), "每条都要记下实查来源");
+    assert.match(entry!.source, /实查/, "每条都要记下实查来源");
   }
   // 反向：语音库里不得出现清单外的 edge 音色（避免手写想像值混进来）。
-  const libraryEdgeIds = VOICE_LIBRARY.filter((v) => v.route === "edge" && !(v.id in VOICE_ALIASES)).map((v) => v.id);
+  const libraryEdgeIds = VOICE_LIBRARY.filter((v) => v.route === "fallback" && !(v.id in VOICE_ALIASES)).map((v) => v.id);
   assert.deepEqual(libraryEdgeIds.slice().sort(), Object.keys(EDGE_ORACLE).sort());
 });
 
@@ -67,11 +67,13 @@ test("别名逐字对得上上游 VOICE_ALIASES，且别名本身是可提交值
   }
 });
 
-test("已知缺陷被钉住：shimmer 指向的 zh-CN-XiaoyouNeural 已不在 Microsoft 现行清单", () => {
-  // 这是上游 proxy 的缺陷（不在本刀修：要改 + 部署 VPS）。本测试把它变成事实，
-  // 哪天 proxy 修好了、或 Microsoft 复活该音色，这条会红，逼人回来更新事实。
-  assert.equal(VOICE_ALIASES.shimmer, "zh-CN-XiaoyouNeural");
-  assert.equal(describeVoice("zh-CN-XiaoyouNeural"), undefined, "不在实查清单里 ⇒ 描述不出来");
+test("shimmer 指向清单内真实存在的音色（不再指向已下架的 zh-CN-XiaoyouNeural）", () => {
+  // 08ff5b6e：shimmer 从已下架的 zh-CN-XiaoyouNeural 改为 zh-CN-XiaoyiNeural。
+  // 这里同时钉住「别名目标必须在实查清单内且可描述」，防止以后又指向幽灵音色。
+  assert.equal(VOICE_ALIASES.shimmer, "zh-CN-XiaoyiNeural");
+  assert.ok(VOICE_ALIASES.shimmer in EDGE_ORACLE, "别名目标必须在 Microsoft 现行清单内");
+  assert.ok(describeVoice(VOICE_ALIASES.shimmer), "别名目标必须可描述");
+  assert.equal(describeVoice("zh-CN-XiaoyouNeural"), undefined, "已下架音色仍不在实查清单里");
 });
 
 test("接受集 ≠ 描述集：上游按模式接受的音色可提交但描述不出来", () => {

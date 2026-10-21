@@ -11,7 +11,7 @@
  * 测试只拿被测函式的输出与这张死表比对。
  *
  * 执行器（2026-09-28 现场校正）：**VPS 有 bun**（`~/.bun/bin/bun`，agent-gateway.service
- * 就是以 `bun run index.ts` 跑的）。权威跑法（在 /opt/eimu-harness/gateway 下）：
+ * 就是以 `bun run index.ts` 跑的）。权威跑法（在 /opt/agent-harness/gateway 下）：
  *   export PATH=$HOME/.bun/bin:$PATH
  *   bun test workflow-templates/workflow-templates.test.ts
  *

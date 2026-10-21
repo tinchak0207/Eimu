@@ -399,7 +399,7 @@ export function collectAncestorAssetIds(
 }
 
 /**
- * **挂用＝copy-on-use**（REQ-B2b，项目负责人 09-23 裁定）：在目标项目建本地副本（内容本体），
+ * **挂用＝copy-on-use**（REQ-B2b，暴君 09-23 裁定）：在目标项目建本地副本（内容本体），
  * lineage 记一条指向来源的 `derivation` 边，再落幂等挂用记录。
  *
  * 不变量：

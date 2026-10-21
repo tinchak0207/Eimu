@@ -7,7 +7,7 @@ export const CHAT_PANEL_MIN_WIDTH = 320;
 export const CHAT_PANEL_MAX_WIDTH = 720;
 
 /**
- * 宽度持久化 v2 key（2026-09-24 垃圾值大赦，项目负责人回报「Ctrl+Shift+R 聊天框先占
+ * 宽度持久化 v2 key（2026-09-24 垃圾值大赦，暴君回报「Ctrl+Shift+R 聊天框先占
  * 几乎半屏、秒缩回 30% 以下，非常恐怖」）：只认「用户真的拖过宽」写入的值。
  * 旧 key（v1 时代）存的是垃圾——useState(420) 时代 mount effect 无条件落盘 420、
  * 40vw mount effect 落盘旧视口快照——视口变了或从未手动拖过时该值 ≠ CSS 默认，

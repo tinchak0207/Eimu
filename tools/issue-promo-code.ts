@@ -167,7 +167,7 @@ function gatewayBaseUrl(options: Options): string {
   return (
     options.baseUrl ??
     process.env.GATEWAY_BASE_URL ??
-    "https://store.eimu.dev/newapi"
+    "https://store.tinchak0207.xyz/newapi"
   );
 }
 

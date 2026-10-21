@@ -25,8 +25,8 @@ test("buildHistoryArchive 摊平工作流参数并保留原始 workflow", () => 
       starred: true,
       quota: 1_000_000,
       results: [
-        { provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: "https://x/a.png" },
-        { provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: null },
+        { provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://x/a.png" },
+        { provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: null },
       ],
       workflow: { imageSize: "1024x1024", workflowPresetLabel: "商品图", qualityProfile: "print" },
     }),
@@ -69,7 +69,7 @@ test("entryFileName 把音频来源的副档名带进 zip 条目名", () => {
     prompt: "轻快的钢琴曲",
     results: [
       {
-        provider: "audio_eimu",
+        provider: "audio_tinchak",
         modelId: "music-1",
         image: null,
         imageUrl: null,
@@ -84,7 +84,7 @@ test("entryFileName 把音频来源的副档名带进 zip 条目名", () => {
     generatedAt: 1_700_000_000_000,
     prompt: "旁白",
     results: [
-      { provider: "audio_eimu", modelId: "tts-1", image: null, imageUrl: null, audioUrl: "https://blob.example/voice.m4a" },
+      { provider: "audio_tinchak", modelId: "tts-1", image: null, imageUrl: null, audioUrl: "https://blob.example/voice.m4a" },
     ],
   });
   assert.match(entryFileName(m4a), /\.m4a$/);
@@ -95,7 +95,7 @@ test("entryFileName 对图片沿用 .png（含 base64 无 URL）", () => {
     id: "img",
     generatedAt: 1_700_000_000_000,
     prompt: "一只猫",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/cat.png" }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/cat.png" }],
   });
   assert.match(entryFileName(imageEntry), /\.png$/);
 
@@ -103,7 +103,7 @@ test("entryFileName 对图片沿用 .png（含 base64 无 URL）", () => {
     id: "b64",
     generatedAt: 1_700_000_000_000,
     prompt: "一只狗",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: "AAAA", imageUrl: null }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: "AAAA", imageUrl: null }],
   });
   assert.match(entryFileName(base64Entry), /\.png$/);
 });
@@ -114,7 +114,7 @@ test("纯视频记录：entrySrc 认得 videoUrl（不再被判 skipped），条
     generatedAt: 1_700_000_000_000,
     prompt: "海边日落",
     results: [
-      { provider: "video_eimu", modelId: "seedance-2.0", image: null, imageUrl: null, videoUrl: "https://blob.example/clip.mp4", mediaType: "video" },
+      { provider: "video_tinchak", modelId: "seedance-2.0", image: null, imageUrl: null, videoUrl: "https://blob.example/clip.mp4", mediaType: "video" },
     ],
   });
   // entrySrc 返回非空即代表 exportHistoryZip 不会把它计入 skipped。
@@ -229,13 +229,13 @@ test("批量导出：一张取图逾时 → 该张 skipped，其余照常，zip 
     id: "good",
     generatedAt: 1_700_000_000_000,
     prompt: "好图",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/good.png" }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/good.png" }],
   });
   const bad = entry({
     id: "bad",
     generatedAt: 1_700_000_010_000,
     prompt: "坏图",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/bad.png" }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/bad.png" }],
   });
 
   const { result, names, manifest } = await runZipExport(

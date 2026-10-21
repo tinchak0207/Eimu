@@ -41,7 +41,7 @@ test("MODEL_ROUTES：registry 直连步骤必须有对应 claim（否则 seed �
   }
 });
 
-test("生产校准：gpt-image-2 系顺序＝yyds > adobe2api > newapi", () => {
+test("生产校准：gpt-image-2 系顺序＝yyds > adobe2api > newapi（2026-10-03 改：yyds 1K/2K/4K 统一 0.016 元/次为最低价）", () => {
   assert.deepEqual([...MODEL_ROUTES["gpt-image-2"]], ["yyds", "adobe2api", "newapi"]);
   assert.deepEqual([...MODEL_ROUTES["gpt-image-2.5-flare"]], ["yyds", "adobe2api", "newapi"]);
   assert.deepEqual([...MODEL_ROUTES["gpt-image-2.5-sunburst"]], ["yyds", "adobe2api", "newapi"]);

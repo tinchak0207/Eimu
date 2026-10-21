@@ -57,9 +57,9 @@ test("fetchImageResponse 对 http(s) 源补 ?dl=1 且 no-store", async () => {
     return new Response(new Blob(["x"]), { status: 200 });
   }) as typeof fetch;
   try {
-    await imageHelpers.fetchImageResponse("https://store.eimu.dev/image-data/files/a.png");
+    await imageHelpers.fetchImageResponse("https://store.tinchak0207.xyz/image-data/files/a.png");
     assert.deepEqual(calls, [
-      { url: "https://store.eimu.dev/image-data/files/a.png?dl=1", cache: "no-store" },
+      { url: "https://store.tinchak0207.xyz/image-data/files/a.png?dl=1", cache: "no-store" },
     ]);
   } finally {
     globalThis.fetch = original;
@@ -74,8 +74,8 @@ test("fetchImageResponse 源已有 query 时用 & 追加 dl=1", async () => {
     return new Response(new Blob(["x"]), { status: 200 });
   }) as typeof fetch;
   try {
-    await imageHelpers.fetchImageResponse("https://store.eimu.dev/a.png?token=t1");
-    assert.equal(seen, "https://store.eimu.dev/a.png?token=t1&dl=1");
+    await imageHelpers.fetchImageResponse("https://store.tinchak0207.xyz/a.png?token=t1");
+    assert.equal(seen, "https://store.tinchak0207.xyz/a.png?token=t1&dl=1");
   } finally {
     globalThis.fetch = original;
   }
@@ -98,7 +98,7 @@ test("fetchImageResponse：上游永不回应 → timeout 主动 abort，落人�
     const started = Date.now();
     await assert.rejects(
       settlesWithin(
-        imageHelpers.fetchImageResponse("https://store.eimu.dev/never.png", 40),
+        imageHelpers.fetchImageResponse("https://store.tinchak0207.xyz/never.png", 40),
         400,
       ),
       (err: unknown) => {
@@ -121,7 +121,7 @@ test("fetchImageResponse：非逾时的网络失败原样透传（不吞成逾�
   }) as typeof fetch;
   try {
     await assert.rejects(
-      imageHelpers.fetchImageResponse("https://store.eimu.dev/x.png", 5_000),
+      imageHelpers.fetchImageResponse("https://store.tinchak0207.xyz/x.png", 5_000),
       /Failed to fetch/,
     );
   } finally {

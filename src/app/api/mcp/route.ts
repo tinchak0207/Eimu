@@ -137,7 +137,7 @@ function controlPlaneOrigin(): string {
  *    `/api/agent/biz/**` 族（`canvas_get_state` / `workflow_read` / `workflow_history`，
  *    站内只有 Vercel 有这条 route）在本函式没有其他顺位可救，少了它就落到第 3 点、
  *    被 Cloudflare 发 managed challenge（`Just a moment` 403）。生产值＝
- *    `https://image.eimu.dev`（同 Vercel 专案、`server: Vercel`、不挂 CF 的自订域名）；
+ *    `https://image.tinchak0207.xyz`（同 Vercel 专案、`server: Vercel`、不挂 CF 的自订域名）；
  *    换值**必须**是不挂 Cloudflare 的 origin——换回公开域名（`eimu.dev`）等于复发。
  * 2. 对 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路径表（唯一真源＝
  *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不挂 CF 的控制面 origin。

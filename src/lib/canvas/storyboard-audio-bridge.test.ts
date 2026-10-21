@@ -16,7 +16,7 @@ import type {
   StoryboardAudioShot,
 } from "./storyboard-audio-bridge";
 
-const MP3 = (n: number) => `https://store.eimu.dev/tts_${n}.mp3`;
+const MP3 = (n: number) => `https://store.tinchak0207.xyz/tts_${n}.mp3`;
 
 /** 一颗最小分镜（只带本层会读的栏位）。 */
 function shot(shotNumber: string, extra: Partial<StoryboardAudioShot> = {}): StoryboardAudioShot {

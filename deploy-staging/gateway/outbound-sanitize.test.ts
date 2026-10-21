@@ -29,12 +29,12 @@ test("工作区路径与 R 系列代号被剥离（评测实录原句）", () =>
     scrubInternalRefs("[完整结果已落盘：outputs/subagent/0be1228b-EP01配乐BGM.md（1159 字）]"),
     "[完整结果已落盘：（内部存档）（1159 字）]",
   )
-  assert.equal(scrubInternalRefs("产物在 /opt/eimu-harness/workspace/tixia_ep1/storyboard.json 里"), "产物在 （内部存档） 里")
+  assert.equal(scrubInternalRefs("产物在 /opt/agent-harness/workspace/tixia_ep1/storyboard.json 里"), "产物在 （内部存档） 里")
   assert.equal(scrubInternalRefs("清单已落盘 `tixia_ep1/audio/tts_manifest.json`，"), "清单已落盘 （内部存档），")
 })
 
 test("交付物 URL 原样保留（含路径段与副档名）", () => {
-  const line = "成片：https://store.eimu.dev/agent/v1/audio/tts_mukadd47_ugkpykpi.mp3 ，字幕 https://x.example/runs/a.srt"
+  const line = "成片：https://store.tinchak0207.xyz/agent/v1/audio/tts_mukadd47_ugkpykpi.mp3 ，字幕 https://x.example/runs/a.srt"
   assert.equal(scrubInternalRefs(line), line)
 })
 

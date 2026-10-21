@@ -6,7 +6,7 @@
  * 零依赖、无 import，除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/music_lyria.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
  * env：GEMINI_STUDIO_API_KEY（generativelanguage lyria-3.5 generateContent，带人声整歌，付费）；
  *      GEMINI_API_KEY（无 studio key 时退回 Vertex lyria-002 :predict，纯器乐 30s，degraded）。
  */

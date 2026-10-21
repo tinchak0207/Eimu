@@ -64,7 +64,7 @@ export const ASPECT_RATIO_VALUES = [
   "2:3",
 ] as const satisfies readonly AspectRatio[];
 export type ImageResolution = "1k" | "2k" | "4k";
-export type VideoResolution = "360p" | "480p" | "540p" | "720p" | "1080p" | "4k";
+export type VideoResolution = "360p" | "480p" | "540p" | "720p" | "1080p" | "2k" | "4k";
 export type OutputResolution = ImageResolution | VideoResolution;
 
 export type ImageCreditTable = Partial<Record<ImageResolution, number>>;
@@ -238,7 +238,7 @@ export const SEEDANCE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9
 export const SEEDANCE_20_MINI_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 export const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"] as const;
 export const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
-// 2026-09-05 项目负责人裁定：Seedance 全系只卖 ≥10 秒（10 秒以下亏本）。
+// 2026-09-05 暴君裁定：Seedance 全系只卖 ≥10 秒（10 秒以下亏本）。
 // 2026-10-12 实测：miaowuai（上游 minimax-h3-max）720p 时长下限是 **5 秒**——传 4 秒被上游
 // 400 拒单（「生成时长 4 秒超出范围，分辨率 720p 支持 5～15 秒」，job 60f6da1a…）。本表若
 // 继续供 4 秒，等于让 agent 选到一个必然失败的值 ⇒ MiniMax H3 另立收窄档位。

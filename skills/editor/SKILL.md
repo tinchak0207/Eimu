@@ -7,7 +7,7 @@ description: 剪辑域 Expert 配方库总入口。触发时机：时间线编�
               docs/timeline-post-production-plan.md §2 拆片表（B1-B7）与 §7 全役完结；
               记忆 2026-08-31-b1-timeline-lifecycle-layer、timeline-post-production-buildout-0831、
               timeline-b1-b3-harness-training-e2e。
-工具真源: VPS /opt/eimu-harness/workspace/.opencode/tools/timeline_*.ts（本地
+工具真源: VPS /opt/agent-harness/workspace/.opencode/tools/timeline_*.ts（本地
            src/lib/harness-tool-registry.ts 只登记 id，handler 不在本 repo）。
 入库批次: 2026-09-27 剪辑域 Agent 能力面活化（补 editor-persona skillPaths 待补项）。
 -->
@@ -64,4 +64,4 @@ description: 剪辑域 Expert 配方库总入口。触发时机：时间线编�
 
 ## 授权
 
-自有配方，无第三方授权义务。工具链执行码真源在 VPS `/opt/eimu-harness`（`gateway/timeline.ts` + `gateway/lint.ts` + `gateway/mix.ts` + `gateway/style.ts` + `gateway/master.ts` + `.opencode/tools/timeline_*.ts`）。
+自有配方，无第三方授权义务。工具链执行码真源在 VPS `/opt/agent-harness`（`gateway/timeline.ts` + `gateway/lint.ts` + `gateway/mix.ts` + `gateway/style.ts` + `gateway/master.ts` + `.opencode/tools/timeline_*.ts`）。

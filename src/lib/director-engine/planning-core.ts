@@ -2,7 +2,7 @@
  * planning-core — 自 vendor agentPlanning.ts 拆出的纯核（白名单④重命名移植）。
  * LLM 呼叫点切除，二期 quickChat 替换点；其余逐行等价。
  *
- * 2026-09-03 项目负责人裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
+ * 2026-09-03 暴君裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
  */
 import { nanoid } from 'nanoid';
 import type {
@@ -59,7 +59,7 @@ const ACTIONS = new Set<DirectorActionId>([
   'hand-over', 'receive', 'step-back', 'step-forward', 'glance', 'inspect', 'knock',
 ]);
 
-/* 2026-09-03 项目负责人裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
+/* 2026-09-03 暴君裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
    逐词对照 vendor 简体原词补同义繁写（繁体紧跟原词；同形词如 展卷/步行/跪下 不重复），禁止发明新词/新动作。 */
 const ACTION_KEYWORDS: Array<{ action: DirectorActionId; pattern: RegExp }> = [
   { action: 'sew', pattern: /走针|走针|落针|落针|缝制|缝制|缝纫|缝纫|刺绣|刺绣|针线|针线|针尖.*布料|针尖.*布料|穿刺布料|针穿|针穿|丝线绷紧|丝线绷紧/ },

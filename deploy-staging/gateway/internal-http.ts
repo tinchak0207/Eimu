@@ -1,6 +1,6 @@
 // index.ts 行区 6412–6869 机械抽取（Wave3，2026-09-19）：画布摘要读取、时间线端点族、
 // confirm 轮询/resume/session-key/session-tasks、optimize-prompt 与 extract-lessons 内部端点。
-// 逐行搬运自 /home/user/Desktop/image-app/deploy-staging/gateway/index.ts，仅加 export 前缀＋本档头＋单行 import。
+// 逐行搬运自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，仅加 export 前缀＋本档头＋单行 import。
 import { getTimeline, applyOps, listVersions, diffVersions, restoreVersion, getLog, totalDurationSec, TimelineBlockedError, TimelineValidationError, TimelineNotFoundError, type TimelineOp } from "./timeline"
 import { analyzeRhythm } from "./rhythm"
 import { lintTimeline } from "./lint"
@@ -334,7 +334,7 @@ BLOCK SCAFFOLD (for multi-shot / long-form work):
 SCENE CONTEXT → ACTIVE REFERENCES → LOCATION MAP → FIRST FRAME/BLOCKING → FORMAT MODE → OPTICS → CAMERA → ACTION → PERFORMANCE → PHYSICS → LIGHTING → COLOR GRADE → WARDROBE → AUDIO → STYLE → OUTPUT SETTINGS → POSITIVE LOCKS. Write only the blocks the shot needs. 2000+ words is fine here — structure replaces the word cap.
 
 HARD RULES (each one exists because a shot failed without it):
-1. POSITIVE PHRASING ONLY. Never write negative instructions ("does not", "no X"). Declare what IS true. Seedance parses every token as a positive instruction. Short lock tails inside a positive declaration ("Stable composition, no flicker") are fine.
+1. POSITIVE PHRASING ONLY. Never write negative instructions ("does not", "no X"). Declare what IS true. Seedance parses every token as a positive instruction. Consistency locks are allowed only for identity details ("the same face, the same coat"); never lock composition or stillness.
 2. ANTI-SLOP. Replace empty adjectives with named referents: "cinematic" -> a lighting setup or lens spec ("golden-hour backlight", "anamorphic 2.39:1 flare"); "epic" -> "large-scale"; "fast" -> describe physics ("feet striking hard, each stride at full extension"); "beautiful"/"high quality" -> delete, describe the specific visual.
 3. EMOTION = MUSCLE. Never write emotion labels ("she looks scared"). Write "jaw clenches, nostrils flare, shallow breath, shoulders pull inward". One visible micro-event every 1-2 seconds (a blink, a breath, a nostril move). Layered emotion: dominant state in the face, underlying state in breath/posture/hands, the tell in the eyes.
 4. NAME THE CAMERA WITH AN ENDPOINT. Not "the camera moves" but "slow dolly-in, ending on her hands around the cup". One primary move per shot, max one texture modifier ("slightly handheld"). Camera matches emotion: jittery handheld for anger, smooth breathing for calm, static slow push for revelation.
@@ -344,7 +344,7 @@ HARD RULES (each one exists because a shot failed without it):
 8. FOV IN DEGREES ONLY (for multishot): 180 fisheye / 107 ultra-wide arch / 84 wide group / 63 observational / 47 neutral / 29 portrait / 18 close portrait / 12 tele-detail / 8 extreme. Add "no drift mid-segment".
 9. MEASURABLE LANGUAGE. Speed in km/h. Fog/haze in % and meters. Giant scale via human-height comparison ("as tall as four humans stacked"). Left/right always from the camera. White balance fixed in Kelvin (3200K/4000K/5600K/8500K). Mass and size in real units so gravity reads correctly.
 10. HOMOGRAPH TRAP. If a word has a second physical reading the model may take it: tearing (rip/cry), shoot, duck, bolt, draw, wave, charge, rock, drop, fire, strike, break, pound, snap. Replace with phrasing only ONE thing can look like: "wind tearing at her coat" -> "wind whipping violently at her coat".
-11. END WITH A QUALITY TAIL if video: "Stable composition, no flicker, detailed texture preserved." Audio: "SFX only, no music" unless the user asked for a soundtrack.
+11. END WITH THE RIGHT TAIL FOR THE MEDIUM. Video: end with a visible state change — name what is measurably different by the final frame (subject position, pose or silhouette; contents, surfaces or parts moved; light or environment shifted) and make clear the camera move follows that change instead of replacing it. Never write "stable composition", "no flicker", "composition holds" or any instruction that freezes the frame — they produce PPT-style micro-motion. Still image: end with the detail and composition that must be preserved. Audio (video): "SFX only, no music" unless the user asked for a soundtrack.
 12. CUT DISCIPLINE. Keep one continuous shot unless the scene demands a cut. If a cut is needed, name the type (HARD CUT / SMASH CUT / MATCH CUT / REVERSE CUT) and timing. Every cut changes BOTH shot size AND camera character (double-contrast rule). Never repeat either across a cut.
 13. POSITIVE LOCKS for multi-shot: "The set contains only what is described. Character identity and environment stay identical across every cut. No extra people, no duplicated furniture." For 2+ characters write real heights to prevent equalization drift.
 

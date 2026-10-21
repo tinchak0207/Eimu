@@ -1,6 +1,6 @@
 // /api/agent/biz/resolve-owner —— B 端密钥属主解析：raw key → 派生 key 正典化。
 //
-// 背景：插件直连 store.eimu.dev/agent/v1/* 时带的是 B 端 key 本身，
+// 背景：插件直连 store.tinchak0207.xyz/agent/v1/* 时带的是 B 端 key 本身，
 // 网关按 key 字符串隔离身份空间 —— 与 /api/agent/biz/agent/v1/* 代理路径
 // （换发成 getOrCreateAgentKeyForUser 派生 key）形成两个互不可见的身份空间。
 // 网关在验证 raw key 后调用本端点把身份正典化为属主派生 key，此后

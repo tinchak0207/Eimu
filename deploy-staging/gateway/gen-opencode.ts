@@ -8,8 +8,8 @@
 // 内声明，否则拒写（见下方 GUARD 段落）。
 import { readFileSync, writeFileSync, renameSync } from "node:fs"
 
-const REGISTRY_PATH = process.env.AGENT_MODEL_REGISTRY || "/opt/eimu-harness/agent-models.json"
-const TARGET_PATH = "/opt/eimu-harness/workspace/.opencode/opencode.json"
+const REGISTRY_PATH = process.env.AGENT_MODEL_REGISTRY || "/opt/agent-harness/agent-models.json"
+const TARGET_PATH = "/opt/agent-harness/workspace/.opencode/opencode.json"
 
 let registry: {
   providers?: unknown

@@ -456,7 +456,7 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("shot_identity", every((shot) => Boolean(shot.shotId)) && uniqueShotIds.size === shots.length, "shot ids are present and unique"),
     gate("shot_order", ordered, "shot order is contiguous"),
     gate("scene_binding", every((shot) => Boolean(shot.sceneId)), "each shot is bound to a scene"),
-    // 2026-10-12 项目负责人裁定：影片默认模型改为 minimax-h3（miaowuai 渠道上游 minimax-h3-max，
+    // 2026-10-12 暴君裁定：影片默认模型改为 minimax-h3（miaowuai 渠道上游 minimax-h3-max，
     // 稳定快速、约 45 秒出片、单镜 5–15 秒，推荐 15 秒）⇒ 单镜下限 10s 放宽为 5s。
     // 上限仍 30s（seedance-2.5 族仍有 30s 档）。按条计费下仍鼓励打满时长，但 5–9s 不再机器拦。
     gate("duration_bounds", every((shot) => shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30), durationBoundsDetail(shots.filter((shot) => !(shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30)).map((shot) => `${shot.shotId}(${Number.isFinite(shot.durationSeconds) ? shot.durationSeconds : "?"}s)`))),

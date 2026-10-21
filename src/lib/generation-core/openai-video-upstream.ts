@@ -46,7 +46,9 @@ const REQUEST_TIMEOUT_MS = 30_000;
 //   {"error":{"code":"","message":"无效的请求，model sd4-seedance-2.0 is not a
 //    public model name","type":"new_api_error"}}
 // 帐号就算有余额也 100% 失败。下表改用 GET /v1/models（2026-09-27 实查 37 个模型）
-// 中确实存在的名字，按供应商价目选择。
+// 中确实存在的名字，每族取当前最低价（上游 /api/pricing，元/次）：
+//   sd12-seedance-2.0 2.9 / sd13-seedance-2.0-mini 1.7 / sd8-seedance-2.5 3.9
+//   sd12-seedance-2.0-fast 2.9 / sd7-seedance-2.0-1080p 5.9
 // 形状假设（未验证）：sd10..sd14 与 sd4 同族协议（completed + video_url/
 // metadata.url，收 resolution/duration/aspect_ratio）。名字存在性已实查；
 // 有余额后第一单须覆核形状假设。

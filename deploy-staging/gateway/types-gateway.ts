@@ -175,7 +175,7 @@ export interface SessionState {
   // lastPromptBody.model 是 turn 起点模型，failover 换模后不回写，用旧值会把死帐户
   // 的错误记到无辜 provider 头上（事故实锤：chaozhiyuan 403 五次误标 hublinuxdo）。
   lastDispatchedModel?: { providerID: string; modelID: string } | null
-  // 黏性渠道（2026-09-21 项目负责人裁定）：failover 换模后轮子产出真实正文＝该渠道被实证可用，
+  // 黏性渠道（2026-09-21 暴君裁定）：failover 换模后轮子产出真实正文＝该渠道被实证可用，
   // 钉死在本 session，下一轮起 personaModel() 直接返回它，不再每轮重跑死主模型重试链；
   // 下一次 failover 排队时解除（自我修复）。volatile，不进快照。
   stickyModel?: { providerID: string; modelID: string; persona: "efficient" | "thoughtful" } | null

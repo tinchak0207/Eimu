@@ -1,7 +1,7 @@
 // REQ-E1b 跨层对帐（我方帐本 vs new-api users.quota 变动）——只读，永不改写任一侧。
 //
 // 为什么需要它：REQ-E1a 把对外余额的权威搬回我方帐本，但 new-api 内核仍在 relay 前
-// 扣 users.quota（第二个 writer，BA-07 的结构性缺口）。双写不消除（项目负责人 09-23 裁定），
+// 扣 users.quota（第二个 writer，BA-07 的结构性缺口）。双写不消除（暴君 09-23 裁定），
 // 改成「双写必可解释」：本档定期比对两层，把差值逐笔定位到 job／operation／billing_user。
 //
 // 三条硬纪律：

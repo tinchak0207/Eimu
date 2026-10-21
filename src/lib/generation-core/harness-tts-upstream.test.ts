@@ -35,8 +35,8 @@ function supplier(overrides: Partial<SupplierRecord> = {}): SupplierRecord {
     label: HARNESS_CHANNEL,
     adapterType: "harness_tts",
     supplyTier: "relay",
-    failureDomain: "store.eimu.dev",
-    baseUrl: "https://store.eimu.dev/agent",
+    failureDomain: "store.tinchak0207.xyz",
+    baseUrl: "https://store.tinchak0207.xyz/agent",
     credentialRef: "HARNESS_TTS_API_KEY",
     configuration: {},
     priority: 50,
@@ -101,17 +101,17 @@ function captureFetch(response: Response): { calls: Array<{ url: string; init: R
 test("harness_tts adapter：POST {base}/v1/tts，Bearer 凭证，回 mp3 URL", async () => {
   process.env.HARNESS_TTS_API_KEY = "sk-biz-test-key";
   const capture = captureFetch(
-    Response.json({ ok: true, url: "https://store.eimu.dev/agent/v1/audio/tts_abc.mp3", chars: 6, cost_coins: 0.006 }),
+    Response.json({ ok: true, url: "https://store.tinchak0207.xyz/agent/v1/audio/tts_abc.mp3", chars: 6, cost_coins: 0.006 }),
   );
   try {
     const output = await generateWithHarnessTts(supplier(), input());
     assert.equal(capture.calls.length, 1);
-    assert.equal(capture.calls[0].url, `https://store.eimu.dev/agent${HARNESS_TTS_PATH}`);
+    assert.equal(capture.calls[0].url, `https://store.tinchak0207.xyz/agent${HARNESS_TTS_PATH}`);
     const headers = capture.calls[0].init.headers as Record<string, string>;
     assert.equal(headers.Authorization, "Bearer sk-biz-test-key");
     // 哨兵 "default" ⇒ 不送 voice，让闸道用它自己的预设（route.ts 档头语义）。
     assert.deepEqual(JSON.parse(String(capture.calls[0].init.body)), { text: "你好，世界。" });
-    assert.equal(output.url, "https://store.eimu.dev/agent/v1/audio/tts_abc.mp3");
+    assert.equal(output.url, "https://store.tinchak0207.xyz/agent/v1/audio/tts_abc.mp3");
     assert.equal(output.base64, null);
     assert.equal(output.endpointLabel, HARNESS_CHANNEL);
     assert.equal(output.supplierModelId, TTS_MODEL);
@@ -194,7 +194,7 @@ test("registry 渠道 harness-tts 认领 catalog 真源 id tts-1（kind=tts）",
 test("harness-tts 描述子：env 齐备才算 configured，supportedModels=[tts-1]", () => {
   const channel = REGISTRY_CHANNELS.find((c) => c.label === HARNESS_CHANNEL)!;
   const env = {
-    HARNESS_TTS_BASE_URL: "https://store.eimu.dev/agent",
+    HARNESS_TTS_BASE_URL: "https://store.tinchak0207.xyz/agent",
     HARNESS_TTS_API_KEY: "sk-biz-test-key",
     HARNESS_TTS_ENABLED: "true",
   };

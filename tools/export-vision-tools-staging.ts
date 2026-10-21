@@ -8,8 +8,8 @@
 // 仅 node:fs/promises 内建模组，无需 import 改写）。
 //
 // staging 目标目录：落 staging/vision-tools/，VPS 同步落位：
-//   staging/vision-tools/vision_tools.ts → /opt/eimu-harness/workspace/.opencode/lib/vision_impl.ts
-// 薄入口 /opt/eimu-harness/workspace/.opencode/tools/vision_analyze.ts 为 VPS 侧
+//   staging/vision-tools/vision_tools.ts → /opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
+// 薄入口 /opt/agent-harness/workspace/.opencode/tools/vision_analyze.ts 为 VPS 侧
 // 一次性接线稿（同 music_gen.ts 先例），不经本导出器。
 //
 // 用法（真源改动后必跑）：
@@ -36,12 +36,12 @@ const TOOLS_HEADER = `/**
  * 除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 \`npx tsx tools/export-vision-tools-staging.ts\` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/vision_impl.ts
- * env：NEWAPI_API_KEY（Bearer 鉴权，VPS /opt/eimu-control-plane/.env.control-plane
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
+ * env：NEWAPI_API_KEY（Bearer 鉴权，VPS /opt/image-control-plane/.env.control-plane
  * 已有同名对，harness 侧同步注入）；NEWAPI_VISION_MODEL 可选覆盖（默认
  * gemini-3-flash）。通路唯一 = new-api 中控 {NEWAPI_BASE_URL}/chat/completions
- * （项目负责人铁律 vision-must-route-newapi-not-direct，R2c 起直连双通路已删）。
- * 薄入口：/opt/eimu-harness/workspace/.opencode/tools/vision_analyze.ts
+ * （暴君铁律 vision-must-route-newapi-not-direct，R2c 起直连双通路已删）。
+ * 薄入口：/opt/agent-harness/workspace/.opencode/tools/vision_analyze.ts
  */
 
 `;

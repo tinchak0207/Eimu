@@ -6,7 +6,7 @@
  * 零依赖、无 import，除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/music_flowmusic.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
  * env：FLOWMUSIC2API_URL（服务地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。
  */
 

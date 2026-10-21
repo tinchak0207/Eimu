@@ -63,7 +63,7 @@
 //   npx tsx tools/export-expert-agents.ts --tools-file <path>      # VPS 工具清单（每行一个 id）
 //   npx tsx tools/export-expert-agents.ts --check                  # 只校验不写（部署片验漂移用）
 //
-// --tools-file 由部署片从 VPS `ls /opt/eimu-harness/workspace/.opencode/tools/ | grep -v .bak`
+// --tools-file 由部署片从 VPS `ls /opt/agent-harness/workspace/.opencode/tools/ | grep -v .bak`
 // 生成；未传参数时用 src/lib/harness-tool-registry.ts HARNESS_TOOL_ID_LIST + 4 个已知
 // VPS 额外工具作为近似全集（仅用于交叉校验 registry 引用与覆盖统计，不进产物形状），
 // 并在 stdout 明确警告。导出机械可重跑：同输入同输出，无时间戳（digest 头生成日期除外）。
@@ -90,7 +90,7 @@ const OUT_DIR = join(root, "deploy-staging", "expert-gateway");
 const SYNC_DIR = join(root, "deploy-staging", "gateway", "expert");
 /** 双写目录对（仅用于「三个纯派生产物」）：构建目录 + git 追踪的发布副本。 */
 const OUT_DIRS = [OUT_DIR, SYNC_DIR] as const;
-/** 发布树根（本机存在；对应 VPS /opt/eimu-harness/workspace/.opencode，即 agent 的 cwd
+/** 发布树根（本机存在；对应 VPS /opt/agent-harness/workspace/.opencode，即 agent 的 cwd
  * 之下那一层）。skillPath 漂移护栏的存在性断言根。 */
 const HARNESS_RUNTIME_ROOT = join(root, "deploy-staging", "opencode-runtime");
 const CHECK = process.argv.includes("--check");
@@ -275,7 +275,7 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   return `${JSON.stringify(agents, null, 2)}\n`;
 }
 
-/** agent 的工作目录是 workspace 根（生产 session `directory=/opt/eimu-harness/workspace`），
+/** agent 的工作目录是 workspace 根（生产 session `directory=/opt/agent-harness/workspace`），
  * 技能树实际在 workspace/.opencode/skills/ 下——故任何注入给 agent 的座标都必须以此为前缀。 */
 const WORKSPACE_ROOT_PREFIX = ".opencode/";
 

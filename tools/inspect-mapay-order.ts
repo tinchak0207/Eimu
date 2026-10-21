@@ -22,7 +22,7 @@ import { defaultRemoteOptions, parsePipeRows, runWithSql, type RemoteOptions } f
 const PG_CONTAINER = "image-control-postgres";
 const PG_USER = "image_control";
 const PG_DB = "image_control";
-const NA_DB = "/opt/eimu-site/new-api-data/one-api.db";
+const NA_DB = "/opt/imagesite/new-api-data/one-api.db";
 
 const PG_SINK = `sudo -n docker exec -i ${PG_CONTAINER} psql -v ON_ERROR_STOP=1 -tA -F '|' -U ${PG_USER} -d ${PG_DB} -f -`;
 const NA_SINK = `sudo -n sqlite3 -readonly -noheader -separator '|' ${NA_DB}`;

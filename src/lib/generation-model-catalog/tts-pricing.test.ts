@@ -21,7 +21,7 @@ import {
   ttsQuotaForChars,
 } from "./tts-pricing";
 
-test("费率＝0.001 币/字，100 字 → 0.1 币 → 50,000 quota（项目负责人 2026-10-01 口径）", () => {
+test("费率＝0.001 币/字，100 字 → 0.1 币 → 50,000 quota（暴君 2026-10-01 口径）", () => {
   assert.equal(TTS_COINS_PER_CHAR, 0.001);
   assert.equal(ttsCoinsForChars(100), 0.1);
   assert.equal(ttsQuotaForChars(100), 50_000);

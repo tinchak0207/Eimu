@@ -252,17 +252,39 @@ test("子代理唤醒骨架漂移（label 带引号）→ 兜底解析，仍不�
   assert.equal(it.status, "ok");
 });
 
-test("系统重试提示 → 整条不显示，计 droppedByType.system-hint", () => {
+// 生产真路径：gateway 历史读面（sessions-http.ts / session-read.ts）已把唤醒
+// 讯息的 role 改写成 "system"。系统角色分支必须还原产出卡，且普通 system 讯息
+// 绝不冒充用户气泡。
+test("role=system 的子代理唤醒 → subagent_result；普通 system 讯息整条丢弃计数", () => {
+  const { items, droppedParts, droppedByType } = normalizeOpenCodeMessages([
+    { info: { role: "system" }, parts: [{ type: "text", text: wakeOkMsg.parts![0].text as string }] },
+    { info: { role: "system" }, parts: [{ type: "text", text: "内部系统注入，不应显示" }] },
+  ]);
+  assert.equal(items.length, 1);
+  const it = items[0] as { kind: string; subagentId: string; label: string; status: string; text: string };
+  assert.equal(it.kind, "subagent_result");
+  assert.equal(it.subagentId, "a4e7dae6");
+  assert.equal(it.label, "搜索竞品定价");
+  assert.equal(it.status, "ok");
+  assert.equal(it.text, "已完成 3 家竞品定价抓取，均值 ¥29/月，明细见表格。");
+  assert.equal(droppedParts, 1);
+  assert.equal(droppedByType["system-message"], 1);
+});
+
+test("系统重试提示原样保留：剥离归 gateway 显示通道，前端不再按文案猜测", () => {
   const hint =
     "（系统提示：上一轮回复因上游模型错误中断，请从中断处继续完成任务，不要重复已完成的步骤或工具调用）";
   const { items, droppedParts, droppedByType } = normalizeOpenCodeMessages([
     { info: { role: "user" }, parts: [{ type: "text", text: hint }] },
     { info: { role: "user" }, parts: [{ type: "text", text: "真实用户讯息" }] },
   ]);
-  assert.equal(items.length, 1);
-  assert.equal((items[0] as { text: string }).text, "真实用户讯息");
-  assert.equal(droppedParts, 1);
-  assert.equal(droppedByType["system-hint"], 1);
+  // 431b39b5 起显示通道已在 gateway 侧剥离；前端不得再按正文标题猜删
+  // （用户可能正好引用同一段指令）。历史归一化只做忠实映射。
+  assert.equal(items.length, 2);
+  assert.equal((items[0] as { text: string }).text, hint);
+  assert.equal((items[1] as { text: string }).text, "真实用户讯息");
+  assert.equal(droppedParts, 0);
+  assert.equal(droppedByType["system-hint"], undefined);
 });
 
 // 现场实锤（messages-gw.ts:195）：召回前缀实际是「头部注入」——
@@ -274,33 +296,35 @@ const recallBlock =
   "- [infra] vercel-deploy\n" +
   "  部署走干净 worktree。\n";
 
-test("记忆召回知识块（头部注入，live 实际格式）→ 从用户气泡剥离，剩余文本正常显示", () => {
+test("记忆召回知识块（头部注入）原样保留：剥离归 gateway 显示通道", () => {
   const msgs: OpenCodeMessage[] = [
     { info: { role: "user" }, parts: [{ type: "text", text: `${recallBlock}\n\n帮我画一只猫` }] },
   ];
   const { items, droppedByType } = normalizeOpenCodeMessages(msgs);
   assert.equal(items.length, 1);
   assert.equal(items[0].kind, "user");
-  assert.equal((items[0] as { text: string }).text, "帮我画一只猫");
-  assert.equal(droppedByType["recall-block"], undefined); // 有剩余文本：不是丢弃是剥离
+  assert.equal((items[0] as { text: string }).text, `${recallBlock}\n\n帮我画一只猫`);
+  assert.equal(droppedByType["recall-block"], undefined); // 前端不重复剥离
 });
 
-test("记忆召回知识块（尾部追加格式）→ 同样剥离", () => {
+test("记忆召回知识块（尾部追加格式）→ 同样原样保留", () => {
   const msgs: OpenCodeMessage[] = [
     { info: { role: "user" }, parts: [{ type: "text", text: `帮我画一只猫\n\n${recallBlock}` }] },
   ];
   const { items } = normalizeOpenCodeMessages(msgs);
   assert.equal(items.length, 1);
-  assert.equal((items[0] as { text: string }).text, "帮我画一只猫");
+  assert.equal((items[0] as { text: string }).text, `帮我画一只猫\n\n${recallBlock}`);
 });
 
-test("纯知识块（剥后无剩余文本）→ 不生成 user item，计 droppedByType.recall-block", () => {
+test("纯知识块也作为用户正文保留（前端不再重复剥离）", () => {
   const { items, droppedByType, droppedParts } = normalizeOpenCodeMessages([
     { info: { role: "user" }, parts: [{ type: "text", text: recallBlock }] },
   ]);
-  assert.equal(items.length, 0);
-  assert.equal(droppedByType["recall-block"], 1);
-  assert.equal(droppedParts, 1);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "user");
+  assert.equal((items[0] as { text: string }).text, recallBlock);
+  assert.equal(droppedByType["recall-block"], undefined);
+  assert.equal(droppedParts, 0);
 });
 
 test("assistant 内部框架段（历史路径）→ 剥离，正文与正常标题保留", () => {

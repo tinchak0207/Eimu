@@ -10,7 +10,7 @@ import { invoke } from "./editor/adapter/tauri-adapter"
 
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
 
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/eimu-harness/workspace"
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 const TMP_DIR = path.join(WORKSPACE_DIR, "tmp")
 
 export interface DuckingEvent { at_ms: number; end_ms: number; depth_db: number | null; track: string }

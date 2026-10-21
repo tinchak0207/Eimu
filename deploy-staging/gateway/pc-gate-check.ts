@@ -1,6 +1,6 @@
 /**
  * 片 C 纯函数验收（临时档，跑完即删）。
- * 验的是**已落位的生产模组** /opt/eimu-harness/gateway/delivery-gate.ts
+ * 验的是**已落位的生产模组** /opt/agent-harness/gateway/delivery-gate.ts
  * （不重写一份逻辑来验自己 = 假验收）。
  */
 import { checkDelivery, DELIVERY_CONTRACTS, formatDeliveryGateNotice, DELIVERY_GATE_MARK } from "./delivery-gate"

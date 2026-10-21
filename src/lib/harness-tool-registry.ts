@@ -1,7 +1,7 @@
 /**
  * Harness 真实工具面（产品诚实稽核真源，2026-08-31；2026-09-28 再核）。
  *
- * 真源 = VPS /opt/eimu-harness/workspace/.opencode/tools/（排除 .bak），
+ * 真源 = VPS /opt/agent-harness/workspace/.opencode/tools/（排除 .bak），
  * 核对日期 2026-08-31，来源于 agent-evolve 评测。
  * 这是 agent-templates.ts requiredTools 绑定的唯一判定集：
  * 站内 domain registry（agent-tool-contract / 5 个领域档）是宣告层自我认证，
@@ -27,7 +27,7 @@
  * - image_quote：真调用 GET {API_BASE}/models，站点路由
  *   src/app/api/v1/models/route.ts 存在 GET handler → 已实装。
  * - quote_bundle：loadCatalog → GET {API_BASE}/models（同上）→ 已实装。
- * API_BASE = https://image.eimu.dev/v1（harness lib/client.ts L6）。
+ * API_BASE = https://image.tinchak0207.xyz/v1（harness lib/client.ts L6）。
  *
  * 清单本体（HARNESS_TOOL_ID_LIST / HARNESS_TOOL_IDS / HarnessToolId）已迁到
  * `harness-tool-ids.ts`（客户端安全：不含任何本站模组 import，供浏览器 bundle 侧

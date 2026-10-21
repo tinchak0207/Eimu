@@ -26,5 +26,5 @@ export function buildWechatEmail(peerId: string) {
     .update(`wx:${peerId}`)
     .digest("hex")
     .slice(0, 12);
-  return `wechat-${digest}@wx.eimu.dev`;
+  return `wechat-${digest}@wx.tinchak0207.xyz`;
 }

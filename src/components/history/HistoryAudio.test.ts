@@ -48,7 +48,7 @@ function imageEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     generatedAt: Date.now(),
     source: "server",
     entryKind: "image",
-    results: [{ provider: "image_eimu", modelId: "gpt-image-2", image: null, imageUrl: IMAGE_URL }],
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: IMAGE_URL }],
     ...overrides,
   };
 }

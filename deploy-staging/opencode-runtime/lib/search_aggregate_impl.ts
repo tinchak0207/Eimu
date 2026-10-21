@@ -9,7 +9,7 @@
  * 假设自己位于 skill root 的 scripts/ 子目录，故保留 scripts/ 子目录层级，
  * 使 `sys.path.insert(BASE_DIR/scripts)`（reddit_miner）与 state 预设路径语义不变。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/search_aggregate_impl.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/search_aggregate_impl.ts
  * env：子进程只带 PATH/HOME/LANG/LC_ALL（严禁整体 process.env 透传；TAVILY_API_KEY /
  *      EXA_API_KEY 一律不传——本工具不接 tavily）；HOME 与 AGGREGATE_SEARCH_STATE_DIR
  *      指向 os.tmpdir() 下的可写临时目录，确保不会尝试写入唯读的 lib/。

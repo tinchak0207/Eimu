@@ -5,7 +5,7 @@
 # 执行器：VPS 有 bun（agent-gateway.service 就是 bun 跑的），故用 bun 不用 node。
 set -uo pipefail
 
-cd /opt/eimu-harness/gateway || exit 2
+cd /opt/agent-harness/gateway || exit 2
 export PATH="/home/ubuntu/.bun/bin:$PATH"
 
 exec bun test workflow-templates/workflow-templates.test.ts

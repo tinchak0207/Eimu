@@ -5,7 +5,7 @@ import { StatusDashboard, type GatusEndpoint } from "./StatusDashboard";
 const SITE_URL = getSiteUrlFromEnv();
 
 const GATUS_STATUS_URL =
-  "https://store.eimu.dev/gatus-api/endpoints/statuses";
+  "https://store.tinchak0207.xyz/gatus-api/endpoints/statuses";
 
 export const dynamic = "force-dynamic";
 

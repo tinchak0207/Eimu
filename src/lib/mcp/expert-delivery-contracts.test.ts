@@ -7,7 +7,7 @@
 //
 // 本测试守三条：
 //   ① src 镜像 与 deploy-staging 原档 **逐位元组相同**（Buffer 比对；原档缺席时明确 skip，不红）。
-//   ② route 载入的契约集合＝八个域、每域 requiredFields 非空。
+//   ② route 载入的契约集合＝九个域、每域 requiredFields 非空。
 //   ③ 三边一致：src 镜像 ↔ 指南 HARNESS_DELIVERY_CONTRACTS ↔ deploy-staging 原档（逐域逐栏位）。
 //   ④ 接线探针：route.ts 的静态 import 指向 src 镜像，且不再 import 任何 deploy-staging 路径。
 
@@ -51,12 +51,12 @@ test("同步棘轮：src 镜像与 deploy-staging 原档逐位元组相同（原
   );
 });
 
-test("route 载入的契约＝八域、requiredFields 非空、与指南逐域逐栏位一致（有原档时并验原档）", () => {
+test("route 载入的契约＝九域、requiredFields 非空、与指南逐域逐栏位一致（有原档时并验原档）", () => {
   const loaded = contractSource as unknown as Contracts;
   const guide = JSON.parse(HARNESS_DELIVERY_CONTRACTS) as Contracts;
 
-  // ② route 实际载入的集合：八个合法域、每域 requiredFields 非空。
-  assert.equal(Object.keys(loaded).length, 8, "route 载入的契约必须是 8 个域");
+  // ② route 实际载入的集合：九个合法域、每域 requiredFields 非空。
+  assert.equal(Object.keys(loaded).length, 9, "route 载入的契约必须是 9 个域");
   for (const [domain, contract] of Object.entries(loaded)) {
     assert.ok(Array.isArray(contract.requiredFields), `${domain}.requiredFields 必须是数组`);
     assert.ok(contract.requiredFields.length > 0, `${domain}.requiredFields 不得为空`);

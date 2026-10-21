@@ -84,8 +84,9 @@ test("元件引用的每个 x.y.z 型字面量都必须是文案表既有键（�
 
 test("唯一来源：抽样具名文案在 src 下只出现在 ui-strings.ts", () => {
   const samples = [
-    // REQ-B2b 起副标题改述 copy-on-use 语义（挂用＝建本地副本），抽样跟著现行文案走。
-    "挂用＝在本项目建本地副本（改来源不影响副本，删来源副本仍可用）；跨项目复用需先显式分享",
+    // 2026-10-10（5c8f87b0）资产面板收敛为项目标签：旧的 copy-on-use 副标题随
+    // 挂用交互一起删除，抽样跟到现行副标题。
+    "给资产打上本项目标签，它就会常驻本项目的生成注入；一个资产可同时属于多个项目",
     "已挂用：已在本项目建本地副本并锁定（生成用的是副本）",
     "窗口内没有任何已落账的扣费记录——不做 0 曲线，这里是「无记录」。",
     "已删除 · 曾有引用，记录已不在",
@@ -94,7 +95,7 @@ test("唯一来源：抽样具名文案在 src 下只出现在 ui-strings.ts", (
     "正在读取资产库…",
     "资料不足（{samples}/{minimum} 样本）",
     "继续向上（当前展开 {depth} 层）",
-    "全部数字都是既有账本的只读投影：每个数字都能指回一条 billing_operation / capability 记录，无数据源不画。",
+    "全部数字都是既有账本的只读投影：每个数字都能指回一条计费记录，无数据源不画。",
     "没有可见资产 · 去「资源库 / 角色卡」存一个",
     "本项目还没有挂用的资产",
     "未读到任何渠道记录（supplier 表为空或不可达）。",
@@ -139,7 +140,9 @@ test("中文内容＝改造前逐字原文（UI 视觉零变化）", () => {
   assert.equal(text("stats.liveness.unavailable"), "不可用");
   assert.equal(text("stats.liveness.unknown"), "无法判定");
   assert.equal(text("stats.rate.insufficient", { samples: 1, minimum: 3 }), "资料不足（1/3 样本）");
-  assert.equal(text("stats.card.ledgerSource"), "billing_operation commit+refund/applied");
+  // 2026-10-06（5e46b701 工作树入库）：卡片来源说明改为面向用户的中文口径，
+  // 不再直出内部表名/操作名。
+  assert.equal(text("stats.card.ledgerSource"), "计费账本（扣费 / 退款）");
   // B2 面板。
   assert.equal(text("assets.title"), "项目资产库");
   assert.equal(text("assets.mount.release"), "已挂用 · 解除");

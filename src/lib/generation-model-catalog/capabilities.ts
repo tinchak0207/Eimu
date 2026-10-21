@@ -1,6 +1,8 @@
 import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
-import { servableUpscaleTiers } from "../generation-core/upscale-tier";
+// 可用性判据来自 client-safe 叶模组（零 env）：本档会进客户端 bundle，
+// **不得**改从 generation-core/upscale-tier 取——那档会载入服务端专用 env 开关。
+import { servableUpscaleTiers } from "../generation-core/upscale-tier-availability";
 // 数量上限的唯一真源（叶模组，零 import）：能力投射与执行端闸门吃同一颗常数。
 // **不得**改从 route 或 biz-image-references 取——那两者会把 node:/DB 拖进 client bundle。
 import { MAX_REQUEST_BATCH_COUNT, MAX_REQUEST_REFERENCE_IMAGES } from "../generation-core/request-limits";
@@ -50,7 +52,11 @@ export function resolveGenerationModelId(modelId: string): string | null {
   return null;
 }
 
-export function generationCapabilities(modelId: string): GenerationCapabilityProjection | null {
+/**
+ * 能力投射。`fourKEnabled` 由**服务端调用点**注入（/v1/models 读 env 后传入）；
+ * 客户端与共享路径不传，恒为 false（4K 未校准前不外露，也不泄漏内部 env）。
+ */
+export function generationCapabilities(modelId: string, fourKEnabled: boolean = false): GenerationCapabilityProjection | null {
   const model = currentEffectiveCatalog()[modelId] ?? GENERATION_MODEL_CATALOG[modelId];
   if (!model) return null;
   return {
@@ -80,7 +86,7 @@ export function generationCapabilities(modelId: string): GenerationCapabilityPro
     ...(model.kind === "video" ? { promptCharLimit: VIDEO_PROMPT_CHAR_LIMIT } : {}),
     // 超分档位（P1-4）：只在模型真的宣告超分链路时外露，且只外露**可提交**档位
     // （4K 未校准前不在此列）——不输出空能力宣称，也不宣告会被拒收的档位。
-    ...(model.upscaleTiers?.length ? { upscaleTiers: servableUpscaleTiers(model.upscaleTiers) } : {}),
+    ...(model.upscaleTiers?.length ? { upscaleTiers: servableUpscaleTiers(model.upscaleTiers, fourKEnabled) } : {}),
   };
 }
 
@@ -182,9 +188,9 @@ export function supportsVideoGenerationType(modelId: string, type: VideoGenerati
  * （**不升格**：能力宣告缺一即不许提交，见 generation-core/upscale-tier.ts）。
  * 回传值＝宣告档位 ∩ 上游可提交档位（4K 在 factor 真单校准前不在内）。
  */
-export function modelUpscaleTiers(modelId: string): readonly UpscaleTier[] {
+export function modelUpscaleTiers(modelId: string, fourKEnabled: boolean = false): readonly UpscaleTier[] {
   const declared = generationModel(modelId)?.upscaleTiers ?? [];
-  return servableUpscaleTiers(declared);
+  return servableUpscaleTiers(declared, fourKEnabled);
 }
 
 /** 该模型此刻宣告的超分档位（未经可用性过滤）——呼叫端拿去跑提交闸门用。 */
@@ -192,13 +198,13 @@ export function declaredUpscaleTiers(modelId: string): readonly UpscaleTier[] {
   return generationModel(modelId)?.upscaleTiers ?? [];
 }
 
-export function supportsUpscaleTier(modelId: string, tier: UpscaleTier): boolean {
-  return modelUpscaleTiers(modelId).includes(tier);
+export function supportsUpscaleTier(modelId: string, tier: UpscaleTier, fourKEnabled: boolean = false): boolean {
+  return modelUpscaleTiers(modelId, fourKEnabled).includes(tier);
 }
 
 /** 一键超分的预设档位＝该模型最高可提交档位；不支援超分回 null。 */
-export function defaultUpscaleTierFor(modelId: string): UpscaleTier | null {
-  const tiers = modelUpscaleTiers(modelId);
+export function defaultUpscaleTierFor(modelId: string, fourKEnabled: boolean = false): UpscaleTier | null {
+  const tiers = modelUpscaleTiers(modelId, fourKEnabled);
   return tiers.length ? tiers[tiers.length - 1] : null;
 }
 

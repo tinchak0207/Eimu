@@ -10,7 +10,7 @@
  * 零二次维护面（真源改 args，包装自动跟随）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
- *   本档整份 → /opt/eimu-harness/workspace/.opencode/lib/blender-tools-adapter.ts
+ *   本档整份 → /opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts
  *   三个 3 行 adapter → .opencode/tools/blender_{exec,render,export_gltf}.ts：
  *     import { wrapBlenderTool, blenderExecTool } from "../lib/blender-tools-adapter"
  *     export default wrapBlenderTool(blenderExecTool)

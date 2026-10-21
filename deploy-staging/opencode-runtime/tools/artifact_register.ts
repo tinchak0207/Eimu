@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { ok, fail } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
-const WORKSPACE = process.env.HARNESS_WORKSPACE || "/opt/eimu-harness/workspace"
+const WORKSPACE = process.env.HARNESS_WORKSPACE || "/opt/agent-harness/workspace"
 
 /**
  * P3：register 只登记元数据，**不**隐式 publish/升版（旧实现在无 expected_version 时
@@ -87,7 +87,7 @@ const EXAMPLE_ARGS = {
   action: "register",
   name: "scene_01_master_keyframe",
   type: "image",
-  uri: "https://store.eimu.dev/artifacts/scene_01_keyframe.png",
+  uri: "https://store.tinchak0207.xyz/artifacts/scene_01_keyframe.png",
   metadata: {
     resolution: "1280x720",
     seed: 4294967295,

@@ -1,7 +1,7 @@
 /**
  * fxRenderStub — fxRender.ts 边界替身（F-SHARDING 片3）。
  *
- * 来源：/home/user/Desktop/kunpeng-vendor src/lib/editor/fxRender.ts @ 872a58b。
+ * 来源：/home/lenovo/Desktop/kunpeng-vendor src/lib/editor/fxRender.ts @ 872a58b。
  * 逐行抽取：hashContent（vendor L42-46）+ 类型块（FxDoc L29-32、FxLayerResult
  * L464-468、FxSegmentLayerResult L471-475、FxTimelineLayerItem L477-484、
  * FxTimelineProgress L486-494）。

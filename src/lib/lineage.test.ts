@@ -299,7 +299,7 @@ test("端到端链形：生成登记（挂钩 a）→ 落宿主栏位 → 读时
     taskId: "task-src",
     prompt: "源头",
     generatedAt: 1700000000000,
-    results: [{ provider: "image_eimu", modelId: "m", image: null, imageUrl: "https://x/src.png", resultId: "art-src" }],
+    results: [{ provider: "image_tinchak", modelId: "m", image: null, imageUrl: "https://x/src.png", resultId: "art-src" }],
     source: "server",
   };
   // 挂钩 a：第二次生成带了第一次的产物作参考图。

@@ -711,7 +711,7 @@ export async function POST(req: NextRequest) {
               responseImageUrl = await persistGeneratedImage(
                 authenticatedUser.id,
                 entryId,
-                "image_eimu",
+                "image_tinchak",
                 responseImage,
               );
               responseImage = null;
@@ -751,7 +751,7 @@ export async function POST(req: NextRequest) {
               results: [
                 {
                   // Already uploaded above, so persistImages() skips a second upload.
-                  provider: "image_eimu",
+                  provider: "image_tinchak",
                   modelId,
                   image: responseImage,
                   imageUrl: responseImageUrl,
@@ -765,7 +765,7 @@ export async function POST(req: NextRequest) {
         }
         console.log(`Completed [requestId=${requestId}, model=${modelId}, upstreamModel=${result.upstreamModelId}, endpoint=${endpoint.label}, endpointHost=${safeEndpointName(endpoint.baseURL)}, chargedCoins=${requiredCoins}, estimatedCredits=${estimatedCredits ?? 1}, upstreamElapsedMs=${result.upstreamElapsedMs}, imageDelivery=${responseImage ? "inline-base64" : "blob-url"}]`);
         return NextResponse.json({
-          provider: "image_eimu",
+          provider: "image_tinchak",
           image: responseImage,
           imageUrl: responseImageUrl,
           endpointLabel: publicEndpointLabel(endpoint.label),

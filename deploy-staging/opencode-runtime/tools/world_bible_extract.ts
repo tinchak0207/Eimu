@@ -8,7 +8,7 @@ import path from "node:path"
 // 文本分块 → 逐块调 LLM 抽取（通道绑定见 lib/llm-channel.ts，key 不落任何输出）
 // → 合并去重 → schema 校验。LLM 失败诚实回 ok:false，不降级编造。
 
-const WORKSPACE = "/opt/eimu-harness/workspace"
+const WORKSPACE = "/opt/agent-harness/workspace"
 const CHUNK_CHARS = 4500
 const MAX_CHUNKS = 6
 

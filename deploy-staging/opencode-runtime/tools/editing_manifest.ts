@@ -3,7 +3,7 @@ import { ok, fail } from "../lib/client"
 
 // 剪辑声明生成器（2026-08-31 片1 实装）：镜头清单 → ffmpeg 兼容 edit decision list。
 // 纯代码（零 LLM 零扣费，不执行 ffmpeg，只产声明）。
-// 格式对齐 VPS gateway assembleFilmNode（/opt/eimu-harness/gateway/index.ts L1483+）：
+// 格式对齐 VPS gateway assembleFilmNode（/opt/agent-harness/gateway/index.ts L1483+）：
 // - harness_clips 栏位形状 = gateway setHarnessState clips（id/path/label/duration/inSec/outSec/transitionAfter）
 // - concat 声明 = `-f concat -safe 0 -i list.txt`（file '...' 行）
 // - 归一化→concat copy、混流 `-map 0:v -map 1:a -c:v copy -c:a aac -movflags +faststart`、

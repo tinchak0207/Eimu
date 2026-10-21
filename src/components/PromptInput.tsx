@@ -119,7 +119,7 @@ interface PromptInputProps {
   chatHeaderExtra?: import("react").ReactNode;
   /** 双向同步：把 AgentChatSurface 的 switchSession 能力上抛（画布选中节点 → 切会话）。 */
   switchSessionRef?: MutableRefObject<((sessionId: string) => Promise<boolean>) | null>;
-  /** 项目负责人裁定 2026-09-01：套模板「留旧开新」，同款上抛 startNewSession。 */
+  /** 暴君裁定 2026-09-01：套模板「留旧开新」，同款上抛 startNewSession。 */
   startNewSessionRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }
 

@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ─────────────────────── 后端 mock（CDP Fetch 拦截；不触网）
 
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
-// 网关是跨域（store.eimu.dev）：mock 回应必须带 CORS 头，否则浏览器会挡掉
+// 网关是跨域（store.tinchak0207.xyz）：mock 回应必须带 CORS 头，否则浏览器会挡掉
 // 回应、把成功的直传误判成失败（生产网关本身有 CORS）。
 const jsonHeaders = [
   { name: "content-type", value: "application/json" },
@@ -48,7 +48,7 @@ async function installBackendMock(shell) {
   await cdp.send("Fetch.enable", {
     patterns: [
       { urlPattern: "*/api/agent/sessions*", requestStage: "Request" },
-      { urlPattern: "https://store.eimu.dev/*", requestStage: "Request" },
+      { urlPattern: "https://store.tinchak0207.xyz/*", requestStage: "Request" },
       { urlPattern: "*/e2e-events*", requestStage: "Request" },
     ],
   });

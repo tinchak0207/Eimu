@@ -526,7 +526,7 @@ test("充值入帐：已使用的兑换码入帐、未使用的不入帐、基�
 });
 
 test("生产实录回放：415 张码全扫、11 张已兑换全数在帐本上（含人工码，净额不变）", async () => {
-  // 2026-09-27 直查 /opt/eimu-site/new-api-data/one-api.db 的原值（id/name/quota/
+  // 2026-09-27 直查 /opt/imagesite/new-api-data/one-api.db 的原值（id/name/quota/
   // used_user_id/redeemed_time 一字不改），上游分页语义 p=0≡p=1 亦照实模拟。
   const used: { id: number; name: string; quota: number; userId: number; at: string }[] = [
     { id: 1, name: "starter-9.9-200", quota: 100_000_000, userId: 9, at: "2026-06-02 19:51:05" },
@@ -834,9 +834,19 @@ test("B1 分配（真转移）双写：我方帐本主帐 −Δ／成员 +Δ，�
 // ── 变更探针（源码守门：只算探针，不计入已验证） ──────────────────────────
 
 test("变更探针：本模组对 account_ledger 只有 INSERT（append-only，无 UPDATE/DELETE）", () => {
-  const source = readFileSync(join(process.cwd(), "src/lib/generation-core/account-ledger.ts"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  // <1000 行重构：account-ledger.ts 降为 barrel，SQL 在 account-ledger/*.ts。
+  const source = [
+    "src/lib/generation-core/account-ledger.ts",
+    ...["opening", "queries", "recharge-ingest", "schema", "storage", "types", "writes"].map(
+      (m) => `src/lib/generation-core/account-ledger/${m}.ts`,
+    ),
+  ]
+    .map((rel) =>
+      readFileSync(join(process.cwd(), rel), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, ""),
+    )
+    .join("\n");
   assert.doesNotMatch(source, /UPDATE\s+account_ledger/i);
   assert.doesNotMatch(source, /DELETE\s+FROM\s+account_ledger/i);
   assert.match(source, /INSERT INTO account_ledger/);

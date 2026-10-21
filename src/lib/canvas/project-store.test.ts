@@ -22,7 +22,15 @@ test("画布 reducer 契约存在且被 types 引用", () => {
 });
 
 test("agent-chat-types 涵盖 canvas 事件", () => {
-  const types = readFileSync("src/lib/agent-chat-types.ts", "utf8");
+  // <1000 行重构：AGENT_EVENT_NAMES 在 agent-chat-types/types-events.ts。
+  const types = [
+    "src/lib/agent-chat-types.ts",
+    ...["sse-parse", "types-agent", "types-core", "types-events"].map(
+      (m) => `src/lib/agent-chat-types/${m}.ts`,
+    ),
+  ]
+    .map((rel) => readFileSync(rel, "utf8"))
+    .join("\n");
   for (const name of [
     "canvas.plan",
     "canvas.node.created",

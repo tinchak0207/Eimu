@@ -23,7 +23,7 @@
  *   sudo docker exec -w /app image-control-worker npx tsx tools/refresh-channel-bias.ts --diagnose
  *   # 刷新（默认 dry-run，只打印将要做的写操作）
  *   sudo docker exec -w /app image-control-worker npx tsx tools/refresh-channel-bias.ts \
- *     --model minimax-h3 --reason "适配器严格 JSON body 修复 + 上游实测 200 出片 54s" --actor eimu
+ *     --model minimax-h3 --reason "适配器严格 JSON body 修复 + 上游实测 200 出片 54s" --actor tinchak0207
  *   # 真正落地（写入水位 + 复位调度态 + 清理窗口内健康事件）
  *   ... --apply
  *

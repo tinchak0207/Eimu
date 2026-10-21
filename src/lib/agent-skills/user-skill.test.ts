@@ -149,7 +149,7 @@ test("落库契约：产出 doc 过 store 闸门，读回再解析仍是原 skil
   assert.deepEqual(memoryDocToSkill(stored), skill);
 });
 
-test("去重复用 store：同名一句话的第二条被 store 判 duplicate，本端不自己判", async () => {
+test("去重复用 store：同名一句话的第二条被 private reconcile 判 noop（同一事实只刷新确认时间）", async () => {
   __resetAgentMemoryStoreForTests();
   const first = validated(baseDraft({ family: "ugc", name: "口播带货第一版" }));
   const second = validated(baseDraft({ family: "ugc", name: "口播带货第二版" }));
@@ -160,13 +160,31 @@ test("去重复用 store：同名一句话的第二条被 store 判 duplicate，
     docs: [skillToMemoryDoc(first, { ownerKey: OWNER_KEY })],
   });
   assert.equal(one.accepted.length, 1);
+  const [firstDoc] = await listMemoryDocs({ scope: "private", ownerKey: OWNER_KEY });
+  assert.ok(firstDoc, "第一条必须已落库");
 
   const two = await ingestMemoryDocs({
     batchId: "user-skill-test-2b",
     docs: [skillToMemoryDoc(second, { ownerKey: OWNER_KEY })],
   });
-  assert.deepEqual(two.rejected, [{ slug: second.id, reason: "duplicate" }]);
+  // 5ed6b925 的 private reconcile 在 G5 duplicate 之前把「同一事实」判为 noop：
+  // 不新增文档、不进 accepted、也不进 rejected。去重仍由 store 单一真源执行。
+  assert.deepEqual(two.rejected, []);
+  assert.deepEqual(two.noop, [firstDoc.id]);
   assert.equal(two.accepted.length, 0);
+});
+
+test("saveMySkill：近重复第二条（noop）→ 409 duplicate，不得误报 400 invalid_skill/structure", async () => {
+  __resetAgentMemoryStoreForTests();
+  const first = await saveMySkill(OWNER_KEY, baseDraft({ family: "ugc", name: "口播带货第一版" }));
+  assert.equal(first.ok, true, `第一条应建立成功：${JSON.stringify(first)}`);
+
+  const second = await saveMySkill(OWNER_KEY, baseDraft({ family: "ugc", name: "口播带货第二版" }));
+  assert.deepEqual(second, { ok: false, status: 409, error: "duplicate", reason: "duplicate" });
+
+  const docs = await listMemoryDocs({ scope: "private", ownerKey: OWNER_KEY });
+  assert.equal(docs.length, 1, "noop 不得新增第二条文档");
+  __resetAgentMemoryStoreForTests();
 });
 
 test("验证器正对照：正规化（trim／去重）并派生 id", () => {

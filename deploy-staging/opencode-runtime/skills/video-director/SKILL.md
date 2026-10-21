@@ -9,6 +9,16 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 
 创作前从原任务提取显式硬约束，交付前对照原任务逐项核对；不另造重复路径表。用户的 before/after/until/then（先、后、直到、再）是动作依赖，须同时保留在现有 camera.timing 与最终 shot.prompt 中。等待触发后才启动的机位不能写成全程匀速；没有给定秒点时保留事件触发，不编精确秒数。
 
+## 动态优先（先于运镜）
+
+视频 = 帧间变化。先决定「这一镜里什么在变」，再决定机位怎么走；运镜不能替代主体动作。
+
+- 开拍前先回答三件事：**主体动作**（谁做了什么、身体怎么发力）、**空间关系**（人物/道具/环境的相对位置怎么变）、**环境状态**（光、风、尘、人群、门帘怎么变）。答不出来＝这一镜不能开拍。
+- 动作/叙事镜头必须先有 3D 预演（director-engine 白模或 blender_*）或明确的 beat 时间线；不许用「单张首帧 + 六槽静态描述」开拍——那正是成片像 PPT 的根因。
+- 不默认 slow push，也不接受全片统一慢推。每镜的机位必须由动作或空间变化驱动：跟拍跟的是谁、甩镜从哪个动作起、急推在哪个 beat 落点，都要写清。目的确实不需要位移时 static 合法，但同片不能所有镜头都靠慢推。
+- 读取顺序：先读 [references/motion-first.md](references/motion-first.md)（动态优先配方、beat 写法、反 PPT 验收），再读 [references/motion.md](references/motion.md)（机位几何与视差）。不把整库每轮注入。
+- 交付前用 `video_evidence action=motion` 逐镜检查 `median_diff` / `static_ratio`；`verdict=static` 必须重做，或如实标注「未达标」并说明原因，不伪签通过。
+
 1. 先问镜头要带来什么：跟随行动、揭示信息、建立空间、压迫、疏离或让观众读清细节。目的不需要位移时 static 合法；明确固定机位、固定焦距必须遵守，不默认慢推或全部慢放大。
 2. 分开主体动作、环境变化和摄影机动作。一镜选一条主路径，默认以 camera.trajectory 一句话说明从有依据的起点到有依据的终点如何物理移动，再写 camera.movement 与必要的 timing，以及沿途新信息。不要把同一机位路线重复写成起止描述和分时位置表。以场景固定参照描述机位；只写确实可判断的视差、遮挡揭示或透视变化用于审阅，不保证上游必然实现。
 3. I2V 图片提供起始外观与构图，prompt 写动作如何开始、发展、落点；不要只重述静态图。首尾图描述状态差，补可见中间动作，不用两张图冒充运动路径。参考图存在不等于首尾硬锁。
@@ -16,7 +26,7 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 5. 根据真实目录模型、能力、输入限制和完整档位报价选路；不能把原生位姿张量控制当 prompt 保证。模型失败先识别主体/场景/机位哪层冲突，缩短动作或换合适路径，不堆同义运镜词。付费视频渠道（MiniMax H3／Seedance／miaowu）全断时，目录里的免费兜底档 `agnes-video-2.5-flash`（agnes 免费额度，480p/720p、5/10 秒、无参考图，队列限速）仍可出片——只在付费档不可用时用它，不因免费默认选它；细则见 [references/models.md](references/models.md)。
 6. shot.camera 交既有编译器与 chain。自然语言视频默认只填 movement、单一权威 trajectory 与必要 timing；start/end/parallax/keyframes 仍是平台支持的可选字段，保留用户显式字段与硬约束，不默认填满。keyframes 仅在任务确实要求分时控制时，从同一条已确定的路径推导；time_seconds 严格递增且位于镜头 duration 内，position 不得与轨迹方向或位置顺序冲突。无可靠空间依据或无法保持一致时，明确不能作该硬精确承诺，改用简洁运动方案，不编造位置。先 dry_run 核最终 submit_body，再在真实授权下制作。制作后由独立 critic 实际看时间序列，含开头相邻原帧及中尾覆盖；单帧、probe、首帧骤跳都不能证明连续运镜，缺感知标 PARTIAL，不伪签 PASS。
 
-按需读取（相对本目录）：运动选型用 [references/motion.md](references/motion.md)；模型提示与输入边界用 [references/models.md](references/models.md)。不把整库每轮注入。
+按需读取（相对本目录）：动态优先与 beat 时间线先读 [references/motion-first.md](references/motion-first.md)，运动选型再读 [references/motion.md](references/motion.md)；模型提示与输入边界用 [references/models.md](references/models.md)。不把整库每轮注入。
 
 
 ## 批量逐帧与产物回收

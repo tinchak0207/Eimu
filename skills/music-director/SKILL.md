@@ -5,7 +5,7 @@ description: 音乐 Expert 配方库。触发时机：配乐／主题曲／MV �
 
 # Music Director — SunoForge v3.0 配方库
 
-本目录是音乐域 Expert 的 must-load 配方库，主体为 SunoForge v3.0（MIT）12 档 verbatim 入库（`files/`，不翻译不修改）。目标生成平台为 Google Lyria 3.5（项目负责人裁定路线），配方同时覆盖 Suno／Flow Music／ElevenMusic／Stable Audio 等。
+本目录是音乐域 Expert 的 must-load 配方库，主体为 SunoForge v3.0（MIT）12 档 verbatim 入库（`files/`，不翻译不修改）。目标生成平台为 Google Lyria 3.5（暴君裁定路线），配方同时覆盖 Suno／Flow Music／ElevenMusic／Stable Audio 等。
 
 ## 12 档结构（5 CORE 规则层 + 7 DATA 事实层）
 

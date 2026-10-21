@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: image-eimu
+    name: image-tinchak0207
     env: node
     plan: free
     buildCommand: npm install && npm run build
@@ -11,10 +11,10 @@ services:
       - key: IMAGE_API_KEY
         sync: false
       - key: IMAGE_API_BASE_URL
-        value: https://your-relay.example/v1
+        value: https://share-api.com/v1
       - key: IMAGE_API_MODEL
         value: gpt-image-2
       - key: IMAGE_API_KEY_FALLBACK
         sync: false
       - key: IMAGE_API_BASE_URL_FALLBACK
-        value: https://your-relay-2.example/v1
+        value: https://happycode.vip/v1

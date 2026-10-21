@@ -39,6 +39,16 @@ import { readBeastMode, routeExpert, EXPERT_REGISTRY } from "./expert-registry.t
 import { validateExpertDeliverable, type ExpertTaskContract } from "./expert-contract.ts";
 import { HARNESS_TOOL_ID_LIST } from "./harness-tool-registry.ts";
 
+// ── 真源符号定位（防漂移，不钉死行号）─────────────────────────────────────────
+// 2026-10-19：id 清单本体已抽到 harness-tool-ids.ts（295c3560 客户端安全拆分），
+// registry 只 re-export，旧的行号断言在拆分后恒为 0。改为按符号定位：每个 id
+// 在当前真源档必须恰好有一条登记行。
+
+function harnessIdDefinitionLines(source: string, id: string): string[] {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return source.split("\n").filter((line) => new RegExp(`^\\s*"${escaped}",\\s*$`).test(line));
+}
+
 // ── 共用夹具 ─────────────────────────────────────────────────────────────────
 
 const VALID_INPUT = {
@@ -96,34 +106,29 @@ test("persona 工具白名单：每个 id 都真实存在于 harness-tool-regist
   }
 });
 
-test("persona 工具白名单 id 与 harness 真源行号逐一对账（源码断言防漂移）", () => {
-  // 行号考古（现场实测，2026-09-08）：doc_struct L69 / canvas_apply_ops L37 /
-  // script_scene_parse L86 / story_sequence_consistency L87 / storyboard_qc_17 L88 /
-  // world_bible_extract L114 / image_quote L76。registry 占位行注释的
-  // L88/L89/L115 与现场有 1 行偏移，以现场为准（已在交付回报如实记录）。
-  // 2026-09-28 行号整体位移（+10 档头诚实注记、world_bible_extract 再 +7 因新增 4 支
-  // 影片工具）：这是**登记面自愿增行**造成的位移，不是 id 被搬走；数值按现场重测更新，
-  // 判定语义（id 在登记表里的位置 = 防重排/防幻影）不变。
-  // 2026-10-03：人机共笔三件（workflow_write/history/rollback）登记 + 档头注记更新，
-  // 再次自愿增行 → 全表 +2（world_bible_extract 另 +6，因新 id 排在它之前）。同样按现场重测。
-  const lines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
-  const lineOf = (id: string): number =>
-    lines.findIndex((l) => l.includes(`"${id}"`)) + 1;
-  const expected: Record<string, number> = {
-    script_scene_parse: 98,
-    story_sequence_consistency: 99,
-    storyboard_qc_17: 100,
-    canvas_apply_ops: 49,
-    doc_struct: 81,
-    world_bible_extract: 138,
-    image_quote: 88,
-  };
-  for (const [id, line] of Object.entries(expected)) {
-    assert.ok(
-      SCREENWRITER_PERSONA_TOOL_IDS.includes(id as (typeof SCREENWRITER_PERSONA_TOOL_IDS)[number]),
-      `白名单缺编剧域工具 ${id}`,
+test("persona 工具白名单 id 与 harness 真源逐一对账（按符号定位防漂移）", () => {
+  // 2026-10-19：不再钉死行号（档头注记/登记位移会误红，且真源已拆档）。
+  // 每个白名单 id 必须在 harness-tool-ids.ts 恰好登记一次——防幻影、防重复。
+  const source = readFileSync(
+    nodePath.resolve(process.cwd(), "src/lib/harness-tool-ids.ts"),
+    "utf8",
+  );
+  const expected = [
+    "script_scene_parse",
+    "story_sequence_consistency",
+    "storyboard_qc_17",
+    "canvas_apply_ops",
+    "doc_struct",
+    "world_bible_extract",
+    "image_quote",
+  ] as const;
+  for (const id of expected) {
+    assert.ok(SCREENWRITER_PERSONA_TOOL_IDS.includes(id), `白名单缺编剧域工具 ${id}`);
+    assert.equal(
+      harnessIdDefinitionLines(source, id).length,
+      1,
+      `harness-tool-ids.ts 中 "${id}" 必须恰好登记一次`,
     );
-    assert.equal(lineOf(id), line, `harness-tool-registry 中 "${id}" 行号漂移`);
   }
 });
 

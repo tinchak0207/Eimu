@@ -11,7 +11,7 @@ export default tool({
     "关键约束：上限 16MiB、只接受常规文件（拒绝 symlink/hardlink）；sha256 不变不产生新版本；expected_version 做乐观并发；只有返回 slug/version/url/sha256 才算成功。",
     "失败处置：version_conflict 先 artifact_get 读最新版本再发布；artifact_publish_failed 按 gateway 文本修正；network_error 稍后重试。",
     "互指：复核元数据用 artifact_get，真实探测用 artifact_verify；artifact_register 只登记不产生版本。",
-    "示例：artifact_publish({name:film_final_cut, path:/opt/eimu-harness/workspace/out/final.mp4})",
+    "示例：artifact_publish({name:film_final_cut, path:/opt/agent-harness/workspace/out/final.mp4})",
   ].join("\n"),
   args: {
     name: tool.schema.string().describe("artifact 名称（同会话内唯一，如 film_final_cut）"),

@@ -7,7 +7,7 @@ import type { PromptInputMode } from "@/components/PromptInput";
 export const MODES_WITHOUT_TEXTAREA = new Set<PromptInputMode>(["upscale", "agent"]);
 
 /**
- * ── 全模式共用外框高度（2026-08-22 项目负责人裁定：AI 助理 toggle 时大面板高度
+ * ── 全模式共用外框高度（2026-08-22 暴君裁定：AI 助理 toggle 时大面板高度
  *    不可变，溢出不可接受）──
  * 不猜固定数字：在 generate/edit（textarea 可见）时实测内容区自然高度，
  * 锁定为所有模式的外框高度。generate 回到原本自然高（零溢出）；

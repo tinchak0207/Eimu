@@ -17,7 +17,7 @@
  *
  * 为什么是「契约档」而非运行时：与 blender/music 版同构——persona 的运行时
  * 真源（模型绑定、subagent 派遣 gateway/subagent.ts、agent prompt / AGENTS.md）
- * 都在 VPS /opt/eimu-harness，本地 repo 无 gateway 真源可改。本档钉死契约
+ * 都在 VPS /opt/agent-harness，本地 repo 无 gateway 真源可改。本档钉死契约
  * 四要素并被委托单/回传两端 import。
  *
  * SKILL 挂载：视频导演读取视频域导演配方；模型与运动参考按任务读取，

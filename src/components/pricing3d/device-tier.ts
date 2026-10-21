@@ -1,7 +1,7 @@
 // /pricing 舞台的装置分级（2026-10-01）：低端机不跑 WebGL，改显示预渲染的静态场景图。
 //
 // 实测（Intel UHD 核显）：3D 舞台滚动 6–9fps、单帧卡 1.3s；即使预热 shader＋动态解析度，滑鼠一动仍只有
-// ~13fps。项目负责人裁定：低端机宁可没有灵动感，也不能卡——直接换成同构图的静态图（由真引擎离线渲染，
+// ~13fps。暴君裁定：低端机宁可没有灵动感，也不能卡——直接换成同构图的静态图（由真引擎离线渲染，
 // 见 public/showcase/pricing3d/）。这里只做「判断」，纯函式可测；读浏览器资讯在 detectPricingStageMode。
 
 export type PricingStageMode = "3d" | "lite" | "off";

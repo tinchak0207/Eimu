@@ -1,7 +1,7 @@
 /**
  * memory_recall harness 工具 VPS staging 稿（P0-5，2026-09-15）。
  *
- * 行为真源＝本档；部署落点＝VPS `/opt/eimu-harness/workspace/.opencode/lib/memory_recall_impl.ts`。
+ * 行为真源＝本档；部署落点＝VPS `/opt/agent-harness/workspace/.opencode/lib/memory_recall_impl.ts`。
  * 结构逐行同构 R1 search_web 轮子（VPS `.opencode/lib/web_search_impl.ts`，2026-09-10 机械导出）：
  * 纯零依赖、无 import、同 ok/fail plumbing 契约、同错误铁律（缺参数/非 2xx/网络层失败一律
  * 结构化 fail() 带原文摘录与人话 hint，绝不 throw 逃逸、绝不吞错、绝不伪造结果）、同 20s 超时帽。

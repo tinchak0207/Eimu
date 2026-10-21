@@ -4,7 +4,7 @@
  * 镜像自 src/lib/music-take-entropy.ts，勿直接手改本档。
  * 该档零依赖、零 import，故全文逐行照抄、无任何 import 路径改写。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/music_take_entropy.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_take_entropy.ts
  * env：无（纯函数，零依赖零副作用）。
  */
 

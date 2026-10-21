@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
 
-export const API_BASE = "https://image.eimu.dev/v1"
+export const API_BASE = "https://image.tinchak0207.xyz/v1"
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 
@@ -256,7 +256,7 @@ async function acquireRateSlot(key: string, signal?: AbortSignal): Promise<void>
  * 而控制面那棵树是落后的分叉（没有角色卡路由）；/api/biz/* 不在改写清单内，
  * 由站点本体服务（有 Blob、有完整五值卡模型）。角色卡与 tag 解析走这里。
  */
-export const SITE_BASE = "https://image.eimu.dev"
+export const SITE_BASE = "https://image.tinchak0207.xyz"
 
 /**
  * 签章 + 出网的共用核心：key 解析、限流、header 组装只写一次。
@@ -664,13 +664,13 @@ export async function uploadImageBytes(
 
 /**
  * 读本地图片来源（chat 附件绝对路径 / workspace 相对路径）→ 位元组 + mime。
- * 路径解析：原样 → process.cwd() → /opt/eimu-harness/workspace 依序命中。
+ * 路径解析：原样 → process.cwd() → /opt/agent-harness/workspace 依序命中。
  * 抛错带 .code 供 classifyError 诚实归因。
  */
 async function readLocalImageBytes(src: string): Promise<{ buffer: Buffer; mimeType: string; absPath: string }> {
   let abs = src
   if (!isAbsolute(abs)) {
-    const hit = [process.cwd(), "/opt/eimu-harness/workspace"]
+    const hit = [process.cwd(), "/opt/agent-harness/workspace"]
       .map((base) => resolvePath(base, abs))
       .find((cand) => existsSync(cand))
     abs = hit || resolvePath(process.cwd(), abs)

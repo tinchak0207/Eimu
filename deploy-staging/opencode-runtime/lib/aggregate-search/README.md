@@ -37,7 +37,7 @@
 ### 1. 克隆与安装依赖
 
 ```bash
-git clone https://github.com/eimu/aggregate-search.git
+git clone https://github.com/tinchak0207/aggregate-search.git
 cd aggregate-search
 
 # 安装可选扩展依赖（Telegram / X 搜索支持）

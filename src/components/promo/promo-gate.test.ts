@@ -95,7 +95,7 @@ test("?promo=1 是验收用的强制预览：穿过全部守卫（含渠道判�
 });
 
 /**
- * 进站判定只做一次（2026-09-27 项目负责人实锤「?promo 在从登入态 logout 时也错误触发」）：
+ * 进站判定只做一次（2026-09-27 暴君实锤「?promo 在从登入态 logout 时也错误触发」）：
  * 登出让 isLoggedIn 由真翻假、effect 重跑，若重判就会对只是登出的人再插播一次。
  * 这里用纯函式的连续呼叫模拟那串登入态变化，把「定案就不改判」钉死。
  */
@@ -195,7 +195,7 @@ test("主输入区送不出去的那句话：写进宣传片同一格，补送 e
 
 
 /**
- * 结尾送出的分流（2026-09-27 项目负责人第三轮）：未登入不得直接把话吞掉——必须留一份
+ * 结尾送出的分流（2026-09-27 暴君第三轮）：未登入不得直接把话吞掉——必须留一份
  * pending 走登入；登入态才当场开跑。空框（直接按送出）两条都要用片中的那句话。
  */
 test("结尾送出分流：未登入留 pending 走登入，登入当场开跑", () => {
@@ -228,8 +228,17 @@ test("结尾送出分流：未登入留 pending 走登入，登入当场开跑",
  */
 test("接线探针：hook 的 auth 回报 → Surface → PromptInput → ImagePlayground 存进同一格", () => {
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
-  const hook = read("../../hooks/use-agent-chat.ts");
-  const surface = read("../agent-chat/AgentChatSurface.tsx");
+  // <1000 行重构：hook 的 options 型别与发信分支分居子模组；Surface 的 props 型别在 .types.ts。
+  const hook = [
+    read("../../hooks/use-agent-chat.ts"),
+    ...["commands", "connection", "core", "types"].map((m) => read(`../../hooks/use-agent-chat/${m}.ts`)),
+  ].join("\n");
+  const surface = [
+    read("../agent-chat/AgentChatSurface.tsx"),
+    read("../agent-chat/AgentChatSurface.types.ts"),
+    read("../agent-chat/AgentChatSurface.session-actions.ts"),
+    read("../agent-chat/AgentChatSurface.helpers.ts"),
+  ].join("\n");
   const prompt = read("../PromptInput.tsx");
   const playground = read("../ImagePlayground.tsx");
 

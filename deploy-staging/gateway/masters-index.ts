@@ -11,7 +11,7 @@ import { memoryPostIngest } from "./memory-wiring.ts"
 // generation_job(kind='film_export', status='succeeded') + artifact(metadata_json.masterExport)。
 // 读取端＝控制面 /v1/masters（B 端按属主 userId 列举）。
 
-export const MASTERS_PUBLIC_BASE = (process.env.MASTERS_PUBLIC_BASE || "https://store.eimu.dev").replace(/\/+$/, "")
+export const MASTERS_PUBLIC_BASE = (process.env.MASTERS_PUBLIC_BASE || "https://store.tinchak0207.xyz").replace(/\/+$/, "")
 
 /** 导出成功（probe 过档）才有资格调用：索引是「验过的成片」清单，probe 未过档不进。
  *  登记失败**不**反悔导出——档案已在盘上、静态路由已可服务，只诚实记 note：

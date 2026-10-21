@@ -461,7 +461,7 @@ test("napi seed-2.0：body 带 ratio/seconds、无 aspect_ratio/resolution/gener
     return jsonResponse(200, {
       id: TASK_ID,
       status: "completed",
-      video_url: "http://203.0.113.11/generated_videos/video_napi.mp4",
+      video_url: "http://172.81.98.24/generated_videos/video_napi.mp4",
     });
   }) as typeof fetch;
 
@@ -471,7 +471,7 @@ test("napi seed-2.0：body 带 ratio/seconds、无 aspect_ratio/resolution/gener
       supplier({ id: "env:napi", label: "napi", baseUrl: "https://napi.wanzij.cn/v1", credentialRef: "NAPI_API_KEY", supplierModelId: "seed-2.0" }),
       videoInput({ modelId: "seedance-2.5-30s", workflow: { references: [], metadata: {}, durationSeconds: 30, generateAudio: true } }),
     );
-    assert.equal(output.url, "http://203.0.113.11/generated_videos/video_napi.mp4");
+    assert.equal(output.url, "http://172.81.98.24/generated_videos/video_napi.mp4");
     assert.equal(output.supplierModelId, "seed-2.0");
     assert.ok(captured);
     assert.equal(captured.model, "seed-2.0");
@@ -498,7 +498,7 @@ test("napi seed-2.5：参考图走 images 阵列、supplierModelId 渠道级短�
     return jsonResponse(200, {
       id: TASK_ID,
       status: "completed",
-      video_url: "http://203.0.113.11/generated_videos/video_napi25.mp4",
+      video_url: "http://172.81.98.24/generated_videos/video_napi25.mp4",
     });
   }) as typeof fetch;
 

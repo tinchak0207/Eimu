@@ -43,7 +43,7 @@ test("config reads env and normalizes trailing slash", () => {
 test("missing key resolves to empty string", () => {
   const cfg = resolveConfig({} as NodeJS.ProcessEnv);
   assert.equal(cfg.apiKey, "");
-  assert.equal(cfg.apiBase, "https://image.eimu.dev/api/v1");
+  assert.equal(cfg.apiBase, "https://image.tinchak0207.xyz/api/v1");
 });
 
 test("requestJson attaches Bearer auth and parses JSON", async () => {

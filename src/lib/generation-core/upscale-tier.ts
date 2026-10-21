@@ -15,8 +15,8 @@
  *
  * ── 上游真相（本档所有数字的唯一来源，2026-09-29 逐行实查）─────────────────
  * 上游链：站点路由 → VPS pixai-bridge → PixAI GraphQL `createGenerationTask`。
- *   `pixai-bridge/server.py:127` `POST /v1/upscale`（FastAPI，无 body 上限）
- *   → `pixai-bridge/app.py:347-353` `handle_upscale`：只读
+ *   `/opt/pixai-bridge/server.py:127` `POST /v1/upscale`（FastAPI，无 body 上限）
+ *   → `/opt/pixai-bridge/app.py:347-353` `handle_upscale`：只读
  *     `{image, factor, ratio, size}`，`opts = {mediaId: image, upscale: factor, ratio, size}`
  *   → `app.py:230-232`（`resolve_gen_params`）：
  *       `if ratio not in RATIO_SIZES: ratio = "1:1"`
@@ -44,10 +44,12 @@
  * 由 env `UPSCALE_4K_UPSTREAM=1` 在校准后开启（同 P1-3 `VIDEO_POST_PRODUCTION_UPSTREAM` 手法）。
  * 未开启时 `/v1/models` 的能力投射也只宣告真正可提交的档位（不卖未校准档位）。
  *
- * 本档是**叶模组**：不 import catalog（只用 type-only import）、不 import DB／node 内建，
- * 因此可被 `generation-model-catalog/capabilities.ts` 安全引用（无循环、不污染 client bundle）。
+ * 本档是**服务端 / 测试**模组：不 import catalog（只用 type-only import）、不 import DB／node 内建，
+ * 但会 import 服务端专用 env 开关（`upscale-4k-flag.ts`）——因此 **不得** 被客户端可达模组引用。
+ * 客户端共用的「哪些档位可提交」纯判据在 `upscale-tier-availability.ts`（零 env、零 import），
+ * `generation-model-catalog/capabilities.ts` 只引用后者。
  *
- * ── 后端换血（2026-09-30 项目负责人指令「4k超分可以走 gpt image 2 执行超分」）───────────
+ * ── 后端换血（2026-09-30 暴君指令「4k超分可以走 gpt image 2 执行超分」）───────────
  * PixAI 渠道当日已死（站点风控）⇒ 上面的 `(size, factor)` 参数化只描述 **legacy 后端**
  * （`/v1/upscale` 未设 `UPSCALE_BACKEND` 时的预设），它现在只会回 502。
  * 新后端（控面设 `UPSCALE_BACKEND=gpt-image-2`，实作在 `/v1/upscale`）是 **gpt-image-2
@@ -63,6 +65,12 @@
  */
 
 import type { UpscaleTier } from "../generation-model-catalog/types";
+import { upscaleFourKUpstreamEnabled } from "../upscale-4k-flag";
+import {
+  defaultUpscaleTier as defaultUpscaleTierWithFlag,
+  isUpscaleTierServable as isUpscaleTierServableWithFlag,
+  servableUpscaleTiers as servableUpscaleTiersWithFlag,
+} from "./upscale-tier-availability";
 
 export type { UpscaleTier };
 
@@ -74,7 +82,7 @@ export type UpscaleBridgeSize = (typeof UPSCALE_BRIDGE_SIZES)[number];
 export const UPSCALE_TIERS = ["1k", "2k", "4k"] as const satisfies readonly UpscaleTier[];
 
 /**
- * 上游比例→尺寸表，**逐字转录** `pixai-bridge/app.py:171-179`（2026-09-29 实查）。
+ * 上游比例→尺寸表，**逐字转录** `/opt/pixai-bridge/app.py:171-179`（2026-09-29 实查）。
  * 这是「4K 保证值」唯一的推导来源（禁止手写长边数字）。
  * 注意语义：`RATIO_SIZES[ratio].get(size, RATIO_SIZES[ratio]["1k"])` ⇒ 未知 size 回 1k。
  */
@@ -203,35 +211,36 @@ export class UpscaleTierError extends Error {
 // ── 档位可用性（4K 未校准 ⇒ 默认 fail-closed，env 开关在校准后开启）──────────
 
 /**
- * 4K 上游语义是否已由真单校准——**由调用端注入，本档不读 env**。
+ * 4K 上游语义是否已由真单校准——**默认值来自服务端专用档 upscale-4k-flag.ts**，
+ * 调用端也可显式注入（两个提交路由与 `/v1/models` 都这么做）。
  *
- * 为什么不在本档读 env：本档经 generation-model-catalog/capabilities 进客户端
- * bundle，若在此读 `process.env.UPSCALE_4K_UPSTREAM` 会把内部 env 名泄漏到公开
- * JS 产物（红队 2026-10-05）。env 读取移到服务端专用档 upscale-4k-flag.ts；
- * 服务端提交端把结果注入 `fourKEnabled`，客户端与共享投射拿不到该开关、恒为
- * false——与既有行为一致（非 NEXT_PUBLIC env 在客户端本就不可见，默认关闭）。
+ * 为什么 env 读取不在本档：本档若被客户端可达模组 import（曾经经
+ * generation-model-catalog/capabilities），在档内读 `process.env.UPSCALE_4K_UPSTREAM`
+ * 会把内部 env 名泄漏到公开 JS 产物（红队 2026-10-05）。现由
+ * `upscale-tier-availability.ts`（零 import、无 env）承载客户端共用的纯判据；
+ * 本档只被服务端路由与测试载入。
  */
-export function isUpscaleTierServable(tier: UpscaleTier, fourKEnabled: boolean = false): boolean {
-  const contract = UPSCALE_TIER_CONTRACTS[tier];
-  if (contract.semantics === "upstream-factor-unverified") return fourKEnabled;
-  return true;
+export function isUpscaleTierServable(
+  tier: UpscaleTier,
+  fourKEnabled: boolean = upscaleFourKUpstreamEnabled(),
+): boolean {
+  return isUpscaleTierServableWithFlag(tier, fourKEnabled);
 }
 
 /** 可提交档位（声明序）。`declared` 省略＝以档位全集为声明面。 */
 export function servableUpscaleTiers(
   declared: readonly UpscaleTier[] = UPSCALE_TIERS,
-  fourKEnabled: boolean = false,
+  fourKEnabled: boolean = upscaleFourKUpstreamEnabled(),
 ): readonly UpscaleTier[] {
-  return declared.filter((tier) => isUpscaleTierServable(tier, fourKEnabled));
+  return servableUpscaleTiersWithFlag(declared, fourKEnabled);
 }
 
 /** 一键预设档位＝最高可提交档位（4K 校准开启后免改码自动变 4K，这就是「一键超分到 4K」）。 */
 export function defaultUpscaleTier(
   declared: readonly UpscaleTier[] = UPSCALE_TIERS,
-  fourKEnabled: boolean = false,
+  fourKEnabled: boolean = upscaleFourKUpstreamEnabled(),
 ): UpscaleTier {
-  const servable = servableUpscaleTiers(declared, fourKEnabled);
-  return servable.length ? servable[servable.length - 1] : "1k";
+  return defaultUpscaleTierWithFlag(declared, fourKEnabled);
 }
 
 // ── 输入解析 ────────────────────────────────────────────────────────────────
@@ -318,7 +327,7 @@ function tierResolution(tier: UpscaleTier, defaulted: boolean): UpscaleTierResol
 export function resolveUpscaleTier(
   requested?: unknown,
   declared: readonly UpscaleTier[] = UPSCALE_TIERS,
-  fourKEnabled: boolean = false,
+  fourKEnabled: boolean = upscaleFourKUpstreamEnabled(),
 ): UpscaleTierResolution {
   const interpreted = interpretUpscaleSize(requested);
   if (interpreted.kind === "pixels") {
@@ -470,7 +479,7 @@ export function resolveUpscaleSubmission(options: {
   fourKEnabled?: boolean;
 }): NormalizedUpscaleSubmission {
   const declared = options.declaredTiers ?? UPSCALE_TIERS;
-  const fourKEnabled = options.fourKEnabled === true;
+  const fourKEnabled = options.fourKEnabled ?? upscaleFourKUpstreamEnabled();
   const raw = (options.input && typeof options.input === "object" && !Array.isArray(options.input))
     ? options.input as Record<string, unknown>
     : {};
@@ -523,9 +532,9 @@ export function resolveUpscaleSubmission(options: {
         `档位 ${explicitTier.tier} 固定 factor=${contract.factor}，与同时给的 factor=${factorLabel} 矛盾（档位契约：${contractSummary}）。`,
       );
     }
-    resolution = resolveUpscaleTier(explicitTier.tier, declared);
+    resolution = resolveUpscaleTier(explicitTier.tier, declared, fourKEnabled);
   } else if (explicitTier.kind === "unknown") {
-    resolution = resolveUpscaleTier(explicitTier.raw, declared);
+    resolution = resolveUpscaleTier(explicitTier.raw, declared, fourKEnabled);
   } else if (sizeInterpretation.kind === "tier") {
     if (requestedFactor !== null) {
       const paired = Number.isFinite(requestedFactor) ? tierForLegacyPair(sizeInterpretation.tier, requestedFactor) : null;
@@ -534,12 +543,12 @@ export function resolveUpscaleSubmission(options: {
           `(size="${sizeInterpretation.raw}", factor=${factorLabel}) 不是本平台贩售的档位组合（档位契约：${contractSummary}）。`,
         );
       }
-      resolution = resolveUpscaleTier(paired, declared);
+      resolution = resolveUpscaleTier(paired, declared, fourKEnabled);
     } else {
-      resolution = resolveUpscaleTier(sizeInterpretation.tier, declared);
+      resolution = resolveUpscaleTier(sizeInterpretation.tier, declared, fourKEnabled);
     }
   } else if (sizeInterpretation.kind === "unknown") {
-    resolution = resolveUpscaleTier(sizeInterpretation.raw, declared);
+    resolution = resolveUpscaleTier(sizeInterpretation.raw, declared, fourKEnabled);
   } else if (requestedFactor !== null) {
     const byFactor = Number.isFinite(requestedFactor) ? tierForFactor(requestedFactor) : null;
     if (!byFactor) {
@@ -548,9 +557,9 @@ export function resolveUpscaleSubmission(options: {
           + `${[...new Set(UPSCALE_TIERS.map((tier) => UPSCALE_TIER_CONTRACTS[tier].factor))].sort((a, b) => a - b).join("／")}；档位契约：${contractSummary}）。`,
       );
     }
-    resolution = resolveUpscaleTier(byFactor, declared);
+    resolution = resolveUpscaleTier(byFactor, declared, fourKEnabled);
   } else {
-    resolution = resolveUpscaleTier(undefined, declared);
+    resolution = resolveUpscaleTier(undefined, declared, fourKEnabled);
   }
   if (!resolution.ok) throw new UpscaleTierError(resolution.code, resolution.message, resolution.status);
 

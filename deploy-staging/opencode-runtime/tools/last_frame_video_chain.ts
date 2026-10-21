@@ -1,4 +1,4 @@
-import { compileShotPrompt, normalizeShotCamera, type ShotCamera } from "../lib/video-prompt-schema"
+import { compileShotPrompt, normalizeShotCamera, type ShotAudio, type ShotBeat, type ShotCamera, type ShotStateChange } from "../lib/video-prompt-schema"
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, platformFetch, classifyError, registerTask } from "../lib/client"
 
@@ -9,11 +9,21 @@ interface Shot {
   first_frame_url?: string
   last_frame_url?: string
   prompt: string
+  subject?: string
+  action?: string
+  beats?: ShotBeat[]
+  state_change?: ShotStateChange
+  environment_change?: string
+  audio?: ShotAudio
   camera?: ShotCamera
   duration_seconds?: number
   model?: string
   size?: string
 }
+
+/** 散文 prompt 的正向动态契约（不用否定句）：镜头必须发生可观察的物理变化。 */
+const DYNAMIC_CONTRACT = "Continuous physical action drives the shot: the subject's position, pose, and silhouette change measurably from the first frame to the last, and the environment evolves with the action."
+
 
 function parseShots(raw: string): { shots: Shot[]; error?: string } {
   let j: unknown
@@ -41,9 +51,30 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
     let camera: ShotCamera | undefined
     try { camera = normalizeShotCamera(o, typeof o.duration_seconds === "number" ? o.duration_seconds : undefined) }
     catch (error) { return { shots: [], error: `第 ${shots.length + 1} 镜运镜无效：${error instanceof Error ? error.message : String(error)}；未提交任何镜头` } }
+    // 状态变化字段原样透传给 buildBody（beats / state_change / environment_change / audio）。
+    const beats = Array.isArray(o.beats)
+      ? (o.beats as unknown[])
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+          .map((item) => ({
+            at_seconds: typeof item.at_seconds === "number" && Number.isFinite(item.at_seconds) ? item.at_seconds : undefined,
+            action: typeof item.action === "string" ? item.action : "",
+            environment_change: typeof item.environment_change === "string" ? item.environment_change : undefined,
+          }))
+      : undefined
+    const stateRaw = o.state_change && typeof o.state_change === "object" && !Array.isArray(o.state_change) ? o.state_change as Record<string, unknown> : undefined
+    const stateChange: ShotStateChange | undefined = stateRaw
+      ? { from: typeof stateRaw.from === "string" ? stateRaw.from : undefined, to: typeof stateRaw.to === "string" ? stateRaw.to : undefined }
+      : undefined
+    const audio = o.audio && typeof o.audio === "object" && !Array.isArray(o.audio) ? o.audio as ShotAudio : undefined
     shots.push({
       camera,
       prompt: prompt.trim() ? prompt : "根据参考图片生成连贯的视频",
+      subject: typeof o.subject === "string" ? o.subject : undefined,
+      action: typeof o.action === "string" ? o.action : undefined,
+      beats,
+      state_change: stateChange,
+      environment_change: typeof o.environment_change === "string" ? o.environment_change : undefined,
+      audio,
       first_frame_url: first || undefined,
       last_frame_url: last || undefined,
       duration_seconds: typeof o.duration_seconds === "number" ? o.duration_seconds : undefined,
@@ -58,12 +89,24 @@ function parseShots(raw: string): { shots: Shot[]; error?: string } {
 /** 首帧、尾帧保序作为图片参考；不宣称上游硬锁端点。 */
 function buildBody(shot: Shot, defModel: string, defSize: string, defDur: number): Record<string, unknown> {
   const duration = shot.duration_seconds ?? defDur
-  // Keep free text verbatim; only explicitly supplied camera data adds a compiled motion block.
-  const motion = shot.camera ? compileShotPrompt({ subject: "", action: "", camera: shot.camera, output: { duration_seconds: duration } }, shot.model || defModel) : ""
-  const prompt = motion ? `${shot.prompt}\n${motion}` : shot.prompt
+  const model = shot.model || defModel
+  const hasMotionData =
+    (Array.isArray(shot.beats) && shot.beats.some((beat) => typeof beat?.action === "string" && beat.action.trim() !== "")) ||
+    (typeof shot.state_change?.from === "string" && shot.state_change.from.trim() !== "" &&
+      typeof shot.state_change?.to === "string" && shot.state_change.to.trim() !== "")
+  let prompt: string
+  if (hasMotionData) {
+    // 有状态变化：编译成时间线（起态 → beats → 终态 → 环境变化 → 机位）。
+    prompt = compileShotPrompt({ ...shot, subject: shot.subject ?? "", action: shot.action ?? shot.prompt }, model)
+  } else {
+    // 散文镜头：原话逐字保留；显式运镜照旧追加，末尾补一句正向动态契约（不用否定句）。
+    const motion = shot.camera ? compileShotPrompt({ subject: "", action: "", camera: shot.camera, output: { duration_seconds: duration } }, model) : ""
+    prompt = `${shot.prompt}${motion ? `\n${motion}` : ""}`
+    if (!prompt.includes(DYNAMIC_CONTRACT)) prompt = `${prompt}\n${DYNAMIC_CONTRACT}`
+  }
   if (prompt.length > 4000) throw new Error(`镜头提示词共 ${prompt.length} 字超过 4000；未截断、未提交`)
   return {
-    model: shot.model || defModel,
+    model,
     prompt,
     n: 1,
     size: shot.size || defSize,
@@ -113,9 +156,9 @@ async function pollJob(
 
 export default tool({
   description:
-    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【运镜契约】camera={movement?,start?,end?,trajectory?,timing?,parallax?,keyframes?:[{time_seconds,position}]}，独立trajectory/keyframes同样实传；未知结构或超长明确拒绝。散文prompt逐字保留，未指定运镜不添加默认运动。dolly是摄影机空间位移，zoom是机位固定的光学变焦；参考图差异不是连续运镜证据。\n\n【帧契约】首帧和尾帧 URL 按序经 reference_images 透传站点计费链。minimax-h3 支持最多 9 张图片参考；图片参与生成，但不保证锁定开头或结尾。禁止丢弃关键帧而静默改成纯文生视频。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
+    "首尾帧视频链：输入关键帧清单（JSON 数组 [{first_frame_url?, last_frame_url?, prompt, subject?, action?, beats?, state_change?, environment_change?, audio?, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]），逐镜经站点计费链 /v1/videos/generations 提交视频 job，轮询至完成，返回按镜排序的 mp4 URL + 耗时 + 实际 cost_coins。\n\n【状态变化契约】有 beats:[{at_seconds?,action,environment_change?}] 或 state_change:{from,to} 的镜头按时间线编译（起态→动作 beat→终态→环境变化→机位）；没有则保留散文原话，并在末尾追加正向动态契约（主体位置/姿态/轮廓与环境的可观察变化）。只写静态画面会被模型做成慢推。\n\n【运镜契约】camera={movement?,start?,end?,trajectory?,timing?,parallax?,keyframes?:[{time_seconds,position}]}，独立trajectory/keyframes同样实传；未知结构或超长明确拒绝。散文prompt逐字保留，未指定运镜不添加默认运动。dolly是摄影机空间位移，zoom是机位固定的光学变焦；参考图差异不是连续运镜证据。\n\n【帧契约】首帧和尾帧 URL 按序经 reference_images 透传站点计费链。minimax-h3 支持最多 9 张图片参考；图片参与生成，但不保证锁定开头或结尾。禁止丢弃关键帧而静默改成纯文生视频。\n\n【预算纪律】必带 dry_run（构造提交体不发射，零扣费）；真发射前用目录 coins_per_second×时长做保守估价，超 budget_max_coins（默认 50）直接拒发并回报预算冲突，不擅自超支。submit_only 模式提交后立即返回 job ids 不等完成（长任务不阻塞）。同一错误重试 2 次即停，失败由站点计费链退款，不重发烧钱。",
   args: {
-    shots: tool.schema.string().min(1).describe("关键帧清单 JSON 数组字串：[{first_frame_url?, last_frame_url?, prompt, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]"),
+    shots: tool.schema.string().min(1).describe("关键帧清单 JSON 数组字串：[{first_frame_url?, last_frame_url?, prompt, subject?, action?, beats?, state_change?, environment_change?, audio?, camera?, trajectory?, keyframes?, duration_seconds?, model?, size?}]"),
     model: tool.schema.string().optional().describe("默认视频模型（镜未指定时用）；建议先用 video_quote 查可用模型与单价"),
     size: tool.schema.string().optional().describe("默认画幅，如 16:9 / 9:16（镜未指定时用），默认 16:9"),
     duration_seconds: tool.schema.number().int().min(5).max(15).optional().describe("默认时长秒（镜未指定时用）"),

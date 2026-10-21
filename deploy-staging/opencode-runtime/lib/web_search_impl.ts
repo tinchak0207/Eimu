@@ -6,8 +6,8 @@
  * 零依赖、无 import，除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 `npx tsx tools/export-web-search-tools-staging.ts` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/web_search_impl.ts
- * env：EXA_API_KEY（Exa Search API 鉴权，写 /opt/eimu-harness/.env 与
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts
+ * env：EXA_API_KEY（Exa Search API 鉴权，写 /opt/agent-harness/.env 与
  *      .env.opencode 双档；TAVILY_API_KEY 暂留）。
  */
 

@@ -1,4 +1,4 @@
-# 模板，不是现役档。现役真源＝VPS /opt/eimu-control-plane/control-plane-compose.yml
+# 模板，不是现役档。现役真源＝VPS /opt/image-control-plane/control-plane-compose.yml
 # （api/worker 另有 PIXAI_BASE_URL/PIXAI_API_KEY 明文 env，secret 不入 git）。
 # deploy/vps/deploy-control-plane.sh 永不覆写 VPS compose，只比对键名漂移。
 services:
@@ -74,6 +74,9 @@ services:
     environment:
       FILMERA_ENV_PATH: /app/.env.control-plane
       NODE_ENV: production
+      # 2026-10-20 压测：默认 6 会让 30 张图排成 5 分钟级；上游实测可承受 12 路。
+      # 同时必须把 supplier/account/capability 三层 concurrency_limit 一起提到 12。
+      GENERATION_WORKER_CONCURRENCY: "12"
     depends_on:
       generation-postgres:
         condition: service_healthy

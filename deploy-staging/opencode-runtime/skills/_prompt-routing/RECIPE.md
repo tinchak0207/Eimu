@@ -78,7 +78,7 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 直接调用 blender_exec 建模（所有席位开放，不必派 Expert；先 asset_search 查 blender-3d-assets 现成件）→ blender_render（eevee 快稿；转台/360° 传 turntable: true 出 mp4）→ 交付 public_urls；要网页可交互预览加 blender_export_gltf。**主动选用**：精确几何／同一物体多角度一致／空间布局／产品 360° 时不走文生图，直接 Blender（本机渲染，零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：blender_* 可用时直接调用 blender_exec 建模（不必派 Expert；先 asset_search 查 blender-3d-assets 现成件）→ blender_render（eevee 快稿；转台/360° 传 turntable: true 出 mp4）→ 交付 public_urls；要网页可交互预览加 blender_export_gltf；不可用时走 bash + 自建几何 + 光栅渲染，产出预演帧/GLB 并标注 `.blend` 未交付，禁止二维文生图冒充。**主动选用**：精确几何／同一物体多角度一致／空间布局／产品 360° 时不走文生图，直接 Blender（本机渲染，零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
 
 ## §商品图
 

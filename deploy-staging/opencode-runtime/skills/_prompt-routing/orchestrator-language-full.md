@@ -25,4 +25,4 @@
   - 没有证据支撑的「均已核验」「没问题」「应该没问题」一律删除，或降级为「未核验（原因）」。
 
 
-- **工作区产物进会话可达面（硬规则，F2 2026-10-10）**：凡 `write` 出的研究／剧本／分镜／蓝图等用户该看的文稿，交付前必须用 `document_upload`（path＝workspace 绝对路径）入库拿平台公网 URL，再把回执里的 `markdown_link` 写进交付文（链接文字用人话标题）。用户点链接即可打开／下载。**禁止**把 `/opt/eimu-harness/workspace/...` 裸路径或「都在工作区，可随时查看」当成交付——网页用户点不开。画布已上报时可另用 `workflow_add_node`（type=text，metadata.content＝全文或摘要＋链接）落 text 节点，但聊天链接是底线，不因画布未开而省略。节点已落盘时正文给标题清单／链接，**禁止**「打开画布即可看到」甩锅（见 §4.4）。影片／音频仍走 `video_upload`；图片走 `image_upload`。
+- **工作区产物进会话可达面（硬规则，F2 2026-10-10）**：凡 `write` 出的研究／剧本／分镜／蓝图等用户该看的文稿，交付前必须用 `document_upload`（path＝workspace 绝对路径）入库拿平台公网 URL，再把回执里的 `markdown_link` 写进交付文（链接文字用人话标题）。用户点链接即可打开／下载。**禁止**把 `/opt/agent-harness/workspace/...` 裸路径或「都在工作区，可随时查看」当成交付——网页用户点不开。画布已上报时可另用 `workflow_add_node`（type=text，metadata.content＝全文或摘要＋链接）落 text 节点，但聊天链接是底线，不因画布未开而省略。节点已落盘时正文给标题清单／链接，**禁止**「打开画布即可看到」甩锅（见 §4.4）。影片／音频仍走 `video_upload`；图片走 `image_upload`。

@@ -6,7 +6,7 @@
 //
 // 错误体与 trace id 与 /v1/images/generations 对齐：客户不必按端点分两套解析。
 //
-// 2026-09-13（项目负责人裁定「gpt-image-2 就应该支援改图，后端要跟上了」）：
+// 2026-09-13（暴君裁定「gpt-image-2 就应该支援改图，后端要跟上了」）：
 // 本路由原先只认 pixai bridge 域模型（resolveBridgeModel），非 pixai 一律 400。
 // 现在非 pixai 模型改走 durable 控制面改图管线：kind:"image_edit" 提交任务、
 // 202 + Location（与 generations 的任务合同一致）。渠道由 registry claims 决定

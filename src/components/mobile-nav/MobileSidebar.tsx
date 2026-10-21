@@ -343,7 +343,7 @@ export function MobileSidebarPanel({
         </div>
 
         {/* 底部帐号动作：随内容一起卷（浮动玻璃条另为绝对定位的 .mobile-sidebar-dock）。
-            「账号设置」「退出登录」已移除（2026-10-03 项目负责人裁定回归 header，另一路在
+            「账号设置」「退出登录」已移除（2026-10-03 暴君裁定回归 header，另一路在
             手机端 header 显出那两颗）；帐号设置仍可经 dock 齿轮的 fallback 到达。 */}
         <div className="pt-1">
           <div className="flex flex-col">

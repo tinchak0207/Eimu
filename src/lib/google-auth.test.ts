@@ -71,7 +71,7 @@ test("buildGooglePassword is stable, secret-sensitive, and Gg+14hex shaped", () 
 
 test("buildGoogleEmail stays synthetic and free of real personal data", () => {
   const email = buildGoogleEmail(profile);
-  assert.equal(email, "google-110234567890123456789@oauth.eimu.dev");
+  assert.equal(email, "google-110234567890123456789@oauth.tinchak0207.xyz");
   assert.match(email, /^[^@\s]+@[^@\s]+\.[a-z]+$/);
   assert.ok(!email.includes(profile.email!), "不得使用真实 Gmail 地址");
   assert.ok(!email.includes(profile.name!), "不得夹带真实姓名");

@@ -24,7 +24,7 @@ import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib"
 
 // WORKSPACE 预设为生产落点；允许 EIMU_WORKSPACE 覆写**仅为测试隔离**（可用干净临时根真跑
 // bwrap，见 vps-tools/eimu-shell.test.ts）。未设时与旧版逐字相同，不改变任何 argv／可见性语义。
-export const WORKSPACE = process.env.EIMU_WORKSPACE || "/opt/eimu-harness/workspace"
+export const WORKSPACE = process.env.EIMU_WORKSPACE || "/opt/agent-harness/workspace"
 export const UPLOADS = path.join(WORKSPACE, "uploads")
 export const RUN_ROOT = path.join(WORKSPACE, ".run")
 const BWRAP = "/usr/bin/bwrap"
@@ -210,7 +210,7 @@ export function sessionRunDir(sessionID: string): string {
 function sandboxEnv(): string[] {
   const args: string[] = ["--clearenv"]
   const set = (k: string, v: string) => args.push("--setenv", k, v)
-  set("PATH", "/opt/eimu-harness/bin:/usr/local/bin:/usr/bin:/bin")
+  set("PATH", "/opt/agent-harness/bin:/usr/local/bin:/usr/bin:/bin")
   set("HOME", WORKSPACE)
   set("TMPDIR", "/tmp")
   set("PYTHONDONTWRITEBYTECODE", "1")
@@ -263,7 +263,7 @@ function sandboxArgv(opts: { sessionID: string; cwd?: string }): { argv: string[
   const cwdReal = opts.cwd ? safeResolve(opts.cwd) : run
   const cwd = withinWorkspace(cwdReal) ? cwdReal : run
   const extraOpt: string[] = []
-  for (const p of ["/opt/eimu-harness/bin"]) if (existsSync(p)) extraOpt.push("--ro-bind", p, p)
+  for (const p of ["/opt/agent-harness/bin"]) if (existsSync(p)) extraOpt.push("--ro-bind", p, p)
   const argv = [
     BWRAP,
     "--die-with-parent",

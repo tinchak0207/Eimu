@@ -150,7 +150,7 @@ afterAll(() => {
   globalThis.fetch = realFetch
   for (const w of writtenFiles) {
     try {
-      rmSync(join("/opt/eimu-harness/workspace/outputs/subagent", `${w.id}-${safeLabel(w.label)}.md`), { force: true })
+      rmSync(join("/opt/agent-harness/workspace/outputs/subagent", `${w.id}-${safeLabel(w.label)}.md`), { force: true })
     } catch {
       /* best-effort 清理，不影响测试结果 */
     }

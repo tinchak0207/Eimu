@@ -5,7 +5,7 @@
  * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
  * output 为 JSON 字串）。
  *
- * 模型通路（R2c 迁移，项目负责人铁律「模型调用禁直连必走 new-api」记忆
+ * 模型通路（R2c 迁移，暴君铁律「模型调用禁直连必走 new-api」记忆
  * vision-must-route-newapi-not-direct）：唯一通路 = new-api 中控端点
  * POST {NEWAPI_BASE_URL}/chat/completions（OpenAI chat 形状），Bearer 鉴权
  * env NEWAPI_API_KEY。多上游冗余由中控渠道池原生承担（failover/计费/冷却），
@@ -63,7 +63,7 @@ function asString(v: unknown): string | undefined {
 
 /**
  * new-api 中控 chat 端点（唯一模型通路；R2c 定案）。
- * 公网闸道 image.eimu.dev/v1 无 chat/completions 路由（站点自营
+ * 公网闸道 image.tinchak0207.xyz/v1 无 chat/completions 路由（站点自营
  * 图/视频 API，/v1/models 为站点自营清单 46 模型），视觉审核走 VPS 内网
  * http://127.0.0.1:3001/v1（与 new-api 内核同机，controller/worker 同款）。
  */

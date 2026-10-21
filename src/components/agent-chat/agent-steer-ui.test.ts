@@ -23,12 +23,30 @@ function readCode(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-const composer = read("src/components/agent-chat/AgentComposer.tsx");
+// <1000 行重构后的真实源码面：组件/钩子/传输层都拆成同目录子模组。
+const composer = [
+  "AgentComposer.tsx",
+  "AgentComposer.interaction.ts",
+  "AgentComposer.send-pipeline.ts",
+  "AgentComposer.types.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const panel = read("src/components/agent-chat/AgentChatPanel.tsx");
 const bubble = read("src/components/agent-chat/AgentMessageBubble.tsx");
-const hook = read("src/hooks/use-agent-chat.ts");
+const hook = [
+  "src/hooks/use-agent-chat.ts",
+  ...["commands", "connection", "core", "types"].map((m) => `src/hooks/use-agent-chat/${m}.ts`),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 const hookCode = readCode(hook);
-const client = read("src/lib/agent-chat-client.ts");
+const client = [
+  "src/lib/agent-chat-client.ts",
+  ...["auth", "session", "settings", "transport", "types"].map((m) => `src/lib/agent-chat-client/${m}.ts`),
+]
+  .map((rel) => read(rel))
+  .join("\n");
 
 test("回合进行中：有字是「引导」（方向标），空框仍是「停止」（红方块）——两颗钮不互相冒充", () => {
   // steerActive 缺省 false：不传时渲染与改动前逐位一致。
@@ -131,7 +149,7 @@ test("端点链路齐备：client → 站内中继 → 网关 /steer（三处都
 // ─────────────── F-D2（2026-09-23）对抗性验收缺陷的具名回归 ───────────────
 
 test("D2-2 409 契约落地：引导端点回 409 时落回正常送出腿（讯息不得被吞）", () => {
-  const client2 = read("src/lib/agent-chat-client.ts");
+  const client2 = client;
   // 判定器在 client：409 只有一个语义（没有可引导的回合），与失败区分开。
   assert.match(client2, /export function isSteerUnavailableError\(err: unknown\): boolean \{/);
   assert.match(client2, /err\.status === 409/);
@@ -162,7 +180,14 @@ test("D2-2 409 契约落地：引导端点回 409 时落回正常送出腿（讯
 
 test("D2-3 逾时收口接线：TTL 两端镜像、排队时排定清扫、存档还原带 savedAt", () => {
   const gatewayCore = read("deploy-staging/gateway/steer-core.ts");
-  const types = read("src/lib/agent-chat-types.ts");
+  const types = [
+    "src/lib/agent-chat-types.ts",
+    ...["sse-parse", "types-agent", "types-core", "types-events"].map(
+      (m) => `src/lib/agent-chat-types/${m}.ts`,
+    ),
+  ]
+    .map((rel) => read(rel))
+    .join("\n");
   // 镜像锁：两端 TTL 必须逐字同值（网关判逾时、前端判逾时用的是同一个时钟契约）。
   assert.match(gatewayCore, /export const STEER_QUEUE_TTL_MS = 30 \* 60 \* 1000;/);
   assert.match(types, /export const AGENT_STEER_QUEUE_TTL_MS = 30 \* 60 \* 1000;/);
@@ -172,9 +197,12 @@ test("D2-3 逾时收口接线：TTL 两端镜像、排队时排定清扫、存�
   assert.match(hookCode, /if \(ack\.status === "queued"\) armSteerExpiry\(AGENT_STEER_QUEUE_TTL_MS\);/);
   assert.match(hookCode, /dispatch\(\{ type: "steer-expire", now: Date\.now\(\) \}\)/);
   assert.match(hookCode, /case "steer-expire":\s*\n\s*return expireQueuedSteers\(state, \{ now: action\.now, ttlMs: AGENT_STEER_QUEUE_TTL_MS \}\);/);
+  // 2026-10-19 账号隔离（95a27106）：restore 的 items 可能是服务端重建结果、
+  // 游标改名为 cursor（server event_counter 优先，否则存档 lastEventId）；
+  // savedAt 仍原样送进 reducer，逾时兜底锚点语义不变。
   assert.match(
     hookCode,
-    /dispatch\(\{ type: "restore", items: saved\.items, lastEventId, savedAt: saved\.savedAt \}\)/,
+    /dispatch\(\{ type: "restore", items, lastEventId: cursor, savedAt: saved\.savedAt \}\)/,
     "restore 必须带存档时刻（逾时判定的兜底锚点）",
   );
   assert.match(hookCode, /armSteerExpiry\(saved\.savedAt \+ AGENT_STEER_QUEUE_TTL_MS - Date\.now\(\)\)/);

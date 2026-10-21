@@ -1296,7 +1296,7 @@ test("tools/call 正向对照：list_skills 经真 handler 回公开库真子集
 test("转发 origin：get_quota 走不挂 CF 的控制面 origin（真 fetch URL、Authorization 逐字透传）", async () => {
   clearDispatchEnv();
   // 尾斜线刻意留著：验 resolve 时的 trim/去尾斜线。
-  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.eimu.dev/";
+  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.tinchak0207.xyz/";
   const { calls, restore } = stubFetch();
   try {
     const response = await callMcp(
@@ -1308,7 +1308,7 @@ test("转发 origin：get_quota 走不挂 CF 的控制面 origin（真 fetch URL
     assert.notEqual(payload.isError, true, payload.content[0].text);
 
     assert.equal(calls.length, 1, "get_quota 应恰好转发一次");
-    assert.equal(calls[0].url, "https://store.eimu.dev/image-control/api/v1/quota");
+    assert.equal(calls[0].url, "https://store.tinchak0207.xyz/image-control/api/v1/quota");
     assert.equal(calls[0].init.method, "GET");
     const headers = calls[0].init.headers as Record<string, string>;
     assert.equal(headers.Authorization, `Bearer ${VALID_KEY}`, "Authorization 必须逐字透传");
@@ -1339,7 +1339,7 @@ test("转发 origin：非控制面路径（canvas_get_state）回落公开 origi
 test("转发 origin：MCP_DISPATCH_ORIGIN 覆写一切（控制面路径与回落路径都改道）", async () => {
   clearDispatchEnv();
   process.env.MCP_DISPATCH_ORIGIN = "https://dispatch.example/";
-  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.eimu.dev";
+  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.tinchak0207.xyz";
   const { calls, restore } = stubFetch();
   try {
     await callMcp(

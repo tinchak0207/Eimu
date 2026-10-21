@@ -20,7 +20,7 @@ import {
 
 type VoiceoverProject = Pick<CanvasProject, "nodes" | "episodes" | "scriptType" | "narrationVoice">;
 
-const MP3 = (n: number) => `https://store.eimu.dev/tts/line-${n}.mp3`;
+const MP3 = (n: number) => `https://store.tinchak0207.xyz/tts/line-${n}.mp3`;
 
 function shotNode(
   shotNumber: string,
@@ -213,7 +213,7 @@ test("真跑：某行 TTS 失败 → 立即停手、整批拒写、分镜原样"
 
 test("真跑：任务成功但回不可用音频 URL（图 URL）→ 整批拒写", async () => {
   const nodes = sixNarrationNodes();
-  const client = fakeClient(() => ({ audioUrl: "https://store.eimu.dev/cover.png", durationMs: 1000 }));
+  const client = fakeClient(() => ({ audioUrl: "https://store.tinchak0207.xyz/cover.png", durationMs: 1000 }));
   const execution = await runStoryboardVoiceover(project(nodes), { client });
   assert.equal(execution.result.applied, false);
   assert.equal(execution.result.refused?.code, "tts_line_failed");

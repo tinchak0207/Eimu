@@ -1,7 +1,7 @@
 // GET /api/media-download?url=<encoded https URL> — 助理媒体（图／影片／音频）真下载通道（2026-10-03）。
 //
 // 存在理由：媒体卡的「下载」原本直接 <a download href=上游URL>：跨源时浏览器忽略
-// download 属性、只会打开附件连结（项目负责人点名的病征）。本路由以站内同源身份代理位元组，
+// download 属性、只会打开附件连结（暴君点名的病征）。本路由以站内同源身份代理位元组，
 // 前端 fetch → blob → <a download> 才是真下载。
 //
 // 安全立场（防 SSRF）：只准上游 agent 媒体真源主机（由 AGENT_GATEWAY_DEFAULT_ORIGIN 推导，

@@ -19,7 +19,7 @@ import { getWaveform } from "./waveform"
 import { detectBeats } from "./beatDetect"
 
 // 与 timeline.ts L28 / index.ts L446 同值；env 可覆盖（测试用）。
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/eimu-harness/workspace"
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 
 // ── 规则常数（PRD REQ-EDIT-02，全部可复现） ──────────────────────────────────
 const WINDOW_SEC = 2                 // curve 滑动窗口长度与步进

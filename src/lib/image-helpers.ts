@@ -81,7 +81,7 @@ export const imageHelpers = {
   // ignores Vary: Origin) and gets blocked. Bust the cache key and skip the
   // HTTP cache so the fetch always takes a fresh CORS-eligible response.
   //
-  // ?dl=1 的机制真相（2026-10-04 缺陷 B 追查）：CDN(store.eimu.dev)
+  // ?dl=1 的机制真相（2026-10-04 缺陷 B 追查）：CDN(store.tinchak0207.xyz)
   // 的 /image-data/ 由 nginx 按 $http_origin 白名单回 Access-Control-Allow-Origin
   // （见 deploy/imagesite/nginx/default.conf），?dl=1 本身不被上游读取——它的作用
   // 是换掉 URL 缓存键；配合 cache:"no-store" 让本次 CORS fetch 不复用 <img>

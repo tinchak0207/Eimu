@@ -235,7 +235,7 @@ describe("B 工具结果安全网：单笔上限与落盘", () => {
   test("(b) 已是原生截断参考句 → 未被二次处理", async () => {
     const now = Date.now()
     const native =
-      "…（内容已截断）…\nFull output saved to: /opt/eimu-harness/workspace/.opencode-state/tool-output/tool_01ABC\nUse Grep/Read with offset/limit to inspect the file."
+      "…（内容已截断）…\nFull output saved to: /opt/agent-harness/workspace/.opencode-state/tool-output/tool_01ABC\nUse Grep/Read with offset/limit to inspect the file."
     const messages: Msg[] = [userMsg(now), asstMsg([toolPart("bash", native, now)], now)]
     const snapshot = JSON.stringify(messages)
     const res = await slimMessages(messages, { now })

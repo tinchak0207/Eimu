@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse("", { status: 200 });
   }
 
-  // text 讯息：验证码通道已取消（2026-09-30 项目负责人裁定：扫到即登入，少一个阻塞）。
+  // text 讯息：验证码通道已取消（2026-09-30 暴君裁定：扫到即登入，少一个阻塞）。
   // 有人照旧习惯发字过来，就告诉他正确做法，不再兑换任何码。
   if (msg.msgType === "text") {
     void pushCustomText(msg.fromUserName, "现在无需验证码：直接用微信扫网页上的二维码即可登录。");

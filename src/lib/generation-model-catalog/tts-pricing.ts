@@ -1,8 +1,8 @@
 // 站内 TTS 单价（唯一真源，2026-10-01 接上真计费）。
 //
-// 费率逐字取自 VPS 上游定价表 `/opt/eimu-harness/gateway/pricing-and-validation.ts:14`
+// 费率逐字取自 VPS 上游定价表 `/opt/agent-harness/gateway/pricing-and-validation.ts:14`
 //   → `'tts-zh': { base_cost: 0, per_char: 0.001 }`
-// 即：一口价固定成分 base_cost = 0，逐字成分 per_char = 0.001 币/字（项目负责人 2026-10-01 同意的口径）。
+// 即：一口价固定成分 base_cost = 0，逐字成分 per_char = 0.001 币/字（暴君 2026-10-01 同意的口径）。
 //
 // ── 为什么镜射成一颗站内常数，而不进 catalog 的 pricing 机制 ──────────────────
 // catalog（`types.ts`→`pricing.ts`）的定价维度只有两种：图像按解析度、视频按

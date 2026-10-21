@@ -7,6 +7,7 @@ import {
   NANO_BANANA_2_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
   PIXAI_TSUBAKI2_MODEL_ID,
+  PROVIDER_KEY,
   PROVIDERS,
   imageGenerationCoins,
   modelPromotionTag,
@@ -16,7 +17,7 @@ import {
 
 test("Adobe Firefly Image 5 is available through the server-side relay", () => {
   assert.equal(ADOBE_FIREFLY_MODEL_ID, "adobe-firefly");
-  assert.equal(PROVIDERS.image_eimu.models.includes(ADOBE_FIREFLY_MODEL_ID), true);
+  assert.equal(PROVIDERS[PROVIDER_KEY].models.includes(ADOBE_FIREFLY_MODEL_ID), true);
   assert.equal(modelDisplayName(ADOBE_FIREFLY_MODEL_ID), "Adobe Firefly Image 5 · 1 币/张");
   assert.equal(imageGenerationCoins(ADOBE_FIREFLY_MODEL_ID, "fast"), 1);
 });
@@ -24,8 +25,8 @@ test("Adobe Firefly Image 5 is available through the server-side relay", () => {
 test("Nano Banana Pro and Nano Banana 2 keep distinct official model identities", () => {
   assert.equal(NANO_BANANA_PRO_MODEL_ID, "gemini-3-image");
   assert.equal(NANO_BANANA_2_MODEL_ID, "gemini-3.1-flash-image");
-  assert.ok(PROVIDERS.image_eimu.models.includes(NANO_BANANA_PRO_MODEL_ID));
-  assert.ok(PROVIDERS.image_eimu.models.includes(NANO_BANANA_2_MODEL_ID));
+  assert.ok(PROVIDERS[PROVIDER_KEY].models.includes(NANO_BANANA_PRO_MODEL_ID));
+  assert.ok(PROVIDERS[PROVIDER_KEY].models.includes(NANO_BANANA_2_MODEL_ID));
   assert.equal(modelDisplayName(NANO_BANANA_PRO_MODEL_ID), "Nano Banana Pro · 4 币/张");
   assert.equal(modelDisplayName(NANO_BANANA_2_MODEL_ID), "Nano Banana 2 · 2 币/张");
 });
@@ -36,10 +37,10 @@ test("GPT Image 2 follows the Adobe credit table at ten credits per coin", () =>
 });
 
 test("PixAI Tsubaki.2 keeps the recommendation tag; default engine is GPT Image 2", () => {
-  // 2026-09-05 项目负责人裁定：预设模型改 GPT Image 2；Tsubaki.2 保留「推荐」标签。
+  // 2026-09-05 暴君裁定：预设模型改 GPT Image 2；Tsubaki.2 保留「推荐」标签。
   assert.equal(modelPromotionTag(PIXAI_TSUBAKI2_MODEL_ID), "推荐");
-  assert.equal(MODEL_CONFIGS.fast.image_eimu, "gpt-image-2");
-  assert.equal(MODEL_CONFIGS.quality.image_eimu, "gpt-image-2");
+  assert.equal(MODEL_CONFIGS.fast[PROVIDER_KEY], "gpt-image-2");
+  assert.equal(MODEL_CONFIGS.quality[PROVIDER_KEY], "gpt-image-2");
 });
 
 test("endpoint overrides do not replace nano-banana-pro with the legacy default model", () => {

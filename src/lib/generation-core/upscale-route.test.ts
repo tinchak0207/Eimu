@@ -118,7 +118,7 @@ test("非 JSON 请求体具名拒绝（旧行为是 1k 兜底＋原样转发＝�
     assert.equal(payload.code, "upscale_request_body_invalid");
   });
 });
-// ── 后端二：gpt-image-2 生成式重绘（2026-09-30 项目负责人指令）──────────────────────
+// ── 后端二：gpt-image-2 生成式重绘（2026-09-30 暴君指令）──────────────────────
 // 这条后端把「4K 超分」的真源从 PixAI 的 factor 换成 gpt-image-2 的 **像素 size**
 // （实有渠道是 openai_images 型的 /images/edits，adapter 只送 size／quality，不送
 // resolution——所以档位必须折算成尺寸，否则就是「付 4K 的钱拿 1K 的图」）。
@@ -277,7 +277,7 @@ test("OpenAPI 的档位契约与执行端同源：列举、配对、具名闸码
   assert.ok(imageObject.properties.width && imageObject.properties.height, "回应必须揭露实测 width/height（4K 交付要可自证）");
 });
 
-// ── 收费跟后端走（2026-10-01 项目负责人授权「4K放大后端你自己决定 做好就行」）───────────
+// ── 收费跟后端走（2026-10-01 暴君授权「4K放大后端你自己决定 做好就行」）───────────
 // 真行为断言：读真 catalog 的 `imageCredits`、走真的收费／预扣函式，断言**金额本身**；
 // 不是扫源码字串。病根＝4K 已改成 gpt-image-2 生成式重绘（有真实上游成本），收费却仍是
 // legacy 的 0.001 币一口价（1k／2k／4k 同价 ⇒ 4K 自打成免费升级，每档赔钱）。

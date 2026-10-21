@@ -78,6 +78,8 @@ import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
 import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
+import { AgentQueryHandoff, type PlaygroundMode } from "@/components/image-playground/query-handoff";
+import { ImagePlaygroundFloatingOverlays } from "@/components/image-playground/floating-overlays";
 
 // 2026-08-27 专业工作站入口移除：AI 工作站（agent 模式）已吸收其独有机制
 // （LoRA 库 / 配方模板 / kunpeng 风格库），旧工作站不再被动态 import。
@@ -88,23 +90,6 @@ import { useCreativeProjects } from "@/hooks/use-creative-projects";
 // 聊天区的懒加载 import 在 PromptInput 里：聊天区是那张卡片的一个面，
 // 由持有 toggle 的组件自己按需拉 chunk，这里不再需要它。
 
-/** 卡片的四个面。第四个面 agent 与 edit / upscale 同级，见 PromptInput。 */
-type PlaygroundMode = PromptInputMode;
-
-/** 查询交接独立订阅：客户端历史导航也能接住，静态首页只让这一空组件等待查询。 */
-function AgentQueryHandoff({ onApply }: { onApply: (params: URLSearchParams) => void }) {
-  const searchParams = useSearchParams();
-  const query = searchParams.toString();
-  useEffect(() => {
-    const params = new URLSearchParams(query);
-    onApply(params);
-    if (params.get("agent") === "1") {
-      window.history.replaceState(window.history.state, "", window.location.pathname);
-    }
-  }, [query, onApply]);
-  return null;
-}
-
 export default function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
@@ -112,7 +97,7 @@ export default function ImagePlayground({ suggestions }: { suggestions: Suggesti
   // 按下去只换卡片中间那块控件区（共用 generate/edit/upscale 那套 dust 转场），
   // 卡片底板、右边结果画布、底下案例区全部原地不动，也不跳 /agent 独立页。
   //
-  // 2026-09-22 项目负责人裁定：**首屏初始面翻成 AI 助理**，直接生图降为同级第二面
+  // 2026-09-22 暴君裁定：**首屏初始面翻成 AI 助理**，直接生图降为同级第二面
   // （不删除、toggle 语义一行不动）。理由是首屏决定产品定位——进站第一眼看见
   // 的是参数框＋输入框＋输出框，就会被判定成生图中转站；新范式若锁在「先点
   // 助理再发话」两步之后，每一步都不是使用者已知的。深度连结（?agent=1）的
@@ -144,7 +129,7 @@ export default function ImagePlayground({ suggestions }: { suggestions: Suggesti
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
   /**
-   * 未登入新访客的进站宣传片（2026-09-27 项目负责人裁定落地）。
+   * 未登入新访客的进站宣传片（2026-09-27 暴君裁定落地）。
    *
    * 频率：每浏览器一次（PROMO_SEEN_KEY）——新机／新浏览器给完整震撼，回访的
    * 未登入用户不再被反覆挡在门外。判定链是纯函式（promo-gate.ts），这里只负责
@@ -185,7 +170,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // v3 embed：右侧结果面板 mode。2026-08-25 canvas 常驻化：agent 模式右侧
   // 一进入就是 canvas（模板库或画布），不再有「AI 助理左边、图片结果右边」
   // 的中间态。非 agent 模式（generate/edit/upscale）维持 ImageDisplay。
-  // 画布工作站（2026-08-16，项目负责人裁定「挤」）：画布模式 = 全场画布，聊天卡
+  // 画布工作站（2026-08-16，暴君裁定「挤」）：画布模式 = 全场画布，聊天卡
   // 变成左侧浮动面板，expanded|rail 两态 + 右缘拖宽，localStorage 记忆。
   // 辽阔是预设，不是奖励——不再有「compact 嵌右栏」这种把画布塞缝里的状态。
   // 面板两态/宽度/拖宽与 localStorage 持久化抽到 canvas-workstation/use-chat-panel。
@@ -275,7 +260,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 反馈闭环靠 currentSessionId 兜底：切完后 selectedNodeId 对应节点的
   // session_id === currentSessionId，相等判断挡住死循环。
   const switchSessionRef = useRef<((sessionId: string) => Promise<boolean>) | null>(null);
-  // 项目负责人裁定 2026-09-01：套模板「留旧开新」——AgentChatSurface 上抛 startNewSession。
+  // 暴君裁定 2026-09-01：套模板「留旧开新」——AgentChatSurface 上抛 startNewSession。
   const startNewSessionRef = useRef<(() => Promise<boolean>) | null>(null);
   const lastLinkedSelectionRef = useRef<string | null>(null);
   useEffect(() => {
@@ -491,7 +476,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    * 人是被宣传片吸引来的）也让路，判准全在 promo-gate.ts。
    *
    * 频率：**每页载入只判一次**（resolvePromoEntry）。这条 effect 依赖登入态，
-   * 但登入态翻面不等于重新进站——2026-09-27 项目负责人实锤：登入中的用户按登出，
+   * 但登入态翻面不等于重新进站——2026-09-27 暴君实锤：登入中的用户按登出，
    * isLoggedIn 由真翻假，若重判就会把 `?promo=1` 的强制预览又播一次（见
    * promo-gate.ts 的 resolvePromoEntry 注释）。定案后一律沿用首次结果。
    *
@@ -521,7 +506,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [authLoading, isLoggedIn]);
 
   /**
-   * 浮层收尾（2026-09-27 项目负责人第二轮：「还不如把封面做成结尾界面，输入框变成
+   * 浮层收尾（2026-09-27 暴君第二轮：「还不如把封面做成结尾界面，输入框变成
    * 真的能输入，用户一发送马上开新对话」）：不再只是预填，而是当场开新对话把那句
    * 送进聊天区——送出去的动作就是人按的那一下，D-5／D-24 的语义不受影响。
    *
@@ -540,7 +525,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   /**
    * 留旧开新＋直送。与模板卡同一条路（startNewSessionRef → 注入即送），
    * 但这条要 echo：那句话是使用者自己打的，必须出现在他自己的聊天记录里
-   * ——不 echo 的话，送出后到第一个字回来之前画面完全是空的（2026-09-27 项目负责人）。
+   * ——不 echo 的话，送出后到第一个字回来之前画面完全是空的（2026-09-27 暴君）。
    */
   const runPromoTrial = useCallback((text: string) => {
     const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
@@ -556,7 +541,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   /**
-   * 收尾送出的那句话（2026-09-27 项目负责人第三轮）：登入态决定「当场开跑」还是
+   * 收尾送出的那句话（2026-09-27 暴君第三轮）：登入态决定「当场开跑」还是
    * 「先弹登入窗再开跑」，分流是纯函式（resolvePromoTrialIntent）。
    *
    * 未登入那条不是丢掉：那句话先写进 ref ＋ sessionStorage，登入态一翻真就补送。
@@ -900,7 +885,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                 >
                   {(chatHeaderExtra) => (
                     <>
-                  {/* 罪状 7（项目负责人逐条评测）：聊天框顶栏的「AI 助理改了 N 项设置 /
+                  {/* 罪状 7（暴君人肉评测）：聊天框顶栏的「AI 助理改了 N 项设置 /
                       模型 / 恢复我的设定」撤销条整块删除（非隐藏）——控件上已是现值，
                       再画一遍被动过什么只是噪音；D-12 的参数回流本身（模型/比例/
                       解析度真正被改掉）仍然生效，撤的只是这条提示栏。 */}
@@ -986,55 +971,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             <FaqSection />
           </div>
 
-      {pwaHandoffUrl && (
-        <PwaHandoffPanel
-          loginUrl={pwaHandoffUrl}
-          onSuccess={() => {
-            setPwaHandoffUrl(null);
-            refresh().catch(() => {});
-          }}
-          onClose={() => setPwaHandoffUrl(null)}
-        />
-      )}
 
-      {/* 未登入新访客的进站宣传片：z-[120] 在 navbar(z-80) 与既有 portal 弹层(z-90) 之上，
-          浮层开著时底下的首页仍完整挂载——收尾的「开始试玩」要当场把话预填进输入框，
-          整页跳转会把那个输入框连同画布一起重建。 */}
-      {promoOpen && (
-        <PromoIntroOverlay
-          onTrial={handlePromoTrial}
-          onDismiss={handlePromoDismiss}
-          needsLogin={!isLoggedIn}
-          onLoginDismiss={handlePromoLoginDismiss}
-        />
-      )}
-
-      {/* 新人礼首登弹窗（已发放、未展示才弹）。标题/正文/币数全部来自服务端，
-          这里不写死任何数字；与宣传片浮层同层级（z-[95] 的 portal）。 */}
-      {welcomeGiftOpen && welcomeGift && welcomeGift.title && welcomeGift.body && (
-        <WelcomeGiftDialog
-          open
-          title={welcomeGift.title}
-          body={welcomeGift.body}
-          onStart={handleWelcomeGiftStart}
-          onLater={handleWelcomeGiftSeen}
-        />
-      )}
-
-      {(!showProgress && (isLoading || failedProviders.length > 0)) && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">
-          <div className="pointer-events-auto lg-bar flex items-center gap-3 rounded-ios-4xl px-5 py-2.5">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                isLoading ? "bg-[#34C759] animate-pulse" : "bg-[#FF3B30]",
-              )}
-            />
-            <span className="text-ios-footnote text-[rgba(0,0,0,0.58)]">{renderState}</span>
-          </div>
-        </div>
-      )}
-
+      <ImagePlaygroundFloatingOverlays P={{ pwaHandoffUrl, refresh, setPwaHandoffUrl, promoOpen, handlePromoTrial, handlePromoDismiss, isLoggedIn, handlePromoLoginDismiss, welcomeGiftOpen, welcomeGift, handleWelcomeGiftStart, handleWelcomeGiftSeen, showProgress, isLoading, failedProviders, renderState }} />
     </>
   );
 }

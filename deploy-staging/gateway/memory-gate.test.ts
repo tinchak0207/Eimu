@@ -134,7 +134,7 @@ describe("G4 身份泄漏（仅 shared → 降级 private）", () => {
     ["邮箱", base({ description: "用户 tina.chen@example.com 偏好此风格" })],
     ["session id", base({ body: "该风格确立于 ses_ABC123def456 对话" })],
     ["URL", base({ body: "参考 https://img.example.com/ref.png 风格" })],
-    ["绝对路径", base({ body: "素材存放在 /opt/eimu-harness/assets 下" })],
+    ["绝对路径", base({ body: "素材存放在 /opt/agent-harness/assets 下" })],
     ["ownerKey hex 长串", base({ body: `标识 ${OWNER} 对应该用户` })],
     ["价格数字", base({ description: "用户预算 $19.9 内选模型" })],
   ] as const

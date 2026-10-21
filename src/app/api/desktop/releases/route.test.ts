@@ -34,9 +34,9 @@ test("GET /api/desktop/releases 回来源真值与两平台栏位", async () => 
     assert.ok(body.releases[platform].size > 0, `${platform} size 应为正整数`);
     assert.match(body.releases[platform].sha256, /^[0-9a-f]{64}$/, `${platform} sha256 应为 64 位 hex`);
   }
-  // 两平台版号各自独立、皆为该平台自身的最新产物版号 0.3.2，不可被 top-level 取代。
-  assert.equal(body.releases.linux.version, "0.3.2");
-  assert.equal(body.releases.windows.version, "0.3.2");
+  // 两平台版号各自独立、各自为该平台自身的最新产物版号（Linux 0.3.5／Windows 0.3.3），不可被 top-level 取代。
+  assert.equal(body.releases.linux.version, "0.3.5");
+  assert.equal(body.releases.windows.version, "0.3.3");
 });
 
 test("GET /api/desktop/releases 带短快取、不泄漏 secret", async () => {

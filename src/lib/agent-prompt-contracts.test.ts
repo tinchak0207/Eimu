@@ -66,7 +66,7 @@ test("契约目录非空，且 agentCode 唯一", () => {
   assert.equal(new Set(codes).size, codes.length, `agentCode 必须唯一，实际：${codes.join("、")}`);
 });
 
-test("契约覆盖 EXPERT_IDS 全部八个 Expert（逐值对齐 expert-contract 白名单，不多不少）", () => {
+test("契约覆盖 EXPERT_IDS 全部九个 Expert（逐值对齐 expert-contract 白名单，不多不少）", () => {
   const codes = AGENT_PROMPT_CONTRACTS.map((c) => c.agentCode).sort();
   assert.deepEqual(codes, [...EXPERT_IDS].sort());
 });

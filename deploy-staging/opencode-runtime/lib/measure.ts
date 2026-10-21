@@ -103,7 +103,7 @@ const CMU_PACKAGE = "cmu-pronouncing-dictionary"
 
 /** 解析候选根：先 tools 自己的 node_modules，再 ~/.opencode，再裸 require（相对链／NODE_PATH）。 */
 const CMU_ROOTS = [
-  "/opt/eimu-harness/workspace/.opencode/node_modules",
+  "/opt/agent-harness/workspace/.opencode/node_modules",
   "/home/ubuntu/.opencode/node_modules",
   "/home/ubuntu/.opencode/dict/node_modules",
   join(process.cwd(), "node_modules"),

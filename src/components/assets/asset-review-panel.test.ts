@@ -330,7 +330,7 @@ test("exportAssetReviewZip：上游永不回应 → 逾时落终态（该张 ski
     const result = await Promise.race([
       exportAssetReviewZip(
         [card({ name: "霍辞渊", references: [{ url: PNG_1PX, role: "character", name: "正面" }] }),
-         card({ id: "card-2", name: "雨夜街", kind: "scene", references: [{ url: "https://store.eimu.dev/never.png", role: "scene", name: "街" }] })],
+         card({ id: "card-2", name: "雨夜街", kind: "scene", references: [{ url: "https://store.tinchak0207.xyz/never.png", role: "scene", name: "街" }] })],
         new Date("2026-09-24T00:00:00.000Z"),
         50,
       ),

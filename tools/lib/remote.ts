@@ -5,7 +5,7 @@ import path from "node:path";
  * Shared VPS read/exec plumbing for the ops tools in tools/.
  *
  * The control plane (Postgres `image-control-postgres`) and new-api (SQLite
- * `/opt/eimu-site/new-api-data/one-api.db`) only exist on the Tencent VPS.
+ * `/opt/imagesite/new-api-data/one-api.db`) only exist on the Tencent VPS.
  * These helpers ship SQL over the SSH-over-443 tunnel as base64 so no quoting
  * or escaping ever survives into the remote shell.
  */
@@ -42,7 +42,7 @@ export function b64(input: string): string {
  * the SQL on stdin, e.g.
  *   sudo -n docker exec -i image-control-postgres psql -v ON_ERROR_STOP=1 \
  *     -U image_control -d image_control -f -
- *   sudo -n sqlite3 -readonly -header -column /opt/eimu-site/new-api-data/one-api.db
+ *   sudo -n sqlite3 -readonly -header -column /opt/imagesite/new-api-data/one-api.db
  */
 export function runWithSql(sink: string, sql: string, opts: RemoteOptions): ExecResult {
   const pipeline = `echo ${b64(sql)} | base64 -d | ${sink}`;

@@ -11,7 +11,7 @@
  */
 
 export const LYRIC_PLAYER_BASE_URL =
-  "https://store.eimu.dev/image-data/files/uploads/ba-deng-liu-zhao/index.html";
+  "https://store.tinchak0207.xyz/image-data/files/uploads/ba-deng-liu-zhao/index.html";
 
 /** 强缓存 bust：与上次上传播放器时的 ?v= 约定一致，可按日滚动。 */
 export const LYRIC_PLAYER_CACHE_BUST = "20261010-deeplink";

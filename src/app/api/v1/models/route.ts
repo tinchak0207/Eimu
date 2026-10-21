@@ -7,6 +7,7 @@ import { generationCapabilities, generationCoins, generationModel } from "@/lib/
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
+import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
 import { MUSIC_CHARGE_ENDPOINT, musicCoinsPerGeneration } from "@/lib/music-pricing";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
@@ -82,7 +83,8 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
     (modelId) => isModelAllowedForKey(auth.key, modelId) && !breakerUnavailable.has(modelId),
   ).map(
     (modelId) => {
-      const capabilities = generationCapabilities(modelId);
+      // 4K 能力投射只在服务端读一次 env：未校准（默认）不外露 4K。
+      const capabilities = generationCapabilities(modelId, upscaleFourKUpstreamEnabled());
       const isVideo = capabilities?.mediaType === "video";
       const base = {
         id: modelId,

@@ -4,7 +4,7 @@
  * 这不是规则层（invisible-prompt-director.ts），而是「让 agent 学会写提示词」的
  * 工业级指令：把 Higgsfield Hell Grind 95 分钟长片 pipeline + Seedance 2.0 官方
  * prompt 架构浓缩成可执行规则，agent 收到用户短描述后照此生成优化稿。
- * 用户可能是什么都不懂的项目负责人，只输入一句话 —— 规则负责自动补齐一切。
+ * 用户可能是什么都不懂的暴君，只输入一句话 —— 规则负责自动补齐一切。
  *
  * 知识来源：OSideMedia/higgsfield-ai-prompt-skill（MIT）。原文引用的 5 个仓库相对
  * 路径（skills/higgsfield-seedance/{SKILL,HELL-GRIND,ENGINE-RULES}.md、
@@ -19,7 +19,7 @@
  *
  * ⚠️ 这份必须与 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
  * 保持一致：仓库副本 deploy-staging/gateway/internal-http.ts（VPS 落位
- * /opt/eimu-harness/gateway/internal-http.ts）。改一份就要同步另一份。
+ * /opt/agent-harness/gateway/internal-http.ts）。改一份就要同步另一份。
  * P0-9（2026-10-06）：该副本曾漏掉本档的 KUNPENG_SEEDANCE_SUPPLEMENT（生产视频 prompt
  * 拿不到 kunpeng 6 条硬规则），已补齐为逐字副本；gateway 为独立发布单元无法 import 本档，
  * 故此处为「双份副本 + 同步」关系，非单一真源 import。

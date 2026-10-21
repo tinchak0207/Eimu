@@ -182,7 +182,7 @@ export const SECTION_TOKEN_RE = /§\s?\d+(?:\.\d+)*/g
 // 实锤：面向工作室的进度简报出现「spec 已落盘 `runs/txj-ep01/audio/…md`」「R7 止损线执行正确」
 // 「完整结果已落盘 outputs/subagent/…」——AGENTS.md §0 已禁内部标识入正文，模型仍会带出。
 // 出站确定性兜底：URL 段原样保留（交付物链接是给用户的），只在非 URL 段替换工作区路径
-// （/opt/eimu-harness/…、outputs/…、runs/…、以及带文档/数据副档名的相对路径）与 R 系列规则代号。
+// （/opt/agent-harness/…、outputs/…、runs/…、以及带文档/数据副档名的相对路径）与 R 系列规则代号。
 const URL_SEGMENT_RE = /(https?:\/\/[^\s)）\]」>`"']+)/
 export const INTERNAL_PATH_RE = /`?(?:\/opt\/agent-harness\/[^\s`，。；、（）()「」\[\]]+|(?:outputs|runs)\/[^\s`，。；、（）()「」\[\]]+|(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:md|json|jsonl|txt|ts|py|mjs|srt|ass))`?/g
 export const INTERNAL_RULE_CODE_RE = /\bR\d{1,2}(?:-[A-Z]\d?)?\s*(止损线|止损条款|止损|铁律)/g

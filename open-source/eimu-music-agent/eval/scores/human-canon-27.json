@@ -1,0 +1,501 @@
+{
+ "benchmark": "SongBench (Tencent, arXiv 2604.25937)",
+ "evaluator": "official eval.py + ckpt/songbench.safetensors + MuQ-large-msd-iter, fp32",
+ "input": "44.1 kHz stereo WAV",
+ "positive_control": {
+  "track": "media-1789821225748-t6qbpy",
+  "mean7": 6.915,
+  "note": "reproduced in three independent runs"
+ },
+ "audio_note": " copyrighted human reference audio intentionally NOT included; only scores + metadata",
+ "tracks": [
+  {
+   "id": "cn_daishujia",
+   "title": "大艺术家",
+   "artist": "蔡依林",
+   "canon": "金曲奖",
+   "award": "第24届金曲奖最佳年度歌曲（2013）",
+   "year": 2012,
+   "dims": {
+    "Melody": 7.4746,
+    "Arrangement": 7.7277,
+    "Musicality": 7.0551,
+    "Vocal": 7.4657,
+    "Instrumental": 7.1574,
+    "Mixing": 6.6336,
+    "Structure": 6.9491
+   },
+   "mean7": 7.209
+  },
+  {
+   "id": "cn_wenbie",
+   "title": "吻别",
+   "artist": "张学友",
+   "canon": "金曲奖",
+   "award": "第5届金曲奖最佳年度歌曲（1993）",
+   "year": 1993,
+   "dims": {
+    "Melody": 6.9793,
+    "Arrangement": 7.6146,
+    "Musicality": 5.8198,
+    "Vocal": 7.2082,
+    "Instrumental": 7.8819,
+    "Mixing": 7.1462,
+    "Structure": 7.4641
+   },
+   "mean7": 7.1592
+  },
+  {
+   "id": "cn_shanqiu",
+   "title": "山丘",
+   "artist": "李宗盛",
+   "canon": "金曲奖",
+   "award": "第25届金曲奖最佳年度歌曲（2014）",
+   "year": 2013,
+   "dims": {
+    "Melody": 7.2935,
+    "Arrangement": 7.3346,
+    "Musicality": 6.1362,
+    "Vocal": 7.0636,
+    "Instrumental": 6.9608,
+    "Mixing": 6.7611,
+    "Structure": 7.4862
+   },
+   "mean7": 7.0051
+  },
+  {
+   "id": "cn_jiangnan",
+   "title": "江南",
+   "artist": "林俊杰",
+   "canon": "经典",
+   "award": "未核到（公认华语经典）",
+   "year": 2004,
+   "dims": {
+    "Melody": 6.9007,
+    "Arrangement": 6.9653,
+    "Musicality": 6.1636,
+    "Vocal": 7.1729,
+    "Instrumental": 7.3097,
+    "Mixing": 7.1638,
+    "Structure": 7.3261
+   },
+   "mean7": 7.0003
+  },
+  {
+   "id": "en_illalwaysloveyou",
+   "title": "I Will Always Love You",
+   "artist": "Whitney Houston",
+   "canon": "格莱美",
+   "award": "1994 Record of the Year（36th）",
+   "year": 1992,
+   "dims": {
+    "Melody": 6.7791,
+    "Arrangement": 7.1147,
+    "Musicality": 5.7956,
+    "Vocal": 7.8927,
+    "Instrumental": 7.2968,
+    "Mixing": 6.9252,
+    "Structure": 6.716
+   },
+   "mean7": 6.9314
+  },
+  {
+   "id": "en_leavethedoor",
+   "title": "Leave the Door Open",
+   "artist": "Silk Sonic",
+   "canon": "格莱美",
+   "award": "2022 Record of the Year & Song of the Year（64th）",
+   "year": 2021,
+   "dims": {
+    "Melody": 6.9559,
+    "Arrangement": 7.3156,
+    "Musicality": 6.0374,
+    "Vocal": 7.1702,
+    "Instrumental": 7.0712,
+    "Mixing": 6.5268,
+    "Structure": 6.669
+   },
+   "mean7": 6.8209
+  },
+  {
+   "id": "cn_nuoyafangzhou",
+   "title": "诺亚方舟",
+   "artist": "五月天",
+   "canon": "金曲奖",
+   "award": "第23届金曲奖最佳年度歌曲（2012）",
+   "year": 2011,
+   "dims": {
+    "Melody": 6.8764,
+    "Arrangement": 7.1007,
+    "Musicality": 5.8559,
+    "Vocal": 6.6302,
+    "Instrumental": 6.6271,
+    "Mixing": 6.7322,
+    "Structure": 7.3962
+   },
+   "mean7": 6.7455
+  },
+  {
+   "id": "en_24kmagic",
+   "title": "24K Magic",
+   "artist": "Bruno Mars",
+   "canon": "格莱美",
+   "award": "2018 Record of the Year（60th）",
+   "year": 2016,
+   "dims": {
+    "Melody": 6.7305,
+    "Arrangement": 7.1939,
+    "Musicality": 5.7572,
+    "Vocal": 6.8484,
+    "Instrumental": 6.6651,
+    "Mixing": 6.9839,
+    "Structure": 6.9822
+   },
+   "mean7": 6.7373
+  },
+  {
+   "id": "cn_xiaoqingge",
+   "title": "小情歌",
+   "artist": "苏打绿",
+   "canon": "经典",
+   "award": "未核到（公认华语经典）",
+   "year": 2006,
+   "dims": {
+    "Melody": 6.9836,
+    "Arrangement": 6.7884,
+    "Musicality": 5.6007,
+    "Vocal": 6.6806,
+    "Instrumental": 7.0612,
+    "Mixing": 6.8499,
+    "Structure": 6.9793
+   },
+   "mean7": 6.7062
+  },
+  {
+   "id": "en_flowers",
+   "title": "Flowers",
+   "artist": "Miley Cyrus",
+   "canon": "格莱美",
+   "award": "2024 Record of the Year（66th）",
+   "year": 2023,
+   "dims": {
+    "Melody": 6.6849,
+    "Arrangement": 6.7639,
+    "Musicality": 5.859,
+    "Vocal": 7.133,
+    "Instrumental": 6.62,
+    "Mixing": 6.9853,
+    "Structure": 6.5527
+   },
+   "mean7": 6.657
+  },
+  {
+   "id": "cn_xiaoxingyun",
+   "title": "小幸运",
+   "artist": "田馥甄",
+   "canon": "经典",
+   "award": "未核到（高传唱）",
+   "year": 2015,
+   "dims": {
+    "Melody": 6.736,
+    "Arrangement": 6.673,
+    "Musicality": 5.8726,
+    "Vocal": 6.7137,
+    "Instrumental": 7.0494,
+    "Mixing": 6.4333,
+    "Structure": 6.9795
+   },
+   "mean7": 6.6368
+  },
+  {
+   "id": "en_thinkingoutloud",
+   "title": "Thinking Out Loud",
+   "artist": "Ed Sheeran",
+   "canon": "格莱美",
+   "award": "2016 Song of the Year（58th）",
+   "year": 2014,
+   "dims": {
+    "Melody": 6.7789,
+    "Arrangement": 6.5976,
+    "Musicality": 5.7631,
+    "Vocal": 7.3568,
+    "Instrumental": 6.7356,
+    "Mixing": 6.5613,
+    "Structure": 6.4405
+   },
+   "mean7": 6.6048
+  },
+  {
+   "id": "cn_haodan",
+   "title": "好胆你就来",
+   "artist": "张惠妹",
+   "canon": "金曲奖",
+   "award": "第21届金曲奖最佳年度歌曲（2010）",
+   "year": 2009,
+   "dims": {
+    "Melody": 6.9391,
+    "Arrangement": 6.8427,
+    "Musicality": 5.4024,
+    "Vocal": 6.9329,
+    "Instrumental": 6.0146,
+    "Mixing": 6.6482,
+    "Structure": 6.6135
+   },
+   "mean7": 6.4848
+  },
+  {
+   "id": "cn_qinghuaci",
+   "title": "青花瓷",
+   "artist": "周杰伦",
+   "canon": "金曲奖",
+   "award": "第19届金曲奖最佳年度歌曲（2008）",
+   "year": 2007,
+   "dims": {
+    "Melody": 6.295,
+    "Arrangement": 6.5923,
+    "Musicality": 5.3814,
+    "Vocal": 6.5878,
+    "Instrumental": 6.9415,
+    "Mixing": 6.4687,
+    "Structure": 6.7971
+   },
+   "mean7": 6.4377
+  },
+  {
+   "id": "cn_meigui",
+   "title": "玫瑰少年",
+   "artist": "蔡依林",
+   "canon": "金曲奖",
+   "award": "第30届金曲奖最佳年度歌曲（2019）",
+   "year": 2018,
+   "dims": {
+    "Melody": 6.6742,
+    "Arrangement": 6.9169,
+    "Musicality": 5.4301,
+    "Vocal": 6.6662,
+    "Instrumental": 6.3138,
+    "Mixing": 6.5119,
+    "Structure": 6.5427
+   },
+   "mean7": 6.4365
+  },
+  {
+   "id": "cn_guquan",
+   "title": "孤勇者",
+   "artist": "陈奕迅",
+   "canon": "经典",
+   "award": "未核到（高传唱）",
+   "year": 2021,
+   "dims": {
+    "Melody": 6.784,
+    "Arrangement": 6.6454,
+    "Musicality": 5.6357,
+    "Vocal": 6.5146,
+    "Instrumental": 6.346,
+    "Mixing": 6.3385,
+    "Structure": 6.6277
+   },
+   "mean7": 6.4131
+  },
+  {
+   "id": "en_getlucky",
+   "title": "Get Lucky",
+   "artist": "Daft Punk ft. Pharrell Williams & Nile Rodgers",
+   "canon": "格莱美",
+   "award": "2014 Record of the Year（56th）",
+   "year": 2013,
+   "dims": {
+    "Melody": 6.3972,
+    "Arrangement": 6.8285,
+    "Musicality": 5.3983,
+    "Vocal": 6.4627,
+    "Instrumental": 6.7106,
+    "Mixing": 6.5282,
+    "Structure": 6.1474
+   },
+   "mean7": 6.3533
+  },
+  {
+   "id": "cn_daoxiang",
+   "title": "稻香",
+   "artist": "周杰伦",
+   "canon": "金曲奖",
+   "award": "第20届金曲奖最佳年度歌曲（2009）",
+   "year": 2008,
+   "dims": {
+    "Melody": 6.3903,
+    "Arrangement": 6.3271,
+    "Musicality": 5.2296,
+    "Vocal": 6.3099,
+    "Instrumental": 6.7454,
+    "Mixing": 5.932,
+    "Structure": 6.3605
+   },
+   "mean7": 6.185
+  },
+  {
+   "id": "en_tearsinheaven",
+   "title": "Tears in Heaven",
+   "artist": "Eric Clapton",
+   "canon": "格莱美",
+   "award": "1993 Record of the Year & Song of the Year（35th）",
+   "year": 1992,
+   "dims": {
+    "Melody": 6.1196,
+    "Arrangement": 6.8103,
+    "Musicality": 5.0728,
+    "Vocal": 6.5294,
+    "Instrumental": 6.8106,
+    "Mixing": 6.0595,
+    "Structure": 5.8359
+   },
+   "mean7": 6.1769
+  },
+  {
+   "id": "cn_yueliang",
+   "title": "月亮代表我的心",
+   "artist": "邓丽君",
+   "canon": "经典",
+   "award": "未核到（公认华语经典）",
+   "year": 1977,
+   "dims": {
+    "Melody": 6.3924,
+    "Arrangement": 6.6292,
+    "Musicality": 5.1356,
+    "Vocal": 6.3689,
+    "Instrumental": 6.2262,
+    "Mixing": 5.6103,
+    "Structure": 6.2578
+   },
+   "mean7": 6.0886
+  },
+  {
+   "id": "en_slowburn",
+   "title": "Slow Burn",
+   "artist": "Kacey Musgraves",
+   "canon": "格莱美",
+   "award": "2019 Album of the Year - Golden Hour（61st）",
+   "year": 2018,
+   "dims": {
+    "Melody": 5.9019,
+    "Arrangement": 5.8908,
+    "Musicality": 5.1016,
+    "Vocal": 6.709,
+    "Instrumental": 6.3698,
+    "Mixing": 5.557,
+    "Structure": 5.837
+   },
+   "mean7": 5.9096
+  },
+  {
+   "id": "cn_dafengchui",
+   "title": "大风吹",
+   "artist": "草东没有派对",
+   "canon": "金曲奖",
+   "award": "第28届金曲奖最佳年度歌曲（2017）",
+   "year": 2016,
+   "dims": {
+    "Melody": 6.161,
+    "Arrangement": 6.6103,
+    "Musicality": 4.7936,
+    "Vocal": 5.8312,
+    "Instrumental": 5.9333,
+    "Mixing": 6.1016,
+    "Structure": 5.5696
+   },
+   "mean7": 5.8572
+  },
+  {
+   "id": "en_notlikeus",
+   "title": "Not Like Us",
+   "artist": "Kendrick Lamar",
+   "canon": "格莱美",
+   "award": "2025 Record of the Year & Song of the Year（67th）",
+   "year": 2024,
+   "dims": {
+    "Melody": 5.8114,
+    "Arrangement": 6.1625,
+    "Musicality": 4.8491,
+    "Vocal": 6.055,
+    "Instrumental": 5.7854,
+    "Mixing": 6.1553,
+    "Structure": 5.9544
+   },
+   "mean7": 5.8247
+  },
+  {
+   "id": "en_dontknowwhy",
+   "title": "Don't Know Why",
+   "artist": "Norah Jones",
+   "canon": "格莱美",
+   "award": "2003 Record of the Year & Song of the Year（45th）",
+   "year": 2002,
+   "dims": {
+    "Melody": 5.489,
+    "Arrangement": 5.9752,
+    "Musicality": 4.8519,
+    "Vocal": 6.7055,
+    "Instrumental": 6.4707,
+    "Mixing": 5.5695,
+    "Structure": 5.4779
+   },
+   "mean7": 5.7914
+  },
+  {
+   "id": "en_rolling",
+   "title": "Rolling in the Deep",
+   "artist": "Adele",
+   "canon": "格莱美",
+   "award": "2012 Record of the Year & Song of the Year（54th）",
+   "year": 2010,
+   "dims": {
+    "Melody": 5.8919,
+    "Arrangement": 5.7894,
+    "Musicality": 4.3567,
+    "Vocal": 6.8368,
+    "Instrumental": 5.927,
+    "Mixing": 5.7041,
+    "Structure": 5.8675
+   },
+   "mean7": 5.7676
+  },
+  {
+   "id": "en_bridge",
+   "title": "Bridge over Troubled Water",
+   "artist": "Simon & Garfunkel",
+   "canon": "格莱美",
+   "award": "1971 Record of the Year & Song of the Year（13th）",
+   "year": 1970,
+   "dims": {
+    "Melody": 5.9411,
+    "Arrangement": 5.8701,
+    "Musicality": 4.7016,
+    "Vocal": 5.8432,
+    "Instrumental": 5.9827,
+    "Mixing": 5.515,
+    "Structure": 5.8166
+   },
+   "mean7": 5.6672
+  },
+  {
+   "id": "en_badguy",
+   "title": "bad guy",
+   "artist": "Billie Eilish",
+   "canon": "格莱美",
+   "award": "2020 Record of the Year & Song of the Year（62nd）",
+   "year": 2019,
+   "dims": {
+    "Melody": 5.2915,
+    "Arrangement": 5.526,
+    "Musicality": 4.6121,
+    "Vocal": 5.7592,
+    "Instrumental": 5.2453,
+    "Mixing": 5.5269,
+    "Structure": 5.2984
+   },
+   "mean7": 5.3228
+  }
+ ],
+ "n": 27,
+ "mean7": 6.4048
+}

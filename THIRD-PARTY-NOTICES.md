@@ -80,22 +80,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-## Agent Skills（随仓库分发的技能语料）
-
-以下技能文本按上游原文收录，文件头保留来源与作者标注。除特别注明外均为 MIT License；MIT 完整文本见本文档「kunpeng」一节。
-
-| 上游 | 许可证 | 位置 |
-| --- | --- | --- |
-| [jangtrinh/design-os-3d-blender](https://github.com/jangtrinh/design-os-3d-blender) | MIT | `skills/blender-agent-os/` |
-| [arjun988/blender-skills](https://github.com/arjun988/blender-skills) | MIT | `skills/blender-director/` |
-| [RobLe3/cc-blender-skill](https://github.com/RobLe3/cc-blender-skill) | MIT | `skills/blender-agent-os/` 中标注 RobLe3 的配方 |
-| [LobzyJay/motion-design-with-claude](https://github.com/LobzyJay/motion-design-with-claude) | MIT | `skills/motion-design/` |
-| [tsogjavklann/awwwards-3d](https://github.com/tsogjavklann/awwwards-3d) | MIT | `skills/web-3d-awwwards/` |
-| [sunxiayi/make-blender-education-video-skill](https://github.com/sunxiayi/make-blender-education-video-skill) | MIT | `skills/make-blender-education-video/` |
-| [Kappaemme-git/astra-ad-studio](https://github.com/Kappaemme-git/astra-ad-studio) | MIT | `skills/astra-ad-studio/` |
-| SunoForge v3.0 | MIT | `skills/music-director/files/` |
-| 南鸢 nuyoah | MIT | `deploy-staging/opencode-runtime/skills/nuyoah-*/` |
-| jangtrinh img2threejs | Apache-2.0 | `skills/blender-agent-os/img2threejs/LICENSE` |
-
-`src/vendor-bridges/editor/`、`deploy-staging/gateway/editor/`、`src/lib/openui/` 的第三方声明见上文对应小节与随附 LICENSE / THIRD_PARTY_NOTICES。

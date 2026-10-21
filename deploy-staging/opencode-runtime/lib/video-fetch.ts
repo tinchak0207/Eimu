@@ -9,7 +9,7 @@
 // 我方落地差异（已在回报逐条列出）：
 //   1. 无 uv：prepare 走 `python3 -m venv` ＋ `pip install yt-dlp==<pin>`（同形状：钉版、独立环境、显式、使用前断言）。
 //      有 uv 时仍走 hypit 原路（uv sync --project --frozen）。
-//   2. ffmpeg 不在 PATH：可用性检查先试 PATH 的 `ffmpeg`，再试 /opt/eimu-harness/bin/ffmpeg；
+//   2. ffmpeg 不在 PATH：可用性检查先试 PATH 的 `ffmpeg`，再试 /opt/agent-harness/bin/ffmpeg；
 //      失败讯息逐字保留 hypit 原文。
 //   3. 版本真源宣告在自带的 lib/video-fetch-runtime/pyproject.toml（hypit 是独立 runtime 套件）。
 
@@ -25,8 +25,8 @@ import { fileURLToPath } from "node:url"
 const PROJECT = join(dirname(fileURLToPath(import.meta.url)), "video-fetch-runtime")
 const PROJECT_FILE = join(PROJECT, "pyproject.toml")
 /** host state root：venv 落在此（独立环境，含版本号路径）。 */
-const HOST_STATE_ROOT = "/opt/eimu-harness/workspace/.opencode-state"
-const FFMPEG_CANDIDATES = ["ffmpeg", "/opt/eimu-harness/bin/ffmpeg"]
+const HOST_STATE_ROOT = "/opt/agent-harness/workspace/.opencode-state"
+const FFMPEG_CANDIDATES = ["ffmpeg", "/opt/agent-harness/bin/ffmpeg"]
 
 export interface VideoDownloadEnvironment {
   version: string

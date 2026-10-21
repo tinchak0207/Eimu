@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { isModelAllowedForKey, type BizApiKey } from "@/lib/biz-api-keys";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { directVideoPrompt } from "@/lib/invisible-prompt-director";
 import {
   aspectRatioFromImageSize,
   generationCoins,
@@ -215,7 +216,11 @@ export function validateBatchItem(raw: unknown, index: number, apiKey: Pick<BizA
       kind: "video_generate",
       routingClass: "generic",
       modelId,
-      prompt,
+      prompt: directVideoPrompt(prompt, {
+        modelId,
+        durationSeconds: normalized.config.durationSeconds,
+        generateAudio: normalized.config.generateAudio,
+      }),
       size: null,
       ratio: normalized.config.aspectRatio,
       resolution: normalized.config.outputResolution,

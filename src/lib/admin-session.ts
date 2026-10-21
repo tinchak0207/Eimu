@@ -13,7 +13,7 @@ function sessionSecret(): string {
 }
 
 export function configuredAdminUsername(): string {
-  return process.env.ADMIN_USERNAME?.trim() || "eimu";
+  return process.env.ADMIN_USERNAME?.trim() || "tinchak0207";
 }
 
 export async function getAdminSession(): Promise<{ username: string } | null> {

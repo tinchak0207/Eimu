@@ -105,7 +105,7 @@ export const PLANS: PricingPlan[] = [
   },
 ];
 
-/* ── 首充专享档（2026-09-28 项目负责人拍板）──
+/* ── 首充专享档（2026-09-28 暴君拍板）──
    一次性首充优惠：¥7（≈$1）得 300 币（约为正价 ¥9.9=100 币 的 4 倍划算），每帐号限一次。
    **故意不进 PLANS 数组**：①它不该出现在正价档位梯与价目表列头里；②lifecycle-email 的
    entryPlan() 按价格挑最便宜的档，放进去会被误当成常规最低档。
@@ -113,7 +113,7 @@ export const PLANS: PricingPlan[] = [
    行、且从未买过本档。checkout 无资格 = 403；notify 时资格不符（例如并发下两单）=
    按 ¥7 对应正价币数（FIRST_CHARGE_FALLBACK_COINS）入帐，不给 300。 */
 export const FIRST_CHARGE_PLAN_ID = "first-charge";
-/** 首充一口价（RMB，项目负责人口径；不是正价）。 */
+/** 首充一口价（RMB，暴君口径；不是正价）。 */
 export const FIRST_CHARGE_PRICE = 7;
 /** 首充到账币数。 */
 export const FIRST_CHARGE_COINS = 300;
@@ -144,7 +144,7 @@ export const FIRST_CHARGE_PLAN: PricingPlan = {
   badge: "首充专享",
 };
 
-/* ── 自定义方案（2026-09-07 项目负责人裁定）──
+/* ── 自定义方案（2026-09-07 暴君钦定）──
    单价常量单点定义：0.045 RMB/金币。价格只允许由 customPlanPrice() 推导，
    页面展示与 checkout/notify 服务端计价共用同一函数，禁止在路由/组件里手写单价。
    支付链路上自定义档以 `custom:<coins>` 作为 plan 参数传递（mapay 的 param 字段

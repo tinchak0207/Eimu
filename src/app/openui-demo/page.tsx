@@ -14,7 +14,7 @@ import { fillRichExample, RICH_EXAMPLES } from "@/lib/openui/rich-examples";
  * 组件只收 taskId，走与聊天完全相同的 AgentMarkdown → AgentOpenUIBlock → OpenUIArtifactSlot
  * → AgentImageCard / AgentVideoCard / AgentAudioCard 渲染链。
  */
-const STORE = "https://store.eimu.dev/image-data/files/uploads";
+const STORE = "https://store.tinchak0207.xyz/image-data/files/uploads";
 const ALBUM_COVER = `${STORE}/media-1791379462314-gf50k0.png`;
 // 演示会话数据（模拟 image/video/audio.done 已到达的条目）：模型/尺寸/扣费是演示夹具，
 // 分辨率与时长由浏览器对真实素材实测。

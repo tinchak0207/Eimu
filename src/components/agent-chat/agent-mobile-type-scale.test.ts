@@ -67,8 +67,13 @@ test("窄屏字级阶梯：正文 17px/25px、过程列 15px、次要行 14px、
     "caption1 层缺 14px",
   );
   // 手机端不得 <14px：caption2(11px) 与 12/13px 正文小字全部抬到 14px 地板。
-  assert.match(narrowBlock, /\.agent-chat-surface \.text-ios-caption2/);
-  assert.match(narrowBlock, /\.agent-chat-surface \.text-\\\[0\\\.6875rem\\\]/);
+  // 2026-10-04（20712427）：裸值 text-[0.6875rem] 已收敛为 text-ios-caption2，
+  // 地板断言改钉 caption2 规则本身必须给 14px（语义不变，不再钉已删除的裸值）。
+  assert.match(
+    narrowBlock,
+    /\.agent-chat-surface \.text-ios-caption2[\s\S]{0,300}?font-size:\s*14px/,
+    "caption2（11px 层）缺 14px 地板",
+  );
   assert.match(narrowBlock, /\.agent-chat-surface \.text-\\\[0\\\.75rem\\\]/);
   assert.match(narrowBlock, /\.agent-chat-surface \.text-\\\[0\\\.8125rem\\\]/);
 

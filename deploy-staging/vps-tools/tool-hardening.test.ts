@@ -11,7 +11,7 @@
 //
 // 跑法：本机没有 node_modules（bun registry 无 DNS），`@opencode-ai/plugin/tool` 解析不到 →
 // 本档必须在**有依赖的环境**执行，也就是生产机：
-//   scp 本档 + eimu-guard.test.ts 到 VPS → cd /opt/eimu-harness/workspace/.opencode → bun test <档案>
+//   scp 本档 + eimu-guard.test.ts 到 VPS → cd /opt/agent-harness/workspace/.opencode → bun test <档案>
 // 这也是唯一能同时验「部署后的代码」与「真实依赖解析」的地方。
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 

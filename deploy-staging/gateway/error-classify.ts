@@ -222,7 +222,7 @@ export const ERROR_RULES: ErrorRule[] = [
   {
     // 429/限流/过载：原 RETRYABLE_NODE_ERROR 完全没覆盖（error-classify 旧注释
     // 称已修，但那张表无人引用）——改前现场这类节点级「不可重试」，靠 failover
-    // 换渠道。行为等价优先，照抄现场 false；要放开需项目负责人点头另案。
+    // 换渠道。行为等价优先，照抄现场 false；要放开需暴君点头另案。
     name: "rate-limit",
     pattern: /\b(overload|overloaded|capacity[_ -]?saturated|rate[ -]?limit|too many requests|http_?429|429)\b/i,
     class: "rate_limit",
@@ -231,7 +231,7 @@ export const ERROR_RULES: ErrorRule[] = [
   },
   {
     // 0919 诚实归因（video-director 试产事故）：shuai(new-api) 预扣费闸方言。
-    // 话术 0919 项目负责人钉死，一字不动。欠费重试也不会好，换渠道（F2）才有意义。
+    // 话术 0919 暴君钉死，一字不动。欠费重试也不会好，换渠道（F2）才有意义。
     // 注意：正则逐字照抄原 humanize-gw 条目——\b 包中文条目在 JS 里要求紧邻
     // ASCII 词字符才命中（"预扣费额度失败" 开头的讯息实测不命中），这是原表
     // 既有可能性，合并不改行为；要修另案。

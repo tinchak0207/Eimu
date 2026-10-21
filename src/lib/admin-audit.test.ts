@@ -79,7 +79,7 @@ test("recordConfigChange: fails soft when the injected sql mock throws mid-query
       {
         configKey: "channel-overrides",
         version: 2,
-        actor: "eimu",
+        actor: "tinchak0207",
         action: "update",
         previousVersion: 1,
         diff: {},
@@ -109,7 +109,7 @@ test("listConfigChanges: maps rows newest-first and defaults actor to 'unknown'"
         id: "id-1",
         config_key: "channel-overrides",
         version: 1,
-        actor: "eimu",
+        actor: "tinchak0207",
         action: "update",
         previous_version: null,
         diff_json: {},
@@ -124,7 +124,7 @@ test("listConfigChanges: maps rows newest-first and defaults actor to 'unknown'"
   assert.equal(result[0].version, 2);
   assert.equal(result[0].actor, "unknown");
   assert.equal(result[1].version, 1);
-  assert.equal(result[1].actor, "eimu");
+  assert.equal(result[1].actor, "tinchak0207");
   assert.equal(result[1].previousVersion, null);
 });
 

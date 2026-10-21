@@ -1,4 +1,4 @@
-<!-- source: Eimu 内部实测（2026-09-11，VPS /opt/eimu-flowmusic2api 上游 genz27/FlowMusic2API MIT）｜license: first-party internal（自有实测数据，非第三方转载）｜ingested: 2026-09-11 | 下游 Expert must-load，覆盖 DATA_GOOGLE 在本通路的适用性 -->
+<!-- source: Eimu 内部实测（2026-09-11，VPS /opt/flowmusic2api 上游 genz27/FlowMusic2API MIT）｜license: first-party internal（自有实测数据，非第三方转载）｜ingested: 2026-09-11 | 下游 Expert must-load，覆盖 DATA_GOOGLE 在本通路的适用性 -->
 ---
 file_id: DATA_FLOWMUSIC
 version: "1.0"

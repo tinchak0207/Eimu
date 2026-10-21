@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   SHORTDRAMA_TOOL_IDS,
+  STORYBOARD_MIN_SHOT_SECONDS,
   getShortDramaToolDefinitions,
   runShortDramaTool,
   type ShortDramaToolId,
@@ -121,14 +122,15 @@ test("storyboard qc duration bounds allow full 30s clips and reject beyond 30s",
   const segment = over.output.gates.find((gate) => gate.id === "segment_duration");
   assert.equal(segment?.passed, true);
 
-  // H7：<10s 短档判 fail 且文案点名镜号与秒数；10/30 边界通过。
-  for (const d of [2, 4, 9, 9.9]) {
+  // H7：短于下限的档判 fail 且文案点名镜号与秒数；下限/30 边界通过。
+  // f6ab6475：STORYBOARD_MIN_SHOT_SECONDS 由 10 放宽为 5（minimax-h3 单镜 5-15 秒）。
+  for (const d of [2, 4, STORYBOARD_MIN_SHOT_SECONDS - 0.1]) {
     const r = run(d).output.gates.find((gate) => gate.id === "duration_bounds");
     assert.equal(r?.passed, false, `${d}s must fail`);
     assert.match(r?.detail ?? "", /S01-01\(/);
-    assert.match(r?.detail ?? "", /<10/);
+    assert.match(r?.detail ?? "", new RegExp(`<${STORYBOARD_MIN_SHOT_SECONDS}`));
   }
-  for (const d of [10, 15, 30]) {
+  for (const d of [STORYBOARD_MIN_SHOT_SECONDS, 15, 30]) {
     assert.equal(run(d).output.gates.find((gate) => gate.id === "duration_bounds")?.passed, true, `${d}s must pass`);
   }
 });

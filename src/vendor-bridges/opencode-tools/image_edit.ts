@@ -16,7 +16,7 @@ import {
   fail,
 } from "../lib/client"
 
-// 编辑能力后盾 = 站点 /v1/images/edits（2026-09-13 项目负责人裁定：多模型化，gpt-image-2
+// 编辑能力后盾 = 站点 /v1/images/edits（2026-09-13 暴君裁定：多模型化，gpt-image-2
 // 等在内）。站点现分两域：pixai bridge 域走原同步链；其余目录模型走 durable 控制面
 // 改图管线（kind:"image_edit"、202 任务合同）。harness 不做白名单门禁——不可用模型
 // 由站点回诚实 400（model_edit_unsupported/model_not_found），渠道事实源是

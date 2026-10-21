@@ -16,7 +16,7 @@
  * 由哪条通路服务（`smartsearch:search` / `smartsearch:anysearch-search`）。两条皆失败才回 fail，
  * hint 同时列出两条错误与可操作替代（search_web / search_aggregate）。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/smart_search_impl.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/smart_search_impl.ts
  * env：子进程只带 PATH/HOME/LANG/LC_ALL/PYTHONPATH（指向 vendored package 父目录）
  *      ＋**若进程有 EXA_API_KEY 才透传**（让 Exa 亦可用）。严禁整体 process.env 透传。
  *      HOME 指向 os.tmpdir() 下的可写临时目录，确保 CLI 的自动 skill maintenance

@@ -10,7 +10,7 @@
 //     new-api 不可用的既有姿势是歧义结果冻结 billing_unknown、永不盲目重放
 //     （billing-ledger classifyBillingFailure）——手术模式不让可用性变差。
 //
-// 映射依赖已拔除（项目负责人 2026-09-23 裁定，G1 刀）：配额权威在 new-api **user 层**
+// 映射依赖已拔除（暴君 2026-09-23 裁定，G1 刀）：配额权威在 new-api **user 层**
 // （users.quota），biz_key_newapi_token 映射是残留物（26 把在用 key vs 15 条映射，
 // upsertBizKeyTokenMapping 零生产呼叫者、最后一笔 2026-09-17），旧行为是「09-17
 // 之后签发的任何 key 首次使用必 503」的地雷类别。现行语义：**无映射的 key 不再
@@ -56,7 +56,7 @@ export const SURGERY_QUOTA_PRECHECK_ENV = "SURGERY_QUOTA_PRECHECK";
 export const QUOTA_PRECHECK_TIMEOUT_MS_DEFAULT = 3_000;
 
 /**
- * /v1 对外 402 统一契约（项目负责人 2026-09-28 裁决：破坏性变更已核准，受害面近乎零）。
+ * /v1 对外 402 统一契约（暴君 2026-09-28 裁决：破坏性变更已核准，受害面近乎零）。
  *
  * 所有「余额／额度不足」出口一律回这一套：type 与 code 同码 `insufficient_balance`，
  * 文案逐字固定（含充值入口）。legacy reserve 分支与本闸门共用同一常数——客户端

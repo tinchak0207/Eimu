@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 控面一键部署：plan（唯读，预设）／deploy／rollback [tag]
 #
-# 来源＝本机 git HEAD（不是 working tree）。控面＝VPS /opt/eimu-control-plane（无 git 手搬副本）。
+# 来源＝本机 git HEAD（不是 working tree）。控面＝VPS /opt/image-control-plane（无 git 手搬副本）。
 #   plan     git archive HEAD → 与 VPS app/ 做 checksum 比对 → 双向 diff 闸（BLOCKED＝VPS 独有修改）
 #            → compose 漂移（只印键名）→ 磁碟。不改 VPS 任何东西。
 #   deploy   已硬停用：禁止在在线生产主机同步源码并全量构建；须改用离机预构建镜像产物。
@@ -29,10 +29,10 @@ if [[ "${1:-plan}" == "deploy" ]]; then
   exit 1
 fi
 
-VPS_HOST="${VPS_HOST:-ubuntu@YOUR_SERVER_IP}"
+VPS_HOST="${VPS_HOST:-ubuntu@43.172.85.76}"
 VPS_PORT="${VPS_PORT:-22443}"
-VPS_KEY="${VPS_KEY:-/home/user/.ssh/id_ed25519}"
-CP_DIR="${CP_DIR:-/opt/eimu-control-plane}"
+VPS_KEY="${VPS_KEY:-/home/lenovo/.ssh/new.pem}"
+CP_DIR="${CP_DIR:-/opt/image-control-plane}"
 APP_DIR="$CP_DIR/app"
 COMPOSE_FILE="control-plane-compose.yml"
 API_IMAGE="image-control-plane-generation-api"
@@ -43,7 +43,7 @@ NGINX_CTR="imagesite-nginx"
 # 只 reload 不 restart（2026-09-28 事故）：restart 会让 nginx 在启动时重新解析 conf 内所有上游，
 # 任一上游容器已被移除（当时是 adobe2api-plus-web）→ [emerg] host not found → 全站入口重启回圈 2m42s。
 # reload 同样重新解析上游 IP（控面重建后 IP 会变），但设定有错时 master 保留旧 worker 继续服务。
-PUBLIC_HEALTHZ="https://store.eimu.dev/image-control/api/readyz"
+PUBLIC_HEALTHZ="https://store.tinchak0207.xyz/image-control/api/readyz"
 SERVICES=(generation-api generation-worker)
 ROLLBACK_KEEP=3
 

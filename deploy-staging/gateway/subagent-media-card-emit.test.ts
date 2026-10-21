@@ -158,27 +158,27 @@ test("collectToolOutputMediaUrls：{jobs:[{video_url,cost_coins}]} → video 恰
   const parsed = parseToolOutput(
     JSON.stringify({
       ok: true,
-      jobs: [{ task_id: "j1", status: "succeeded", video_url: "https://store.eimu.dev/x/a.mp4", cost_coins: 13 }],
+      jobs: [{ task_id: "j1", status: "succeeded", video_url: "https://store.tinchak0207.xyz/x/a.mp4", cost_coins: 13 }],
     }),
   )
   const r = collectToolOutputMediaUrls(parsed)
   expect(r.video.length).toBe(1)
-  expect(r.video[0]!.url).toBe("https://store.eimu.dev/x/a.mp4")
+  expect(r.video[0]!.url).toBe("https://store.tinchak0207.xyz/x/a.mp4")
   expect(r.video[0]!.cost_coins).toBe(13)
   expect(r.audio.length).toBe(0)
 })
 
 test("collectToolOutputMediaUrls：{shots:[{mp4_url}]} → video 恰 1", () => {
-  const r = collectToolOutputMediaUrls({ ok: true, shots: [{ index: 0, mp4_url: "https://store.eimu.dev/x/b.mp4" }] })
+  const r = collectToolOutputMediaUrls({ ok: true, shots: [{ index: 0, mp4_url: "https://store.tinchak0207.xyz/x/b.mp4" }] })
   expect(r.video.length).toBe(1)
-  expect(r.video[0]!.url).toBe("https://store.eimu.dev/x/b.mp4")
+  expect(r.video[0]!.url).toBe("https://store.tinchak0207.xyz/x/b.mp4")
   expect(r.audio.length).toBe(0)
 })
 
 test("collectToolOutputMediaUrls：{audios:[{url:.m4a}]} → audio 恰 1", () => {
-  const r = collectToolOutputMediaUrls({ ok: true, audios: [{ url: "https://store.eimu.dev/x/c.m4a" }] })
+  const r = collectToolOutputMediaUrls({ ok: true, audios: [{ url: "https://store.tinchak0207.xyz/x/c.m4a" }] })
   expect(r.audio.length).toBe(1)
-  expect(r.audio[0]!.url).toBe("https://store.eimu.dev/x/c.m4a")
+  expect(r.audio[0]!.url).toBe("https://store.tinchak0207.xyz/x/c.m4a")
   expect(r.video.length).toBe(0)
 })
 
@@ -209,13 +209,13 @@ test("FIX-A：子代理 tool part completed 含影片 URL → 父会话恰 1 条
       input: {},
       output: JSON.stringify({
         ok: true,
-        jobs: [{ task_id: "j1", status: "succeeded", video_url: "https://store.eimu.dev/x/a.mp4", cost_coins: 13 }],
+        jobs: [{ task_id: "j1", status: "succeeded", video_url: "https://store.tinchak0207.xyz/x/a.mp4", cost_coins: 13 }],
       }),
     },
   })
   const v = frames(p.captured, "video.done")
   expect(v.length).toBe(1)
-  expect(v[0]!.url).toBe("https://store.eimu.dev/x/a.mp4")
+  expect(v[0]!.url).toBe("https://store.tinchak0207.xyz/x/a.mp4")
   expect(v[0]!.cost_coins).toBe(13)
   expect(v[0]!.media_kind).toBe("video")
   expect(frames(p.captured, "audio.done").length).toBe(0)
@@ -229,11 +229,11 @@ test("FIX-A：子代理 tool part completed 含音频 URL → 父会话恰 1 条
     id: "pt-a",
     callID: "c-a",
     tool: "music_gen",
-    state: { status: "completed", input: {}, output: { ok: true, audios: [{ url: "https://store.eimu.dev/x/c.m4a" }] } },
+    state: { status: "completed", input: {}, output: { ok: true, audios: [{ url: "https://store.tinchak0207.xyz/x/c.m4a" }] } },
   })
   const a = frames(p.captured, "audio.done")
   expect(a.length).toBe(1)
-  expect(a[0]!.url).toBe("https://store.eimu.dev/x/c.m4a")
+  expect(a[0]!.url).toBe("https://store.tinchak0207.xyz/x/c.m4a")
   expect(a[0]!.media_kind).toBe("audio")
   expect(frames(p.captured, "video.done").length).toBe(0)
 })
@@ -249,7 +249,7 @@ test("FIX-A 去重：同一 part completed 重复 updated → 仍只恰 1 条 vi
     state: {
       status: "completed",
       input: {},
-      output: JSON.stringify({ ok: true, jobs: [{ status: "succeeded", video_url: "https://store.eimu.dev/x/d.mp4" }] }),
+      output: JSON.stringify({ ok: true, jobs: [{ status: "succeeded", video_url: "https://store.tinchak0207.xyz/x/d.mp4" }] }),
     },
   }
   await feedTool(childId, part)
@@ -269,7 +269,7 @@ test("FIX-A 负向：tool running → 父会话 0 条 media 帧", async () => {
     state: {
       status: "running",
       input: {},
-      output: JSON.stringify({ ok: true, jobs: [{ status: "succeeded", video_url: "https://store.eimu.dev/x/r.mp4" }] }),
+      output: JSON.stringify({ ok: true, jobs: [{ status: "succeeded", video_url: "https://store.tinchak0207.xyz/x/r.mp4" }] }),
     },
   })
   expect(frames(p.captured, "video.done").length).toBe(0)

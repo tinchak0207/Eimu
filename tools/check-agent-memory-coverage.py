@@ -12,7 +12,7 @@
   达标                                             → exit 0
 
 环境变量：
-  MEMORY_QUEUE_DIR       队列目录（首个候选；不存在时回退 /opt/eimu-harness/state/memory-queue
+  MEMORY_QUEUE_DIR       队列目录（首个候选；不存在时回退 /opt/agent-harness/state/memory-queue
                          再回退 ./.memory-queue）
   MEMORY_AUDIT_PATH      审计 JSONL（默认 <选中的 queueDir>/memory-audit.jsonl）
   MEMORY_COV_DAYS        窗口天数（默认 7；窗口为 cut <= t <= now，未来时间戳忽略）
@@ -32,9 +32,9 @@ from pathlib import Path
 CST = timezone(timedelta(hours=8))
 
 # 2026-10-19 P2-6：队列目录不再在 import 时一次定死；依次尝试
-# MEMORY_QUEUE_DIR → /opt/eimu-harness/state/memory-queue → ./.memory-queue，
+# MEMORY_QUEUE_DIR → /opt/agent-harness/state/memory-queue → ./.memory-queue，
 # 选第一个存在的目录。审计档默认跟随选中的目录（MEMORY_AUDIT_PATH 可显式覆盖）。
-DEFAULT_QUEUE_DIRS = ["/opt/eimu-harness/state/memory-queue", "./.memory-queue"]
+DEFAULT_QUEUE_DIRS = ["/opt/agent-harness/state/memory-queue", "./.memory-queue"]
 AUDIT_FILENAME = "memory-audit.jsonl"
 
 DAYS = int(os.environ.get("MEMORY_COV_DAYS", "7"))

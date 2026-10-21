@@ -2,7 +2,7 @@
  * 站点对外介绍的单一真源：layout metadata（含 OG／Twitter／JSON-LD）、首页 tab 标题、
  * PWA manifest 都从这里取，别再各写一份。
  *
- * 2026-09-27 项目负责人纠正：旧文案以「在线生成 GPT Image 2 / Nano Banana Pro 图片」开头
+ * 2026-09-27 暴君纠正：旧文案以「在线生成 GPT Image 2 / Nano Banana Pro 图片」开头
  * ＋一句「不用注册中转站」，站在浏览器分页上被读成「又一个 Image/Banana 镜像站」——
  * 等于自己把产品归类成中转站。定位之争在第一眼就被裁定（见记忆
  * manju-relay-objection-and-demo-onboarding-0922），所以介绍的第一句必须是

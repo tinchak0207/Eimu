@@ -2,14 +2,14 @@
 // bridge-reverse-tunnel.js — VPS 127.0.0.1:<REMOTE_BIND_PORT> 反向转发 → 本机 blender-bridge 127.0.0.1:<LOCAL_TARGET_PORT>
 //
 // 谁连谁（方向铁律）：本机在 NAT 后，VPS 无法主动连入。本机 ssh2 客户端主动出站 →
-//   127.0.0.1:<SSH_PORT>（ws-tunnel-node.js，SSH-over-443）→ nginx store.eimu.dev/ssh
+//   127.0.0.1:<SSH_PORT>（ws-tunnel-node.js，SSH-over-443）→ nginx store.tinchak0207.xyz/ssh
 //   → VPS gost(18083) → VPS sshd:22；SSH ready 后 forwardIn 请求 VPS sshd 绑 127.0.0.1:<REMOTE_BIND_PORT>
 //   （GatewayPorts 不需要——只绑 loopback，VPS 本机进程可达即够）；之后 VPS 侧对该端口的每条
 //   连线以 'tcp connection' 事件回到本机，本机 pipe 到 <LOCAL_TARGET_PORT>（blender-bridge）。
 //
 // ═════════ 轮子出处与白名单（禁止造轮子铁律，2026-09-06 片W）═════════
 // 基底（交互逻辑逐行保留）：
-//   /home/user/Desktop/image-app/.dsh-ssh/reverse-tunnel-443.js
+//   /home/lenovo/Desktop/image-app/.dsh-ssh/reverse-tunnel-443.js
 //   —— ssh2 反向隧道轮子，08-21 对同一台 VPS sshd 实弹验证 forwardIn('127.0.0.1') 可绑。
 //   保留：ssh2 Client 连线参数（readyTimeout/keepaliveInterval/私钥惯例）、forwardIn、
 //         'tcp connection' → accept() + net.connect + 双向 pipe + 四路 cleanup（原 L27-45）。
@@ -25,7 +25,7 @@
 //      回退开关：若落位实测会话被 sshd 闲置回收，启动时带 USE_EXEC_ANCHOR=1 恢复原轮子锚。
 // ═════════════════════════════════════════════════════════════════════════
 const net = require('net');
-const { Client } = require('/home/user/.local/lib/node_modules/ssh2');
+const { Client } = require('/home/lenovo/.local/lib/node_modules/ssh2');
 const fs = require('fs');
 const { execFile } = require('child_process');
 
@@ -36,7 +36,7 @@ const SSH_USER = process.env.SSH_USER || 'ubuntu';
 const KEY_PATH = process.env.KEY_PATH || (process.env.HOME + '/.ssh/new.pem');
 const REMOTE_BIND_PORT = parseInt(process.env.REMOTE_BIND_PORT || '8765', 10);   // VPS sshd 绑定端口
 const LOCAL_TARGET_PORT = parseInt(process.env.LOCAL_TARGET_PORT || '8765', 10); // 本机 blender-bridge
-const WS_TUNNEL_SCRIPT = '/home/user/Desktop/image-app/.pixai-refresh/start-ssh443.sh';
+const WS_TUNNEL_SCRIPT = '/home/lenovo/Desktop/image-app/.pixai-refresh/start-ssh443.sh';
 const USE_EXEC_ANCHOR = process.env.USE_EXEC_ANCHOR === '1';
 const BASE_RETRY_MS = 2000;
 const MAX_RETRY_MS = 30000;

@@ -23,7 +23,7 @@ const CONTROL_PLANE_ENV = {
 };
 
 /**
- * 402 统一契约（项目负责人 2026-09-28 裁决，破坏性变更已核准）：type 与 code 同码，
+ * 402 统一契约（暴君 2026-09-28 裁决，破坏性变更已核准）：type 与 code 同码，
  * 文案逐字（含充值入口）。测试独立抄写这份文案，不从实现取——实现改字即爆红。
  */
 const BALANCE_MESSAGE = "余额不足，本次未扣费。充值：https://eimu.dev/pricing";

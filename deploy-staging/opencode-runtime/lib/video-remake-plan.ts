@@ -269,7 +269,7 @@ export async function buildRemakePlan(source: string, opts: RemakePlanOptions): 
     ...(opts.language === undefined ? {} : { language: opts.language }),
     ...(opts.max_audio_seconds === undefined ? {} : { max_seconds: opts.max_audio_seconds }),
     signal: opts.signal,
-    // allow_paid_vision 一律不传 ⇒ false（零付费；要付费通道须项目负责人逐次报备）
+    // allow_paid_vision 一律不传 ⇒ false（零付费；要付费通道须暴君逐次报备）
   })
   warnings.push(...analysis.warnings)
 

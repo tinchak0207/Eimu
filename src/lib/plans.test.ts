@@ -75,7 +75,7 @@ test("pricing plans match the public image package offers", () => {
   assert.equal(PLANS.some((plan) => plan.name.includes("无限")), false);
 });
 
-/* ── 自定义档（2026-09-07 项目负责人裁定）：0.045 RMB/金币单点权威 ──
+/* ── 自定义档（2026-09-07 暴君钦定）：0.045 RMB/金币单点权威 ──
    价格是钱：单价常量、区间夹取、档位吸附、解析器（checkout/notify 同源）
    全部钉进断言，任何改动都必须显式过这一关。 */
 test("custom plan prices by the single-source 0.045 RMB per coin constant", () => {

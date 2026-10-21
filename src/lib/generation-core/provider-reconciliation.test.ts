@@ -60,7 +60,7 @@ test("markProviderTaskSubmitted 落提交锚点：CAS 守卫齐全（同 id 幂�
   // 同 task id 重写允许（提交回调+失败保险双入口）、不同 task id 不覆盖。
   assert.ok(update.sql.includes("provider_task_id IS NULL OR provider_task_id ="));
   // 只允许挂在还没被判死的 attempt 上。
-  assert.ok(update.sql.includes("status IN ('submitting', 'running', 'failed')"));
+  assert.ok(update.sql.includes("status IN ('submitting', 'running', 'failed', 'submit_unknown')"));
   // 落行即排程：state=running + 首轮轮询时间 + 对帐窗口。
   assert.ok(update.sql.includes("provider_state = 'running'"));
   assert.ok(update.sql.includes("provider_next_poll_at ="));
@@ -106,7 +106,7 @@ test("reviveGenerationJobWithArtifacts：CAS 只复活非活跃 job；CAS 落空
   assert.equal(revived.artifacts.length, 1);
   const update = calls.find((call) => call.sql.includes("status = 'succeeded'"));
   assert.ok(update, "revive should UPDATE the job to succeeded");
-  assert.ok(update.sql.includes("status IN ('failed', 'refunded', 'submit_unknown', 'cancelled')"));
+  assert.ok(update.sql.includes("status IN ('failed', 'refunded', 'submit_unknown')"));
   assert.ok(update.sql.includes("requested_count <="));
   assert.ok(emittedEvents(calls).includes("reconcile_delivered"));
 
@@ -297,7 +297,7 @@ test("runProviderReconciliation：上游确认 FAILURE + job 冻结中且无其�
       { match: "FOR UPDATE SKIP LOCKED", rows: [claimRow()] },
       { match: "attempt.id = ANY", rows: [CONTEXT_ROW] },
       { match: "provider_reconcile_deadline_at IS NOT NULL", rows: [] },
-      { match: "SELECT * FROM generation_job", rows: [SUBMIT_UNKNOWN_JOB_ROW] },
+      { match: "FROM generation_job job WHERE job.id", rows: [SUBMIT_UNKNOWN_JOB_ROW] },
       { match: "SELECT * FROM billing_operation", rows: [{ id: "op-1", job_id: "job-1", status: "applied", amount: 5000, sequence: 1 }] },
       { match: "SET status = 'failed'", rows: [{ id: "job-1" }] },
       { match: "provider_state IN ('unknown', 'running')", rows: [] },
@@ -340,7 +340,7 @@ test("runProviderReconciliation：job 仍活跃（非 submit_unknown）→ 不�
       { match: "FOR UPDATE SKIP LOCKED", rows: [claimRow()] },
       { match: "attempt.id = ANY", rows: [CONTEXT_ROW] },
       { match: "provider_reconcile_deadline_at IS NOT NULL", rows: [] },
-      { match: "SELECT * FROM generation_job", rows: [{ ...SUBMIT_UNKNOWN_JOB_ROW, status: "running" }] },
+      { match: "FROM generation_job job WHERE job.id", rows: [{ ...SUBMIT_UNKNOWN_JOB_ROW, status: "running" }] },
     ]);
     const summary = await runProviderReconciliation({ executorId: "test", sql });
     assert.equal(summary.claimed, 1);

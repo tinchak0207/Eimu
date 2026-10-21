@@ -170,7 +170,7 @@ test("isAppHost: 仅收 APP_HOSTS；不可解析拒", () => {
 // ---------------------------------------------------------------------------
 test("pickFfmpegCandidate: linux 候选表含 harness 路径、HOME 展开、PATH 后备", () => {
   const list = pickFfmpegCandidate({ HOME: "/home/tester" }, "linux");
-  assert.equal(list[0], "/opt/eimu-harness/bin/ffmpeg");
+  assert.equal(list[0], "/opt/agent-harness/bin/ffmpeg");
   assert.ok(list.includes("/home/tester/.kunpeng/bin/ffmpeg"));
   assert.ok(list.includes("/opt/homebrew/bin/ffmpeg"));
   assert.ok(list.includes("/usr/local/bin/ffmpeg"));

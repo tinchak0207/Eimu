@@ -30,7 +30,7 @@ export function getSiteUrlFromRequest(request: Request): string {
  *
  * Always returns the configured public domain, regardless of which
  * hostname the request arrived on. This ensures Google sees a single canonical
- * domain and avoids duplicate-indexing across eimu.dev / image.eimu.dev.
+ * domain and avoids duplicate-indexing across eimu.dev / image.tinchak0207.xyz.
  */
 export async function getSiteUrl(): Promise<string> {
   return getSiteUrlFromEnv();

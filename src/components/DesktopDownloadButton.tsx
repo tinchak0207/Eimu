@@ -10,7 +10,7 @@ import { resolveDesktopDownload, type DesktopDownload } from "@/lib/desktop-rele
 /**
  * 桌面版下载钮（单一元件，两个变体）。
  *
- * 项目负责人原话「搞弹窗就有点蠢了，点击按钮直接识别浏览器环境然后下载就行了」——
+ * 暴君原话「搞弹窗就有点蠢了，点击按钮直接识别浏览器环境然后下载就行了」——
  * 所以没有选单：单击即由 UA 判定平台并动作。
  * - `icon`：header 用（极简图标态、`hidden xl:flex`、aria/title「下载桌面版」）。
  * - `hero`：宣传片结尾那颗大的；文字随平台自动变（Linux/Windows 各自副档名）。

@@ -64,7 +64,7 @@ export const LUMA_RAY2_MODEL_ID = /** @type {const} */ ("luma-ray-2");
 export const LUMA_RAY3_HDR_MODEL_ID = /** @type {const} */ ("luma-ray-3-hdr");
 export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
 export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
-// agnes 免费视频（apihub.agnes-ai.com，2026-10-13 项目负责人指定）：平台自有免费额度渠道，
+// agnes 免费视频（apihub.agnes-ai.com，2026-10-13 暴君指定）：平台自有免费额度渠道，
 // 作为**免费兜底**——付费视频渠道（miaowu / xiaoyxiao）全断时仍有可用供货。上游名同名直传。
 export const AGNES_VIDEO_25_FLASH_MODEL_ID = /** @type {const} */ ("agnes-video-2.5-flash");
 
@@ -104,7 +104,7 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   AGNES_IMAGE_25_FLASH_MODEL_ID,
 ];
 
-// 2026-09-27 项目负责人裁定「无供货即下架」：以下 14 条视频 model 全层零供货（无任何
+// 2026-09-27 暴君裁定「无供货即下架」：以下 14 条视频 model 全层零供货（无任何
 // enabled AND is_current 的 video_generate capability；adobe2api 停视频后亦无人承接），
 // 自公开/在售目录移除（常数保留供 capability 历史与 adobe2api 映射表引用）：
 //   adobe-firefly-video / kling-2.5-turbo / kling-3.0 / kling-3.0-omni /
@@ -118,7 +118,7 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
 // 2026-10-13：seedance-2.0-mini 由 miaowuai 承接（上游 seedance-2.0-mini 按秒计价，
 // 已进付费视频白名单）⇒ 重新上架；fast / 30s 仍无供货，维持下架。
 // 2026-10-13：agnes-video-2.5-flash 上架——平台自有**免费兜底**视频档（免费额度渠道，
-// agnes 免费兜底），付费渠道（miaowu/xiaoyxiao）全断时仍有供货；免费档队列/限速较慢。
+// agnes 上游成本 ¥0），付费渠道（miaowu/xiaoyxiao）全断时仍有供货；免费档队列/限速较慢。
 export const SUPPORTED_VIDEO_MODEL_IDS = [
   SEEDANCE_20_MODEL_ID,
   SEEDANCE_20_MINI_MODEL_ID,
@@ -145,7 +145,7 @@ export const SUPPORTED_AV_MODEL_IDS = [TTS_1_MODEL_ID, AVATAR_1_MODEL_ID, LIPSYN
 // B 端 `GET /v1/models` 显式附加价目（x_coins_per_music，与实扣同源），供 agent 报价。
 export const MUSIC_1_MODEL_ID = /** @type {const} */ ("music-1");
 
-// 2026-09-27 项目负责人裁定「adobe2api 留图、停视频」：本表只列 adobe2api 仍承接的**图像**
+// 2026-09-27 暴君裁定「adobe2api 留图、停视频」：本表只列 adobe2api 仍承接的**图像**
 // 模型；原视频条目（veo/kling/seedance/firefly-video/luma/runway 全族）一并移除，
 // 对应 capability 由 seed 的 retireUnclaimedCapabilities 退役。
 export const ADOBE2API_MODEL_IDS = [

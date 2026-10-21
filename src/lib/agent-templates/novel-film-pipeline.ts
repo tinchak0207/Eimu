@@ -11,7 +11,7 @@ export const novelFilmPipelineCard: AgentTemplate =
     "glow": "#3B2F4A",
     "showcaseVideo": "/showcase/agent-templates/novel-film-3.mp4",
     "showcaseImage": "/showcase/agent-templates/novel-film-3.webp",
-    "painPoint": "文本到分镜全靠逐条，断点在情绪连续性和角色漂移",
+    "painPoint": "文本到分镜全靠人肉，断点在情绪连续性和角色漂移",
     "pipeline": {
       "summary": "小说文本→结构化剧本JSON→资产先行→锁构图分镜→成组关键帧的影视化流水线",
       "steps": [

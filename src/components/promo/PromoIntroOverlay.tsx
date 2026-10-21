@@ -7,14 +7,14 @@ import { PromoLoginPopover } from "./PromoLoginPopover";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 
 /**
- * 未登入新访客的进站宣传片浮层（2026-09-27 项目负责人裁定落地）。
+ * 未登入新访客的进站宣传片浮层（2026-09-27 暴君裁定落地）。
  *
  * 为什么是浮层而不是首页 hero 卡：定位之争在「进网站第一刻」就被裁定——
  * 新访客看见的第一眼若是参数框＋输入框＋输出框，就会拿生图中转站的尺来量我们
  * （原始决策见记忆 manju-relay-objection-and-demo-onboarding-0922）。浮层把
  * 那第一秒拿去放一部片。
  *
- * 收尾（2026-09-27 项目负责人第二轮纠正：「你结尾那个引导好差啊」）：
+ * 收尾（2026-09-27 暴君第二轮纠正：「你结尾那个引导好差啊」）：
  * 原本是一块玻璃面板＋「开始试玩」钮，浮在近白的片尾画面上——灰糊成一团、
  * 没有画面、还要人多按一次。现在直接拿**宣传片 A 版封面**当结尾画面
  * （`public/promo/eimu-promo-cover.jpg`，1920×1080），封面里那个输入框
@@ -90,7 +90,7 @@ export function PromoIntroOverlay({
   /** 直式（手机）：封面要放大到框好按的大小。 */
   const [portrait, setPortrait] = useState(false);
   /**
-   * 送出钮的 0.2 秒转圈（2026-09-27 项目负责人裁定）：按下到「长出登入框」之间要有
+   * 送出钮的 0.2 秒转圈（2026-09-27 暴君裁定）：按下到「长出登入框」之间要有
    * 「真的在做事」的反馈，否则人只看到一个小框冒出来＝没接住他的动作。
    */
   const [sending, setSending] = useState(false);
@@ -195,7 +195,7 @@ export function PromoIntroOverlay({
 
   /**
    * 送出：空框也走得通——直接按送出就是跑片中那句话。
-   * 未登入走「转圈 0.2 秒 → 送出钮上方长出登入小框」（项目负责人 2026-09-27：
+   * 未登入走「转圈 0.2 秒 → 送出钮上方长出登入小框」（暴君 2026-09-27：
    * 直接弹全屏登入墙会让人丧失兴趣，先给一个正在开跑的反馈再问他要不要登入）。
    */
   const submit = useCallback(
@@ -246,7 +246,7 @@ export function PromoIntroOverlay({
               // 横式＝整张封面完整入镜（contain）：缩到能塞进视窗的最小那组尺寸，
               // 多出来的边留给同色底。**曾经写成 max(100vw, 177.78vh) 想「不留
               // 黑边」，结果视窗比例接近 16:9 时封面被放大到高度溢出——品牌标与
-              // 右上「成片」标签整个被切掉、底下还留一条空带（2026-09-27 项目负责人
+              // 右上「成片」标签整个被切掉、底下还留一条空带（2026-09-27 暴君
               // 截图实锤「你交给我的什么玩意啊」）。海报式结尾就该完整入镜。
               // 直式＝放大到框好按（手机手指放得下），此时刻意只露出框那一段。
               width: portrait ? "250vw" : "min(100vw, 177.78vh)",
@@ -349,7 +349,7 @@ export function PromoIntroOverlay({
               </div>
             )}
 
-            {/* 结尾画面的大下载钮（项目负责人：2026.08.29 那行下方放一颗大的、内容自动识别）：
+            {/* 结尾画面的大下载钮（暴君：2026.08.29 那行下方放一颗大的、内容自动识别）：
                 座标在 DesktopDownloadButton 内以封面画布为准（cqh()/pct()），与本容器同一个
                 `container-type: size` 座标系；落在 .prompt 与 .cap 之下、不重叠。 */}
             <DesktopDownloadButton variant="hero" />

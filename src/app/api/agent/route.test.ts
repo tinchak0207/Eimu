@@ -85,8 +85,8 @@ test("漏配 env 与临时故障必须是两种 503，不共用一句「稍后�
 
 test("agent gateway 预设指向 store 域名，绝不指向 image 域名（404）", () => {
   const source = code("src/lib/agent-gateway.ts");
-  assert.match(source, /AGENT_GATEWAY_DEFAULT_ORIGIN\s*=\s*"https:\/\/store\.eimu\.xyz"/);
-  assert.doesNotMatch(source, /image\.eimu\.xyz/, "image 域名的 /agent/* 是 404，打过去等于功能全坏");
+  assert.match(source, /AGENT_GATEWAY_DEFAULT_ORIGIN\s*=\s*"https:\/\/store\.tinchak0207\.xyz"/);
+  assert.doesNotMatch(source, /image\.tinchak0207\.xyz/, "image 域名的 /agent/* 是 404，打过去等于功能全坏");
   assert.match(source, /agentGatewayOrigin\(/, "取 origin 必须走正规化函数");
   assert.match(source, /AGENT_CHAT_ENABLED/, "启用开关必须读 AGENT_CHAT_ENABLED");
   assert.match(source, /Bearer/, "打闸道必须带 Bearer 认证");

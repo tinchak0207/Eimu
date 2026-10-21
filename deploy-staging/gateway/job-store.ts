@@ -8,7 +8,7 @@ export const generationUserAdmissions = new Map<string, number>()
 let connection: Database | undefined
 function db(): Database {
   if (connection) return connection
-  const next = new Database(process.env.SESSIONS_DB_PATH || "/opt/eimu-harness/state/sessions.db", { create: true })
+  const next = new Database(process.env.SESSIONS_DB_PATH || "/opt/agent-harness/state/sessions.db", { create: true })
   next.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
   next.exec(`CREATE TABLE IF NOT EXISTS generation_consumers (
     child_oc TEXT PRIMARY KEY, parent_gw TEXT NOT NULL, parent_oc TEXT NOT NULL, created_at INTEGER NOT NULL, consumer_agent TEXT);

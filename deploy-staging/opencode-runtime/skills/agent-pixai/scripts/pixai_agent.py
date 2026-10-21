@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get('KOTONE_BRIDGE_BASE', 'https://store.eimu.dev/kotone/v1')
+BASE = os.environ.get('KOTONE_BRIDGE_BASE', 'https://store.tinchak0207.xyz/kotone/v1')
 
 
 def http_json(method, path, api_key, payload=None, timeout=240):

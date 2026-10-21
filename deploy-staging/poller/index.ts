@@ -5,10 +5,10 @@ import { pollPathFor } from "./media-endpoints";
 // Configuration
 // ============================================================
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://127.0.0.1:8081";
-// WP3：VPS 本机直连控面（不经 Vercel 边缘/Cloudflare）。实测 store.eimu.dev/
-// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.eimu.dev/v1
+// WP3：VPS 本机直连控面（不经 Vercel 边缘/Cloudflare）。实测 store.tinchak0207.xyz/
+// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.tinchak0207.xyz/v1
 // 完全相同（同一后端），延时约 14ms vs 88~113ms。语义不变，只是换快路径。
-const PLATFORM_API_BASE = process.env.PLATFORM_API_BASE ?? "https://store.eimu.dev/image-control/api/v1";
+const PLATFORM_API_BASE = process.env.PLATFORM_API_BASE ?? "https://store.tinchak0207.xyz/image-control/api/v1";
 const POLLER_TICK_MS = parseInt(process.env.POLLER_TICK_MS ?? "1000", 10);
 // WP1 前段密集快探：任务创建后 FAST_PROBE_WINDOW_MS 内以 FAST_PROBE_TICK_MS 间隔轮询，
 // 让 1~8s 快速出图的媒体不再被首轮指数退避（首退避即 8s + jitter）白等 3~11s。

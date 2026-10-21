@@ -19,7 +19,7 @@ test("recordGenerationResult keeps the latest generated images for the active ac
     prompt: "make a poster",
     generatedAt: 1000,
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "b64-a", imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "b64-a", imageUrl: null },
     ],
   });
 
@@ -52,7 +52,7 @@ test("recordGenerationResult preserves professional workflow metadata", () => {
       concurrency: 2,
     },
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "b64-a", imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "b64-a", imageUrl: null },
     ],
   });
 
@@ -73,7 +73,7 @@ test("recordGenerationResult keeps history isolated by account", () => {
     prompt: "alice image",
     generatedAt: 1000,
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "alice-b64", imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "alice-b64", imageUrl: null },
     ],
   });
 
@@ -83,7 +83,7 @@ test("recordGenerationResult keeps history isolated by account", () => {
     prompt: "bob image",
     generatedAt: 2000,
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "bob-b64", imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "bob-b64", imageUrl: null },
     ],
   });
 
@@ -100,7 +100,7 @@ test("mergePersistedHistory keeps local entries first and strips image payloads"
     prompt: "cached prompt",
     generatedAt: 1000,
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "cached-b64", imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "cached-b64", imageUrl: null },
     ],
   });
 
@@ -141,7 +141,7 @@ test("writeGenerationCache does not let localStorage quota failures interrupt ge
     prompt: "large image",
     generatedAt: 3000,
     results: [
-      { provider: "image_eimu", modelId: "gpt-image-2", image: "x".repeat(1000), imageUrl: null },
+      { provider: "image_tinchak", modelId: "gpt-image-2", image: "x".repeat(1000), imageUrl: null },
     ],
   });
 

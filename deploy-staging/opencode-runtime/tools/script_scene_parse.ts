@@ -8,7 +8,7 @@ import path from "node:path"
 // + 台词行（角色名：/「」/（OS））+ 动作节拍；台词时长按 4.5 字/秒折算。
 // 契约对齐 src/lib/shortdrama-domain/index.ts:parseScript（scenes[{sceneId,heading,beats}]）。
 
-const WORKSPACE = "/opt/eimu-harness/workspace"
+const WORKSPACE = "/opt/agent-harness/workspace"
 const CHARS_PER_SECOND = 4.5
 
 const SCENE_RE =

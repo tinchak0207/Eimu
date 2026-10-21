@@ -9,7 +9,7 @@
  *   写进错误或日志。
  * - 所有路径操作 fail-closed。
  *
- * 目录布局（HARNESS_MEMORY_ROOT，默认 /opt/eimu-harness/state/agent-memory）：
+ * 目录布局（HARNESS_MEMORY_ROOT，默认 /opt/agent-harness/state/agent-memory）：
  *   user    <root>/<tenant>/user/<agent>/
  *   project <root>/<tenant>/project/<workspaceKey>/<agent>/
  *   local   <root>/<tenant>/local/<workspaceKey>/<sessionKey>/<agent>/
@@ -29,7 +29,7 @@ export const MEMORY_READ_MAX_CHARS = 65536
 export const MEMORY_LIST_MAX_FILES = 1000
 export const MEMORY_DEFAULT_NAME = "MEMORY.md"
 export const MEMORY_ARCHIVED_SENTINEL = ".archived"
-export const DEFAULT_MEMORY_ROOT = "/opt/eimu-harness/state/agent-memory"
+export const DEFAULT_MEMORY_ROOT = "/opt/agent-harness/state/agent-memory"
 
 /** 约束（P2 配额）：每 tenant/scope 的记忆文件数与总字节上限。 */
 export const MEMORY_SCOPE_MAX_FILES = 500

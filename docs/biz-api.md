@@ -324,3 +324,21 @@ curl https://eimu.dev/v1/skus/sku-multi-angle/runs \
 `all_terminal: true`（或 `status: "completed"`）表示全部镜头已终结；部分成功语义下 `succeeded` 的镜头随时可经 `result_url` 取件。run 不占新表——`run_id` 即幂等键根，镜头任务的幂等键为 `skurun:<run_id>:<shot_index>`，聚合视图直接从任务事实源构建。
 
 ---
+
+## 我方内部：签发密钥
+
+```bash
+# 签发（--user-id 是上游 New API 的用户 id，消耗从该账户余额扣除）
+npm run bizkey:issue -- --label "某聚合平台" --user-id 12
+
+# 可选参数
+npm run bizkey:issue -- --label "客户A" --user-id 12 --rpm 120 --models gpt-image-2,adobe-firefly
+
+# 查看已签发的密钥
+npm run bizkey:list
+```
+
+也可以在 `/admin` → 「B 端密钥」页可视化签发。两条路径等价，CLI 只需要
+`BLOB_READ_WRITE_TOKEN`，不需要管理员密码。
+
+明文密钥只在签发时输出一次，存储里只有 sha256。丢了只能吊销重发。

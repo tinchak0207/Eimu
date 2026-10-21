@@ -29,7 +29,7 @@ const realPatterns = parseBashDenyPatterns(rawCfg)
 
 // 确定性隔离（在任何测试与任何 default 载入之前执行，杜绝执行顺序／主机环境依赖）：
 //  - 让网关 60s 快取载入路径（loadBashDenyPatterns 预设路径）永远指向真表，
-//    不因宿主 /opt/eimu-harness 是否存在、或测试先后而异（快取是模组级可变状态）；
+//    不因宿主 /opt/agent-harness 是否存在、或测试先后而异（快取是模组级可变状态）；
 //  - 让稽核落点导入本次执行专属 tmp，不写到主机 /opt。
 process.env.BASH_DENY_CONFIG_PATH = REAL_JSON
 process.env.DENY_AUDIT_PATH = path.join(mkdtempSync(path.join(tmpdir(), "deny-audit-e2e-")), "audit.jsonl")

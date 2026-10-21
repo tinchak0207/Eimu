@@ -2,8 +2,8 @@
  * memory_recall 薄入口（P0-5，2026-09-15；逐行同构 VPS R1 search_web.ts 范式，
  * 白名单偏离仅名称/描述符 import 路径——wrap 函数体、tool import、execute 透传全不动）。
  *
- * 部署落点：VPS `/opt/eimu-harness/workspace/.opencode/tools/memory_recall.ts`
- * （配套 lib：`/opt/eimu-harness/workspace/.opencode/lib/memory_recall_impl.ts`）。
+ * 部署落点：VPS `/opt/agent-harness/workspace/.opencode/tools/memory_recall.ts`
+ * （配套 lib：`/opt/agent-harness/workspace/.opencode/lib/memory_recall_impl.ts`）。
  * 注册名 = tools/ 档名 = `memory_recall`。命名域教训（09-10 实锤）：opencode 1.18.14
  * 保留 websearch/web_search 命名域，撞名档被物理移除；`memory_recall` 非保留名，OK。
  *

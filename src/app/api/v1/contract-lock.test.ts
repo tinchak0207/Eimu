@@ -289,7 +289,15 @@ const TTS_STATUS = "src/app/api/v1/tts/[id]/route.ts";
 const IMAGE_RESULT = "src/app/api/v1/images/[id]/result/route.ts";
 const VIDEO_RESULT = "src/app/api/v1/videos/[id]/result/route.ts";
 const MODEL_STATUS = "src/app/api/v1/model-status/route.ts";
-const OPENAPI = "src/app/api/v1/openapi.json/route.ts";
+// <1000 行重构：openapi 的 SPEC 大对象拆成 route.ts（handler）＋spec.ts／
+// spec-components.ts／spec-paths.ts。契约原文锁必须读全部 spec 模组。
+const OPENAPI_FILES = [
+  "src/app/api/v1/openapi.json/route.ts",
+  "src/app/api/v1/openapi.json/spec.ts",
+  "src/app/api/v1/openapi.json/spec-components.ts",
+  "src/app/api/v1/openapi.json/spec-paths.ts",
+];
+const OPENAPI_SOURCE = OPENAPI_FILES.map(read).join("\n");
 
 const BIZ_ROUTES = [
   GENERATIONS,
@@ -313,7 +321,7 @@ test("铁律①：每个对外路由的错误体都是 {error:{message,type,code
 });
 
 test("铁律①：错误 type 六枚举是稳定承诺，openapi 原文锁死", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   for (const type of [
     "invalid_request_error",
     "authentication_error",
@@ -327,7 +335,7 @@ test("铁律①：错误 type 六枚举是稳定承诺，openapi 原文锁死", 
 });
 
 test("铁律①：稳定错误码清单（承诺永不变）——每个码都还在 openapi 清单里", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const stableCodes = [
     "invalid_json",
     "missing_prompt",
@@ -499,13 +507,16 @@ test("铁律②source：三个 generations 路由读 Idempotency-Key 头、冲�
 
 // ═══════════════════════════════════════════ GenerationTask 栏位集与 cost_coins（铁律 ③）
 
-test("铁律③runtime：非终结任务的栏位集精确等于 openapi 必填 13 栏（多余栏位=契约漂移）", () => {
+test("铁律③runtime：非终结任务的栏位集精确等于必填 13 栏 + metadata/cancellation_requested（多余栏位=契约漂移）", () => {
+  // 生产（task-response.ts）对非终结任务无条件带 metadata（画布工作流可公开 metadata）与
+  // cancellation_requested（取消意图可观测）；这两栏是 13 必填之外的固定栏位集，仍须精确相等。
+  const NON_TERMINAL_FIELDS = [...TASK_REQUIRED_FIELDS, "metadata", "cancellation_requested"];
   for (const status of ["queued", "running", "unknown"] as const) {
     const response = generationTaskResponse(jobFixture(status));
     assert.deepEqual(
       Object.keys(response).sort(),
-      [...TASK_REQUIRED_FIELDS].sort(),
-      `${status} 任务栏位集必须恰为必填 13 栏`,
+      [...NON_TERMINAL_FIELDS].sort(),
+      `${status} 任务栏位集必须恰为必填 13 栏 + metadata/cancellation_requested`,
     );
     assert.equal("result_url" in response, false, `${status} 不得带 result_url`);
     assert.equal("data" in response, false, `${status} 不得带 data`);
@@ -612,13 +623,13 @@ test("铁律⑤runtime：submit_unknown / billing_unknown 对外是 unknown—�
   }
   // 内部租约/计费态不得泄漏为对外状态。
   assert.equal(taskStatus(jobFixture("pending_billing")), "queued");
-  assert.equal(taskStatus(jobFixture("leased")), "running");
+  assert.equal(taskStatus(jobFixture("leased")), "queued");
   assert.equal(taskStatus(jobFixture("refunded")), "refunded");
   assert.equal(taskStatus(jobFixture("cancelled")), "cancelled");
 });
 
 test("铁律⑤source：unknown 在 openapi TaskStatus 枚举与批量计数中都是正式成员", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   assert.match(
     openapi,
     /TaskStatus:\s*\{\s*type:\s*"string",\s*enum:\s*\[\s*"queued",\s*"running",\s*"succeeded",\s*"failed",\s*"cancelled",\s*"refunded",\s*"unknown"/,
@@ -651,7 +662,7 @@ test("铁律④source：余额不足必须 402 insufficient_balance（type 与 c
   assert.match(
     gate,
     /message:\s*"余额不足，本次未扣费。充值：https:\/\/eimu\.dev\/pricing"/,
-    "402 文案必须逐字（项目负责人 2026-09-28 裁决）",
+    "402 文案必须逐字（暴君 2026-09-28 裁决）",
   );
 
   // 路由接线：预留先于生成；legacy 余额不足出口引用同一份常数，不得另写文案。
@@ -667,7 +678,15 @@ test("铁律④source：未出图张数全退，退款在 after() 不阻塞响�
 });
 
 test("铁律④source：控制面退费对称——退 billingAmount 减已 commit 差额，全退才标 refunded", () => {
-  const source = code("src/lib/generation-core/billing-ledger.ts");
+  // <1000 行重构：billing-ledger.ts 降为 barrel，退费写入在 write.ts。
+  const source = [
+    "src/lib/generation-core/billing-ledger.ts",
+    ...["query", "schema", "types", "write"].map(
+      (m) => `src/lib/generation-core/billing-ledger/${m}.ts`,
+    ),
+  ]
+    .map(code)
+    .join("\n");
   assert.match(source, /Math\.max\(0,\s*job\.billingAmount\s*-\s*committed\)/, "退费 = billingAmount - committed");
   assert.match(
     source,
@@ -677,7 +696,7 @@ test("铁律④source：控制面退费对称——退 billingAmount 减已 comm
 });
 
 test("铁律④source：批量 quota 帐面四栏必填，billed 只有 succeeded 为 true", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const block = openapi.slice(openapi.indexOf("BatchBillingSummary:"), openapi.indexOf("BatchItemView:"));
   for (const field of ["reserved_total", "charged_total", "refunded_total", "pending_total"]) {
     assert.ok(block.includes(field), `批量 billing 摘要缺少 ${field}`);
@@ -752,7 +771,7 @@ test("结果端点：image_generation.result / video_generation.result 形状与
 });
 
 test("openapi GenerationTask 必填栏与实现一致（栏位集漂移当场爆红）", () => {
-  const openapi = read(OPENAPI);
+  const openapi = OPENAPI_SOURCE;
   const taskBlock = openapi.slice(openapi.indexOf("GenerationTask:"), openapi.indexOf("ImageResult:"));
   for (const field of TASK_REQUIRED_FIELDS) {
     assert.ok(taskBlock.includes(`"${field}"`), `openapi GenerationTask 必填栏缺少 ${field}`);

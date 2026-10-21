@@ -20,7 +20,14 @@ const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 const imageCardSrc = read("src/components/agent-chat/AgentImageCard.tsx");
 const videoCardSrc = read("src/components/agent-chat/AgentVideoCard.tsx");
 const audioCardSrc = read("src/components/agent-chat/AgentAudioCard.tsx");
-const surfaceSrc = read("src/components/agent-chat/AgentChatSurface.tsx");
+// <1000 行重构：Surface 的动作/纯 helper 已拆出同目录子模组。
+const surfaceSrc = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => read(`src/components/agent-chat/${f}`))
+  .join("\n");
 const panelSrc = read("src/components/agent-chat/AgentChatPanel.tsx");
 const transcriptSrc = read("src/components/agent-chat/AgentTranscript.tsx");
 
@@ -138,7 +145,7 @@ test("音频卡：「再来 N 组」选单、「微调」独立钮；回调缺�
 });
 
 /**
- * 2026-10-03 五钮契约整改（项目负责人逐钮点名）：
+ * 2026-10-03 五钮契约整改（暴君逐钮点名）：
  * 存图库要有显式回应、改图＝加附件不送 prompt、放大＝全屏查看、下载＝真下载、分享＝复制连结。
  */
 test("图卡：放大改走卡片内全屏查看器，onUpscale 语义已撤除", () => {
@@ -199,7 +206,7 @@ test("三张卡：存图库三态（存图库／已存／未存入）＋下载�
 test("下载：surface 走同源 /api/media-download，不再 window.open 附件连结", () => {
   assert.match(surfaceSrc, /\/api\/media-download\?url=\$\{encodeURIComponent\(url\)\}/);
   assert.match(surfaceSrc, /async function triggerDownload\(url: string, filename: string\): Promise<boolean>/);
-  // 项目负责人点名的病征：失败 fallback 开附件连结——必须绝迹。
+  // 暴君点名的病征：失败 fallback 开附件连结——必须绝迹。
   assert.doesNotMatch(surfaceSrc, /window\.open\(/);
   // 三种媒体共用同一条 triggerDownload。
   assert.match(surfaceSrc, /triggerDownload\(item\.url, `agent-\$\{Date\.now\(\)\}\.png`\)/);
@@ -209,9 +216,9 @@ test("下载：surface 走同源 /api/media-download，不再 window.open 附件
 
 test("存图库：surface 契约回 boolean，去重命中与成功都回 true", () => {
   assert.match(surfaceSrc, /const onSaveToLibrary = useCallback\(async \(item: AgentChatLibraryItem\): Promise<boolean>/);
-  assert.match(surfaceSrc, /if \(savedIds\.has\(item\.id\)\) return true;/);
+  assert.match(surfaceSrc, /if \(P\.savedIds\.has\(item\.id\)\) return true;/);
   // 去重命中。
-  assert.match(surfaceSrc, /setSavedIds\(\(prev\) => new Set\(\[\.\.\.prev, item\.id\]\)\);\s*return true;/);
+  assert.match(surfaceSrc, /P\.setSavedIds\(\(prev\) => new Set\(\[\.\.\.prev, item\.id\]\)\);\s*return true;/);
   // HTTP 失败回 false（不再静默吞掉）。
   assert.match(surfaceSrc, /if \(!res\.ok\) return false;/);
 });

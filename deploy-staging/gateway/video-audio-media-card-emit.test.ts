@@ -87,12 +87,12 @@ test("video_result_fetch 形状 {jobs:[{video_url,cost_coins}]} → 恰好 1 条
     ok: true,
     title: "取作业结果",
     jobs: [
-      { task_id: "j1", status: "succeeded", video_url: "https://store.eimu.dev/x/a.mp4", cost_coins: 13 },
+      { task_id: "j1", status: "succeeded", video_url: "https://store.tinchak0207.xyz/x/a.mp4", cost_coins: 13 },
     ],
   })
   const v = frames(captured, "video.done")
   expect(v.length).toBe(1)
-  expect(v[0]!.url).toBe("https://store.eimu.dev/x/a.mp4")
+  expect(v[0]!.url).toBe("https://store.tinchak0207.xyz/x/a.mp4")
   expect(v[0]!.cost_coins).toBe(13)
   expect(frames(captured, "audio.done").length).toBe(0)
 })
@@ -103,11 +103,11 @@ test("last_frame_video_chain 形状 {shots:[{mp4_url}]} → 恰好 1 条 video.d
   await driveCompleted(s, "last_frame_video_chain", {
     ok: true,
     title: "逐镜链",
-    shots: [{ index: 0, job_id: "s2", status: "succeeded", mp4_url: "https://store.eimu.dev/x/b.mp4" }],
+    shots: [{ index: 0, job_id: "s2", status: "succeeded", mp4_url: "https://store.tinchak0207.xyz/x/b.mp4" }],
   })
   const v = frames(captured, "video.done")
   expect(v.length).toBe(1)
-  expect(v[0]!.url).toBe("https://store.eimu.dev/x/b.mp4")
+  expect(v[0]!.url).toBe("https://store.tinchak0207.xyz/x/b.mp4")
 })
 
 test("未完成作业 {jobs:[{status:queued}]} → 0 条 media 帧（negative，防伪阳性）", async () => {
@@ -121,10 +121,10 @@ test("未完成作业 {jobs:[{status:queued}]} → 0 条 media 帧（negative，
 test("回归：audios:[{url:.m4a}] 仍恰好 1 条 audio.done（旧行为不可退化）", async () => {
   const captured: string[] = []
   const s = register("sess-g2-audios", captured)
-  await driveCompleted(s, "music_gen", { ok: true, audios: [{ url: "https://store.eimu.dev/x/c.m4a" }] })
+  await driveCompleted(s, "music_gen", { ok: true, audios: [{ url: "https://store.tinchak0207.xyz/x/c.m4a" }] })
   const a = frames(captured, "audio.done")
   expect(a.length).toBe(1)
-  expect(a[0]!.url).toBe("https://store.eimu.dev/x/c.m4a")
+  expect(a[0]!.url).toBe("https://store.tinchak0207.xyz/x/c.m4a")
   expect(frames(captured, "video.done").length).toBe(0)
 })
 
@@ -138,14 +138,14 @@ test("handleInternalEmit(video.done) → 200 且 session SSE 恰收到该帧（�
     body: JSON.stringify({
       session_id: s.sessionId,
       event: "video.done",
-      data: { url: "https://store.eimu.dev/x/d.mp4", cost_coins: 130, task_id: "j4", media_kind: "video" },
+      data: { url: "https://store.tinchak0207.xyz/x/d.mp4", cost_coins: 130, task_id: "j4", media_kind: "video" },
     }),
   })
   const res = await handleInternalEmit(req)
   expect(res.status).toBe(200)
   const v = frames(captured, "video.done")
   expect(v.length).toBe(1)
-  expect(v[0]!.url).toBe("https://store.eimu.dev/x/d.mp4")
+  expect(v[0]!.url).toBe("https://store.tinchak0207.xyz/x/d.mp4")
   expect(v[0]!.cost_coins).toBe(130)
   expect(v[0]!.task_id).toBe("j4")
   expect(v[0]!.media_kind).toBe("video")
@@ -163,14 +163,14 @@ test("handleInternalEmit(audio.done) → 200 且 session SSE 恰收到该帧（�
     body: JSON.stringify({
       session_id: s.sessionId,
       event: "audio.done",
-      data: { url: "https://store.eimu.dev/x/e.m4a", cost_coins: 7, task_id: "j5", media_kind: "audio" },
+      data: { url: "https://store.tinchak0207.xyz/x/e.m4a", cost_coins: 7, task_id: "j5", media_kind: "audio" },
     }),
   })
   const res = await handleInternalEmit(req)
   expect(res.status).toBe(200)
   const a = frames(captured, "audio.done")
   expect(a.length).toBe(1)
-  expect(a[0]!.url).toBe("https://store.eimu.dev/x/e.m4a")
+  expect(a[0]!.url).toBe("https://store.tinchak0207.xyz/x/e.m4a")
   expect(a[0]!.cost_coins).toBe(7)
   expect(a[0]!.task_id).toBe("j5")
   expect(a[0]!.media_kind).toBe("audio")

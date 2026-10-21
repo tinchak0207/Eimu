@@ -24,6 +24,7 @@ import {
   videoPostProductionGeneratedSeconds,
 } from "@/lib/generation-core/video-post-production";
 import { EditInputError, parseReferenceImageSpecs, resolveEditReference } from "@/lib/biz-image-references";
+import { directVideoPrompt } from "@/lib/invisible-prompt-director";
 import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
@@ -106,6 +107,11 @@ interface VideoRequestBody {
   prompt?: unknown;
   n?: unknown;
   size?: unknown;
+  /**
+   * 输出分辨率档位（"720p"/"1080p"/"2k"/"4k" 等）。非法值由 catalog 归一化回默认
+   * （与 duration/size 同一策略，不硬拒）；档位语义以 model catalog 为准。
+   */
+  resolution?: unknown;
   duration_seconds?: unknown;
   generate_audio?: unknown;
   /** 有序参考图；上游图片参考不代表硬锁首尾帧。 */
@@ -251,6 +257,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 每一条普通影片生成都必须带物理动作合同：用户写「slow camera push in」这类纯运镜
+  // 提示词时，模型会把推镜当成整条片子的内容。生成式后期（局部改片）的 prompt 是改动
+  // 指令，不套创作合同。directVideoPrompt 幂等，Vercel 代理到控制面后二次执行不会重复追加。
+  const directedPrompt = postProduction
+    ? prompt
+    : directVideoPrompt(prompt, {
+        modelId,
+        durationSeconds: body.duration_seconds === undefined ? undefined : Number(body.duration_seconds),
+        generateAudio: optionalBoolean(body.generate_audio),
+      });
+  if (!postProduction) body.prompt = directedPrompt;
+
   const rawN = body.n === undefined ? 1 : Number(body.n);
   if (!Number.isInteger(rawN) || rawN < 1 || rawN > MAX_N) {
     return errorResponse(400, `n 需为 1 到 ${MAX_N} 之间的整数。`, "invalid_request_error", "invalid_n", traceId);
@@ -284,7 +302,9 @@ export async function POST(req: NextRequest) {
   if (!generationControlPlaneEnabled()) {
     const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/$/, "");
     if (origin) {
-      const upstream = await fetch(`${origin}/api/v1/videos/generations`, {
+      // 控制面在 /image-control basePath 下挂载；裸 /api/v1 在控制面 origin 上回 404
+      // （2026-10-20 实测：/api/v1/...=404、/image-control/api/v1/...=401）。
+      const upstream = await fetch(`${origin}/image-control/api/v1/videos/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -315,11 +335,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 时长 / 音讯 / 宽高比 都交给 catalog 归一化：非法值回默认，合法值透传。
+  // 分辨率 / 时长 / 音讯 / 宽高比 都交给 catalog 归一化：非法值回默认，合法值透传。
   // 生成式后期：本次生成的秒数由续长／区段长决定（已在契约校验时确认落在 catalog 档位），
   // 直接以它做归一化输入——扣费、成本闸、上游拿到的秒数同源。
   const generatedSeconds = postProduction ? videoPostProductionGeneratedSeconds(postProduction) : undefined;
   const normalized = normalizeGenerationConfig(modelId, {
+    outputResolution: typeof body.resolution === "string" ? body.resolution.trim() : undefined,
     aspectRatio: aspectRatioFromVideoSize(typeof body.size === "string" ? body.size : undefined),
     durationSeconds: generatedSeconds
       ?? (body.duration_seconds === undefined ? undefined : Number(body.duration_seconds)),
@@ -369,7 +390,7 @@ export async function POST(req: NextRequest) {
       idempotencyKey: req.headers.get("idempotency-key"),
       kind: "video_generate",
       modelId,
-      prompt,
+      prompt: directedPrompt,
       ratio: normalized.config.aspectRatio,
       resolution: normalized.config.outputResolution,
       quality: normalized.config.qualityMode,

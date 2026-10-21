@@ -2,7 +2,7 @@
 //
 // agent-debug —— eimu.dev 生产 Agent 的调试服务。
 //
-// 目的：不开浏览器，直接对生产 agent 网关（store.eimu.dev）跑一轮真实对话，
+// 目的：不开浏览器，直接对生产 agent 网关（store.tinchak0207.xyz）跑一轮真实对话，
 // 完整录下 SSE 事件流，再用「生产前端同一份 reducer」（src/lib/agent-chat-reducer.ts
 // + agent-chat-types.ts）把事件还原成用户看到的 transcript —— 精细到足以反推出
 // 用户所见的体验：思维链（reasoning.delta）、助手文字、工具卡、问题卡、确认卡、
@@ -50,7 +50,7 @@ import { templateToCanvasLayout } from "../src/components/canvas-workstation/age
 
 // ─────────────────────────── 常数与参数
 
-const DEFAULT_BASE = "https://store.eimu.dev";
+const DEFAULT_BASE = "https://store.tinchak0207.xyz";
 const TURN_TIMEOUT_MS = 900_000; // 一轮上限 15 分钟（复杂工作流：模型探测规格+建 10+ 节点可达 5-8 分钟，300s 会掐断健康轮次——run3 实录 303s 被切）
 const SSE_CONNECT_TIMEOUT_MS = 15_000;
 

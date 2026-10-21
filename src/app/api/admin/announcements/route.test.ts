@@ -24,7 +24,7 @@ const requireFn = createRequire(import.meta.url);
 const nextHeaders = requireFn("next/headers") as { cookies: unknown };
 
 process.env.ADMIN_SESSION_SECRET = "admin-announcements-test-secret";
-process.env.ADMIN_USERNAME = "eimu";
+process.env.ADMIN_USERNAME = "tinchak0207";
 delete process.env.BLOB_READ_WRITE_TOKEN;
 delete process.env.IMAGE_DATA_BASE_URL;
 delete process.env.IMAGE_DATA_API_KEY;
@@ -46,7 +46,7 @@ function installCookieMock() {
 }
 
 function mintToken(): string {
-  return createAdminSessionToken("eimu", process.env.ADMIN_SESSION_SECRET as string);
+  return createAdminSessionToken("tinchak0207", process.env.ADMIN_SESSION_SECRET as string);
 }
 
 function jsonRequest(method: string, payload?: unknown): NextRequest {

@@ -180,9 +180,16 @@ test("正常路径：A 用 DSL 写入自己的画布，专案真的出现编译�
   };
   const res = await workflowPOST(req("/api/v1/canvas/workflow", { headers: AUTH_A, body: { projectId: "proj-a2", source, label: "起两条" } }));
   assert.equal(res.status, 200, await res.clone().text());
-  const payload = (await res.json()) as { success: boolean; applied: number; created_node_ids: string[] };
+  const payload = (await res.json()) as {
+    success: boolean;
+    applied: number;
+    created_node_ids: string[];
+    summary: { added: number; updated: number; connected: number };
+  };
   assert.equal(payload.success, true);
-  assert.ok(payload.applied >= 3, `applied=${payload.applied}`);
+  // applied 只计节点 op（add_node/update_node）；连线数看 summary.connected（5f65b417 口径）。
+  assert.equal(payload.applied, 2, `applied=${payload.applied}`);
+  assert.equal(payload.summary.connected, 1, `connected=${payload.summary.connected}`);
 
   const stored = await readCanvasProject(USER_A, "proj-a2");
   const ids = (stored?.nodes ?? []).map((n) => n.id);

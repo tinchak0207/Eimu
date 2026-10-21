@@ -1,13 +1,13 @@
 // workflow-dsl/compile.ts — DSL → 既有 8-op CanvasAgentOp 的纯函式编译器。
 //
-// 角色（项目负责人裁定 2026-09-02）：画布图为唯一运行时真相；AI 的笔 = 紧凑宣告式 DSL
+// 角色（暴君裁定 2026-09-02）：画布图为唯一运行时真相；AI 的笔 = 紧凑宣告式 DSL
 // （schema.ts 的 WorkflowDslSource），本档把 DSL 编译成 src/lib/canvas/types.ts
 // L239-247 的 CanvasAgentOp（契约真源），交由前端 canvas-reducer-adapter 执行。
 //
 // 语义要点：
 //   1. 校验顺序：schema（schema.ts）→ id 唯一 → needs 引用存在 → Kahn 拓扑（环列成员）
 //      → tool ∈ HARNESS_TOOL_IDS。任何 error → ok:false、ops 空；message 一律简体中文
-//      且自带修复提示（教学式报错，2026-09-02 项目负责人追加）。
+//      且自带修复提示（教学式报错，2026-09-02 暴君追加）。
 //   2. 节点 id 确定性：wf- + 两轮不同 seed 的 FNV-1a 32 位杂凑拼 16 hex——同输入永远同 id，
 //      幂等重套用根绝二次建号竞态（记忆 2026-08-31-workflow-start-idempotent-p0）。
 //   3. 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition

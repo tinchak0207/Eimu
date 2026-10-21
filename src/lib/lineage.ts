@@ -1,6 +1,6 @@
 // 资产血统（REQ-D1）：纯资料层——序列化形态、清洗收口、链条构建与两态判定。
 //
-// 裁决边界（2026-09-22 项目负责人四刀，见 PRD REQ-D1）：
+// 裁决边界（2026-09-22 暴君四刀，见 PRD REQ-D1）：
 //   * 血统只给人看：宿主是历史记录（HistoryEntry）与资产卡（CharacterCard）本体，
 //     严禁补进 compactMetadataForAgent（agent 不读血统是裁决），也不进 canvas 节点 metadata。
 //   * 栏位族复用现成资产/历史表示：`lineage: Array<{kind, assetId?, jobId?, nodeId?, at}>`，
@@ -37,7 +37,7 @@ export interface LineageLink {
   at: string;
 }
 
-/** parents 上限（项目负责人裁决定数）：超过截尾并显式标注截断。 */
+/** parents 上限（暴君裁决定数）：超过截尾并显式标注截断。 */
 export const MAX_LINEAGE_PARENTS = 5;
 
 /** 宿主本体上承载血统的栏位族（HistoryEntry 与 CharacterCard 共用同形）。 */
@@ -284,7 +284,7 @@ export interface LineageTreeNode {
   children: LineageTreeNode[];
 }
 
-/** 默认展开层数（项目负责人裁决：3 层＋「继续向上」）。 */
+/** 默认展开层数（暴君裁决：3 层＋「继续向上」）。 */
 export const LINEAGE_DEFAULT_DEPTH = 3;
 /** 「继续向上」每次追加的层数。 */
 export const LINEAGE_DEPTH_STEP = 3;

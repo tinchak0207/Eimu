@@ -6,7 +6,7 @@
 // hoshino-v2。两套名字之间没有任何映射层，于是：
 //   - 目录与 /v1/models 对外报 A 组名字
 //   - bridge 收到 A 组名字回 400 "Unknown model"
-//   - 更糟的是 capability 挂在 sub2api(disabled) 与 fallback(fallback 渠道，
+//   - 更糟的是 capability 挂在 sub2api(disabled) 与 fallback(share-api.com，
 //     根本不认 pixai) 上，调度器找不到合格 supplier → 一律 overloaded
 //
 // 这个档案是唯一收口：seed 写 supplier_model_id、路由做入站别名归一，
@@ -67,7 +67,7 @@ export const PIXAI_GENERATE_MODEL_IDS: readonly string[] = Object.keys(
  *
  * pixai-template 漏在这里的后果是实测过的：它在 catalog 里、却不在 pixai 的
  * 认领白名单里，于是 seed 把它判成「通用模型」，capability 落到 fallback
- * （fallback 渠道，不认 pixai）与 sub2api（线上 disabled）名下。
+ * （share-api.com，不认 pixai）与 sub2api（线上 disabled）名下。
  */
 export const PIXAI_SERVICE_MODEL_IDS: readonly string[] = [
   PIXAI_EDIT_MODEL_ID,

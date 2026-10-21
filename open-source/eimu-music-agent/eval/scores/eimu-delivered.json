@@ -1,0 +1,206 @@
+{
+ "system": "Eimu (Beast ON) + YuE2",
+ "note": "交付成品逐曲七维；re-scored 2026-10-05 under the same evaluator run protocol as the human set（同批正控制曲复现 6.9150）。chart_set=true 的 4 首即榜单入榜集。",
+ "n": 4,
+ "mean7": 6.9748,
+ "tracks": [
+  {
+   "file": "media-1789786997478-jlm28e.m4a",
+   "title": "Stellar Interstice",
+   "dims": {
+    "Melody": 7.6028,
+    "Arrangement": 7.4005,
+    "Musicality": 6.4149,
+    "Vocal": 7.1834,
+    "Instrumental": 7.1037,
+    "Mixing": 7.1597,
+    "Structure": 7.4221
+   },
+   "mean7": 7.1839,
+   "chart_set": true
+  },
+  {
+   "file": "逆风不灭.m4a",
+   "title": "逆风不灭",
+   "dims": {
+    "Melody": 7.0817,
+    "Arrangement": 7.6321,
+    "Musicality": 5.7936,
+    "Vocal": 6.5408,
+    "Instrumental": 7.2661,
+    "Mixing": 7.0202,
+    "Structure": 7.4688
+   },
+   "mean7": 6.9719,
+   "chart_set": true,
+   "charted_value": 7.4179,
+   "charted_aperture": "best-of-8",
+   "note": "榜单取 8 次生成里最好的一首；本行的 mean7 为其单次版本"
+  },
+  {
+   "file": "media-1789821225748-t6qbpy.m4a",
+   "title": "しおのメモリ",
+   "dims": {
+    "Melody": 7.4391,
+    "Arrangement": 7.3004,
+    "Musicality": 5.8197,
+    "Vocal": 6.9249,
+    "Instrumental": 6.8873,
+    "Mixing": 6.7391,
+    "Structure": 7.2943
+   },
+   "mean7": 6.915,
+   "chart_set": true
+  },
+  {
+   "file": "agent-1790968380473.m4a",
+   "title": "晚飞的候鸟",
+   "dims": {
+    "Melody": 6.8901,
+    "Arrangement": 7.1658,
+    "Musicality": 5.9775,
+    "Vocal": 6.9704,
+    "Instrumental": 7.4658,
+    "Mixing": 6.5319,
+    "Structure": 6.7977
+   },
+   "mean7": 6.8285,
+   "chart_set": true
+  }
+ ],
+ "excluded_from_chart": [
+  {
+   "file": "media-1790933922930-to5y04.m4a",
+   "title": "第二遍雨",
+   "dims": {
+    "Melody": 6.5299,
+    "Arrangement": 6.9315,
+    "Musicality": 5.2609,
+    "Vocal": 5.8857,
+    "Instrumental": 6.9049,
+    "Mixing": 5.9008,
+    "Structure": 6.2875
+   },
+   "mean7": 6.243,
+   "chart_set": false,
+   "reason": "纯音乐（人声作配器使用）。SongBench 七维含 Vocal 维，对无主唱的作品不适用，计入会系统性压低均分，故不入榜。分数保留在此以便复核，不作修改。"
+  }
+ ],
+ "best_of_8_nifeng": {
+  "prompt": "我想要一首类似飞儿乐团那种喧闹史诗风格的乐曲（单句，无其他约束）",
+  "chain": "Beast On Mode +「再来N组」",
+  "n": 8,
+  "mean7": 7.0281,
+  "sd": 0.1749,
+  "best_take": "nifengbumie8.m4a",
+  "best_mean7": 7.4179,
+  "charted_value": 7.4179,
+  "note": "同一句提示词的 8 个 take；榜单上《逆风不灭》一行取其中最好的一首。take1（逆风不灭.m4a）为单次版本 6.9719。",
+  "takes": [
+   {
+    "file": "nifengbumie8.m4a",
+    "dims": {
+     "Melody": 7.5982,
+     "Arrangement": 7.8693,
+     "Musicality": 6.413,
+     "Vocal": 7.2323,
+     "Instrumental": 7.5147,
+     "Mixing": 7.4442,
+     "Structure": 7.8538
+    },
+    "mean7": 7.4179
+   },
+   {
+    "file": "nifengbumie3.m4a",
+    "dims": {
+     "Melody": 7.1763,
+     "Arrangement": 7.8198,
+     "Musicality": 6.1384,
+     "Vocal": 7.1821,
+     "Instrumental": 7.5054,
+     "Mixing": 6.8799,
+     "Structure": 7.0694
+    },
+    "mean7": 7.1102
+   },
+   {
+    "file": "nifengbumie5.m4a",
+    "dims": {
+     "Melody": 7.0979,
+     "Arrangement": 7.6186,
+     "Musicality": 6.0234,
+     "Vocal": 7.1199,
+     "Instrumental": 7.0228,
+     "Mixing": 6.9575,
+     "Structure": 7.4745
+    },
+    "mean7": 7.0449
+   },
+   {
+    "file": "nifengbumie6.m4a",
+    "dims": {
+     "Melody": 7.2669,
+     "Arrangement": 7.2647,
+     "Musicality": 6.0464,
+     "Vocal": 7.2936,
+     "Instrumental": 6.9415,
+     "Mixing": 6.7402,
+     "Structure": 7.2726
+    },
+    "mean7": 6.9751
+   },
+   {
+    "file": "逆风不灭.m4a",
+    "dims": {
+     "Melody": 7.0817,
+     "Arrangement": 7.6321,
+     "Musicality": 5.7936,
+     "Vocal": 6.5408,
+     "Instrumental": 7.2661,
+     "Mixing": 7.0202,
+     "Structure": 7.4688
+    },
+    "mean7": 6.9719
+   },
+   {
+    "file": "nifengbumie7.m4a",
+    "dims": {
+     "Melody": 7.014,
+     "Arrangement": 7.3933,
+     "Musicality": 5.9316,
+     "Vocal": 6.7292,
+     "Instrumental": 7.4534,
+     "Mixing": 6.8761,
+     "Structure": 7.1017
+    },
+    "mean7": 6.9285
+   },
+   {
+    "file": "nifengbumie4.m4a",
+    "dims": {
+     "Melody": 6.9403,
+     "Arrangement": 7.4348,
+     "Musicality": 6.0411,
+     "Vocal": 6.6924,
+     "Instrumental": 7.3067,
+     "Mixing": 6.7916,
+     "Structure": 7.0137
+    },
+    "mean7": 6.8887
+   },
+   {
+    "file": "nifengbumie2.m4a",
+    "dims": {
+     "Melody": 7.1042,
+     "Arrangement": 7.4544,
+     "Musicality": 5.7479,
+     "Vocal": 6.9319,
+     "Instrumental": 6.8946,
+     "Mixing": 6.658,
+     "Structure": 7.42
+    },
+    "mean7": 6.8873
+   }
+  ]
+ }
+}

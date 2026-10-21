@@ -1,6 +1,6 @@
 // 助理消息的 Markdown 解析层（纯函数，可测）。
 //
-// 罪状 3（项目负责人逐条评测）：模型输出的 Markdown 表格/粗体/列表/代码块此前按
+// 罪状 3（暴君人肉评测）：模型输出的 Markdown 表格/粗体/列表/代码块此前按
 // 纯文本原样糊在气泡里。这里用 marked 的 lexer（v18，仓库唯一 markdown 依赖）
 // 把文本解析成结构化 token 树，交给 AgentMarkdown 组件渲染成 React 元素——
 // 不走 marked 的 HTML 字符串输出 + dangerouslySetInnerHTML：模型/用户输入
@@ -45,20 +45,20 @@ export type MdBlock =
  *     image/*、video/*、audio/*（实测有 .png、.m4a、.wav、.flac）。
  *   - `image-data/files/agent-batch3/`：实测同目录有 .png（amx-landscape_169-*）
  *     与 .wav（video-evidence-*），且此目录由 agent 临时写入、无稳定命名契约。
- *   - `image.eimu.dev/v1/images/<id>/result`：预设回 JSON、且须 bearer 金钥
+ *   - `image.tinchak0207.xyz/v1/images/<id>/result`：预设回 JSON、且须 bearer 金钥
  *     （app/api/v1/images/[id]/result/route.ts:29-45），<img> 送不出 Authorization。
  */
 // 参考图目录：三个写入点落盘前全过 validateImageBuffer，只存图片
 // （biz-image-references.ts:90、app/api/generation-jobs/route.ts:147、
 //  generation-core/artifact-service.ts:482）。
 const PLATFORM_IMAGE_URL =
-  /^https?:\/\/store\.eimu\.xyz\/image-data\/files\/generation\/references\/[A-Za-z0-9._-]+$/i;
+  /^https?:\/\/store\.tinchak0207\.xyz\/image-data\/files\/generation\/references\/[A-Za-z0-9._-]+$/i;
 // 音乐生成器交付目录：music-tools.ts 上传，mime→ext 全为 audio/*（agent-output-cards.ts:225）。
 const PLATFORM_AUDIO_MUSIC_URL =
-  /^https?:\/\/store\.eimu\.xyz\/image-data\/files\/uploads\/music-gen-[A-Za-z0-9._-]+$/i;
+  /^https?:\/\/store\.tinchak0207\.xyz\/image-data\/files\/uploads\/music-gen-[A-Za-z0-9._-]+$/i;
 // 网关 TTS 公网面：constants-gateway.ts:193 TTS_PUBLIC_BASE，路径即音频。
 const PLATFORM_AUDIO_TTS_URL =
-  /^https?:\/\/store\.eimu\.xyz\/agent\/v1\/audio\/[A-Za-z0-9._-]+$/i;
+  /^https?:\/\/store\.tinchak0207\.xyz\/agent\/v1\/audio\/[A-Za-z0-9._-]+$/i;
 
 /**
  * 判断一个 URL 是否指向图片：平台生成的图（pixai / Vercel Blob / 任意直链）

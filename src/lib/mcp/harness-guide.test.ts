@@ -12,7 +12,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { QUALITY_POLICIES } from "@/lib/media-quality-gate";
 import {
@@ -25,8 +25,9 @@ import {
   HARNESS_RESOURCES,
 } from "./harness-guide";
 
-// tools.ts 是工具名的单一真源；与 src/app/mcp/page.test.ts 用同一套正则手法。
-const TOOLS_TS_PATH = join(process.cwd(), "src/lib/mcp/tools.ts");
+// <1000 行重构：tools.ts 降为 barrel，工具定义实体在 tools/tools-definitions.ts。
+// 工具名单一真源随之移动；与 src/app/mcp/page.test.ts 用同一套正则手法。
+const TOOLS_TS_PATH = join(process.cwd(), "src/lib/mcp/tools/tools-definitions.ts");
 const CONTRACTS_JSON_PATH = join(
   process.cwd(),
   "deploy-staging/expert-gateway/expert-delivery-contracts.json",
@@ -51,9 +52,9 @@ const BANNED = [
   "happycoding",
   "hublinuxdo",
   // 内部主机与内部路径
-  "store.eimu.dev",
-  "image.eimu.dev",
-  "/opt/eimu-harness",
+  "store.tinchak0207.xyz",
+  "image.tinchak0207.xyz",
+  "/opt/agent-harness",
   "/internal/",
   "opencode",
   // 内部工具 id（MCP 面不存在）
@@ -126,14 +127,29 @@ test("脱敏：指南/资源/prompt 输出不含供应商名、内部主机路�
   }
 });
 
-test("契约完整性：八个域与 expert-delivery-contracts.json 逐域逐栏位一致", () => {
-  const single = JSON.parse(readFileSync(CONTRACTS_JSON_PATH, "utf8")) as Record<
-    string,
-    { requiredFields: string[]; qcSignatureRequired: boolean }
-  >;
-  const ours = JSON.parse(HARNESS_DELIVERY_CONTRACTS) as typeof single;
+test("契约完整性：九个域与 expert-delivery-contracts.json 逐域逐栏位一致", (t) => {
+  type Contracts = Record<string, { requiredFields: string[]; qcSignatureRequired: boolean }>;
+  const ours = JSON.parse(HARNESS_DELIVERY_CONTRACTS) as Contracts;
 
-  assert.equal(Object.keys(ours).length, 8, "契约必须是 8 个域");
+  // 自含形状断言先跑：不依赖原档（干净 checkout 也必须验到）。
+  assert.equal(Object.keys(ours).length, 9, "契约必须是 9 个域");
+  for (const domain of Object.keys(ours)) {
+    assert.ok(Array.isArray(ours[domain].requiredFields), `${domain}.requiredFields 必须是数组`);
+    assert.ok(ours[domain].requiredFields.length > 0, `${domain}.requiredFields 不得为空`);
+    assert.equal(typeof ours[domain].qcSignatureRequired, "boolean", `${domain}.qcSignatureRequired 必须是布林`);
+  }
+
+  // deploy-staging/ 被 .gitignore 排除（只在本机存在）：干净 checkout 没有原档，
+  // 逐域对账无从执行 → 明确 skip（同 expert-delivery-contracts.test.ts 的先例），
+  // 不把「缺档」伪装成通过，也不误红。
+  if (!existsSync(CONTRACTS_JSON_PATH)) {
+    t.skip(
+      "deploy-staging/ 为本机专属目录（未进 git），原档缺席时跳过逐域逐栏位对账；9 域/栏位形状与指南自身一致性断言已执行",
+    );
+    return;
+  }
+
+  const single = JSON.parse(readFileSync(CONTRACTS_JSON_PATH, "utf8")) as Contracts;
   assert.deepEqual(
     Object.keys(ours).sort(),
     Object.keys(single).sort(),

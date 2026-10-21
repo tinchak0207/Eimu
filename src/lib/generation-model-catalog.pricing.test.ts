@@ -195,7 +195,7 @@ test("subscribers are notified on apply and the revision bumps; unsubscribe stop
 });
 
 test("GPT Image 2.5 Flare/Sunburst price at three times GPT Image 2 per resolution", () => {
-  // 项目负责人裁定（2026-09-09）：2.5 两档 = gpt-image-2 × 3（10/20/80 -> 30/60/240 credit）
+  // 暴君裁定（2026-09-09）：2.5 两档 = gpt-image-2 × 3（10/20/80 -> 30/60/240 credit）
   for (const modelId of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
     assert.equal(generationCredits(modelId, { resolution: "1k" }), 30);
     assert.equal(generationCredits(modelId, { resolution: "2k" }), 60);

@@ -16,7 +16,7 @@ const FULL_SCENE_CARD = {
   duration_ms: 6000,
 };
 
-const CAPS_WITH_VIDEO = { videoGeneration: { provider: "image_eimu" } };
+const CAPS_WITH_VIDEO = { videoGeneration: { provider: "image_tinchak" } };
 
 test("fuseSceneVideo returns null when either side is missing (zero behavior change)", () => {
   assert.equal(fuseSceneVideo(FULL_SCENE_CARD, undefined), null);

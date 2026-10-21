@@ -1,6 +1,6 @@
 // 画布工作流引擎核心（Workflow Engine）
 //
-// 项目负责人策略 v2：Deepseek 填内容（prompt/model/参数），引擎展开节点流并执行。
+// 暴君策略 v2：Deepseek 填内容（prompt/model/参数），引擎展开节点流并执行。
 // 本档案 = 纯函式核心（展开模板、依赖排序、节点流状态机），不碰 Bun/gateway，
 // 可单测。执行层（呼叫平台 API / emit canvas.* 事件）在 gateway 内对接。
 //
@@ -86,7 +86,7 @@ function sanitizeStepId(raw: string): string {
  * 以模板 shot1 链（shot1 / shot1_gen / shot1_video）为原型克隆 shotN 链：
  *   shotN → shotN_gen → shotN_video → final_cut 全连，
  *   char_view1 / scene_img 参考连接与 shot1_gen 同构。
- * 项目负责人裁定（2026-09-10）：「垃圾后端没执行好，后端要改」——推翻 08-31 SKILL 的
+ * 暴君裁定（2026-09-10）：「垃圾后端没执行好，后端要改」——推翻 08-31 SKILL 的
  *   「agent 手动 add_node 克隆」旧范式，多链展开是后端责任。
  *
  * workflowId（2026-10-08 DSL 读面接通，可选）：传入时主卡（模板实例 + R8 克隆实例）metadata
@@ -237,7 +237,7 @@ export function expandTemplate(
   // 也要展开）、连线解析之前（衍生连线直接按节点 id 生成，不走 fromRole 解析）。
   // 衍生卡 id 用 nodes.length 递增保唯一（主节点/克隆节点/衍生卡三源不撞）。
   //
-  // 09-21 消除穿透连线（项目负责人「线也很乱」修复）：
+  // 09-21 消除穿透连线（暴君「线也很乱」修复）：
   // 每一行按工序从左向右相邻单向串联（主节点 → 工具卡1 → 工具卡2 → 配方卡 → 门禁卡），
   // 彻底消除所有卡片背后反覆横穿、互相重叠的「千层饼穿透线」。
   const derivedConns: WorkflowConnection[] = []

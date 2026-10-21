@@ -1,6 +1,6 @@
 // 画布工作流模板库（Workflow Templates）
 //
-// 项目负责人策略 v2：Deepseek 只当「参数/提示词传达人」，节点流结构骨架由后端模板提供。
+// 暴君策略 v2：Deepseek 只当「参数/提示词传达人」，节点流结构骨架由后端模板提供。
 // 模板定义「编排好的流程」：Deepseek 填内容（prompt/model/size 等），
 // 引擎（workflow-engine.ts）把模板展开成 CanvasNode[] + 连线并执行。
 //
@@ -68,7 +68,7 @@ export function getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
 }
 
 /**
- * 0920 项目负责人裁定（第二版）：模板判定完成即建骨架弹上画布——不等 Expert 去调
+ * 0920 暴君裁定（第二版）：模板判定完成即建骨架弹上画布——不等 Expert 去调
  * workflow_start（实锤：Expert 根本没调，右边永远空白，「太慢了」）。
  *
  * 后端 startSync 要求每个 text role 非空，故建构时用「占位内容」先满足验证；

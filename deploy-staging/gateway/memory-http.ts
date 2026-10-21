@@ -34,7 +34,17 @@ import {
 } from "./agent-memory-write.ts"
 
 const PREFIX = "/internal/memory/"
-const DEFAULT_WORKSPACE_DIR = "/opt/eimu-harness/workspace"
+
+// ── 2026-10-19：note 写入成功 → 通知召回语料快取失效 ─────────────────────────
+// CorpusCache TTL 5 分钟；若 ingest（含 supersede/retract 生效）后不失效，旧语料仍可能被
+// 召回。钩子由 wiring 注入（本档不 import wiring，避免反向依赖）；异常一律吞掉，不影响回执。
+let onMemoryNoteIngested: (() => void) | null = null
+
+export function setMemoryNoteIngestHook(fn: (() => void) | null): void {
+  onMemoryNoteIngested = fn
+}
+
+const DEFAULT_WORKSPACE_DIR = "/opt/agent-harness/workspace"
 /** JSON 转义会膨胀，给 content 的 100KB 上限留足余量；仍然有界。 */
 const MEMORY_HTTP_BODY_MAX_BYTES = 2 * 1024 * 1024
 
@@ -164,6 +174,13 @@ async function handleMemoryNote(
   }
   if (status < 200 || status >= 300) {
     return errorResponse("ingest_failed", "memory ingest rejected the batch", 502)
+  }
+
+  // 2xx 回执即视为可能改变共享语料（accepted/proposals/noop/superseded 任一）；钩子失败不影响回执。
+  try {
+    onMemoryNoteIngested?.()
+  } catch {
+    /* 快取失效失败不影响写入回执；下个 TTL 周期自然恢复 */
   }
 
   const record = isRecord(json) ? json : {}

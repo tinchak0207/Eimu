@@ -134,7 +134,7 @@ export default function Navbar({ className }: NavbarProps) {
   }, []);
 
   /**
-   * 钥匙按钮：一键复制可用的 API 密钥（2026-08-27 项目负责人裁定）。
+   * 钥匙按钮：一键复制可用的 API 密钥（2026-08-27 暴君裁定）。
    * 明文密钥只在签发响应里出现一次——所以逻辑是：
    * ① 先查现有密钥，取第一颗直接复制（密钥本体存 localStorage 的签发记录）；
    * ② 一颗都没有时现签一颗新的再复制。
@@ -339,7 +339,7 @@ export default function Navbar({ className }: NavbarProps) {
           className,
         )}
       >
-        {/* 2026-09-24 项目负责人裁定「header 往右退缩，让 AI 助理占上来，吃满天花板」＋
+        {/* 2026-09-24 暴君裁定「header 往右退缩，让 AI 助理占上来，吃满天花板」＋
             同刀「首秒零回缩」：margin-left/宽度仍消费 --ws-navbar-inset，但 fallback
             改指面板宽终态 calc(var(--ws-panel-w)+12px)——SSR 首帧即退缩态，不再
             等 JS effect 从 0px 动画退缩（病灶①）。过度动画的类别已从本行移除：
@@ -396,7 +396,7 @@ export default function Navbar({ className }: NavbarProps) {
               </span>
             </Link>
 
-            {/* QQ 群入口（2026-09-21 项目负责人特许，紧贴 Logo）：
+            {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo）：
                 桌面端（≥sm）像余额胶囊一样带文字「交流群」，点击弹出群二维码
                 扫码入群。手机端（<sm）原本是直跳 QQ 加群页的图标——已移进左侧侧栏
                 （MobileSidebar 底部），手机 top bar 收干净。 */}
@@ -412,7 +412,7 @@ export default function Navbar({ className }: NavbarProps) {
             </button>
 
             {/* 桌面版下载（2026-10-04，2026-10-04 二版）：一键直接识别平台并下载，
-                不再开选单（项目负责人：「搞弹窗就有点蠢了」）。平台判定与下载动作全在
+                不再开选单（暴君：「搞弹窗就有点蠢了」）。平台判定与下载动作全在
                 DesktopDownloadButton／resolveDesktopDownload 内，这里只放位置。
                 macOS 仍只 toast 婉拒，行动装置（unknown）因 <xl 断点本来就看不到。
                 壳内由 DesktopDownloadButton 自我隐藏（单一真源，见该档）。 */}
@@ -436,7 +436,7 @@ export default function Navbar({ className }: NavbarProps) {
             ) : isLoggedIn && user ? (
               <>
                 {/* 余额胶囊：余额 + 「+」合体——充值与签到都在「+」浮层里，
-                    导航栏不再放独立入口（2026-08-27 项目负责人裁定）。 */}
+                    导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
                 {/* Nav links — icons only, text stays hidden for screen readers.
@@ -461,7 +461,7 @@ export default function Navbar({ className }: NavbarProps) {
                   <span className="sr-only">文档</span>
                 </Link>
 
-                {/* 钥匙（2026-08-27 项目负责人裁定）：专属小菜单只放 key 相关动作。 */}
+                {/* 钥匙（2026-08-27 暴君裁定）：专属小菜单只放 key 相关动作。 */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -502,7 +502,7 @@ export default function Navbar({ className }: NavbarProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/* 用户名 + 退出（2026-08-27 项目负责人裁定：右侧按钮只承担退出）。
+                {/* 用户名 + 退出（2026-08-27 暴君裁定：右侧按钮只承担退出）。
                     桌面端（≥sm）照旧：用户名文字在 ≥lg 显示、退出图标常驻。
                     手机端（<sm）只出退出图标：帐户出口留在 top bar，用户名文字仍
                     锁在 lg:inline 不出现。 */}

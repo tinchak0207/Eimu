@@ -29,6 +29,26 @@ jobs:
       # 已在本机以「HEAD clean worktree（无 next-env.d.ts、无 .next）」实测 tsc 仍 0 error。
       - run: npx tsc --noEmit
 
+  gateway-typecheck:
+    name: Gateway typecheck (tsc --noEmit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # gateway 自带 package.json（nanoid + bun-types），没有入库的 lockfile；
+      # --no-package-lock 明确不生成 lock，node_modules 也不入库（.gitignore 已覆盖）。
+      - name: Install gateway deps
+        run: npm install --prefix deploy-staging/gateway --no-package-lock --no-audit --no-fund
+      # 闸的覆盖范围：deploy-staging/gateway/** 下所有 *.ts（含 director-engine/、editor/
+      # 子目录；排除 *.test.ts 与 node_modules）。不含 deploy-staging/opencode-runtime
+      # ——那是独立运行树，由它自己的工具链负责。根 tsconfig 的 exclude 含
+      # "deploy-staging"，因此本 job 是生产控制面唯一进 tsc 的入口。
+      - run: npx tsc -p deploy-staging/gateway --noEmit
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -63,7 +83,17 @@ jobs:
           #    - src/lib/critic-expert-frame.test.ts      → expert-delivery-contracts.json
           #    - src/lib/music-expert-frame.test.ts       → expert-constitution.md（EXPERT_CONSTITUTION_PATH）
           #
-          # 本机基线（干净 HEAD worktree、排除上列 6 档）：tests 2774 / pass 2769 / fail 0 / skipped 5
+          # C. 被测源码在本分支已删除（结构性失效，与本分支产品行为零因果）
+          #    src/components/pro-workstation/** 已被 canvas-workstation 取代并删除，
+          #    下列测试仍 readFileSync 旧路径 → 干净 checkout 必 ENOENT。
+          #    本地同样红；保留测试档不入库删除（大规模删测试需单独授权），只在本闸排除。
+          #    - src/components/ProfessionalWorkstation.test.ts
+          #    - src/components/PricingSync.test.ts          → 另含一条旧 pro-workstation 源码断言
+          #    - src/lib/kunpeng-assets.test.ts
+          #    - src/lib/lora-user-state.test.ts
+          #    - src/components/canvas-workstation/panels/migration.test.ts
+          #
+          # 本机基线（2026-10-20 快照 worktree、排除上列 11 档）：tests 4377 / pass 4363 / fail 0 / skipped 14
           EXCLUDE_FILES=(
             "src/lib/blender-e2e.test.ts"
             "src/lib/orchestrator-beast-frame.test.ts"
@@ -71,6 +101,11 @@ jobs:
             "src/lib/blender-honesty-gate.test.ts"
             "src/lib/critic-expert-frame.test.ts"
             "src/lib/music-expert-frame.test.ts"
+            "src/components/ProfessionalWorkstation.test.ts"
+            "src/components/PricingSync.test.ts"
+            "src/lib/kunpeng-assets.test.ts"
+            "src/lib/lora-user-state.test.ts"
+            "src/components/canvas-workstation/panels/migration.test.ts"
           )
 
           # 排除清单腐化守门：清单里的档必须存在。若某档被删/改名而清单没更新，

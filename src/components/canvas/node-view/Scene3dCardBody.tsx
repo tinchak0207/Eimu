@@ -13,7 +13,7 @@
 //   ③交互锁定 = P1 只读+播放：无编辑/生成入口
 //   ④主体加 stills 网格（3-6 张，slice(0,6) 上限）+ 资产下载连结（.blend/.glb）
 // 播放器行为/生命周期 hooks 与视频分支零偏离（同款 <video controls> 原生形，
-// 无自造状态机；渲染验收权在项目负责人，本组件不做自我 UI 检查）。
+// 无自造状态机；渲染验收权在暴君，本组件不做自我 UI 检查）。
 
 import { useState } from "react";
 import { Download, Eye, Mountain, X } from "lucide-react";

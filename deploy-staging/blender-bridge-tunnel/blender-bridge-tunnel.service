@@ -7,14 +7,14 @@ Wants=network-online.target
 Type=simple
 # 登入后手动启动 ws-tunnel(22222) 会随会话丢失，脚本内 ensureWsTunnel 自愈（dsh-groq 先例）；
 # 不在 ExecStartPre 拉 start-ssh443.sh 是避免与 dsh-groq-tunnel 的自愈路径双写竞态。
-ExecStart=/home/user/.nvm/versions/node/v24.19.0/bin/node /home/user/Desktop/image-app/deploy-staging/blender-bridge-tunnel/bridge-reverse-tunnel.js
-Environment=HOME=/home/user
+ExecStart=/home/lenovo/.nvm/versions/node/v24.19.0/bin/node /home/lenovo/Desktop/image-app/deploy-staging/blender-bridge-tunnel/bridge-reverse-tunnel.js
+Environment=HOME=/home/lenovo
 Restart=on-failure
 RestartSec=10
 # ws-tunnel(22222) 崩溃自愈 + ssh 退避重连都在脚本内；此上限兜底防级联（08-24 OOM 教训形态）
 MemoryMax=512M
-StandardOutput=append:/home/user/.local/share/blender-bridge-tunnel.log
-StandardError=append:/home/user/.local/share/blender-bridge-tunnel.log
+StandardOutput=append:/home/lenovo/.local/share/blender-bridge-tunnel.log
+StandardError=append:/home/lenovo/.local/share/blender-bridge-tunnel.log
 
 [Install]
 WantedBy=default.target

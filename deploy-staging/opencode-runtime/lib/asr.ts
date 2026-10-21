@@ -66,7 +66,7 @@ export interface TranscribeOptions {
 
 // ─────────────────────────────────────────── 常数（照抄 Hypit 的口径）
 
-const BIN_DIR = "/opt/eimu-harness/bin"
+const BIN_DIR = "/opt/agent-harness/bin"
 const FFMPEG = process.env.FFMPEG_PATH || (existsSync(join(BIN_DIR, "ffmpeg")) ? join(BIN_DIR, "ffmpeg") : "ffmpeg")
 const FFPROBE = process.env.FFPROBE_PATH || (existsSync(join(BIN_DIR, "ffprobe")) ? join(BIN_DIR, "ffprobe") : "ffprobe")
 const FFPROBE_TIMEOUT_MS = 20_000

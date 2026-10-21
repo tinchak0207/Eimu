@@ -17,7 +17,7 @@
  *
  * 为什么是「契约档」而非运行时：与 blender/music/video 版同构——persona 的
  * 运行时真源（模型绑定、subagent 派遣 gateway/subagent.ts、agent prompt /
- * AGENTS.md）都在 VPS /opt/eimu-harness，本地 repo 无 gateway 真源可改。
+ * AGENTS.md）都在 VPS /opt/agent-harness，本地 repo 无 gateway 真源可改。
  * 本档钉死契约四要素并被委托单/回传两端 import。
  *
  * SKILL 挂载（2026-09-27 配方库落库，消「skill 待补」）：考古结论 2026-09-08 时

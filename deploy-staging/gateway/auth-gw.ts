@@ -204,7 +204,7 @@ export function isLoopback(ip: string | null): boolean {
 // sk-biz-* key, and a wildcard origin combined with credentials is exactly the
 // configuration browsers refuse (and that would let any site drive a user's
 // paid account). Configure via CORS_ORIGINS as a comma-separated list.
-export const CORS_ORIGINS = (process.env.CORS_ORIGINS || "https://image.eimu.dev")
+export const CORS_ORIGINS = (process.env.CORS_ORIGINS || "https://image.tinchak0207.xyz")
   .split(",")
   .map((s) => s.trim().replace(/\/+$/, ""))
   .filter(Boolean)

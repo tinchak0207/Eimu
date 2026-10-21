@@ -639,14 +639,14 @@ async function W2b2() {
       return { selected: n };
     });
     await sleep(800);
-    // 媒体取用替身：store.eimu.dev 对「无 ?dl=1 的跨域 GET」不回 CORS（net::ERR_FAILED），
+    // 媒体取用替身：store.tinchak0207.xyz 对「无 ?dl=1 的跨域 GET」不回 CORS（net::ERR_FAILED），
     // 单张下载因 fetchImageBlob 加 ?dl=1 才成功。此处以 route 注入带 ACAO 的 1x1 PNG，
     // 让 exportHistoryZip 之后的**真** saveManyLocally 链路得以执行（媒体替身、链路本尊）。
     const PNG1x1 = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
       "base64",
     );
-    await shell.page.route("https://store.eimu.dev/**", (route) =>
+    await shell.page.route("https://store.tinchak0207.xyz/**", (route) =>
       route.fulfill({ status: 200, contentType: "image/png", headers: { "Access-Control-Allow-Origin": "*" }, body: PNG1x1 }),
     );
     await installPickerStub(shell, "dir-ok");
@@ -681,7 +681,7 @@ async function W2b2() {
         evidenceStrength: "替身（受控 directory picker）＋ UI notice（exported 来自回传值）",
         mediaFetchStubbed: true,
         mediaFetchStubNote:
-          "store.eimu.dev 对无 ?dl=1 的跨域 GET 不回 CORS（单张下载加 ?dl=1 才成功）——此为真环境发现；此处以 route 注入 ACAO 图档让汇出链路可跑。",
+          "store.tinchak0207.xyz 对无 ?dl=1 的跨域 GET 不回 CORS（单张下载加 ?dl=1 才成功）——此为真环境发现；此处以 route 注入 ACAO 图档让汇出链路可跑。",
         candidates: selOk.candidates,
         cardImgSrcs: cardSrcs,
         bulkFetchRequests: mediaReqs,

@@ -6,7 +6,7 @@ description: 剪辑素材入轨与时间线编排配方。触发时机：把素�
 来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 B1/B2 拆片表
               （时间线资料对象 + ops 9 类指令 + 版本 + 决策日志）与 §7；记忆
               2026-08-31-b1-timeline-lifecycle-layer（版本/锁定/幂等语义）。
-工具真源: VPS /opt/eimu-harness/workspace/.opencode/tools/{timeline_ops,timeline_query,
+工具真源: VPS /opt/agent-harness/workspace/.opencode/tools/{timeline_ops,timeline_query,
           timeline_restore,editing_manifest,video_upload}.ts 与 gateway/timeline.ts。
 入库批次: 2026-09-27 剪辑域 Agent 能力面活化。
 -->

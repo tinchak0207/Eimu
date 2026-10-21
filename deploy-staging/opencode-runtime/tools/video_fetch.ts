@@ -19,6 +19,17 @@ import {
   downloadDirectMedia,
 } from "../lib/video-fetch"
 
+// 平台视频契约的 size 是「比例归一」而非精确像素：模型原生缩放（如 720x1280→768x1344）仍是同一比例。
+// 解析请求 size 的宽高比，接受 WxH / W:H / W×H；无法解析时回 null（不设闸）。
+function parseSizeAspect(size: string | undefined): number | null {
+  const match = /^\s*(\d+)\s*[xX×:]\s*(\d+)\s*$/.exec(size ?? "")
+  if (!match) return null
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (!width || !height) return null
+  return width / height
+}
+
 // 影片抓取（薄包）：全部逻辑在 lib/video-fetch.ts（照抄竞品 hypit packages/yt-dlp/src/*）。
 // 本档只做参数转译与错误码映射。
 export default tool({
@@ -106,8 +117,11 @@ export default tool({
           const probe=await promisify(execFile)("ffprobe",["-v","error","-select_streams","v:0","-show_entries","stream=width,height","-of","json",target],{timeout:15000,maxBuffer:65536})
           const stream=JSON.parse(probe.stdout).streams?.[0]
           if(!stream?.width||!stream?.height)throw new Error("视频尺寸读取失败")
-          const size=/^(\d+)x(\d+)$/.exec(task.size??"")
-          if(size&&(stream.width!==Number(size[1])||stream.height!==Number(size[2])))throw new Error("视频未达到原请求尺寸")
+          const requestedAspect=parseSizeAspect(task.size)
+          if(requestedAspect){
+            const actualAspect=stream.width/stream.height
+            if(Math.abs(Math.log(actualAspect/requestedAspect))>Math.log(1.02))throw new Error(`视频比例与原请求尺寸不符：请求 ${task.size}，实测 ${stream.width}×${stream.height}`)
+          }
           records.push({...artifact,path:target,bytes:bytes.length,sha256,width:stream.width,height:stream.height})
         }
         recordArtifacts(scope,task.task_id,records)

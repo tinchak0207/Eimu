@@ -15,6 +15,7 @@ import {
   supportsUpscaleTier,
 } from "./generation-model-catalog.ts";
 import { UPSCALE_TIER_CONTRACTS } from "./generation-core/upscale-tier.ts";
+import { upscaleFourKUpstreamEnabled } from "./upscale-4k-flag.ts";
 import { PIXAI_UPSCALE_MODEL_ID } from "./image-model-ids.js";
 
 /** env 开关是全域状态：每个用到 4K 的断言都自己设／自己清，不靠执行顺序。 */
@@ -40,19 +41,31 @@ test("catalog 宣告 pixai-upscale 的超分档位契约（含 4K），非超分
 });
 
 test("能力投射只外露**可提交**档位：4K 未校准前不外露，校准后外露且预设即 4K", () => {
+  // env 读取只发生在服务端调用点（/v1/models 与提交端），共享能力函式拿显式开关：
+  // 这里先设 env（保留原意），再把 upscaleFourKUpstreamEnabled() 注入能力投射。
   withFourKUpstream(undefined, () => {
-    assert.deepEqual([...(generationCapabilities(PIXAI_UPSCALE_MODEL_ID)?.upscaleTiers ?? [])], ["1k", "2k"]);
-    assert.equal(generationCapabilities("gpt-image-2")?.upscaleTiers, undefined, "不输出空能力宣称");
-    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "4k"), false);
-    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "2k"), true);
-    assert.equal(defaultUpscaleTierFor(PIXAI_UPSCALE_MODEL_ID), "2k");
-    assert.equal(defaultUpscaleTierFor("gpt-image-2"), null);
+    const fourKEnabled = upscaleFourKUpstreamEnabled();
+    assert.equal(fourKEnabled, false);
+    assert.deepEqual(
+      [...(generationCapabilities(PIXAI_UPSCALE_MODEL_ID, fourKEnabled)?.upscaleTiers ?? [])],
+      ["1k", "2k"],
+    );
+    assert.equal(generationCapabilities("gpt-image-2", fourKEnabled)?.upscaleTiers, undefined, "不输出空能力宣称");
+    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "4k", fourKEnabled), false);
+    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "2k", fourKEnabled), true);
+    assert.equal(defaultUpscaleTierFor(PIXAI_UPSCALE_MODEL_ID, fourKEnabled), "2k");
+    assert.equal(defaultUpscaleTierFor("gpt-image-2", fourKEnabled), null);
   });
   withFourKUpstream("1", () => {
-    assert.deepEqual([...modelUpscaleTiers(PIXAI_UPSCALE_MODEL_ID)], ["1k", "2k", "4k"]);
-    assert.deepEqual([...(generationCapabilities(PIXAI_UPSCALE_MODEL_ID)?.upscaleTiers ?? [])], ["1k", "2k", "4k"]);
-    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "4k"), true);
-    assert.equal(defaultUpscaleTierFor(PIXAI_UPSCALE_MODEL_ID), "4k");
+    const fourKEnabled = upscaleFourKUpstreamEnabled();
+    assert.equal(fourKEnabled, true);
+    assert.deepEqual([...modelUpscaleTiers(PIXAI_UPSCALE_MODEL_ID, fourKEnabled)], ["1k", "2k", "4k"]);
+    assert.deepEqual(
+      [...(generationCapabilities(PIXAI_UPSCALE_MODEL_ID, fourKEnabled)?.upscaleTiers ?? [])],
+      ["1k", "2k", "4k"],
+    );
+    assert.equal(supportsUpscaleTier(PIXAI_UPSCALE_MODEL_ID, "4k", fourKEnabled), true);
+    assert.equal(defaultUpscaleTierFor(PIXAI_UPSCALE_MODEL_ID, fourKEnabled), "4k");
   });
 });
 

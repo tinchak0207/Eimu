@@ -13,7 +13,7 @@ try {
   & npx.cmd vercel --prod --yes | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "Unable to deploy the Production probe." }
   try {
-    $response = Invoke-WebRequest -Uri "https://image.eimu.dev/api/admin/image-upstream-probe" -Method Post -Headers @{ "x-image-upstream-probe" = $token } -UseBasicParsing -TimeoutSec 300
+    $response = Invoke-WebRequest -Uri "https://image.tinchak0207.xyz/api/admin/image-upstream-probe" -Method Post -Headers @{ "x-image-upstream-probe" = $token } -UseBasicParsing -TimeoutSec 300
     $probeOutput = $response.Content
   } catch {
     $response = $_.Exception.Response

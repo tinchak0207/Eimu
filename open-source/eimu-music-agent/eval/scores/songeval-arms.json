@@ -1,0 +1,301 @@
+{
+ "experiment": "SongEval（第二把感知尺）跑消融四臂，音频与 SongBench 同源",
+ "evaluator": "SongEval 官方 ckpt（ASLP-lab），CPU fp32，输入 = sb-in 下 44.1k 立体声 WAV",
+ "why": "SongBench 是七维感知裁判；换一把独立训练的感知尺做稳健性检验——若两把尺都测不出差异，说明差异不在感知轴。",
+ "arms": {
+  "A": {
+   "label": "裸 Lyria（无 harness）",
+   "n": 9,
+   "mean5": 4.4488,
+   "dims": {
+    "Coherence": 4.5538,
+    "Musicality": 4.39,
+    "Memorability": 4.5184,
+    "Clarity": 4.4354,
+    "Naturalness": 4.3463
+   },
+   "tracks": {
+    "idx15-take3": {
+     "Coherence": 4.4934,
+     "Musicality": 4.2714,
+     "Memorability": 4.4156,
+     "Clarity": 4.4412,
+     "Naturalness": 4.2683
+    },
+    "idx15-take2": {
+     "Coherence": 4.5013,
+     "Musicality": 4.3098,
+     "Memorability": 4.3802,
+     "Clarity": 4.3828,
+     "Naturalness": 4.2625
+    },
+    "idx15-take1": {
+     "Coherence": 4.5714,
+     "Musicality": 4.4538,
+     "Memorability": 4.4634,
+     "Clarity": 4.5361,
+     "Naturalness": 4.4206
+    },
+    "idx100-take3": {
+     "Coherence": 4.6994,
+     "Musicality": 4.5368,
+     "Memorability": 4.711,
+     "Clarity": 4.56,
+     "Naturalness": 4.5434
+    },
+    "idx100-take2": {
+     "Coherence": 4.5414,
+     "Musicality": 4.3684,
+     "Memorability": 4.5601,
+     "Clarity": 4.413,
+     "Naturalness": 4.3861
+    },
+    "idx100-take1": {
+     "Coherence": 4.7105,
+     "Musicality": 4.5675,
+     "Memorability": 4.677,
+     "Clarity": 4.5429,
+     "Naturalness": 4.4993
+    },
+    "idx0-take3": {
+     "Coherence": 4.5899,
+     "Musicality": 4.404,
+     "Memorability": 4.5526,
+     "Clarity": 4.4877,
+     "Naturalness": 4.3177
+    },
+    "idx0-take2": {
+     "Coherence": 4.4329,
+     "Musicality": 4.2744,
+     "Memorability": 4.436,
+     "Clarity": 4.237,
+     "Naturalness": 4.2519
+    },
+    "idx0-take1": {
+     "Coherence": 4.4442,
+     "Musicality": 4.3237,
+     "Memorability": 4.4696,
+     "Clarity": 4.3175,
+     "Naturalness": 4.1669
+    }
+   }
+  },
+  "B": {
+   "label": "Eimu 编排 → FlowMusic",
+   "n": 9,
+   "mean5": 4.3162,
+   "dims": {
+    "Coherence": 4.4425,
+    "Musicality": 4.2646,
+    "Memorability": 4.3718,
+    "Clarity": 4.2877,
+    "Naturalness": 4.2144
+   },
+   "tracks": {
+    "idx15-take3": {
+     "Coherence": 4.5001,
+     "Musicality": 4.3474,
+     "Memorability": 4.4711,
+     "Clarity": 4.4042,
+     "Naturalness": 4.258
+    },
+    "idx15-take2": {
+     "Coherence": 4.3132,
+     "Musicality": 4.0802,
+     "Memorability": 4.1306,
+     "Clarity": 4.0933,
+     "Naturalness": 3.9876
+    },
+    "idx15-take1": {
+     "Coherence": 4.6145,
+     "Musicality": 4.4688,
+     "Memorability": 4.5432,
+     "Clarity": 4.5408,
+     "Naturalness": 4.3965
+    },
+    "idx100-take3": {
+     "Coherence": 4.6569,
+     "Musicality": 4.5118,
+     "Memorability": 4.6168,
+     "Clarity": 4.5296,
+     "Naturalness": 4.4605
+    },
+    "idx100-take2": {
+     "Coherence": 4.5606,
+     "Musicality": 4.408,
+     "Memorability": 4.5361,
+     "Clarity": 4.435,
+     "Naturalness": 4.3551
+    },
+    "idx100-take1": {
+     "Coherence": 4.5104,
+     "Musicality": 4.3488,
+     "Memorability": 4.4761,
+     "Clarity": 4.2909,
+     "Naturalness": 4.2601
+    },
+    "idx0-take3": {
+     "Coherence": 4.2117,
+     "Musicality": 3.9701,
+     "Memorability": 4.112,
+     "Clarity": 3.9828,
+     "Naturalness": 4.0476
+    },
+    "idx0-take2": {
+     "Coherence": 4.3593,
+     "Musicality": 4.1897,
+     "Memorability": 4.3285,
+     "Clarity": 4.2689,
+     "Naturalness": 4.2359
+    },
+    "idx0-take1": {
+     "Coherence": 4.256,
+     "Musicality": 4.0562,
+     "Memorability": 4.1319,
+     "Clarity": 4.044,
+     "Naturalness": 3.9286
+    }
+   }
+  },
+  "C": {
+   "label": "Eimu 编排 → YuE2",
+   "n": 7,
+   "mean5": 4.3098,
+   "dims": {
+    "Coherence": 4.4053,
+    "Musicality": 4.2608,
+    "Memorability": 4.3821,
+    "Clarity": 4.297,
+    "Naturalness": 4.2037
+   },
+   "tracks": {
+    "dcd925ff-idx0": {
+     "Coherence": 4.5494,
+     "Musicality": 4.4214,
+     "Memorability": 4.5288,
+     "Clarity": 4.4368,
+     "Naturalness": 4.3635
+    },
+    "86aa3e59-idx15": {
+     "Coherence": 4.2985,
+     "Musicality": 4.1091,
+     "Memorability": 4.254,
+     "Clarity": 4.1717,
+     "Naturalness": 4.0106
+    },
+    "7eca0247-idx100": {
+     "Coherence": 4.4855,
+     "Musicality": 4.3289,
+     "Memorability": 4.5726,
+     "Clarity": 4.3179,
+     "Naturalness": 4.385
+    },
+    "6be99386-idx100": {
+     "Coherence": 4.372,
+     "Musicality": 4.3168,
+     "Memorability": 4.3738,
+     "Clarity": 4.2807,
+     "Naturalness": 4.1946
+    },
+    "6aaf6e8c-idx0": {
+     "Coherence": 4.3823,
+     "Musicality": 4.1536,
+     "Memorability": 4.2685,
+     "Clarity": 4.3313,
+     "Naturalness": 4.1087
+    },
+    "66db9f69-idx0": {
+     "Coherence": 4.3205,
+     "Musicality": 4.21,
+     "Memorability": 4.3412,
+     "Clarity": 4.2394,
+     "Naturalness": 4.0713
+    },
+    "4d3862ef-idx0": {
+     "Coherence": 4.4288,
+     "Musicality": 4.286,
+     "Memorability": 4.3355,
+     "Clarity": 4.3011,
+     "Naturalness": 4.2919
+    }
+   }
+  },
+  "D": {
+   "label": "裸 YuE2（无 harness）",
+   "n": 9,
+   "mean5": 4.3768,
+   "dims": {
+    "Coherence": 4.4965,
+    "Musicality": 4.3485,
+    "Memorability": 4.4461,
+    "Clarity": 4.3506,
+    "Naturalness": 4.2422
+   },
+   "tracks": {
+    "idx15-take3": {
+     "Coherence": 4.5516,
+     "Musicality": 4.3408,
+     "Memorability": 4.4573,
+     "Clarity": 4.413,
+     "Naturalness": 4.2029
+    },
+    "idx15-take2": {
+     "Coherence": 4.3335,
+     "Musicality": 4.1947,
+     "Memorability": 4.2746,
+     "Clarity": 4.1517,
+     "Naturalness": 3.9107
+    },
+    "idx15-take1": {
+     "Coherence": 4.4785,
+     "Musicality": 4.2559,
+     "Memorability": 4.3697,
+     "Clarity": 4.3197,
+     "Naturalness": 4.132
+    },
+    "idx100-take3": {
+     "Coherence": 4.5795,
+     "Musicality": 4.3915,
+     "Memorability": 4.4527,
+     "Clarity": 4.4151,
+     "Naturalness": 4.4066
+    },
+    "idx100-take2": {
+     "Coherence": 4.6038,
+     "Musicality": 4.5202,
+     "Memorability": 4.6187,
+     "Clarity": 4.4087,
+     "Naturalness": 4.4886
+    },
+    "idx100-take1": {
+     "Coherence": 4.4605,
+     "Musicality": 4.365,
+     "Memorability": 4.4892,
+     "Clarity": 4.3452,
+     "Naturalness": 4.239
+    },
+    "idx0-take3": {
+     "Coherence": 4.4375,
+     "Musicality": 4.3161,
+     "Memorability": 4.3999,
+     "Clarity": 4.3492,
+     "Naturalness": 4.2068
+    },
+    "idx0-take2": {
+     "Coherence": 4.6632,
+     "Musicality": 4.5681,
+     "Memorability": 4.6334,
+     "Clarity": 4.5057,
+     "Naturalness": 4.4676
+    },
+    "idx0-take1": {
+     "Coherence": 4.36,
+     "Musicality": 4.1842,
+     "Memorability": 4.3195,
+     "Clarity": 4.2469,
+     "Naturalness": 4.1253
+    }
+   }
+  }
+ }
+}

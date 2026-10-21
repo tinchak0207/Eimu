@@ -254,7 +254,7 @@ export function sanitizeErrorShapedPayload(text: string): string {
  *
  * 明确**不**收录（收集前逐条查证，防止误伤功能面）：
  *  - `channel_id`：我方 agent 闸道 failover 在消费——`deploy-staging/gateway/workflow-gw.ts`
- *    （线上 `/opt/eimu-harness`）的 `resolveActiveModel` 读 `/v1/model-status` 的
+ *    （线上 `/opt/agent-harness`）的 `resolveActiveModel` 读 `/v1/model-status` 的
  *    `channel_id` 做跨渠道切换（:1133/:1137/:1154）。⇒ 保留。
  *  - `used_quota`：我方前端在消费——`src/components/settings/TeamConsoleClient.tsx`
  *    （`UsagePayload`/`UsageMemberRow`），数据来自 `/api/v1/team/usage`（本闸覆盖路径）。

@@ -8,25 +8,31 @@
 //   subject        主体（必填）
 //   action         按 beat 的动作描述（必填；动作用具体计数，不用模糊形容词）
 //   appearance     外观/服装
+//   beats          [{ at_seconds?, action, environment_change? }] 时间顺序的动作 beat
+//   state_change   { from, to } 镜头起态 → 终态（显式状态变化）
+//   environment_change  整镜的环境变化（非单 beat 的部分）
+//   previz         { motion_ref?, keyframes?[] } 预演参考（不直接编译进 prompt）
 //   environment    { time_of_day, lighting, elements[] }
 //   camera         { shot_type, angle, movement, lens, start, end, trajectory, timing, parallax, keyframes:[{time_seconds,position}] }
 //   style          { look, mood, color_grading }
-//   audio          { dialogue: [{ character, tone, line }], ambience, sfx[] }
+//   audio          { dialogue: [{ character, tone, line }], ambience, sfx[], soundscape?, music? }
 //   output         { duration_seconds, aspect_ratio }
 //   negative       忽略不编译——平台无 negative_prompt 栏位，否定句反而伤害生成
 //
-// 模型族编译策略（依 model 字串前缀分族）：
-//   veo*     紧凑单行 JSON（Veo 3.1 官方 JSON prompting，只留非空字段，不加说明文字）
-//   kling*   Cinematic 开头 + 主体句 + 「Beat 0-Ns: camera + action」时间轴模板
-//            + `Dialogue (角色, 语气): "台词"` 对话行 + Audio 行
-//   runway*  首行精确 camera token（Camera dolly in / Truck left / Boom up…），
-//            主体动作句，尾部 shot_type/lens
-//   luma*    摄影机运动自然语言短语打头（模型有 camera motion 词表）
-//   其余     seedance / adobe / 未知模型：SLCT 有序散文
-//            （Style → Shot type → Camera → 主体动作 → 环境 → 光 → 时长 hint）
+// 影片镜头契约（2026-10-20 范式改革）：一个镜头必须有可观察的状态变化——
+// 至少一个非空 beats[].action，或 state_change.from 与 state_change.to 都非空。
+// 只写「一张静态画面 + 六槽描述」会被 validateMotionContract 拒收：模型只会做出慢推/微动。
 //
-// 通用规则：一镜一机位运动 + 一主体动作；各族 front-load（camera+subject 在前）；
-// duration 编进 prompt 尾部 hint；输出守卫 ≤3800 字，超长明确拒绝；不截断动作或运动轨迹。
+// 编译策略：所有模型族先由 compileMotionTimeline 生成时间线（起态 → 逐 beat → 终态 →
+// 环境变化 → 自然语言机位），再按模型族包一层语法：
+//   minimax/h3  官方三栏（首行参考图对齐指令 + integrated_multimodal_description +
+//               overall_soundscape + non_diegetic_music）
+//   veo*        紧凑单行 JSON（action 字段即时间线，保留 camera/output）
+//   kling*      Cinematic 开头 + 主体句 + 时间线（原 Beat 0-Ns 段落）+ Dialogue/Audio
+//   runway* / luma* / 其余（seedance/adobe/未知）：时间线 + 模型语法尾（时长）
+//
+// 通用规则：不编造未提供的动作/位置；字段缺失就跳过。输出守卫 ≤3800 字，超长明确拒绝，
+// 不截断动作或运动轨迹。
 //
 // 纯函数、零依赖、可单测。
 
@@ -41,6 +47,27 @@ export interface ShotCamera {
   timing?: string
   parallax?: string
   keyframes?: { time_seconds: number; position: string }[]
+}
+
+/** 一个动作 beat：at_seconds 可选（无时点按出现顺序叙述），action 必填才计入契约。 */
+export interface ShotBeat {
+  at_seconds?: number
+  action: string
+  environment_change?: string
+}
+
+/** 镜头起态 → 终态；两端都非空才算满足镜头运动契约。 */
+export interface ShotStateChange {
+  from?: string
+  to?: string
+}
+
+export interface ShotAudio {
+  dialogue?: { character: string; tone?: string; line: string }[]
+  ambience?: string
+  sfx?: string[]
+  soundscape?: string
+  music?: string
 }
 
 const CAMERA_ALIASES: Record<string, keyof ShotCamera> = {
@@ -111,14 +138,14 @@ export interface ShotJson {
   subject: string
   appearance?: string
   action: string
+  beats?: ShotBeat[]
+  state_change?: ShotStateChange
+  environment_change?: string
+  previz?: { motion_ref?: string; keyframes?: string[] }
   environment?: { time_of_day?: string; lighting?: string; elements?: string[] }
   camera?: ShotCamera
   style?: { look?: string; mood?: string; color_grading?: string }
-  audio?: {
-    dialogue?: { character: string; tone?: string; line: string }[]
-    ambience?: string
-    sfx?: string[]
-  }
+  audio?: ShotAudio
   output?: { duration_seconds?: number; aspect_ratio?: string }
   negative?: string[]
 }
@@ -203,6 +230,36 @@ export function validateShotJson(obj: unknown): { ok: true; shot: ShotJson } | {
   return { ok: false, error: `缺少必要字段：${missing.join("、")}。示例：${SHOT_EXAMPLE}` }
 }
 
+/**
+ * 影片镜头运动契约（硬闸）：镜头必须有可观察的状态变化。
+ * 满足任一即可：≥1 个非空 beats[].action；或 state_change.from 与 state_change.to 都非空。
+ * 静态六槽（style/shot/camera/subject action/environment/时长）不算影片镜头。
+ */
+export function validateMotionContract(shot: ShotJson): { ok: true } | { ok: false; error: string } {
+  const beats = Array.isArray(shot.beats) ? shot.beats : []
+  const hasBeat = beats.some((beat) => Boolean(nonEmpty(beat?.action)))
+  const from = nonEmpty(shot.state_change?.from)
+  const to = nonEmpty(shot.state_change?.to)
+  if (hasBeat || (from && to)) return { ok: true }
+  return {
+    ok: false,
+    error: "影片镜头缺少状态变化：请提供 beats:[{at_seconds?,action,environment_change?}] 或 state_change:{from,to}。只写一张静态画面＋六槽描述不算影片镜头，模型只会做出慢推/微动。",
+  }
+}
+
+/**
+ * 散文 prompt 的动作兜底：当调用方没有 beats/state_change、也不是结构化 shot JSON 时，
+ * 平台侧仍必须拿到一条物理变化合同，否则 H3 会把「slow camera push in」当成整条片子的内容。
+ * 与站点 src/lib/invisible-prompt-director.ts 的 MOTION_CONTRACT 同义，保持两份一致。
+ */
+export const VIDEO_MOTION_FALLBACK =
+  "Continuous physical action drives the shot: the subject's position, pose, and silhouette change measurably from the first frame to the last, with at least one change in the environment or staging along the way. The camera move follows that change instead of replacing it."
+
+/** prompt 已自带状态变化语义时不再追加兜底（与站点规则层同一组标记）。 */
+export function hasMotionContract(text: string): boolean {
+  return /(state change|action beat|visibly changed|measurably|by the final frame)/i.test(text)
+}
+
 /** shot 的输出参数：duration clamp 1-60（取整）；aspect_ratio 原样（去空白）。 */
 export function shotOutputParams(shot: ShotJson): { duration_seconds?: number; aspect_ratio?: string } {
   const out: { duration_seconds?: number; aspect_ratio?: string } = {}
@@ -215,7 +272,7 @@ export function shotOutputParams(shot: ShotJson): { duration_seconds?: number; a
   return out
 }
 
-// ── 共用片段 ──
+// ── 时间线编译器共用片段 ──
 
 function durationOf(shot: ShotJson): number | undefined {
   return shotOutputParams(shot).duration_seconds
@@ -233,15 +290,163 @@ function envPhrase(shot: ShotJson): string {
   return [nonEmpty(e.time_of_day), ...cleanList(e.elements)].filter(Boolean).join(", ")
 }
 
+/** 去掉句尾标点，统一由编译器补英文句点。 */
+function stripEndPunctuation(text: string): string {
+  return text.replace(/[\s。．.！!？?；;，,]+$/u, "")
+}
+
+/** 按中英文句末标点切句；保护小数（3.5）不被切开。 */
+function splitSentences(text: string): string[] {
+  const body = text.trim()
+  if (!body) return []
+  const out: string[] = []
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
+    const isCjk = "。！？；".includes(ch)
+    const isAscii = "!?;".includes(ch) || (ch === "." && !(/\d/.test(body[i - 1] ?? "") && /\d/.test(body[i + 1] ?? "")))
+    if (!isCjk && !isAscii) continue
+    let end = i + 1
+    while (end < body.length && /[\s"'”’）)]/.test(body[end])) end++
+    const sentence = stripEndPunctuation(body.slice(start, end).trim())
+    if (sentence) out.push(sentence)
+    start = end
+    i = end - 1
+  }
+  const tail = stripEndPunctuation(body.slice(start).trim())
+  if (tail) out.push(tail)
+  return out
+}
+
+/** beat 时点 → mm:ss.SSS（例：1.2 → 00:01.200）。 */
+function formatBeatTime(seconds: number): string {
+  const totalMs = Math.max(0, Math.round(seconds * 1000))
+  const mins = Math.floor(totalMs / 60000)
+  const secs = Math.floor((totalMs % 60000) / 1000)
+  const ms = totalMs % 1000
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${String(ms).padStart(3, "0")}`
+}
+
+function capitalize(text: string): string {
+  return /^[a-z]/.test(text) ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
+/** 机位 → 自然句（不用 "Camera movement: ..." 标签式拼盘）。 */
+function cameraTimelineSentence(camera?: ShotCamera): string {
+  if (!camera) return ""
+  const movement = nonEmpty(camera.movement)
+  const trajectory = nonEmpty(camera.trajectory)
+  const start = nonEmpty(camera.start)
+  const end = nonEmpty(camera.end)
+  const timing = nonEmpty(camera.timing)
+  const parallax = nonEmpty(camera.parallax)
+  const keyframes = (Array.isArray(camera.keyframes) ? camera.keyframes : [])
+    .filter((frame) => typeof frame?.position === "string" && frame.position.trim())
+
+  const clauses: string[] = []
+  if (movement) {
+    clauses.push(/^(static|fixed|locked|静止|固定)/i.test(movement) ? `The camera holds ${movement}` : `The camera moves in a ${movement}`)
+  } else if (trajectory || start || end || keyframes.length) {
+    clauses.push("The camera moves")
+  }
+  if (trajectory) clauses.push(stripEndPunctuation(trajectory))
+  if (start) clauses.push(`starting ${stripEndPunctuation(start)}`)
+  if (end) clauses.push(`ending ${stripEndPunctuation(end)}`)
+  if (timing) clauses.push(stripEndPunctuation(timing))
+  if (parallax) clauses.push(stripEndPunctuation(parallax))
+
+  const parts: string[] = []
+  if (clauses.length) {
+    const [head, ...rest] = clauses
+    parts.push(`${capitalize(head)}${rest.length ? `, ${rest.join(", ")}` : ""}.`)
+  }
+  for (const frame of keyframes) {
+    const at = typeof frame.time_seconds === "number" && Number.isFinite(frame.time_seconds) ? frame.time_seconds : 0
+    parts.push(`At ${formatBeatTime(at)}, the camera is at ${stripEndPunctuation(frame.position)}.`)
+  }
+  return parts.join(" ")
+}
+
+/**
+ * 镜头时间线：风格/景别/主体锚点 → 起态 → 逐 beat（带时点）→ 终态 → 环境变化 → 机位。
+ * 只叙述已提供的字段；缺失就跳过，不补假细节。
+ */
+export function compileMotionTimeline(shot: ShotJson): string {
+  const segs: string[] = []
+
+  // 1) 风格 / 景别 / 主体锚点
+  const styleParts = [nonEmpty(shot.style?.look), nonEmpty(shot.style?.mood), nonEmpty(shot.style?.color_grading)].filter(Boolean)
+  const framing = [nonEmpty(shot.camera?.shot_type), nonEmpty(shot.camera?.angle)].filter(Boolean).join(" ")
+  const subject = subjectPhrase(shot)
+  const anchor: string[] = []
+  if (styleParts.length) anchor.push(styleParts.join(", "))
+  if (framing) anchor.push(framing)
+  if (subject) anchor.push(subject)
+  if (anchor.length) segs.push(`${capitalize(anchor.join(", "))}.`)
+
+  // 静态环境底子（与 environment_change 不同：这是整镜的既有场景）
+  const setting: string[] = []
+  const timeOfDay = nonEmpty(shot.environment?.time_of_day)
+  if (timeOfDay) setting.push(timeOfDay)
+  const elements = cleanList(shot.environment?.elements)
+  if (elements.length) setting.push(elements.join(", "))
+  const lighting = nonEmpty(shot.environment?.lighting)
+  if (lighting) setting.push(lighting)
+  if (setting.length) segs.push(`The scene is ${setting.join("; ")}.`)
+
+  // 2) 起态：state_change.from 优先；否则用 action 的第一句
+  const actionSentences = splitSentences(nonEmpty(shot.action) ?? "")
+  const from = nonEmpty(shot.state_change?.from)
+  let usedFirstAction = false
+  if (from) {
+    segs.push(`The shot begins with ${stripEndPunctuation(from)}.`)
+  } else if (actionSentences.length) {
+    segs.push(`The shot begins with ${actionSentences[0]}.`)
+    usedFirstAction = true
+  }
+
+  // 3) 逐 beat（时间顺序；无时点用 Then 顺接）
+  const beats = (Array.isArray(shot.beats) ? shot.beats : [])
+    .map((beat) => ({
+      at: typeof beat?.at_seconds === "number" && Number.isFinite(beat.at_seconds) ? Math.max(0, beat.at_seconds) : undefined,
+      action: nonEmpty(beat?.action),
+      environment: nonEmpty(beat?.environment_change),
+    }))
+    .filter((beat): beat is { at: number | undefined; action: string; environment: string | undefined } => Boolean(beat.action))
+  for (const beat of beats) {
+    const action = stripEndPunctuation(beat.action)
+    const head = beat.at !== undefined ? `At ${formatBeatTime(beat.at)}, ${action}` : `Then, ${action}`
+    segs.push(`${head}${beat.environment ? `, ${stripEndPunctuation(beat.environment)}` : ""}.`)
+  }
+  // 没有 beats 时，把 action 剩余句子按顺序补进时间线，避免动作信息丢失。
+  if (!beats.length && actionSentences.length) {
+    for (const sentence of usedFirstAction ? actionSentences.slice(1) : actionSentences) segs.push(`${sentence}.`)
+  }
+
+  // 4) 终态
+  const to = nonEmpty(shot.state_change?.to)
+  if (to) segs.push(`By the end of the shot, ${stripEndPunctuation(to)}.`)
+
+  // 5) 环境变化
+  const environmentChange = nonEmpty(shot.environment_change)
+  if (environmentChange) segs.push(`The environment changes: ${stripEndPunctuation(environmentChange)}.`)
+
+  // 6) 机位（自然句）
+  const camera = cameraTimelineSentence(shot.camera)
+  if (camera) segs.push(camera)
+
+  return segs.join(" ")
+}
+
 // ── 各模型族编译器 ──
 
-/** veo：紧凑单行 JSON，只留非空字段，前面不加任何说明文字。 */
-function compileVeo(shot: ShotJson): string {
+/** veo：紧凑单行 JSON，action 字段放时间线，保留 camera/output。 */
+function compileVeo(shot: ShotJson, timeline: string): string {
   const compact: Record<string, unknown> = {}
   compact.subject = nonEmpty(shot.subject) ?? ""
   const appearance = nonEmpty(shot.appearance)
   if (appearance) compact.appearance = appearance
-  compact.action = nonEmpty(shot.action) ?? ""
+  compact.action = timeline
   const env: Record<string, unknown> = {}
   const timeOfDay = nonEmpty(shot.environment?.time_of_day)
   if (timeOfDay) env.time_of_day = timeOfDay
@@ -259,8 +464,6 @@ function compileVeo(shot: ShotJson): string {
     if (shot.camera?.[key] !== undefined) camera[key] = shot.camera[key]
   }
   if (Object.keys(camera).length) compact.camera = camera
-  const motion = cameraMotionText(shot.camera)
-  if (motion) compact.camera_motion_contract = motion
   const style: Record<string, unknown> = {}
   for (const key of ["look", "mood", "color_grading"] as const) {
     const value = nonEmpty(shot.style?.[key])
@@ -276,6 +479,10 @@ function compileVeo(shot: ShotJson): string {
   if (ambience) audio.ambience = ambience
   const sfx = cleanList(shot.audio?.sfx)
   if (sfx.length) audio.sfx = sfx
+  const soundscape = nonEmpty(shot.audio?.soundscape)
+  if (soundscape) audio.soundscape = soundscape
+  const music = nonEmpty(shot.audio?.music)
+  if (music) audio.music = music
   if (Object.keys(audio).length) compact.audio = audio
   const output: Record<string, unknown> = {}
   const params = shotOutputParams(shot)
@@ -285,18 +492,15 @@ function compileVeo(shot: ShotJson): string {
   return JSON.stringify(compact)
 }
 
-/** kling：Cinematic 开头 + 主体句 + Beat 时间轴 + Dialogue 行 + Audio 行。 */
-function compileKling(shot: ShotJson): string {
+/** kling：Cinematic 开头 + 主体句 + 时间线（取代原 Beat 0-Ns 静态拼接）+ Dialogue/Audio。 */
+function compileKling(shot: ShotJson, timeline: string): string {
   const lines: string[] = []
   const ar = shotOutputParams(shot).aspect_ratio ?? "16:9"
   const look = nonEmpty(shot.style?.look)
   lines.push(look ? `Cinematic ${ar}, ${look}` : `Cinematic ${ar}`)
   const subject = subjectPhrase(shot)
   if (subject) lines.push(subject)
-  const duration = durationOf(shot) ?? 5
-  const camera = [nonEmpty(shot.camera?.shot_type), nonEmpty(shot.camera?.angle), nonEmpty(shot.camera?.movement)].filter(Boolean).join(" ")
-  const action = nonEmpty(shot.action) ?? ""
-  lines.push(camera ? `Beat 0-${duration}s: ${camera} + ${action}` : `Beat 0-${duration}s: ${action}`)
+  if (timeline) lines.push(timeline)
   for (const d of Array.isArray(shot.audio?.dialogue) ? shot.audio!.dialogue! : []) {
     const character = nonEmpty(d?.character)
     const line = nonEmpty(d?.line)
@@ -304,78 +508,83 @@ function compileKling(shot: ShotJson): string {
     const tone = nonEmpty(d?.tone)
     lines.push(`Dialogue (${tone ? `${character}, ${tone}` : character}): "${line}"`)
   }
+  const soundscape = nonEmpty(shot.audio?.soundscape)
   const ambience = nonEmpty(shot.audio?.ambience)
-  if (ambience) lines.push(`Audio: ${ambience}`)
+  const audioText = soundscape ?? [ambience, ...cleanList(shot.audio?.sfx)].filter(Boolean).join(" ")
+  if (audioText) lines.push(`Audio: ${audioText}`)
+  const music = nonEmpty(shot.audio?.music)
+  if (music) lines.push(`Music: ${music}`)
   return lines.filter(Boolean).join("\n")
 }
 
-/** runway：首行精确 camera token，主体动作句，尾部 shot_type/lens + 时长 hint。 */
-function compileRunway(shot: ShotJson): string {
+/** runway：时间线 + 模型语法尾（lens + 时长）。 */
+function compileRunway(shot: ShotJson, timeline: string): string {
   const lines: string[] = []
-  const movement = nonEmpty(shot.camera?.movement)
-  if (movement) lines.push(`Camera ${movement}`)
-  const actionSentence = `${subjectPhrase(shot)} ${nonEmpty(shot.action) ?? ""}`.trim()
-  if (actionSentence) lines.push(`${actionSentence}.`)
-  const tail = [nonEmpty(shot.camera?.shot_type), nonEmpty(shot.camera?.lens)].filter(Boolean).join(", ")
+  if (timeline) lines.push(timeline)
+  const tail = [nonEmpty(shot.camera?.lens), nonEmpty(shot.camera?.shot_type)].filter(Boolean).join(", ")
   const duration = durationOf(shot)
-  const hint = duration !== undefined ? `${duration}s` : ""
-  const lastLine = [tail, hint].filter(Boolean).join(". ")
-  if (lastLine) lines.push(lastLine)
+  const hint = [tail, duration !== undefined ? `${duration}s` : ""].filter(Boolean).join(". ")
+  if (hint) lines.push(hint)
   return lines.join("\n")
 }
 
-/** luma：摄影机运动自然语言短语打头，接主体/动作/环境/光线。 */
-function compileLuma(shot: ShotJson): string {
-  const movement = nonEmpty(shot.camera?.movement)
-  const subject = subjectPhrase(shot)
-  const segs: string[] = []
-  if (movement && subject) segs.push(`${movement} on ${subject}`)
-  else if (movement) segs.push(movement)
-  else if (subject) segs.push(subject)
-  const action = nonEmpty(shot.action)
-  if (action) segs.push(action)
-  const env = envPhrase(shot)
-  if (env) segs.push(env)
-  const lighting = nonEmpty(shot.environment?.lighting)
-  if (lighting) segs.push(lighting)
+/** luma：自然语言时间线 + 时长。 */
+function compileLuma(shot: ShotJson, timeline: string): string {
   const duration = durationOf(shot)
-  if (duration !== undefined) segs.push(`${duration}s`)
-  if (!segs.length) return ""
-  const text = segs.join(". ") + "."
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  return [timeline, duration !== undefined ? `${duration}s` : ""].filter(Boolean).join("\n")
 }
 
-/** seedance / adobe / 未知模型：SLCT 有序散文。 */
-function compileDefault(shot: ShotJson): string {
-  const segs: string[] = []
-  const styleHead = [nonEmpty(shot.style?.look), nonEmpty(shot.style?.mood)].filter(Boolean).join(", ")
-  if (styleHead) segs.push(styleHead)
-  const framing = [nonEmpty(shot.camera?.shot_type), nonEmpty(shot.camera?.angle)].filter(Boolean).join(" ")
-  if (framing) segs.push(framing)
-  const movement = nonEmpty(shot.camera?.movement)
-  if (movement) segs.push(movement)
-  const actionSentence = `${subjectPhrase(shot)} ${nonEmpty(shot.action) ?? ""}`.trim()
-  if (actionSentence) segs.push(actionSentence)
-  const env = envPhrase(shot)
-  if (env) segs.push(env)
-  const lighting = [nonEmpty(shot.environment?.lighting), nonEmpty(shot.style?.color_grading)].filter(Boolean).join(", ")
-  if (lighting) segs.push(lighting)
+/** seedance / adobe / 未知模型：时间线 + 时长尾。 */
+function compileDefault(shot: ShotJson, timeline: string): string {
   const duration = durationOf(shot)
-  if (duration !== undefined) segs.push(`${duration}s`)
-  if (!segs.length) return ""
-  return segs.join(". ") + "."
+  return [timeline, duration !== undefined ? `${duration}s` : ""].filter(Boolean).join("\n")
 }
 
-/** Compile using the existing model-family formats; never truncate motion or user action. */
-export function compileShotPrompt(shot: ShotJson, model: string): string {
+/**
+ * minimax/h3 官方三栏：首行参考图对齐指令（0 张不写）+ integrated_multimodal_description
+ * + overall_soundscape + non_diegetic_music。
+ */
+function compileMinimax(shot: ShotJson, timeline: string, referenceImages: number): string {
+  const lines: string[] = []
+  const duration = durationOf(shot)
+  if (referenceImages >= 2) {
+    const endSize = duration !== undefined ? (Number.isInteger(duration) ? `${duration}.00` : duration.toFixed(2)) : "5.00"
+    lines.push(`How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the ${endSize}-second mark of the target video.`)
+    lines.push("")
+  } else if (referenceImages === 1) {
+    lines.push("For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.")
+    lines.push("")
+  }
+  lines.push(`integrated_multimodal_description: [Shot 1] ${timeline}`)
+  const soundscape = nonEmpty(shot.audio?.soundscape)
+    ?? [nonEmpty(shot.audio?.ambience), ...cleanList(shot.audio?.sfx)].filter(Boolean).join(" ")
+  lines.push(`overall_soundscape: ${soundscape || "Natural ambience and physical action sounds consistent with the scene."}`)
+  lines.push(`non_diegetic_music: ${nonEmpty(shot.audio?.music) ?? "N/A"}`)
+  return lines.join("\n")
+}
+
+/**
+ * Compile using the existing model-family formats; never truncate motion or user action.
+ * options.referenceImages：参考图数量（minimax 首行对齐指令用；0/缺省不写首行）。
+ */
+export function compileShotPrompt(shot: ShotJson, model: string, options?: { referenceImages?: number }): string {
   const normalized = { ...shot, camera: normalizeShotCamera(shot as unknown as Record<string, unknown>, shot.output?.duration_seconds) }
+  const timeline = compileMotionTimeline(normalized)
+  const beats = Array.isArray(normalized.beats) ? normalized.beats : []
+  // 只有 camera 的旧兜底调用（给既有散文 prompt 追加运镜）：只回运镜自然句，不套模型族外壳。
+  const cameraOnly = !nonEmpty(normalized.subject) && !nonEmpty(normalized.action)
+    && !beats.some((beat) => Boolean(nonEmpty(beat?.action)))
+    && !nonEmpty(normalized.state_change?.from) && !nonEmpty(normalized.state_change?.to)
+  const referenceImages = Math.max(0, Math.floor(options?.referenceImages ?? 0))
   const m = String(model ?? "").toLowerCase()
-  let out = m.startsWith("veo") ? compileVeo(normalized)
-    : m.startsWith("kling") ? compileKling(normalized)
-    : m.startsWith("runway") ? compileRunway(normalized)
-    : m.startsWith("luma") ? compileLuma(normalized) : compileDefault(normalized)
-  const motion = cameraMotionText(normalized.camera)
-  if (motion && !m.startsWith("veo")) out += `\n${motion}`
+  let out: string
+  if (cameraOnly) out = timeline
+  else if (m.startsWith("minimax")) out = compileMinimax(normalized, timeline, referenceImages)
+  else if (m.startsWith("veo")) out = compileVeo(normalized, timeline)
+  else if (m.startsWith("kling")) out = compileKling(normalized, timeline)
+  else if (m.startsWith("runway")) out = compileRunway(normalized, timeline)
+  else if (m.startsWith("luma")) out = compileLuma(normalized, timeline)
+  else out = compileDefault(normalized, timeline)
   if (out.length > MAX_PROMPT_LENGTH) throw new Error(`编译后的镜头提示词共 ${out.length} 字，超过 ${MAX_PROMPT_LENGTH}；未截断、未提交，请缩短非必要描述`)
   return out
 }

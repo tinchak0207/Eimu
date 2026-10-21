@@ -272,7 +272,9 @@ export async function handleTaskBoard(req: Request, pathname: string): Promise<R
             // P2-4：null 与空字符串同义＝释放认领。
             patch.owner = null
           } else {
-            const owner = payload.owner.trim()
+            // 上方已把 owner 收窄到 string；strictNullChecks=false 下 unknown 不会按
+            // typeof 收窄，这里用 String() 取值（对 string 是恒等，不改行为）。
+            const owner = String(payload.owner).trim()
             if (!owner) {
               // 工具描述承诺「空字符串或 null 释放认领」，HTTP 必须与之一致。
               patch.owner = null

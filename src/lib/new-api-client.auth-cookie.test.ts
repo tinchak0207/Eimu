@@ -23,7 +23,7 @@ function installBrowserEnv(cookie: string, withLocalStorage: boolean): void {
     ? ls
     : { getItem: () => null, setItem: () => {}, removeItem: () => {} }) as Storage;
   globalThis.window = {
-    location: { href: "https://image.eimu.dev/?auth=github", pathname: "/", search: "?auth=github", hash: "" },
+    location: { href: "https://image.tinchak0207.xyz/?auth=github", pathname: "/", search: "?auth=github", hash: "" },
     history: { replaceState: (_state: unknown, _title: string, url: string) => { globalThis.window.location.href = url; } },
     localStorage: globalThis.localStorage,
   } as unknown as Window & typeof globalThis;

@@ -310,7 +310,7 @@ export async function POST(req: NextRequest) {
     if (referenceBuffers.length > 0) {
       const form = new FormData();
       form.append("prompt", styledPrompt);
-      form.append("provider", "image_eimu");
+      form.append("provider", "image_tinchak");
       form.append("modelId", modelId);
       form.append("qualityMode", qualityMode);
       form.append("aspectRatio", aspectRatio);
@@ -336,7 +336,7 @@ export async function POST(req: NextRequest) {
         headers: { ...forwardHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: styledPrompt,
-          provider: "image_eimu",
+          provider: "image_tinchak",
           modelId,
           qualityMode,
           aspectRatio,

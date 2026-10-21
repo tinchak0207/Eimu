@@ -37,7 +37,7 @@ test("buildMapayCheckoutFields creates signed checkout fields for a plan", () =>
       pid: "11976",
       key: "secret",
       gatewayUrl: "https://mzf.mapay.cc/xpay/epay/",
-      siteUrl: "https://image.eimu.dev",
+      siteUrl: "https://image.tinchak0207.xyz",
     },
     orderId: "IMG202606150002",
     paymentType: "alipay",
@@ -47,9 +47,9 @@ test("buildMapayCheckoutFields creates signed checkout fields for a plan", () =>
   assert.equal(fields.pid, "11976");
   assert.equal(fields.type, "alipay");
   assert.equal(fields.money, "9.90");
-  assert.equal(fields.notify_url, "https://image.eimu.dev/api/payments/mapay/notify");
-  assert.equal(fields.return_url, "https://image.eimu.dev/api/payments/mapay/return");
-  assert.equal(fields.name, "image.eimu.dev 梦芽 · 轻度尝鲜包 100金币");
+  assert.equal(fields.notify_url, "https://image.tinchak0207.xyz/api/payments/mapay/notify");
+  assert.equal(fields.return_url, "https://image.tinchak0207.xyz/api/payments/mapay/return");
+  assert.equal(fields.name, "image.tinchak0207.xyz 梦芽 · 轻度尝鲜包 100金币");
   assert.equal(fields.param, "starter");
   assert.equal(fields.sign_type, "MD5");
   assert.equal(verifyMapaySignature(fields, "secret"), true);

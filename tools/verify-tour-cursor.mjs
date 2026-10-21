@@ -8,7 +8,7 @@
 
 import { chromium } from "playwright-core";
 
-const EXECUTABLE = "/home/user/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome";
+const EXECUTABLE = "/home/lenovo/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome";
 const BASE = "http://localhost:3000";
 const failures = [];
 

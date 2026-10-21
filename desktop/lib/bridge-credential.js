@@ -9,7 +9,7 @@
 // 也就是「没设定的人行为与从前完全相同」。
 //
 // 档案：<userData>/device-bridge.json
-//   { "gatewayBaseUrl": "https://store.eimu.dev", "apiKey": "sk-biz-…" }
+//   { "gatewayBaseUrl": "https://store.tinchak0207.xyz", "apiKey": "sk-biz-…" }
 // 权限必须是 0600（只有本人可读）；违反即拒用并回报原因，不静默放行。
 
 const fs = require("node:fs");

@@ -277,7 +277,7 @@ export async function persistUpstreamImageBytes(
   if (buffer.byteLength === 0 || buffer.byteLength > HISTORY_MAX_IMAGE_BYTES) {
     throw new Error(`upstream image empty or over ${HISTORY_MAX_IMAGE_BYTES} bytes`);
   }
-  const blob = await put(imageBlobPath(userId, entryId, "image_eimu"), buffer, {
+  const blob = await put(imageBlobPath(userId, entryId, "image_tinchak"), buffer, {
     access: "public",
     contentType,
     allowOverwrite: true,

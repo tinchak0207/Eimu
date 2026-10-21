@@ -12,7 +12,7 @@ const {
   readCredentialStore,
 } = require("./bridge-credential.js");
 
-const GOOD = { gatewayBaseUrl: "https://store.eimu.dev", apiKey: "sk-biz-test-not-a-real-key" };
+const GOOD = { gatewayBaseUrl: "https://store.tinchak0207.xyz", apiKey: "sk-biz-test-not-a-real-key" };
 
 test("isHttpUrl: 只收 http(s)，拒 file/javascript/相对路径", () => {
   assert.equal(isHttpUrl("https://a.example"), true);

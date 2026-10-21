@@ -29,9 +29,9 @@ MIN_COV = float(os.environ.get("MEDIA_WF_MIN_COVERAGE", "0.15"))
 MIN_SESSIONS = int(os.environ.get("MEDIA_WF_MIN_SESSIONS", "5"))
 DB = os.environ.get(
     "OPENCODE_DB",
-    "/opt/eimu-harness/workspace/.local/share/opencode/opencode.db",
+    "/opt/agent-harness/workspace/.local/share/opencode/opencode.db",
 )
-LEDGER = os.environ.get("LEDGER", "/opt/eimu-harness/ledger.jsonl")
+LEDGER = os.environ.get("LEDGER", "/opt/agent-harness/ledger.jsonl")
 
 
 def main() -> int:

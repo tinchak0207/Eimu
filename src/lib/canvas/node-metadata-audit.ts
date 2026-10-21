@@ -52,7 +52,7 @@ export const AGENT_TRUNCATION_BUDGETS: readonly AgentTruncationBudget[] = [
  * 排除理由的分类（机器可读，供报告与裁定）：
  *   · `intentional`     —— 刻意排除，有明确设计理由（如 SVG 级重料）。
  *   · `suspected-gap`   —— 有**被读的消费端**，B 不透传＝回旧会话/换装置还原后功能退化。
- *                          这是待项目负责人裁定的真缺口（本档只登记，不改 runtime 语义）。
+ *                          这是待暴君裁定的真缺口（本档只登记，不改 runtime 语义）。
  *   · `dormant`         —— A 放行但全库查无 metadata 读者；透传缺一暂无可观察后果。
  */
 export type AgentExclusionVerdict = "intentional" | "suspected-gap" | "dormant";

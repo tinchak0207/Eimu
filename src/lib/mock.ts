@@ -58,7 +58,7 @@ const MOCK_IMAGE_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVQI12NgYGD4z8BQDwAEgAF/QualIQAAAABJRU5ErkJggg==";
 
 export function mockGenerateImage() {
-  return { provider: "image_eimu", image: MOCK_IMAGE_B64, imageUrl: null };
+  return { provider: "image_tinchak", image: MOCK_IMAGE_B64, imageUrl: null };
 }
 
 // ─── Logs ─────────────────────────────────────────────────────────────────────

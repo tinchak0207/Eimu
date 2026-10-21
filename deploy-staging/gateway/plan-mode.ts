@@ -175,11 +175,11 @@ function trimPlanCache(): void {
 }
 
 function workspaceRoot(): string {
-  return process.env.HARNESS_WORKSPACE?.trim() || "/opt/eimu-harness/workspace"
+  return process.env.HARNESS_WORKSPACE?.trim() || "/opt/agent-harness/workspace"
 }
 
 function stateRoot(): string {
-  return process.env.HARNESS_STATE?.trim() || "/opt/eimu-harness/state"
+  return process.env.HARNESS_STATE?.trim() || "/opt/agent-harness/state"
 }
 
 function isWithin(root: string, candidate: string): boolean {

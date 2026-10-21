@@ -18,7 +18,14 @@ import {
 import type { AgentSessionSummary } from "@/lib/agent-chat-client";
 
 const root = process.cwd();
-const surfaceSrc = readFileSync(join(root, "src/components/agent-chat/AgentChatSurface.tsx"), "utf8");
+// <1000 行重构：Surface 的纯 helper（含 isInsideHistorySurface）已拆到同目录子模组。
+const surfaceSrc = [
+  "AgentChatSurface.tsx",
+  "AgentChatSurface.helpers.ts",
+  "AgentChatSurface.session-actions.ts",
+]
+  .map((f) => readFileSync(join(root, `src/components/agent-chat/${f}`), "utf8"))
+  .join("\n");
 
 const mk = (id: string, overrides: Partial<AgentSessionSummary> = {}): AgentSessionSummary => ({
   session_id: id,
@@ -88,10 +95,16 @@ test("搜索过滤：大小写不敏感、命中降级时间标签、空白词�
 
 // ─────────────────────────── 渲染行为（renderToStaticMarkup）
 
+// 渲染断言用「相对今天」的夹具：列表显示的是相对日期（今天→HH:mm、跨年→YYYY/M/D），
+// 固定成 2026-10-03 会在日历翻页后把「今天」变成「10月3日」而误红（不是实现漂移）。
+const renderNow = new Date();
+const TODAY_15_00 = new Date(renderNow.getFullYear(), renderNow.getMonth(), renderNow.getDate(), 15, 0).getTime();
+const PREV_YEAR_DEC25 = new Date(renderNow.getFullYear() - 1, 11, 25, 12, 0).getTime();
+
 const RENDER_FIXTURE: AgentSessionSummary[] = [
-  mk("s1", { title: "海报构图三轮修" }),
-  mk("s2", { title: "视频分镜脚本" }),
-  mk("s3", { title: "旧的一年", last_activity_at: new Date(2025, 11, 25, 12, 0).getTime() }),
+  mk("s1", { title: "海报构图三轮修", last_activity_at: TODAY_15_00 }),
+  mk("s2", { title: "视频分镜脚本", last_activity_at: TODAY_15_00 }),
+  mk("s3", { title: "旧的一年", last_activity_at: PREV_YEAR_DEC25 }),
 ];
 
 const baseProps = {
@@ -123,9 +136,12 @@ test("当前会话高亮：aria-current 与浅灰圆角 class 只落在当前列
     assert.doesNotMatch(tag, /aria-current/);
     assert.doesNotMatch(tag, /bg-black\/\[0\.05\]/);
   }
-  // 相对日期真的上屏：今天的给 HH:mm，跨年的给 YYYY/M/D。
+  // 相对日期真的上屏：今天的给 HH:mm，跨年的给 YYYY/M/D（年份随运行日推导）。
   assert.match(markup, /15:00/);
-  assert.match(markup, /2025\/12\/25/);
+  assert.ok(
+    markup.includes(`${renderNow.getFullYear() - 1}/12/25`),
+    "跨年记录必须渲染成 YYYY/M/D",
+  );
   // 触控与行高契约：整列可点、min-height 52px、active 态。
   assert.match(rowTag(markup, "s1"), /min-h-\[52px\]/);
   assert.match(rowTag(markup, "s1"), /active:bg-black\/\[0\.07\]/);

@@ -5,7 +5,7 @@
 // 为什么用 electron-updater 而不是自写更新器：
 //   - AppImage 自我替换、NSIS 安装编排都有现成且经过检验的实作；
 //   - 产物托管在自家 nginx 的固定目录（`${build.publish.url}`，2026-10-05 前是
-//     Vercel Blob，该 store 被平台封锁后迁到 store.eimu.dev/downloads/desktop），
+//     Vercel Blob，该 store 被平台封锁后迁到 store.tinchak0207.xyz/downloads/desktop），
 //     透过 electron-builder 产出的 app-update.yml（由 build.publish 生成）取得 feed，
 //     不硬编 URL。
 //

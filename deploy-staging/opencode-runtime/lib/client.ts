@@ -8,11 +8,11 @@ import { isAbsolute, resolve as resolvePath } from "node:path"
 import { createHash } from "node:crypto"
 import { journalRegistration, pendingRegistrations, registeredTask, acquireSharedRateSlot, prepareSubmission, finishSubmission, getSubmission, contentHash, lockedProjectBudget, acceptTaskSubmission } from "./image-journal"
 
-// WP3：VPS 本机直连控面，避免绕 Vercel 边缘（image.eimu.dev 由 Vercel 边缘
-// 服务、middleware 再把 /v1/* 改写回 VPS 控面）。实测等价性：store.eimu.dev/
-// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.eimu.dev/v1
+// WP3：VPS 本机直连控面，避免绕 Vercel 边缘（image.tinchak0207.xyz 由 Vercel 边缘
+// 服务、middleware 再把 /v1/* 改写回 VPS 控面）。实测等价性：store.tinchak0207.xyz/
+// image-control/api/v1 的 /openapi.json body sha256 与公网域名 image.tinchak0207.xyz/v1
 // 完全相同（同一后端），但延时约 14ms vs 88~113ms。语义不变，只是换快路径。
-export const API_BASE = process.env.PLATFORM_API_BASE || "https://store.eimu.dev/image-control/api/v1"
+export const API_BASE = process.env.PLATFORM_API_BASE || "https://store.tinchak0207.xyz/image-control/api/v1"
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 const POLLER = process.env.POLLER_URL || "http://127.0.0.1:8082/"
 
@@ -251,10 +251,10 @@ async function acquireRateSlot(key: string, signal?: AbortSignal): Promise<void>
  * 而控制面那棵树是落后的分叉（没有角色卡路由）；/api/biz/* 不在改写清单内，
  * 由站点本体服务（有 Blob、有完整五值卡模型）。角色卡与 tag 解析走这里。
  */
-// TODO（WP3 待验证）：本包不改 SITE_BASE——/api/biz/* 是否也在 store.eimu.dev/
+// TODO（WP3 待验证）：本包不改 SITE_BASE——/api/biz/* 是否也在 store.tinchak0207.xyz/
 // image-control 快路径上存在尚未验证（控面是落后分叉，可能没有 /api/biz/* 路由），
 // 保持走公网本站 origin；验证后再决定是否切换。
-export const SITE_BASE = "https://image.eimu.dev"
+export const SITE_BASE = "https://image.tinchak0207.xyz"
 
 /**
  * 签章 + 出网的共用核心：key 解析、限流、header 组装只写一次。
@@ -781,13 +781,13 @@ export async function uploadImageBytes(
 
 /**
  * 读本地图片来源（chat 附件绝对路径 / workspace 相对路径）→ 位元组 + mime。
- * 路径解析：原样 → process.cwd() → /opt/eimu-harness/workspace 依序命中。
+ * 路径解析：原样 → process.cwd() → /opt/agent-harness/workspace 依序命中。
  * 抛错带 .code 供 classifyError 诚实归因。
  */
 async function readLocalImageBytes(src: string,sessionID:string): Promise<{ buffer: Buffer; mimeType: string; absPath: string }> {
   let abs = src
   if (!isAbsolute(abs)) {
-    const hit = [process.cwd(), "/opt/eimu-harness/workspace"]
+    const hit = [process.cwd(), "/opt/agent-harness/workspace"]
       .map((base) => resolvePath(base, abs))
       .find((cand) => existsSync(cand))
     abs = hit || resolvePath(process.cwd(), abs)

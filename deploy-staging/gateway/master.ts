@@ -20,7 +20,7 @@ import { computeExportFingerprint, isForbiddenMaterialUrl } from "./material-fin
 
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
 
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/eimu-harness/workspace"
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 const TMP_DIR = path.join(WORKSPACE_DIR, "tmp")
 
 const shq = (v: string) => `'${String(v).replace(/'/g, "'\\''")}'`

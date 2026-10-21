@@ -15,7 +15,7 @@
 ## 三步启动（已完成，留档配方）
 
 ```bash
-# 0. token（已就位 ~/.modal.toml，帐号 verenowo；CLI=/home/user/.venvs/modal/bin/modal）
+# 0. token（已就位 ~/.modal.toml，帐号 verenowo；CLI=/home/lenovo/.venvs/modal/bin/modal）
 #    若重建：pip install modal && modal setup
 
 # 1. HMAC secret（值即 worker 的 BLENDER_MODAL_HMAC_KEY）

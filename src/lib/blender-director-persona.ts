@@ -20,9 +20,9 @@
  *
  * 为什么是「契约档」而非运行时：persona 的运行时真源（模型绑定
  * agent-models.json bindings、subagent 派遣 gateway/subagent.ts、agent prompt
- * / AGENTS.md）都在 VPS /opt/eimu-harness（记忆 agent-persona-bound-model-
+ * / AGENTS.md）都在 VPS /opt/agent-harness（记忆 agent-persona-bound-model-
  * reasoning、subagent-ui-menu-gateway-reasoning-filter），本地 repo 无 gateway
- * 真源可改（gateway 派遣实现是 08-31 的镜像，非本档活码）。本档钉死契约
+ * 真源可改（.tmp-home/subagent.ts 是 08-31 派遣用镜像非活码）。本档钉死契约
  * 四要素并被委托单/回传两端 import，Astra 真模型上线日只换
  * VPS agent-models.json 的 bindings.persona.director 一个 id。
  *
@@ -260,7 +260,7 @@ export const DIRECTOR_SELF_CHECK_SECTION = `## 交付前自检（硬流程，跳
 
 渲染完成 ≠ 交付完成。以下四步一步不许跳，违反任何一步即为事故，不是建议。（镜面立方体事故：宣称「metallic 1.0 镜面反光扫过、全部完成」，实际抽帧是哑光深灰＋构图裁顶——话术编出的细节救不了画面。）
 
-1. **亲眼看，才许开口。** 渲染完成后必须抽 ≥2 帧或读 stills 逐张亲眼看（用现场可用的读图通路）。没有读图通路时必须明说「无法自检，需项目负责人终验」，禁止假装看过，禁止拿 stdout／日志脑补画面。
+1. **亲眼看，才许开口。** 渲染完成后必须抽 ≥2 帧或读 stills 逐张亲眼看（用现场可用的读图通路）。没有读图通路时必须明说「无法自检，需暴君终验」，禁止假装看过，禁止拿 stdout／日志脑补画面。
 2. **逐项对照委托单。** 材质关键词（镜面／金属／哑光／透明…）在帧里真的可见吗？主体完整入框吗（无裁顶裁边）？机位构图与委托一致吗？
 3. **不符就如实报。** 回覆写「自检未过：X 项不符（逐项列出）」：可修 → 修后重渲、重过自检；不可修 → 明说未达委托单，禁止包装。「全部完成」只在自检全过后才许出现。
 4. **自检结果写进回覆。** 末行附「自检：材质✓ 构图✓ 机位✓」（不符项标 ✗ 并写死因），与交付物摘要行的 qc 签名并列——只有 qc 没有自检行 = 视同未自检 = 未交付。` as const;

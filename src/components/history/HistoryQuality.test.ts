@@ -129,8 +129,11 @@ test("the header count matches what the grid actually renders below it", () => {
   // history.total is the server's count for the current query and excludes
   // locally-merged cache-only entries; history.entries is what HistoryGrid
   // actually renders. The header count must describe what's on screen.
-  assert.match(client, /筛选出 \$\{history\.entries\.length\} 条/);
-  assert.match(client, /共 \$\{history\.entries\.length\} 条/);
+  // 2026-09-27（6c11a3bb）：项目维度改服务端过滤后，页面多了 displayEntries
+  // ＝网格实际渲染的集合（未选项目时逐位元等于 history.entries）。计数仍必须
+  // 描述屏幕上真正渲染的条数。
+  assert.match(client, /筛选出 \$\{displayEntries\.length\} 条/);
+  assert.match(client, /共 \$\{displayEntries\.length\} 条/);
   assert.doesNotMatch(client, /total=\{history\.total\}/);
 });
 

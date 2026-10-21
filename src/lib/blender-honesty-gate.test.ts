@@ -55,11 +55,11 @@ test("ON：prompt 含自检节标题与『亲眼看』硬指令（抽 ≥2 帧/s
   assert.ok(r.prompt.includes("stills 逐张"), "stills 逐张通路必须在 prompt");
 });
 
-test("ON：无读图通路必须明说『无法自检，需项目负责人终验』，禁止假装看过", async () => {
+test("ON：无读图通路必须明说『无法自检，需暴君终验』，禁止假装看过", async () => {
   const r = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
   assert.equal(r.ok, true);
   if (!r.ok) return;
-  assert.ok(r.prompt.includes("无法自检，需项目负责人终验"));
+  assert.ok(r.prompt.includes("无法自检，需暴君终验"));
   assert.ok(r.prompt.includes("禁止假装看过"));
 });
 
@@ -155,7 +155,7 @@ test("自检节导出常量非空且含全部关键句（防掏空：注入过�
     "交付前自检（硬流程，跳过=事故）",
     "亲眼看",
     "≥2 帧",
-    "无法自检，需项目负责人终验",
+    "无法自检，需暴君终验",
     "禁止假装看过",
     "材质",
     "完整入框",

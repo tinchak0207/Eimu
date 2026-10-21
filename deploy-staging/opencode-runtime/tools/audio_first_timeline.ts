@@ -10,8 +10,8 @@ import { ok, fail, resolveKey } from "../lib/client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 // 静态 ffprobe（johnvansickle build）：URL 直读会段错误，必须先下载到本地档再探。
-const FFPROBE = "/opt/eimu-harness/bin/ffprobe"
-const RUN_DIR = "/opt/eimu-harness/workspace/.run"
+const FFPROBE = "/opt/agent-harness/bin/ffprobe"
+const RUN_DIR = "/opt/agent-harness/workspace/.run"
 
 interface Line {
   role: string
@@ -74,7 +74,7 @@ function probeDurationSec(file: string, signal?: AbortSignal): Promise<number | 
       }
     }
     const child = spawn(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file], {
-      env: { PATH: "/opt/eimu-harness/bin:/usr/local/bin:/usr/bin:/bin", HOME: "/opt/eimu-harness/workspace", LANG: "C.UTF-8" },
+      env: { PATH: "/opt/agent-harness/bin:/usr/local/bin:/usr/bin:/bin", HOME: "/opt/agent-harness/workspace", LANG: "C.UTF-8" },
       stdio: ["ignore", "pipe", "pipe"],
     })
     let out = ""

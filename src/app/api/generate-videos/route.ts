@@ -334,7 +334,7 @@ export async function POST(req: NextRequest) {
         delivered = true;
         after(() => emitEvent("delivered", endpoint.label, false, result.videoUrl ? [result.videoUrl] : undefined));
         return NextResponse.json({
-          provider: "image_eimu",
+          provider: "image_tinchak",
           mediaType: "video",
           videoUrl: result.videoUrl,
           endpointLabel: publicEndpointLabel(endpoint.label),

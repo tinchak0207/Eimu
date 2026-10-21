@@ -17,7 +17,7 @@
  *      process_group(0)，树杀走 platform.ts 同款 pkill -P 公式）。
  *   4. get_home_dir / homeDir → process.env.HOME（vendor dirs::home_dir）。
  *   5. ensure_workspace → env KUNPENG_WORKSPACE 可覆写，默认
- *      /opt/eimu-harness/workspace/kunpeng（vendor 为 ~/.kunpeng/workspace/YYYY-MM-DD/
+ *      /opt/agent-harness/workspace/kunpeng（vendor 为 ~/.kunpeng/workspace/YYYY-MM-DD/
  *      日期分桶 + images/code/docs/videos 四子目录，harness 场景不做日期分桶）。
  *   6. createDir / exists / removeDir → node:fs/promises（@tauri-apps/api/fs 同签名子集）。
  *   7. platform 替身：userAgentPlatform 固定 'linux'（vendor 走 navigator.userAgent）。
@@ -127,9 +127,9 @@ export async function homeDir(): Promise<string> {
 /**
  * 对齐 commands.rs ensure_workspace（白名单改写）：vendor 建
  * ~/.kunpeng/workspace/YYYY-MM-DD/ + 四子目录；harness 固定工作区
- * /opt/eimu-harness/workspace/kunpeng，env KUNPENG_WORKSPACE 可覆写。
+ * /opt/agent-harness/workspace/kunpeng，env KUNPENG_WORKSPACE 可覆写。
  */
-const KUNPENG_WORKSPACE_DEFAULT = '/opt/eimu-harness/workspace/kunpeng';
+const KUNPENG_WORKSPACE_DEFAULT = '/opt/agent-harness/workspace/kunpeng';
 
 async function ensureWorkspace(): Promise<string> {
   const workspace = process.env.KUNPENG_WORKSPACE || KUNPENG_WORKSPACE_DEFAULT;

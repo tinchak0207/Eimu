@@ -210,7 +210,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k", "2k", "4k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    // 2026-08-29 价目表同源（项目负责人裁定）：PixAI 全系图片 0.001 币/张 → 0.01 credit。
+    // 2026-08-29 价目表同源（暴君钦定）：PixAI 全系图片 0.001 币/张 → 0.01 credit。
     // 旧值 0.001 credit=0.0001 币，是折算时把「币」当「credit」的 10 倍错价。
     imageCredits: { "1k": 0.01, "2k": 0.01, "4k": 0.01 },
     referenceImages: true,
@@ -235,7 +235,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     //   （即 4K 校准前不外露）。真源＝generation-core/upscale-tier.ts。
     upscaleTiers: ["1k", "2k", "4k"],
   },
-  // 模板生成的定价键。2026-08-29 价目表同源（项目负责人裁定）：模板 0.001 币/张 → 0.01 credit，
+  // 模板生成的定价键。2026-08-29 价目表同源（暴君钦定）：模板 0.001 币/张 → 0.01 credit，
   // 与 gateway workflow 估价的 unit_price_coins=0.001 对接；/v1/template-generations 扣费走
   // generationCoins(pixai-template) 同源。旧值 50/80/160 credits（5/8/16 币）为错价。
   [PIXAI_TEMPLATE_MODEL_ID]: {
@@ -670,7 +670,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     // 生成式后期（P1-3／对称差 D22）：同 2.5-480p，续片＋局部改片。
     videoGenerationTypes: ["generate", "extend_video", "edit_video"],
   },
-  // drama 渠道专属 30 秒固定档。上游不支持音频生成，勿开 supportsAudio。
+  // drama 渠道专属 30 秒固定档（上游 sd25-30s，按条 6 RMB；94 = 9.4 币/秒 × 10，
+  // 30s 整条 282 币 = 成本 6 RMB × 2.35 利润率）。上游不支持音频生成，勿开 supportsAudio。
   [SEEDANCE_25_30S_MODEL_ID]: {
     id: SEEDANCE_25_30S_MODEL_ID,
     displayName: "Seedance 2.5 30s（固定 30 秒）",
@@ -742,17 +743,20 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     popularity: 90,
     vendor: "MiniMax",
     aspectRatios: RUNWAY_VIDEO_RATIOS,
-    resolutions: ["720p", "1080p"],
+    resolutions: ["720p", "1080p", "2k", "4k"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
     durations: MINIMAX_H3_DURATIONS,
     defaultDuration: 5,
-    // 2026-08-28 价目表同源：720P=5 币/秒、1080P=10 币/秒（admin 覆写层原值折入，
-    // 旧值 25/40 credits=2.5/4 币/秒为错价）。
-    videoCreditsPerSecond: { "720p": 50, "1080p": 100 },
+    // 高清链路＝H3 768P 出片 + DMC auto-hd 超分（2026-10-20 实测四档全部出片）。
+    // 定价依 2026-10-18 高清链路设计：720p 5 币/秒、1080p 7 币/秒、2k 10 币/秒、
+    // 4k 12 币/秒（catalog 用 credits＝币×10）。1080p 由旧值 10 币/秒降为 7 币/秒：
+    // 2026-10-20 实测上游分档成本＝H3 ¥0.05/s ＋ auto-hd 1080p ≈¥0.015/s ⇒ ¥0.065/s
+    // （1 币＝¥0.05），旧价超收。2k/4k 档已由暴君 2026-10-20 明令放开。
+    videoCreditsPerSecond: { "720p": 50, "1080p": 70, "2k": 100, "4k": 120 },
     referenceImages: true,
   },
-  // agnes 免费视频档（2026-10-13 项目负责人指定为**免费兜底**）：平台自有免费额度渠道，
+  // agnes 免费视频档（2026-10-13 暴君指定为**免费兜底**）：平台自有免费额度渠道，
   // 上游成本 ¥0 ⇒ videoCreditsPerSecond 全 0（generationCoins 下限 0.00001 币/秒，
   // 对使用者近乎免费）。上游无公开规格：分辨率/秒数按免费档真单探针收窄（仅 720P、5s
   // 出过 200 queued；480p/10s 过关校验未出样）。**不支援参考图**——上游严格拒未知栏位、

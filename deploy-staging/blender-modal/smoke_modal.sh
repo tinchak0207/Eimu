@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # smoke_modal.sh — blender-modal POC 真云三连 smoke（研究片U 唯一未证项=Eevee EGL serverless，一次判生死）
 #
-# 用法（项目负责人一行）：
-#   cd /home/user/Desktop/image-app/deploy-staging/blender-modal && ./smoke_modal.sh
+# 用法（暴君一行）：
+#   cd /home/lenovo/Desktop/image-app/deploy-staging/blender-modal && ./smoke_modal.sh
 # 可选环境变数：
 #   BLENDER_MODAL_GPU=T4        # T4 起步（几分钱纪律）；Eevee EGL 败则 L4 重判
 #   SKIP_WEB=1                  # 跳过第 4 步（web endpoint/worker 链路验证）
@@ -17,7 +17,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-MODAL="${MODAL:-/home/user/.venvs/modal/bin/modal}"
+MODAL="${MODAL:-/home/lenovo/.venvs/modal/bin/modal}"
 GPU="${BLENDER_MODAL_GPU:-T4}"
 export BLENDER_MODAL_GPU="$GPU"
 mkdir -p out; chmod 700 out 2>/dev/null
@@ -75,7 +75,7 @@ fi
 
 echo "======== [2/4] 单帧 Cycles（后备确认） ========"
 if [ "$EEVEE_OK" = "1" ]; then
-  echo "Eevee 已活，按项目负责人纪律跳过 Cycles 后备（省 GPU 秒）；需要时: modal run modal_app.py::demo --engine cycles --mode still"
+  echo "Eevee 已活，按暴君纪律跳过 Cycles 后备（省 GPU 秒）；需要时: modal run modal_app.py::demo --engine cycles --mode still"
   S2=0
 else
   t0=$(date +%s)

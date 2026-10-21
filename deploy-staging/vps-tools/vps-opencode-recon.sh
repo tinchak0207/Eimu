@@ -10,11 +10,11 @@ set -euo pipefail
 
 # 连线可覆写（预设＝原 22443 直连，行为逐位不变）：22443 连续 2-3 次即被 ISP RST，
 # 多次连线的发布流程改走 SSH-over-443 隧道（127.0.0.1:22222）更稳。
-SSH_KEY="${VPS_SSH_KEY:-/home/user/.ssh/id_ed25519}"
+SSH_KEY="${VPS_SSH_KEY:-/home/lenovo/.ssh/new.pem}"
 SSH_PORT="${VPS_SSH_PORT:-22443}"
-SSH_TARGET="${VPS_SSH_TARGET:-ubuntu@YOUR_SERVER_IP}"
+SSH_TARGET="${VPS_SSH_TARGET:-ubuntu@43.172.85.76}"
 SSH_CMD=(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET")
-VPS_DIR=/opt/eimu-harness/workspace/.opencode
+VPS_DIR=/opt/agent-harness/workspace/.opencode
 LOCAL_DIR="$(cd "$(dirname "$0")/../opencode-runtime" && pwd)"
 TMP_DIR=$(mktemp -d /tmp/vps-oc-recon.XXXXXX)
 WORKTREE=""

@@ -567,8 +567,6 @@ function createBridgeController(deps = {}) {
   let userMode = normalizeMode(readMode());
 
   const currentRoots = () => Array.from(authorizedRoots);
-  // full 模式以家目录为隐式范围，空授权根不构成「无根可服务」。
-  const rootsUnavailable = () => currentRoots().length === 0 && userMode !== "full";
 
   // 冻结契约的 state 只有六值（与前端 BridgeState 一致）；客户端内部的
   // "reconnecting" 一律正规化为 "connecting"，未知值 fail-closed 成 "error"。
@@ -588,8 +586,8 @@ function createBridgeController(deps = {}) {
   /** 冻结契约的状态形状：{ enabled, state, roots, deviceId, mode, lastError? }。 */
   function snapshot() {
     if (!userEnabled) return { enabled: false, state: "off", roots: currentRoots(), deviceId: null, mode: userMode, ...(modeSyncError ? { lastError: modeSyncError } : {}) };
-    // 已开启意图但尚无授权根（且非 full）：不启动，状态一律 no_authorized_roots（不误报客户端状态）。
-    if (rootsUnavailable()) {
+    // 已开启意图但尚无授权根：不启动，状态一律 no_authorized_roots（不误报客户端状态）。
+    if (currentRoots().length === 0) {
       return { enabled: true, state: "no_authorized_roots", roots: [], deviceId: null, mode: userMode, ...(modeSyncError ? { lastError: modeSyncError } : {}) };
     }
     const cs = getClientState() || {};
@@ -686,7 +684,7 @@ function createBridgeController(deps = {}) {
       if (mode === "off") return applyDisable();
       userEnabled = true;
       writeEnabled(true);
-      if (rootsUnavailable()) return emit(snapshot());
+      if (currentRoots().length === 0) return emit(snapshot());
       return emit(await startNow());
     });
     modeUpdate = update.then(() => {}, () => {});
@@ -704,7 +702,7 @@ function createBridgeController(deps = {}) {
         modeSyncError = "权限模式未同步，请检查登录和网络后重试；云端授权尚未确认更新。";
         return emit(snapshot());
       }
-      if (!userEnabled || userMode === "off" || rootsUnavailable()) return emit(snapshot());
+      if (!userEnabled || userMode === "off" || currentRoots().length === 0) return emit(snapshot());
       return emit(await startNow());
     });
     modeUpdate = update.then(() => {}, () => {});
@@ -720,7 +718,7 @@ function createBridgeController(deps = {}) {
       // 使用者已同意。先记意图（持久化），无授权根时**不启动、不自动授权任何路径**。
       userEnabled = true;
       writeEnabled(true);
-      if (rootsUnavailable()) {
+      if (currentRoots().length === 0) {
         // 前端据此引导使用者先去 pickFiles 挑资料夹；授权后 onRootsAuthorized 会自动接上。
         return emit(snapshot());
       }
@@ -755,7 +753,7 @@ function createBridgeController(deps = {}) {
      * 未启用＝不动作（等使用者按 enable 时自然带上当时的 roots）。
      */
     async onRootsAuthorized() {
-      if (!userEnabled || rootsUnavailable()) return snapshot();
+      if (!userEnabled || currentRoots().length === 0) return snapshot();
       return emit(await startNow());
     },
 

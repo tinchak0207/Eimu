@@ -319,7 +319,7 @@ test("exportShotReviewZip：上游永不回应 → 逾时落终态（该张 skip
       exportShotReviewZip(
         [
           { id: "n1", shotNumber: "S01-01", sceneName: "", visualDescription: "", dialogue: "", prompt: "", imageUrl: PNG_1PX },
-          { id: "n2", shotNumber: "S01-02", sceneName: "", visualDescription: "", dialogue: "", prompt: "", imageUrl: "https://store.eimu.dev/never.png" },
+          { id: "n2", shotNumber: "S01-02", sceneName: "", visualDescription: "", dialogue: "", prompt: "", imageUrl: "https://store.tinchak0207.xyz/never.png" },
         ],
         new Date("2026-09-24T00:00:00.000Z"),
         50,

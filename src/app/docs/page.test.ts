@@ -88,7 +88,7 @@ test("billing 分篇：充值三步与四档方案、失败退回逐字", () => 
   assert.match(billing, /失败自动退回/, "缺失败退回口径");
 });
 
-test("mcp 分篇：接入干货与 PDF 直连保留", () => {
+test("mcp 分篇：接入干货保留、作品报告 PDF 死档已清理", () => {
   const mcp = read("src/app/docs/mcp/page.tsx");
 
   assert.match(mcp, /IMAGE_STUDIO_BIZ_KEY/, "必须保留 MCP 密钥配置");
@@ -96,7 +96,16 @@ test("mcp 分篇：接入干货与 PDF 直连保留", () => {
   assert.match(mcp, /generate_image/, "必须列出图像工具");
   assert.match(mcp, /generate_video/, "必须列出视频工具");
   assert.match(mcp, /npm run build/, "必须保留构建步骤");
-  assert.match(mcp, /\/docs\/eimu-competition-report\.pdf/, "保留作品报告 PDF 直连");
+  // 2026-10-06 5e46b701：作品报告 PDF（public/docs/eimu-competition-report.pdf）
+  // 与 mcp 页的链接一并刻意删除（该 commit 的目标是让分支与生产实况一致），
+  // 故断言改为「不得回链死档」＋「保留页尾现有对外入口」。
+  assert.doesNotMatch(
+    mcp,
+    /\/docs\/eimu-competition-report\.pdf/,
+    "作品报告 PDF 已删除，页面不得再链死档",
+  );
+  assert.match(mcp, /https:\/\/github\.com\/deepseek-ai\/deepseek-harness/, "必须保留 GitHub 入口");
+  assert.match(mcp, /href="\/status"/, "必须保留状态页入口");
 });
 
 test("api 分篇：客户端动态渲染与认证口径齐全（metadata 由服务端 page 导出）", () => {

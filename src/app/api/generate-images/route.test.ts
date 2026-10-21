@@ -270,7 +270,7 @@ test("generate image route hands back a blob url rather than inlining megabytes 
   assert.match(source, /image: responseImage/);
   assert.match(source, /imageUrl: responseImageUrl/);
   // Upload has to happen before the response is built, otherwise the body still carries base64.
-  assert.ok(source.indexOf("persistGeneratedImage(") < source.lastIndexOf("provider: \"image_eimu\","));
+  assert.ok(source.indexOf("persistGeneratedImage(") < source.lastIndexOf("provider: \"image_tinchak\","));
 });
 
 test("every routing exit leaves an admin-visible telemetry event", () => {

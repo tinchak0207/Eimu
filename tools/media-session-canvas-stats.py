@@ -8,7 +8,7 @@ now = datetime.now(CST)
 cut7_ms = int((now - timedelta(days=7)).timestamp() * 1000)
 cut14_ms = int((now - timedelta(days=14)).timestamp() * 1000)
 
-DB = "/opt/eimu-harness/workspace/.local/share/opencode/opencode.db"
+DB = "/opt/agent-harness/workspace/.local/share/opencode/opencode.db"
 uri = f"file:{DB}?mode=ro"
 con = sqlite3.connect(uri, uri=True, timeout=120)
 con.execute("PRAGMA temp_store=MEMORY")
@@ -55,7 +55,7 @@ media_by_kind_14 = Counter()
 media_by_kind_7 = Counter()
 workflow_ledger_14 = 0
 workflow_ledger_7 = 0
-with open("/opt/eimu-harness/ledger.jsonl") as f:
+with open("/opt/agent-harness/ledger.jsonl") as f:
     for line in f:
         try:
             o = json.loads(line)

@@ -1,7 +1,7 @@
 // /api/agent/biz/[...path] —— B 端密钥代理：把插件（emu_wish 等）的 agent
 // 网关请求并入调用者的「用户派生 key」空间。
 //
-// 背景：插件直连 store.eimu.dev/agent/v1/* 时带的是 B 端 key 本身，
+// 背景：插件直连 store.tinchak0207.xyz/agent/v1/* 时带的是 B 端 key 本身，
 // 网关 getOwnedSession 按 key 字符串隔离 —— wish 会话与用户在网页端 AI 助理
 // （getOrCreateAgentKeyForUser 派生的专属 key）是两个互不可见的隔离空间。
 // 这条路由做 key 换发：B 端密钥 → userId → 派生 key → 网关。零网关改动。

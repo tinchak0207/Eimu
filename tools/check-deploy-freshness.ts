@@ -9,7 +9,7 @@
  * Read-only. Never prints the Vercel token.
  *
  * Usage:
- *   XDG_DATA_HOME=/home/user/Desktop/image-app/.vercel-cli-data \
+ *   XDG_DATA_HOME=/home/lenovo/Desktop/image-app/.vercel-cli-data \
  *     npx tsx tools/check-deploy-freshness.ts
  *   ... --alias eimu.dev          # check one alias only
  *   ... --json                    # machine-readable result
@@ -79,7 +79,7 @@ function readToken(): string {
   }
   fail(
     "no Vercel token found. Point XDG_DATA_HOME at the repo's .vercel-cli-data, " +
-      "e.g. XDG_DATA_HOME=/home/user/Desktop/image-app/.vercel-cli-data",
+      "e.g. XDG_DATA_HOME=/home/lenovo/Desktop/image-app/.vercel-cli-data",
   );
 }
 

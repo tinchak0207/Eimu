@@ -355,7 +355,7 @@ function createWindow() {
     show: false,
     autoHideMenuBar: true,
     // 标题列交给页面自己的页首（Chrome 式 CSD）。KDE 预设深色标题列与
-    // 浅色页面冲突且吃掉一整条高度（2026-09-17 项目负责人回报「其他 app 不这样」）。
+    // 浅色页面冲突且吃掉一整条高度（2026-09-17 暴君回报「其他 app 不这样」）。
     // 0.3.0：移除 titleBarOverlay —— 原生 overlay 按钮的形状由系统决定、
     // 无法做到「看得出精心设计、完美融入 Eimu」。改为纯 frameless，三颗
     // 视窗控制钮由远端页面自绘，经 window.eimuShell → window-controls.js 操作。

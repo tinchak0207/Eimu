@@ -31,7 +31,7 @@ type TokenResult = {
 };
 
 // [riskclose 2026-09-27] TLS channel: nginx store vhost rewrites /newapi/* -> new-api.
-// The old bare-IP plaintext gateway (http://203.0.113.10) had its /api management
+// The old bare-IP plaintext gateway (http://43.172.85.76) had its /api management
 // surface closed with 444; only this TLS path is reachable by the Vercel site.
 // [riskclose 2026-10-04] 生产环境**必须**显式配置 GATEWAY_BASE_URL：旧实现在 env 缺失时
 // 静默回退到硬编码默认值——钱路上任何「env ?? 硬编码」的静默回退都是定时炸弹

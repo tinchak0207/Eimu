@@ -117,7 +117,7 @@ function runGates(shots: Shot[], lockedCharacters: Set<string>, lockedScenes: Se
     gate("shot_identity", every((s) => Boolean(s.shotId)) && uniqueIds.size === shots.length, `镜号唯一且非空（${shots.length} 镜）`),
     gate("shot_order", ordered, ordered ? "镜号连续 1..N" : `镜号序列不连续：${shots.map((s) => s.order ?? "?").join("→")}`),
     gate("scene_binding", every((s) => Boolean(s.sceneId)), every((s) => Boolean(s.sceneId)) ? "每镜绑定场次" : `缺 sceneId：${bad((s) => Boolean(s.sceneId)).join(", ")}`),
-    // 2026-09-20 项目负责人裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
+    // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
     // 2026-10-12：默认影片模型改 minimax-h3（单镜 5-15s、推荐 15s）⇒ 下限 10s 放宽为 5s；上限仍 30s。
     gate("duration_bounds", every(inBounds), inBounds_ok(bad(inBounds), shots)),
     // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。

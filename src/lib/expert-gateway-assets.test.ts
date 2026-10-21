@@ -204,7 +204,7 @@ test("(b) 平台独立性：cwd 切到空 tmp 目录，beast ON 各组装入口�
     if (!frame.ok) return;
     assert.equal(frame.injected, true);
     assert.ok(frame.frame.includes("BASE_PROMPT"), "frame 必须含 basePrompt 原文");
-    assert.ok(frame.frame.includes("你是 Orchestrator（导演）"), "frame 必须含手册正文（非空资产）");
+    assert.ok(frame.frame.includes("定位目标、理解用户材料、写任务书"), "frame 必须含手册正文（非空资产）");
 
     // Blender 导演 persona（fs override 未给 ⇒ 走 bundle）。
     const blender = await composeDirectorDelegationPrompt(BLENDER_INPUT, { beast_mode: true });
@@ -233,8 +233,8 @@ test("(c) bundle 空白守卫：空／全空白 → 抛「bundled 镜像为空�
   assert.equal(assertBundledAssetNonEmpty("x", "expert_constitution"), "x");
   assert.ok(EXPERT_CONSTITUTION_TEXT.trim().length > 0, "宪法 bundle 不得为空");
   assert.ok(ORCHESTRATOR_DISPATCH_PLAYBOOK_TEXT.trim().length > 0, "手册 bundle 不得为空");
-  assert.ok(loadBundledExpertConstitution().includes("诚实铁律"), "宪法 bundle 必须含特征句");
-  assert.ok(loadBundledOrchestratorPlaybook().includes("你是 Orchestrator（导演）"), "手册 bundle 必须含特征句");
+  assert.ok(loadBundledExpertConstitution().includes("# Expert 工作契约"), "宪法 bundle 必须含特征句");
+  assert.ok(loadBundledOrchestratorPlaybook().includes("# Orchestrator 派遣手册"), "手册 bundle 必须含特征句");
 });
 
 const CONSTITUTION_PATH_ANCHOR = "deploy-staging/expert-gateway/expert-constitution.md";

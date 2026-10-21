@@ -8,11 +8,9 @@
 // 安全边界（与 local-worker.js 同语义，单一授权来源）：
 //  1. 工具白名单＝list_dir/read_file/grep/stat（无写/删/执行）。
 //  2. 路径先 realpath 解 symlink，再过 policy.isSensitivePath（denylist，扫所有路径段）。
-//  3. allowlist **必填**（mode !== "full"）：授权根为空集 ⇒ 一律拒（no_authorized_roots）。
-//     授权来源与 local-worker.js 是**同一份** authorizedRoots（使用者由 pickFiles 显式挑选
-//     的根），不另造第二套授权机制。mode === "full" 时以家目录为隐式范围，allowlist 不再
-//     是唯一闸，改由第二道防线的 MODE_FULL 放行家目录内、家目录外回 needs_authorization；
-//     硬 denylist／sensitive 仍在最前，不因 full 放宽。
+//  3. allowlist **必填**：授权根为空集 ⇒ 一律拒（no_authorized_roots）。授权来源与
+//     local-worker.js 是**同一份** authorizedRoots（使用者由 pickFiles 显式挑选的根），
+//     不另造第二套授权机制。空集**不得**退回「只验 denylist」。
 //  4. 拒绝档案系统根路径（path_is_root），避免整盘扫描。
 //  5. grep 逐档先 stat 再决定是否读取；单档上限 = min(云端下发 max_file_bytes,
 //     本机 MAX_GREP_FILE_BYTES)，超过者**跳过并计数**（避免整档入记忆体）。
@@ -205,8 +203,7 @@ function createBridgeExecutor(options = {}) {
 
   /**
    * 检查路径已授权且非敏感；回传其 realpath。
-   * 顺序：bad_path → 根拒绝 → policy denylist
-   *       → allowlist（仅 mode !== "full"；空集＝全拒）
+   * 顺序：bad_path → 根拒绝 → policy denylist → allowlist（空集＝全拒）
    *       → 第二道防线（permission-rules）→ 存在性。
    * 既有检查（policy denylist／allowlist 必填）在前且一行不放宽；第二道防线为纯加严。
    */
@@ -218,18 +215,13 @@ function createBridgeExecutor(options = {}) {
     if (isFsRoot(abs)) throw new BridgeError("path_is_root", 403, abs);
     // 解 symlink 后再跑 denylist —— policy 是字串判定，跟不了 symlink（同 local-worker）。
     if (policy.isSensitivePath(abs)) throw new BridgeError("sensitive_path", 403);
-    // full 模式以家目录为隐式范围，allowlist 交由第二道防线（MODE_FULL）判定；
-    // 其余模式维持 allowlist 必填（空集＝全拒，不得退回「只验 denylist」）。
-    const mode = modeProvider();
-    const effectiveMode = typeof mode === "string" && mode.length > 0 ? mode : "auto";
-    if (effectiveMode !== "full") {
-      // 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（对话内已同意的根）。
-      const roots = effectiveRoots(grantedRoots);
-      if (roots.length === 0) {
-        throw new BridgeError("no_authorized_roots", 403);
-      }
-      if (!policy.isPathAllowed(abs, roots)) throw new BridgeError("not_authorized", 403);
+    // 有效 allowlist ＝ rootsProvider() ∪ grantedRoots（对话内已同意的根）。
+    const roots = effectiveRoots(grantedRoots);
+    if (roots.length === 0) {
+      // H1：allowlist 必填。空集＝全拒，不得退回「只验 denylist」。
+      throw new BridgeError("no_authorized_roots", 403);
     }
+    if (!policy.isPathAllowed(abs, roots)) throw new BridgeError("not_authorized", 403);
     // 第二道防线（执行前独立复核）：以本机真值判 deny/ask/allow；grantedRoots 产生
     // allow 规则，使「已同意」的根走 rule_allow 放行（未同意者仍 needs_authorization）。
     enforcePermission(tool, raw, abs, grantedRoots);

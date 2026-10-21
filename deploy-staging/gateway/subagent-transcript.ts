@@ -31,7 +31,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-const DEFAULT_TRANSCRIPT_DIR = "/opt/eimu-harness/workspace/outputs/subagent/transcripts"
+const DEFAULT_TRANSCRIPT_DIR = "/opt/agent-harness/workspace/outputs/subagent/transcripts"
 const DEFAULT_MAX_BYTES = 4_000_000
 const DEFAULT_ENTRY_MAX_BYTES = 32_768
 const DEFAULT_READ_MAX_BYTES = 262_144

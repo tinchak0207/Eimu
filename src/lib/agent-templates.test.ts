@@ -135,7 +135,7 @@ test("domain labels cover all domains used by templates", () => {
 // ———— 2026-08-25 工具链绑定：requiredTools 必须指向真实 registry，不许假装能力 ————
 // ———— 2026-08-31 产品诚实稽核：判定集真源从「站内 domain registry 自我认证」
 //      换血为「harness 真实工具面」（harness-tool-registry.ts，
-//      源 = VPS /opt/eimu-harness/workspace/.opencode/tools/）。————
+//      源 = VPS /opt/agent-harness/workspace/.opencode/tools/）。————
 
 import { HARNESS_TOOL_IDS } from "./harness-tool-registry.ts";
 

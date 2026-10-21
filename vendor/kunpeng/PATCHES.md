@@ -1,10 +1,10 @@
 # PATCHES — kunpeng vendor 轮子复制记账
 
-- 轮子来源：`/home/user/Desktop/kunpeng-vendor`（pengfeiqiao/kunpeng，MIT），pin commit `872a58b`，复制时工作区干净（无未提交改动）。
+- 轮子来源：`/home/lenovo/Desktop/kunpeng-vendor`（pengfeiqiao/kunpeng，MIT），pin commit `872a58b`，复制时工作区干净（无未提交改动）。
 - 复制纪律：整档逐行 cp；白名单只允许 import 路径行改写，其余任何一行不许动。
 - 本档记录每一笔白名单改动（档:行 → 改前/改后 → 理由），供后续 vendor 升级双向 diff。
 - 本轮拆片方案：`eval-qinshihuang-polarbear/F-SHARDING.md` 片1（纯 A 类 5 档）。
-- 目标镜像本地为 `src/vendor-bridges/editor/`（对应 VPS 部署树 `/opt/eimu-harness/gateway/editor/`），相对 import 路径两边同构。
+- 目标镜像本地为 `src/vendor-bridges/editor/`（对应 VPS 部署树 `/opt/agent-harness/gateway/editor/`），相对 import 路径两边同构。
 
 ## 白名单改动清单（片1，2026-08-29）
 
@@ -87,7 +87,7 @@
 2. timeout 语义：缺省 120000ms（对齐 bash.rs `unwrap_or(120_000)`）；自管 timer → SIGKILL 树杀；超时 reject 文案对齐 vendor `Command timed out after Nms`；被信号杀 `exit_code = -1`（对齐 `status.code().unwrap_or(-1)`）。
 3. `kill_command`（方案 §4 片4「kill 语义（AbortSignal → SIGKILL）」）：vendor 为进程组 `killpg` TERM→1.5s grace→SIGKILL；Bun.spawn 无 `process_group(0)` 等价 → 进程表（requestId→pid，对应 BashProcessState.active）+ 树杀复用 `stopBackgroundProcessCommand(pid, true)` Unix 分支公式（pkill -KILL -P 先杀直接子进程、再 kill -KILL 父，顺序保证 reparent 前可寻址）。表内无此 id 静默 Ok（对齐 vendor pgid None）。
 4. `get_home_dir` / `homeDir`（@tauri-apps/api/path）：`dirs::home_dir()` → `process.env.HOME`；缺失时抛同文案 `Cannot find home directory`。
-5. `ensure_workspace`（方案 §3 存储路径注入明文）：vendor `~/.kunpeng/workspace/YYYY-MM-DD/` 日期分桶 + images/code/docs/videos 四子目录 → harness 固定 `/opt/eimu-harness/workspace/kunpeng`（env `KUNPENG_WORKSPACE` 可覆写），`mkdir -p` 即返；日期分桶与四子目录不随（composeEngine 自己 `ensureDir(`${workspace}/videos`)`）。
+5. `ensure_workspace`（方案 §3 存储路径注入明文）：vendor `~/.kunpeng/workspace/YYYY-MM-DD/` 日期分桶 + images/code/docs/videos 四子目录 → harness 固定 `/opt/agent-harness/workspace/kunpeng`（env `KUNPENG_WORKSPACE` 可覆写），`mkdir -p` 即返；日期分桶与四子目录不随（composeEngine 自己 `ensureDir(`${workspace}/videos`)`）。
 6. `createDir` / `exists` / `removeDir`：@tauri-apps/api/fs 同签名子集 → `node:fs/promises` mkdir/access/rm（recursive 缺省 false 同 tauri 语义）。
 7. `append_file`：file_ops.rs L262 语义逐点对齐（先 mkdir 父目录，再 create+append；任一失败即抛）。
 8. platform 替身（方案 §1.1 明文「isWindowsSync()=false、替身内固定 'linux'」）：
@@ -169,7 +169,7 @@ artifactsStub（方案 §1.1 行 appendArtifact 明文「替身：no-op / JSONL 
 
 ## 片6（gateway 挂载，2026-08-29，orchestrator 内联接管——subagent 两次撞并发上限阵亡）
 
-- VPS `/opt/eimu-harness/gateway/editor/` = 本地 `src/vendor-bridges/editor/` 整树逐档 md5 等价（13 档对账通过）。
+- VPS `/opt/agent-harness/gateway/editor/` = 本地 `src/vendor-bridges/editor/` 整树逐档 md5 等价（13 档对账通过）。
 - `index.ts`：film 分支占位 return → `assembleFilmNode`（唯一函数级改动）+ 静态路由 Content-Type 加 `.mp4 → video/mp4` 一行（成片交付必要项）。model 解析三级/报价/confirm 零触碰。
 - `assembleFilmNode` 白名单内组合：收集上游 video 产物 → title 最前/shotN 升幂 → **store URL 直映射本盘 `/opt/image-data-api/data`**（VPS 内 fetch 公网回环会挂死，实弹发现）→ ffprobe 逐段真时长 → setHarnessState 注入 → `exportSelectedMainClips` → `probeRenderedVideo` 校验门（≥输入总长 90%）→ TTS 同款公网目录，costCoins: 0。
 - 本地辅助行（非轮子改动）：`shq` 引号函数一行内联（轮内 shellQuote 为模块私有，不扩其导出面）。

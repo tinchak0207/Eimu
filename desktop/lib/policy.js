@@ -7,7 +7,7 @@
 //
 // 依赖来源（形态照抄，未 import 闸道码）：
 //   - ffmpeg 侦测候选表：deploy-staging/gateway/editor/canvas/videoCompose.ts
-//     `detectFfmpeg()`（候选含 /opt/eimu-harness/bin/ffmpeg、~/.kunpeng/bin/ffmpeg）。
+//     `detectFfmpeg()`（候选含 /opt/agent-harness/bin/ffmpeg、~/.kunpeng/bin/ffmpeg）。
 //   - 并发／记忆体闸 FfmpegGate：deploy-staging/gateway/ffmpeg-limiter.ts
 //     （FFMPEG_MAX_CONCURRENT 预设 2、MemAvailable < 400MB 排队）。以同语义
 //     重写为壳内模组（不直接 import deploy-staging/，那是闸道码）。
@@ -244,7 +244,7 @@ const WIN_FFMPEG_CANDIDATES = (home) => [
 ];
 
 const POSIX_FFMPEG_CANDIDATES = (home) => [
-  "/opt/eimu-harness/bin/ffmpeg",
+  "/opt/agent-harness/bin/ffmpeg",
   home ? path.posix.join(home, ".kunpeng", "bin", "ffmpeg") : null,
   "/opt/homebrew/bin/ffmpeg",
   "/usr/local/bin/ffmpeg",

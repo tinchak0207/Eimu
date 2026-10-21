@@ -16,8 +16,8 @@
 # ============================================================================
 set -u
 
-REAL="/opt/eimu-harness/bin/real/ffmpeg"
-GATE="/opt/eimu-harness/bin/.ffmpeg-gate"
+REAL="/opt/agent-harness/bin/real/ffmpeg"
+GATE="/opt/agent-harness/bin/.ffmpeg-gate"
 MAX="${FFMPEG_MAX_CONCURRENT:-2}"
 MIN="${FFMPEG_MIN_MEM_MB:-400}"
 

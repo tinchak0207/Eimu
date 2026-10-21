@@ -2,7 +2,7 @@
 import fs from "node:fs";
 
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
-const BASE = "https://store.eimu.dev/agent/v1";
+const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };
 const WATCH_MS = 75_000;
 

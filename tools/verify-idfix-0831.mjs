@@ -11,7 +11,7 @@ if (process.env.ALLOW_PROD_VERIFY !== "1") {
 }
 
 const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
-const BASE = "https://store.eimu.dev/agent/v1";
+const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };
 const TURN_MS = 260_000; // 单轮上限：含一次真实生图（实测 gpt-image-2 fast ~150s）
 
@@ -132,7 +132,7 @@ try {
   // SSE 的 tool.result 只有 {tool,ok,cost_coins}，**不含工具输出本体** → 在流里找
   // id_corrected_from 必假 FAIL（0831 首跑踩过）。假尾巴 ID 在站点必定不存在，
   // 故「这次呼叫回 ok:true」本身就是纠错成功的充分证据；输出原文铁证查 opencode.db：
-  //   sudo sqlite3 /opt/eimu-harness/workspace/.local/share/opencode/opencode.db \
+  //   sudo sqlite3 /opt/agent-harness/workspace/.local/share/opencode/opencode.db \
   //     "select data from part where data like '%<真实ID前8码>%' and data like '%tool%' order by rowid desc limit 3;"
   const t2ok = /"tool"\s*:\s*"image_get_result"\s*,\s*"ok"\s*:\s*true/.test(t2);
   const t2corrected = /id_corrected_from/.test(t2) || t2ok;

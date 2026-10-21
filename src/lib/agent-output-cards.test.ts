@@ -782,10 +782,10 @@ test("音频交付判定收紧：真音频 URL 形状收，图 URL／无副档�
   const audioNode = (content: unknown) => node({ id: "tpl-vo-1", title: "配音", metadata: { emitsEntity: { kind: "audio" }, content } });
   // 收：grep 到的真交付 URL 形状（gateway TTS `.mp3`、music 上传 store 公网 URL、Lyria inline）
   const accepted = [
-    "https://store.eimu.dev/tts/tts_lx1_ab.mp3",
-    "https://store.eimu.dev/image-data/files/uploads/music-gen-1727000000.mp3",
-    "https://store.eimu.dev/image-data/files/uploads/music-gen-1727000000.flac",
-    "https://store.eimu.dev/image-data/files/uploads/music-gen-1727000000.m4a",
+    "https://store.tinchak0207.xyz/tts/tts_lx1_ab.mp3",
+    "https://store.tinchak0207.xyz/image-data/files/uploads/music-gen-1727000000.mp3",
+    "https://store.tinchak0207.xyz/image-data/files/uploads/music-gen-1727000000.flac",
+    "https://store.tinchak0207.xyz/image-data/files/uploads/music-gen-1727000000.m4a",
     "https://cdn.example.com/vo.mp3?token=abc#t=1",
     "https://cdn.example.com/vo.MP3",
     "data:audio/mpeg;base64,AAAA",

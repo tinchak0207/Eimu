@@ -12,7 +12,7 @@ services:
     group_add:
       - "2001"
     volumes:
-      - /opt/eimu-control-plane/generation-response-spool:/app/generation-response-spool
+      - /opt/image-control-plane/generation-response-spool:/app/generation-response-spool
   generation-worker:
     logging:
       driver: json-file
@@ -24,6 +24,6 @@ services:
     group_add:
       - "2001"
     volumes:
-      - /opt/eimu-control-plane/generation-response-spool:/app/generation-response-spool
+      - /opt/image-control-plane/generation-response-spool:/app/generation-response-spool
     # 已有SIGTERM drain停止新claim、等待已在飞请求完成；覆盖最长影片25分钟预算和物化。
     stop_grace_period: 30m

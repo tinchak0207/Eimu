@@ -1,6 +1,6 @@
 /* ╁━ PricingPlanCarousel ── 充值方案环 ╁━
    本组件是 canvas-workstation/AgentTemplateCarousel.tsx 的逐行复制（2026-09-07
-   项目负责人裁定：/pricing 方案选择器 carousel 化 = 模板廊同款轮子），几何/物理/材质/
+   暴君裁定：/pricing 方案选择器 carousel 化 = 模板廊同款轮子），几何/物理/材质/
    布局全部由共享 ../case-showcase.css 提供。这里只有充值卡独有的卡面材质与排版。
 
    2026-09-11 卡面重做（视觉验收不通过：四档卡面全数不合 DESIGN.md）：
@@ -98,7 +98,7 @@
   transition: opacity 280ms var(--lg-ease, ease);
 }
 
-/* 价格玻璃层 = 一张白色液态玻璃票券（2026-09-27 项目负责人：「kahoot 风」→ 坚守蓝粉白）。
+/* 价格玻璃层 = 一张白色液态玻璃票券（2026-09-27 暴君：「kahoot 风」→ 坚守蓝粉白）。
    注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 取样不到 canvas，
    所以不赌模糊：本体是近实的珍珠白（右上一抹粉、左下一抹蓝，像光穿过玻璃的色散），
    边是一圈跟著滑鼠转的虹彩细边（--mx 由 PricingAtmosphere 写在页面根），

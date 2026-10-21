@@ -217,7 +217,7 @@ export const SKILL_INDEX_ENABLED = envFlagEnabled(process.env.EIMU_SKILL_INDEX)
 
 export const DEFAULT_SKILLS_DIR =
   process.env.EIMU_SKILLS_DIR ||
-  (process.env.BEAST_SKILLS_DIR || "/opt/eimu-harness/workspace/.opencode/skills")
+  (process.env.BEAST_SKILLS_DIR || "/opt/agent-harness/workspace/.opencode/skills")
 
 function parseSkillFrontmatter(raw: string, fallbackName: string): { name: string; description: string } {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw)?.[1] ?? ""

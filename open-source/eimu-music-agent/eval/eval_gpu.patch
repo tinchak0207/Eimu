@@ -1,0 +1,397 @@
+--- eval.py	2026-10-04 22:38:55.266335160 +0800
++++ eval_gpu.py	2026-10-05 01:31:44.448224809 +0800
+@@ -1,47 +1,243 @@
+-import glob
++"""GPU-first memory-reduced copy of the upstream SongBench eval.py.
++
++This file is a copy of the upstream `eval.py` (unmodified original is kept
++byte-for-byte in the same directory).  Only the changes needed to make the
++evaluator fit an 8 GB laptop GPU are added; the scoring math is untouched.
++
++Reward-model config / checkpoint are still read from the relative paths
++`configs/songbench.yaml` and `ckpt/songbench.safetensors`, so **cwd must be
++songbench-toolkit/** (same as the upstream script).
++
++Memory ladder (--mem_level):
++  1  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (set before CUDA init)
++     + torch.cuda.empty_cache() between tracks.  fp32, unchanged numerics.
++  2  + do not materialise the 25-entry hidden_states tuple of MuQ: the reward
++     model only consumes hidden_states[6], which is the output of
++     conformer.layers[5].  We run preprocessing + conv + layers[0..5] and keep
++     that single tensor (identical object the original tuple held).
++  3  + cast MuQ and the reward model to bfloat16 (input too).  This changes
++     numbers; an equivalence check against the fp32 path is mandatory.
++  4  + run MuQ's acoustic front-end (preprocessing -> normalize -> conv) on the
++     CPU and only the conformer + reward model on the GPU.  Measured
++     2026-10-05: the front-end is what OOMs on long tracks (the 2048-bin
++     melspec and the Res2d maps, ~2.48 GB for a 406 s track); the conformer
++     input is only [1, T', 1024] (~62 MB at 406 s), so keeping the front-end off
++     the GPU removes the peak without touching the sequence the conformer sees.
++     Device placement only -> numerics unchanged up to CPU/GPU kernel rounding;
++     an equivalence check against level 1 is still required.
++     NOTE: level 4 is fp32.  The bfloat16 cast belongs to level 3 alone
++     (`mem_level == 3`): MuQ's preprocessing forces the melspec to float16
++     whenever the input is 16-bit, which then collides with bfloat16 conv
++     weights ("Input type (c10::Half) and bias type (c10::BFloat16)").  Level 4
++     must therefore not inherit level 3's dtype.
++
++  Levels 1/2/3/4 are separate configurations, not a strictly additive stack:
++  pick the lowest one that fits, and keep one level for a whole scoring set so
++  every number in a comparison comes from the same evaluator config.
++
++Orthogonal, numerically-safe patches (--lowmem True):
++  a) MuQ conformer self-attention -> F.scaled_dot_product_attention.  The
++     upstream code materialises scores (B,16,T,T) and softmax probs (another
++     B,16,T,T); at T~10150 that is ~6.6 GB for one tensor.  SDPA is the same
++     math without the T^2 materialisation (scale = 1/sqrt(head_size), same as
++     upstream).
++  b) MuQ conv front-end: in-place ReLU / additive residual so the residual
++     module keeps 2 instead of 3 live feature maps (each 512x64x(T/2) fp32,
++     2.6 GB at 406 s).
++  c) reward model: set each nn.MultiheadAttention.dropout to 0.0.  In eval
++     mode dropout is already a no-op, but the non-zero value disables PyTorch's
++     fused (memory-efficient) attention fast path, which then materialises
++     (B*H,T,T) again.  Setting it to 0.0 is behaviourally identical in eval and
++     re-enables the fused path.
++"""
++
+ import os
+-import json
+-import librosa
+-import numpy as np
+-import torch
+-import argparse
+-from muq import MuQ
+-from hydra.utils import instantiate
+-from omegaconf import OmegaConf
+-from safetensors.torch import load_file
+-from tqdm import tqdm
++
++# must be set before CUDA is initialised
++os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
++
++import glob  # noqa: E402
++import json  # noqa: E402
++import argparse  # noqa: E402
++import librosa  # noqa: E402
++import numpy as np  # noqa: E402
++import torch  # noqa: E402
++import torch.nn.functional as F  # noqa: E402
++from muq import MuQ  # noqa: E402
++from muq.muq.modules.conv import Res2dModule  # noqa: E402
++from muq.muq.models.muq_model import MuQModel  # noqa: E402
++from hydra.utils import instantiate  # noqa: E402
++from omegaconf import OmegaConf  # noqa: E402
++from safetensors.torch import load_file  # noqa: E402
++from tqdm import tqdm  # noqa: E402
++
++
++# --------------------------------------------------------------------------
++# numerically-safe memory patches (see module docstring)
++# --------------------------------------------------------------------------
++def _res2d_forward_inplace(self, x):
++    out = self.bn2(self.conv2(F.relu(self.bn1(self.conv1(x)), inplace=True)))
++    if self.diff:
++        x = self.bn3(self.conv3(x))
++    out = out.add_(x)
++    out = F.relu(out, inplace=True)
++    return out
++
++
++def _sdpa_attention_forward(
++    self,
++    hidden_states,
++    attention_mask=None,
++    relative_position_embeddings=None,
++    output_attentions=False,
++):
++    batch_size, sequence_length, hidden_size = hidden_states.size()
++    query_key_states = hidden_states
++    value_states = hidden_states
++
++    if self.position_embeddings_type == "rotary":
++        if relative_position_embeddings is None:
++            raise ValueError(
++                "`relative_position_embeddings` has to be defined when `self.position_embeddings_type == 'rotary'"
++            )
++        query_key_states = self._apply_rotary_embedding(
++            query_key_states, relative_position_embeddings
++        )
++
++    query = self.linear_q(query_key_states).view(
++        batch_size, -1, self.num_heads, self.head_size
++    )
++    key = self.linear_k(query_key_states).view(
++        batch_size, -1, self.num_heads, self.head_size
++    )
++    value = self.linear_v(value_states).view(
++        batch_size, -1, self.num_heads, self.head_size
++    )
++
++    query = query.transpose(1, 2)
++    key = key.transpose(1, 2)
++    value = value.transpose(1, 2)
++
++    # attention_mask from the caller is additive (broadcastable float); SDPA
++    # accepts that directly.  eval path passes None.
++    out = F.scaled_dot_product_attention(
++        query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
++    )
++    out = out.transpose(1, 2).reshape(
++        batch_size, -1, self.num_heads * self.head_size
++    )
++    out = self.linear_out(out)
++    return out, None
+ 
+ 
++def apply_lowmem_patches(conv_inplace: bool = True):
++    from transformers.models.wav2vec2_conformer.modeling_wav2vec2_conformer import (
++        Wav2Vec2ConformerSelfAttention,
++    )
++
++    # The conv front-end patch is only about GPU memory.  At mem_level 4 the
++    # front-end runs on the CPU, so the patch is pointless there — and it is
++    # actively wrong: `Res2dModule.forward` is monkeypatched globally, so it
++    # also intercepts the front-end whose real class is `Conv2dSubsampling`,
++    # whose `conv1` carries a bfloat16 bias while the input stays float32
++    # (RuntimeError: Input type (float) and bias type (c10::BFloat16)).
++    if conv_inplace:
++        Res2dModule.forward = _res2d_forward_inplace
++    Wav2Vec2ConformerSelfAttention.forward = _sdpa_attention_forward
+ 
++
++# --------------------------------------------------------------------------
++# unchanged upstream class, with the memory ladder added
++# --------------------------------------------------------------------------
+ class Synthesizer(object):
+ 
+     def __init__(self,
+                  checkpoint_path_reward_model,
+                  input_path,
+                  output_dir,
+-                 use_cpu: bool = False):
+-    
++                 use_cpu: bool = False,
++                 mem_level: int = 1,
++                 lowmem: bool = True):
++
+         self.checkpoint_path_reward_model = checkpoint_path_reward_model
+         self.input_path = input_path
+         if self.input_path[-1] == '/':
+-            self.input_path = self.input_path[:-1]        
++            self.input_path = self.input_path[:-1]
+         self.output_dir = output_dir
+         os.makedirs(self.output_dir, exist_ok=True)
++        self.mem_level = int(mem_level)
++        self.lowmem = bool(lowmem)
+         self.device = torch.device('cuda') if (torch.cuda.is_available() and (not use_cpu)) else torch.device('cpu')
+-    
++
+     @torch.no_grad()
+     def setup(self):
+-        
++
++        if self.lowmem and self.device.type == 'cuda':
++            apply_lowmem_patches(conv_inplace=self.mem_level < 4)
++
+         train_config_reward_model = OmegaConf.load('configs/songbench.yaml')
+         reward_model = instantiate(train_config_reward_model.generator).to(self.device).eval()
+         state_dict_reward_model = load_file(self.checkpoint_path_reward_model, device="cpu")
+         reward_model.load_state_dict(state_dict_reward_model, strict=False)
+         self.reward_model = reward_model
+ 
++        if self.lowmem:
++            # eval-mode no-op, but re-enables the fused attention fast path
++            for m in self.reward_model.modules():
++                if isinstance(m, torch.nn.MultiheadAttention):
++                    m.dropout = 0.0
++
+         self.muq = MuQ.from_pretrained("OpenMuQ/MuQ-large-msd-iter")
+         self.muq = self.muq.to(self.device).eval()
++
++        if self.mem_level == 3:
++            self.reward_model = self.reward_model.to(torch.bfloat16)
++            self.muq = self.muq.to(torch.bfloat16)
++
++        # level 4: keep the acoustic front-end on the CPU.  It is a stack of
++        # convolutions with a bounded temporal receptive field, so running it on
++        # another device leaves the conformer's input sequence unchanged; it
++        # just stops the 2048-bin melspec / Res2d maps from occupying the GPU.
++        self.frontend_cpu = self.mem_level >= 4 and self.device.type == 'cuda'
++        if self.frontend_cpu:
++            self._frontend_modules = [
++                m for m in (self.muq.model.preprocessing, self.muq.model.normalize, self.muq.model.conv)
++                if isinstance(m, torch.nn.Module)
++            ]
++            for m in self._frontend_modules:
++                m.to('cpu')
++
+         self.result_dict = {}
+-        
++
++    @torch.no_grad()
++    def _muq_hidden6(self, audio):
++        """Return exactly hidden_states[6] of MuQ (output of conformer.layers[5])."""
++        if self.mem_level >= 2:
++            model = self.muq.model
++            enc = model.conformer
++            # level 4: the front-end modules were moved to CPU in setup(); feed
++            # them a CPU tensor and bring only the [1, T', 512] conv output back.
++            front = audio.to('cpu') if self.frontend_cpu else audio
++            x = model.preprocessing(front, features=["melspec_2048"])
++            x = model.normalize(x)
++            h = model.conv(x["melspec_2048"])
++            del x
++            h = h.to(audio.device)
++            h = enc.dropout(h)
++            rel = enc.embed_positions(h) if enc.embed_positions is not None else None
++            # upstream appends hidden_states BEFORE each layer, so entry [6] is
++            # the output of layers[5] -> run layers 0..5 and keep the result.
++            for i in range(6):
++                h = enc.layers[i](
++                    h,
++                    attention_mask=None,
++                    relative_position_embeddings=rel,
++                    output_attentions=False,
++                )[0]
++            return h
++        output = self.muq(audio, output_hidden_states=True)
++        return output["hidden_states"][6]
++
+     @torch.no_grad()
+     def synthesis(self, model_name=None):
+         if os.path.isfile(self.input_path):
+@@ -52,7 +248,7 @@
+                 with open(self.input_path, "r") as f:
+                     lines = [line for line in f]
+             input_files = [{
+-                "input_path": line.strip(), 
++                "input_path": line.strip(),
+             } for line in lines]
+             print(f"input filelst: {self.input_path}")
+         elif os.path.isdir(self.input_path):
+@@ -61,8 +257,8 @@
+             }for file in glob.glob(os.path.join(self.input_path, '*')) if file.lower().endswith(('.wav', '.mp3','.flac'))]
+         else:
+             raise ValueError(f"input_path {self.input_path} is not a file or directory")
+-        
+-        
++
++
+         for input in tqdm(input_files):
+             self.handle(**input)
+ 
+@@ -77,7 +273,7 @@
+                 'mean_Mixing': round(np.mean([v['Mixing'] for v in self.result_dict.values()]), 4),
+                 'mean_Structure': round(np.mean([v['Structure'] for v in self.result_dict.values()]), 4),
+             }, ensure_ascii=False) + '\n')
+-        
++
+         if model_name is None:
+             if 'suno1229' in self.input_path:
+                 model_name = self.input_path.split('/')[-2].split('_')
+@@ -91,9 +287,9 @@
+ 
+         with open(os.path.join(self.output_dir, f"result_{model_name}.json") , "w")as f:
+             json.dump(self.result_dict, f, indent=4, ensure_ascii=False)
+-        
++
+         print(f"result saved to {os.path.join(self.output_dir, f'result_{model_name}.json')}")
+-        
++
+     @torch.no_grad()
+     def handle(self, input_path):
+         try:
+@@ -101,7 +297,7 @@
+             fid = os.path.basename(input_path).split('.')[0]
+             if input_path.endswith('.npy'):
+                 input = np.load(input_path)
+-                
++
+                 # check ssl
+                 if len(input.shape) == 3 and input.shape[0] != 1:
+                     print('ssl_shape error', input_path)
+@@ -109,7 +305,7 @@
+                 if np.isnan(input).any():
+                     print('ssl nan', input_path)
+                     return
+-                
++
+                 input = torch.from_numpy(input).to(self.device)
+                 if len(input.shape) == 2:
+                     input = input.unsqueeze(0)
+@@ -117,10 +313,11 @@
+             if input_path.endswith(('.wav', '.mp3','.flac')):
+                 wav, sr = librosa.load(input_path, sr=24000)
+                 audio = torch.tensor(wav).unsqueeze(0).to(self.device)
+-                output = self.muq(audio, output_hidden_states=True)
+-                input = output["hidden_states"][6]
+-                
+-            values = {} 
++                if self.mem_level == 3:
++                    audio = audio.to(torch.bfloat16)
++                input = self._muq_hidden6(audio)
++
++            values = {}
+             scores_g = self.reward_model(input).squeeze(0)
+             values['Melody'] = round(scores_g[0].item(), 4)
+             values['Arrangement'] = round(scores_g[1].item(), 4)
+@@ -129,13 +326,18 @@
+             values['Instrumental'] = round(scores_g[4].item(), 4)
+             values['Mixing'] = round(scores_g[5].item(), 4)
+             values['Structure'] = round(scores_g[6].item(), 4)
+-            
++
+             self.result_dict[fid] = values
++            print(f"  peak_alloc_GB={torch.cuda.max_memory_allocated()/1e9:.2f} "
++                  f"reserved_GB={torch.cuda.max_memory_reserved()/1e9:.2f}")
+         except Exception as e:
+             print(f'Error processing {input_path}: {str(e)}')
++        finally:
++            # level 1: release the cached blocks between tracks
++            if self.device.type == 'cuda':
++                torch.cuda.empty_cache()
++
+ 
+-        
+-        
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser()
+     parser.add_argument(
+@@ -156,16 +358,30 @@
+         help="Force CPU mode even if a GPU is available.",
+         default=False
+     )
+-    
++    parser.add_argument(
++        "--mem_level",
++        type=int,
++        default=1,
++        help="1=alloc-conf+empty_cache, 2=+single layer-6 capture, 3=+bfloat16, 4=+front-end on CPU"
++    )
++    parser.add_argument(
++        "--lowmem",
++        type=str,
++        default="True",
++        help="numerically-safe patches: SDPA attention, in-place conv, fused reward attn"
++    )
++
+     args = parser.parse_args()
+-    
++
+     reward_model_ckpt_path = "ckpt/songbench.safetensors"
+-    
++
+     synthesizer = Synthesizer(checkpoint_path_reward_model=reward_model_ckpt_path,
+                               input_path=args.input_path,
+                               output_dir=args.output_dir,
+-                              use_cpu=args.use_cpu)
+-    
++                              use_cpu=args.use_cpu,
++                              mem_level=args.mem_level,
++                              lowmem=args.lowmem)
++
+     synthesizer.setup()
+-    
++
+     synthesizer.synthesis()

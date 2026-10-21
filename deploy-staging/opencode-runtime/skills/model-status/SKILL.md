@@ -11,7 +11,7 @@ image_generate / image_edit / image_upscale 工具已内建「调用前自动探
 
 当你需要「选一个可用模型」或「某模型生成失败后找替代」时，主动查可用性：
 
-GET https://image.eimu.dev/v1/model-status（Authorization: Bearer <sk-biz-* key>，工具链 platformFetch 自动持有）
+GET https://image.tinchak0207.xyz/v1/model-status（Authorization: Bearer <sk-biz-* key>，工具链 platformFetch 自动持有）
 
 回传 models[] 每项：
 - id / media_type（image|video）/ endpoint（/v1/images/generations 或 /v1/videos/generations）

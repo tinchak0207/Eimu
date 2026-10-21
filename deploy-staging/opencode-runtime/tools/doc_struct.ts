@@ -8,7 +8,7 @@ import path from "node:path"
 // 产出 items[{level,title,page_start?,txt_line_start,txt_line_end,chars}] 并落盘
 // <原路径>.struct.txt；扫描版 PDF（无文字层）诚实回 ok:false。
 
-const WORKSPACE = "/opt/eimu-harness/workspace"
+const WORKSPACE = "/opt/agent-harness/workspace"
 const SCRIPT = path.join(WORKSPACE, ".opencode", "lib", "doc_struct_extract.py")
 
 export default tool({

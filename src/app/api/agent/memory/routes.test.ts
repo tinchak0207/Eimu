@@ -122,15 +122,19 @@ test("ingest 2xx：有签＋snake_case 映射＋契约 §3.1 响应形状", asyn
     const data = (await res.json()) as {
       accepted: string[];
       rejected: unknown[];
-      stats: { received: number; accepted: number; index_lines: number };
+      stats: { received: number; accepted: number; index_lines: number; seed_accepted: number };
     };
-    assert.deepEqual(data.accepted, ["r-1-route-probe"]);
+    assert.equal(data.accepted.length, 1);
+    // 文档 id 自 dc2c2cfe 起为确定性 mem-<sha256(identity)[0:16]>。
+    assert.match(data.accepted[0], /^mem-[0-9a-f]{16}$/);
     assert.deepEqual(data.rejected, []);
-    assert.deepEqual(data.stats, { received: 1, accepted: 1, index_lines: 1 });
+    assert.deepEqual(data.stats, { received: 1, accepted: 1, index_lines: 1, seed_accepted: 0 });
 
     // 栏位映射落地检查：owner_key→ownerKey、evidence_kind→evidenceKind、self_score→selfScore。
     const docs = await listMemoryDocs({ scope: "private", ownerKey: "owner-hash-1" });
     assert.equal(docs.length, 1);
+    assert.equal(docs[0].id, data.accepted[0]);
+    assert.equal(docs[0].slug, "route-probe");
     assert.equal(docs[0].evidenceKind, "user_confirmed");
     assert.equal(docs[0].selfScore, 4);
     assert.equal(docs[0].promptVersion, "v1");
@@ -184,6 +188,8 @@ test("retract：无签 401；有签 → {retracted:[id]}（契约 §3.2）", asy
       postRequest("http://localhost/api/agent/memory/ingest", body, signMemoryBody(bytes(body), SECRET)),
     );
     assert.equal(ingested.status, 200);
+    const ingestedData = (await ingested.json()) as { accepted: string[] };
+    assert.equal(ingestedData.accepted.length, 1);
 
     const retractBody = JSON.stringify({ batch_id: "r-2" });
     const retracted = await retractPOST(
@@ -194,7 +200,7 @@ test("retract：无签 401；有签 → {retracted:[id]}（契约 §3.2）", asy
       ),
     );
     assert.equal(retracted.status, 200);
-    assert.deepEqual(await retracted.json(), { retracted: ["r-2-to-retract"] });
+    assert.deepEqual(await retracted.json(), { retracted: ingestedData.accepted });
     assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
     __resetAgentMemoryStoreForTests();
   });
@@ -226,6 +232,8 @@ test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],actio
     assert.deepEqual(await badAction.json(), { error: "invalid_action" });
 
     // 2xx 端到端：先 ingest 一条 shared，再按 batch_id 转 pending_review。
+    // shared 自 4ea47695 起 fail-closed：必须带 contributor_key 且过佐证门槛才 active，
+    // 这里用运营旋钮把门槛降到 1（与 store 测试的 corroborationMin: 1 同口径，不改生产默认）。
     const body = JSON.stringify({
       batch_id: "rv-r",
       docs: [
@@ -239,25 +247,63 @@ test("review：无签 401；action 非法 400；有签 → {reviewed:[ids],actio
           evidence: "ev",
           evidence_kind: "verbatim",
           self_score: 5,
+          contributor_key: "owner-hash-1",
         },
       ],
     });
-    const ingested = await ingestPOST(
-      postRequest("http://localhost/api/agent/memory/ingest", body, signMemoryBody(bytes(body), SECRET)),
-    );
-    assert.equal(ingested.status, 200);
+    const previousMin = process.env.MEMORY_SHARED_CORROBORATION_MIN;
+    process.env.MEMORY_SHARED_CORROBORATION_MIN = "1";
+    try {
+      const ingested = await ingestPOST(
+        postRequest("http://localhost/api/agent/memory/ingest", body, signMemoryBody(bytes(body), SECRET)),
+      );
+      assert.equal(ingested.status, 200);
+      const ingestedData = (await ingested.json()) as { accepted: string[] };
+      assert.equal(ingestedData.accepted.length, 1);
+      // 控制组：文档必须真的 active，否则下面的翻转只是在空集上「成功」。
+      assert.deepEqual(
+        (await listMemoryDocs({ scope: "shared" })).map((doc) => doc.status),
+        ["active"],
+      );
 
-    const reviewRaw = JSON.stringify({ batch_id: "rv-r", action: "pending_review" });
-    const res = await reviewPOST(
-      postRequest(
-        "http://localhost/api/agent/memory/review",
-        reviewRaw,
-        signMemoryBody(bytes(reviewRaw), SECRET),
-      ),
-    );
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { reviewed: ["rv-r-to-review"], action: "pending_review" });
-    assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
+      const reviewRaw = JSON.stringify({ batch_id: "rv-r", action: "pending_review" });
+      const res = await reviewPOST(
+        postRequest(
+          "http://localhost/api/agent/memory/review",
+          reviewRaw,
+          signMemoryBody(bytes(reviewRaw), SECRET),
+        ),
+      );
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), {
+        reviewed: ingestedData.accepted,
+        action: "pending_review",
+        blocked: [],
+      });
+      assert.deepEqual(await listMemoryDocs({ scope: "shared" }), []);
+
+      // 回程：pending_review → active（人工放行），验证真是双向翻转而非只改期望。
+      const activateRaw = JSON.stringify({ batch_id: "rv-r", action: "activate" });
+      const activated = await reviewPOST(
+        postRequest(
+          "http://localhost/api/agent/memory/review",
+          activateRaw,
+          signMemoryBody(bytes(activateRaw), SECRET),
+        ),
+      );
+      assert.equal(activated.status, 200);
+      assert.deepEqual(await activated.json(), {
+        reviewed: ingestedData.accepted,
+        action: "activate",
+        blocked: [],
+      });
+      const restored = await listMemoryDocs({ scope: "shared" });
+      assert.equal(restored.length, 1);
+      assert.equal(restored[0].status, "active");
+    } finally {
+      if (previousMin === undefined) delete process.env.MEMORY_SHARED_CORROBORATION_MIN;
+      else process.env.MEMORY_SHARED_CORROBORATION_MIN = previousMin;
+    }
     __resetAgentMemoryStoreForTests();
   });
 });

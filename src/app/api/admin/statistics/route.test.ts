@@ -19,7 +19,7 @@ const requireFn = createRequire(import.meta.url);
 const nextHeaders = requireFn("next/headers") as { cookies: unknown };
 
 process.env.ADMIN_SESSION_SECRET = "statistics-export-test-secret";
-process.env.ADMIN_USERNAME = "eimu";
+process.env.ADMIN_USERNAME = "tinchak0207";
 // 未配置控制面 DB ⇒ buildStatisticsProjection 回 configured:false（确定性、不碰网路）。
 delete process.env.GENERATION_DATABASE_URL;
 delete process.env.DATABASE_URL;
@@ -27,7 +27,7 @@ delete process.env.DATABASE_URL;
 function installCookieMock(signedIn: boolean) {
   const store = new Map<string, string>();
   if (signedIn) {
-    store.set(ADMIN_SESSION_COOKIE, createAdminSessionToken("eimu", process.env.ADMIN_SESSION_SECRET!));
+    store.set(ADMIN_SESSION_COOKIE, createAdminSessionToken("tinchak0207", process.env.ADMIN_SESSION_SECRET!));
   }
   nextHeaders.cookies = async () => ({
     get: (name: string) => {

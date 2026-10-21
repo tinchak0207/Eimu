@@ -103,7 +103,7 @@ curl -s "$BASE/images/3988af81-…/result?format=json" -H "Authorization: Bearer
 - `?format=json`：回 `{object:"image_generation.result", task_id, data:[…]}`
 - 未完成：`409 result_not_ready`
 
-图片 URL 落在 `https://store.eimu.dev/image-data/files/…`，
+图片 URL 落在 `https://store.tinchak0207.xyz/image-data/files/…`，
 **公开可读、不需认证**，格式 `image/webp`，带一年不变快取头。
 
 ## 模型与参数的硬约束（实测）
@@ -132,7 +132,7 @@ curl -s "$BASE/images/3988af81-…/result?format=json" -H "Authorization: Bearer
 
 ## 计费
 
-`1 币 = 500,000 quota`。扣费落在 key 绑定的账户。
+`1 币 = 500,000 quota`。扣费落在 key 绑定的 New API 用户（你这把是 **user 87**）。
 
 当前生效的定价覆写（`/api/model-pricing` 公开端点可查）：
 

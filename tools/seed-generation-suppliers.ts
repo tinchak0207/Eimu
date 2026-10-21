@@ -13,14 +13,14 @@ import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
 import { MODEL_ROUTES, NEWAPI_ROUTE_LABEL, NEWAPI_SUPERSEDED_LABELS, modelsRoutedTo, routeSupplierId } from "../src/lib/model-routes.config";
 
 // reblood：这些渠道的调度已整体切到 new-api。
-// 2026-09-27 项目负责人裁定：tokenmix 已砍除（含 new-api 渠道 9），从迁移清单移除。
+// 2026-09-27 暴君裁定：tokenmix 已砍除（含 new-api 渠道 9），从迁移清单移除。
 // 2026-10-01 路由收口：NEWAPI_ENABLED 时它们不再各自 seed 成「base_url 全指向同一个
 // new-api」的假 supplier（DB 排一次、new-api 再排一次＝双重调度，标签与实际去向不符），
 // 一律由单一 supplier `env:newapi` 代表；new-api 内部的渠道顺序在 new-api 后台调。
 const NEWAPI_MIGRATED_LABELS = NEWAPI_SUPERSEDED_LABELS;
 
 /**
- * 已退役视频渠道（2026-09-27 项目负责人裁定；视频唯一权威改为 xiaoyxiao）。
+ * 已退役视频渠道（2026-09-27 暴君裁定；视频唯一权威改为 xiaoyxiao）。
  *
  * DB 端已把这 7 条的 supplier／supplier_account `enabled=false`、capability
  * `is_current=false AND enabled=false`（止损态）。但 seed 每次 worker 重启都会跑
@@ -28,7 +28,7 @@ const NEWAPI_MIGRATED_LABELS = NEWAPI_SUPERSEDED_LABELS;
  * 把它们**重新开启**——止损态在第一次重启就会被冲掉。此清单让 seed 直接跳过它们
  * （不 upsert、不认领、不回收），是「停用维持」的代码级保证。
  *
- * 移除本清单任一项＝恢复该渠道供货，必须先有项目负责人裁定。
+ * 移除本清单任一项＝恢复该渠道供货，必须先有暴君裁定。
  */
 const RETIRED_SUPPLIER_LABELS = new Set([
   "filmera",
@@ -46,7 +46,7 @@ const RETIRED_SUPPLIER_LABELS = new Set([
  *（openai-images-adapter.ts `aliasedSupplierModel`）。取代原 supplier-adapter.ts 的
  * `SUB2API_MODEL_ALIASES` + `supplier.id === "env:sub2api"` 写死特例。
  *
- * sub2api（store.eimu.dev/sub2api）的 images endpoint 只认它自己字典里的
+ * sub2api（store.tinchak0207.xyz/sub2api）的 images endpoint 只认它自己字典里的
  * 上游模型名。实测（generation_attempt 2026-08-23~27 多笔 400）：平台 id
  * 「gemini-3-image」直传会被拒 `images endpoint requires an image model`；sub2api
  * 对 Nano Banana Pro 的命名是「gemini-3-pro-image」。其余平台 id 与 sub2api 字典一致。
@@ -128,7 +128,7 @@ function origin(value: string): string {
  *
  * 排障记录（2026-08-05）：旧实作只给 adobe2api 设白名单，其余渠道一律认领
  * catalog 里**所有** image 模型。后果是 pixai 专属模型被挂到 sub2api
- * （生产上 disabled）与 fallback（fallback 渠道，根本不认 pixai 模型）名下，
+ * （生产上 disabled）与 fallback（share-api.com，根本不认 pixai 模型）名下，
  * 而真正能服务它的 pixai 渠道从未被 seed。调度器按 public_model_id 找
  * capability 时，命中的全是不可用的 supplier → 一律 overloaded。
  *
@@ -158,8 +158,9 @@ function channelCapabilities(label: string): Capability[] {
     return result;
   }
   // registry 渠道：认领范围 = config 档里登记的 claims，逐 claim 逐 kind 产出
-  // capability；ratios/resolutions 照抄平台 catalog，不在 catalog 的模型跳过并
-  // 提醒（不挡 seed——宁可少认领也不虚报能力）。
+  // capability；ratios 照抄平台 catalog，resolutions 优先用 claim.resolutions
+  // （上游真实可交付档位，避免原生出片渠道虚报超分档），缺省才照抄 catalog；
+  // 不在 catalog 的模型跳过并提醒（不挡 seed——宁可少认领也不虚报能力）。
   const registry = registryChannel(label);
   if (registry) {
     const result: Capability[] = [];
@@ -175,7 +176,7 @@ function channelCapabilities(label: string): Capability[] {
           kind,
           supplierModelId: claim.supplierModelId,
           ratios: [...model.aspectRatios],
-          resolutions: [...model.resolutions],
+          resolutions: claim.resolutions ? [...claim.resolutions] : [...model.resolutions],
           editSupport: claim.kinds.includes("image_edit"),
           videoSupport: claim.kinds.includes("video_generate"),
         });
@@ -221,7 +222,7 @@ function channelCapabilities(label: string): Capability[] {
     if (!allowed && isPixaiModelId(model.id)) continue;
     if (!allowed && model.kind !== "image") continue;
     if (!allowed && GENERIC_CHANNEL_REJECTED_IMAGE_MODEL_IDS.has(model.id)) continue;
-    // 2026-09-27 项目负责人裁定「adobe2api 留图、停视频」：本渠道所有 video_generate
+    // 2026-09-27 暴君裁定「adobe2api 留图、停视频」：本渠道所有 video_generate
     // 认领一律不产出 ⇒ retireUnclaimedCapabilities 会把既有 video capability
     // 逐条 enabled=false + is_current=false（含 seedance-2.0/-fast、veo-3.1/-fast、
     // kling-3.0/-omni、firefly-video、luma 全族、runway-gen-4/4.5）。图片

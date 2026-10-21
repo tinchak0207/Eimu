@@ -4,7 +4,7 @@
  * 设计边界（与工单一致）：
  *   - 只入队：收盘路径不呼叫 LLM、不自动跑批次；批次激活仍由既有
  *     `MEMORY_BATCH_ENABLED` 与人工/定时决定。
- *   - 队列目录：`MEMORY_QUEUE_DIR`（默认 `/opt/eimu-harness/state/memory-queue`）；
+ *   - 队列目录：`MEMORY_QUEUE_DIR`（默认 `/opt/agent-harness/state/memory-queue`）；
  *     不可写时回退 `./.memory-queue`（本地开发）。
  *   - 同 session 合并：kinds 去重合并、attempts+1、updatedAt 更新；原子写（tmp + rename）。
  *   - 审计：`<queueDir>/memory-audit.jsonl`，只记事件元资料（不写 sample/正文）。
@@ -15,7 +15,7 @@ import { constants as fsConstants } from "node:fs"
 import { join, resolve } from "node:path"
 import { sanitizeMemorySample, type MemorySignalKind } from "./memory-trigger.ts"
 
-export const DEFAULT_MEMORY_QUEUE_DIR = "/opt/eimu-harness/state/memory-queue"
+export const DEFAULT_MEMORY_QUEUE_DIR = "/opt/agent-harness/state/memory-queue"
 export const MEMORY_AUDIT_FILENAME = "memory-audit.jsonl"
 
 export interface MemoryQueueRecord {

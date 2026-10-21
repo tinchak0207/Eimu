@@ -157,10 +157,10 @@ redteam-*
 !/deploy-staging/laya-server/
 # 例外：vps-tools/ 是 VPS 运维工具纯程式码（gateway 对账脚本等），不含凭证
 !/deploy-staging/vps-tools/
-# 例外：opencode-runtime/ 是 /opt/eimu-harness/workspace/.opencode 手维护子集（tools/lib/skills/plugin
+# 例外：opencode-runtime/ 是 /opt/agent-harness/workspace/.opencode 手维护子集（tools/lib/skills/plugin
 # ＋设定档）的单一真源；vendored 的 node_modules/services 与执行时 opencode.db 已排除（见该目录 .gitignore）
 !/deploy-staging/opencode-runtime/
-# 例外：poller/ 是 /opt/eimu-harness/poller（生产常驻轮询程式）的唯一真源；此前无 repo 真源导致
+# 例外：poller/ 是 /opt/agent-harness/poller（生产常驻轮询程式）的唯一真源；此前无 repo 真源导致
 # 影片命名空间 bug 存活至今（2026-10-02 修）。纯程式码，不含凭证
 !/deploy-staging/poller/
 # 例外：flowmusic2api/ 是 FlowMusic 帐号池服务的 P1/P2 凭证链修复补丁＋看门狗的真源；
@@ -200,19 +200,3 @@ redteam-*
 /work/
 /_inbox/
 
-
-# 开源仓库：示例环境变量允许入库
-!.env.example
-# 开源仓库：公开的 deploy 子目录与 staging 纯代码
-!/deploy-staging/blender-bridge-tunnel/
-!/deploy-staging/blender-director-persona/
-!/deploy-staging/blender-gateway/
-!/deploy-staging/blender-modal/
-!/deploy-staging/blender-nodes/
-!/deploy-staging/expert-gateway/
-!/deploy-staging/hardening.conf
-!/deploy-staging/opencode.json
-!/deploy-staging/patch-gateway.py
-!/staging/
-!/next.config.mjs
-!/postcss.config.mjs

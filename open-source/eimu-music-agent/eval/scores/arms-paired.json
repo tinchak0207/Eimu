@@ -1,0 +1,541 @@
+{
+ "experiment": "paired ablation, 3 prompts (wsb idx0/idx15/idx100) x 3 takes per arm, byte-identical prompt transform across arms",
+ "evaluator": "same as scores/human-canon-27.json",
+ "positive_control": "media-1789821225748-t6qbpy.wav -> mean7 6.9150 reproduced in every batch",
+ "note": "arm eimu-yue2 is opportunistic: 2 of its audio files are the YuE2 outputs produced inside the eimu-flowmusic sessions and discarded by the harness on client timeout, so its n=7 is not a controlled sample and its per-prompt take counts differ (4/1/2) — do not read its best_of_k as a same-N comparison.",
+ "paired_deltas": {
+  "eimu-flowmusic_minus_bare-lyria": -0.0137,
+  "eimu-yue2_minus_bare-yue2": -0.0084,
+  "bootstrap_95ci": [
+   -0.128,
+   0.233
+  ],
+  "verdict": "harness shows no measurable gain on single-draw score"
+ },
+ "arms": [
+  {
+   "id": "bare-lyria",
+   "label": "裸 Lyria（无 harness）",
+   "n": 9,
+   "mean7": 6.7063,
+   "dims": {
+    "Melody": 6.7837,
+    "Arrangement": 6.9639,
+    "Musicality": 5.8439,
+    "Vocal": 7.0188,
+    "Instrumental": 6.8993,
+    "Mixing": 6.6765,
+    "Structure": 6.7578
+   },
+   "prompts": [
+    {
+     "prompt_idx": 0,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.4851,
+       "Arrangement": 6.7939,
+       "Musicality": 5.7378,
+       "Vocal": 6.7377,
+       "Instrumental": 6.8827,
+       "Mixing": 6.6048,
+       "Structure": 6.4322
+      },
+      {
+       "Melody": 6.773,
+       "Arrangement": 7.0549,
+       "Musicality": 5.5921,
+       "Vocal": 7.0201,
+       "Instrumental": 6.5935,
+       "Mixing": 6.3251,
+       "Structure": 6.5967
+      },
+      {
+       "Melody": 6.1648,
+       "Arrangement": 6.596,
+       "Musicality": 5.4557,
+       "Vocal": 6.9086,
+       "Instrumental": 6.8105,
+       "Mixing": 6.3291,
+       "Structure": 6.6884
+      }
+     ],
+     "take_mean7": [
+      6.5249,
+      6.5651,
+      6.4219
+     ]
+    },
+    {
+     "prompt_idx": 15,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.9507,
+       "Arrangement": 6.832,
+       "Musicality": 5.8099,
+       "Vocal": 6.7269,
+       "Instrumental": 6.66,
+       "Mixing": 6.4876,
+       "Structure": 6.6495
+      },
+      {
+       "Melody": 6.3448,
+       "Arrangement": 6.5596,
+       "Musicality": 5.37,
+       "Vocal": 6.6324,
+       "Instrumental": 6.434,
+       "Mixing": 6.0823,
+       "Structure": 6.5652
+      },
+      {
+       "Melody": 6.9058,
+       "Arrangement": 6.6125,
+       "Musicality": 5.6969,
+       "Vocal": 6.1292,
+       "Instrumental": 6.6223,
+       "Mixing": 6.0133,
+       "Structure": 6.5773
+      }
+     ],
+     "take_mean7": [
+      6.5881,
+      6.284,
+      6.3653
+     ]
+    },
+    {
+     "prompt_idx": 100,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 7.2808,
+       "Arrangement": 7.5611,
+       "Musicality": 6.4312,
+       "Vocal": 7.7181,
+       "Instrumental": 7.4249,
+       "Mixing": 7.5435,
+       "Structure": 7.3439
+      },
+      {
+       "Melody": 7.0161,
+       "Arrangement": 7.4146,
+       "Musicality": 6.2856,
+       "Vocal": 7.5816,
+       "Instrumental": 7.5028,
+       "Mixing": 7.4633,
+       "Structure": 7.135
+      },
+      {
+       "Melody": 7.1322,
+       "Arrangement": 7.2504,
+       "Musicality": 6.216,
+       "Vocal": 7.7143,
+       "Instrumental": 7.1632,
+       "Mixing": 7.2394,
+       "Structure": 6.8316
+      }
+     ],
+     "take_mean7": [
+      7.3291,
+      7.1999,
+      7.0782
+     ]
+    }
+   ],
+   "best_of_k": {
+    "1 (取最好)": 6.8274,
+    "2": 6.7621,
+    "3 (全取=均分)": 6.7063
+   }
+  },
+  {
+   "id": "bare-yue2",
+   "label": "裸 YuE2（无 harness）",
+   "n": 9,
+   "mean7": 6.5015,
+   "dims": {
+    "Melody": 6.4476,
+    "Arrangement": 6.7494,
+    "Musicality": 5.7034,
+    "Vocal": 6.7427,
+    "Instrumental": 6.8496,
+    "Mixing": 6.6972,
+    "Structure": 6.3208
+   },
+   "prompts": [
+    {
+     "prompt_idx": 0,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.7388,
+       "Arrangement": 6.9755,
+       "Musicality": 5.8057,
+       "Vocal": 6.7863,
+       "Instrumental": 7.132,
+       "Mixing": 7.0255,
+       "Structure": 6.2208
+      },
+      {
+       "Melody": 6.0437,
+       "Arrangement": 6.4252,
+       "Musicality": 5.3914,
+       "Vocal": 6.2453,
+       "Instrumental": 6.6158,
+       "Mixing": 6.3747,
+       "Structure": 5.9796
+      },
+      {
+       "Melody": 6.5984,
+       "Arrangement": 6.8122,
+       "Musicality": 5.8274,
+       "Vocal": 6.5894,
+       "Instrumental": 6.7132,
+       "Mixing": 6.8796,
+       "Structure": 6.4139
+      }
+     ],
+     "take_mean7": [
+      6.6692,
+      6.1537,
+      6.5477
+     ]
+    },
+    {
+     "prompt_idx": 15,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.3198,
+       "Arrangement": 6.2401,
+       "Musicality": 5.1803,
+       "Vocal": 6.4225,
+       "Instrumental": 6.5677,
+       "Mixing": 6.2711,
+       "Structure": 6.12
+      },
+      {
+       "Melody": 6.2312,
+       "Arrangement": 6.8956,
+       "Musicality": 5.6317,
+       "Vocal": 6.5041,
+       "Instrumental": 6.8976,
+       "Mixing": 6.3922,
+       "Structure": 6.6225
+      },
+      {
+       "Melody": 6.6329,
+       "Arrangement": 6.8684,
+       "Musicality": 5.4794,
+       "Vocal": 6.3508,
+       "Instrumental": 6.9116,
+       "Mixing": 6.5697,
+       "Structure": 6.3862
+      }
+     ],
+     "take_mean7": [
+      6.1602,
+      6.4536,
+      6.457
+     ]
+    },
+    {
+     "prompt_idx": 100,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.2157,
+       "Arrangement": 6.8167,
+       "Musicality": 5.9129,
+       "Vocal": 6.952,
+       "Instrumental": 6.7765,
+       "Mixing": 6.938,
+       "Structure": 6.2438
+      },
+      {
+       "Melody": 6.7642,
+       "Arrangement": 6.971,
+       "Musicality": 6.2978,
+       "Vocal": 7.6829,
+       "Instrumental": 7.3856,
+       "Mixing": 7.3675,
+       "Structure": 6.4073
+      },
+      {
+       "Melody": 6.484,
+       "Arrangement": 6.7397,
+       "Musicality": 5.8038,
+       "Vocal": 7.1513,
+       "Instrumental": 6.6466,
+       "Mixing": 6.4563,
+       "Structure": 6.4935
+      }
+     ],
+     "take_mean7": [
+      6.5508,
+      6.9823,
+      6.5393
+     ]
+    }
+   ],
+   "best_of_k": {
+    "1 (取最好)": 6.7028,
+    "2": 6.6101,
+    "3 (全取=均分)": 6.5015
+   }
+  },
+  {
+   "id": "eimu-flowmusic",
+   "label": "Eimu 编排 → FlowMusic",
+   "n": 9,
+   "mean7": 6.6926,
+   "dims": {
+    "Melody": 6.7587,
+    "Arrangement": 6.9984,
+    "Musicality": 5.7683,
+    "Vocal": 6.8004,
+    "Instrumental": 7.2104,
+    "Mixing": 6.6473,
+    "Structure": 6.6648
+   },
+   "prompts": [
+    {
+     "prompt_idx": 0,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.3053,
+       "Arrangement": 6.9039,
+       "Musicality": 5.4564,
+       "Vocal": 6.5943,
+       "Instrumental": 7.2993,
+       "Mixing": 6.519,
+       "Structure": 6.5031
+      },
+      {
+       "Melody": 6.555,
+       "Arrangement": 7.1153,
+       "Musicality": 5.4665,
+       "Vocal": 6.6789,
+       "Instrumental": 6.5945,
+       "Mixing": 6.6313,
+       "Structure": 6.2988
+      },
+      {
+       "Melody": 6.7196,
+       "Arrangement": 7.0225,
+       "Musicality": 5.6172,
+       "Vocal": 6.7269,
+       "Instrumental": 7.1635,
+       "Mixing": 6.7282,
+       "Structure": 6.386
+      }
+     ],
+     "take_mean7": [
+      6.5116,
+      6.4772,
+      6.6234
+     ]
+    },
+    {
+     "prompt_idx": 15,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.9129,
+       "Arrangement": 7.0988,
+       "Musicality": 5.7485,
+       "Vocal": 6.8344,
+       "Instrumental": 7.5019,
+       "Mixing": 6.5936,
+       "Structure": 6.8693
+      },
+      {
+       "Melody": 6.3218,
+       "Arrangement": 6.4263,
+       "Musicality": 5.4251,
+       "Vocal": 6.311,
+       "Instrumental": 6.9721,
+       "Mixing": 5.7768,
+       "Structure": 6.2401
+      },
+      {
+       "Melody": 6.8291,
+       "Arrangement": 6.7832,
+       "Musicality": 5.6514,
+       "Vocal": 6.09,
+       "Instrumental": 7.0725,
+       "Mixing": 6.3436,
+       "Structure": 6.4322
+      }
+     ],
+     "take_mean7": [
+      6.7942,
+      6.2105,
+      6.4574
+     ]
+    },
+    {
+     "prompt_idx": 100,
+     "n_takes": 3,
+     "takes": [
+      {
+       "Melody": 6.8339,
+       "Arrangement": 7.1704,
+       "Musicality": 5.9778,
+       "Vocal": 7.2802,
+       "Instrumental": 7.5073,
+       "Mixing": 6.8867,
+       "Structure": 6.9379
+      },
+      {
+       "Melody": 7.0571,
+       "Arrangement": 7.0293,
+       "Musicality": 6.0014,
+       "Vocal": 7.2311,
+       "Instrumental": 7.2039,
+       "Mixing": 7.029,
+       "Structure": 6.9952
+      },
+      {
+       "Melody": 7.2935,
+       "Arrangement": 7.436,
+       "Musicality": 6.5701,
+       "Vocal": 7.4565,
+       "Instrumental": 7.5789,
+       "Mixing": 7.3176,
+       "Structure": 7.3202
+      }
+     ],
+     "take_mean7": [
+      6.942,
+      6.9353,
+      7.2818
+     ]
+    }
+   ],
+   "best_of_k": {
+    "1 (取最好)": 6.8998,
+    "2": 6.7684,
+    "3 (全取=均分)": 6.6926
+   }
+  },
+  {
+   "id": "eimu-yue2",
+   "label": "Eimu 编排 → YuE2",
+   "n": 7,
+   "mean7": 6.5588,
+   "dims": {
+    "Melody": 6.5168,
+    "Arrangement": 6.9452,
+    "Musicality": 5.6812,
+    "Vocal": 6.7169,
+    "Instrumental": 6.9204,
+    "Mixing": 6.7951,
+    "Structure": 6.3359
+   },
+   "prompts": [
+    {
+     "prompt_idx": 0,
+     "n_takes": 4,
+     "takes": [
+      {
+       "Melody": 6.5472,
+       "Arrangement": 7.2493,
+       "Musicality": 5.8831,
+       "Vocal": 6.5192,
+       "Instrumental": 7.1514,
+       "Mixing": 7.3417,
+       "Structure": 6.3001
+      },
+      {
+       "Melody": 6.3395,
+       "Arrangement": 6.9301,
+       "Musicality": 5.5576,
+       "Vocal": 6.6686,
+       "Instrumental": 7.0412,
+       "Mixing": 6.869,
+       "Structure": 6.3846
+      },
+      {
+       "Melody": 6.4961,
+       "Arrangement": 7.2107,
+       "Musicality": 5.5761,
+       "Vocal": 6.574,
+       "Instrumental": 7.2672,
+       "Mixing": 6.893,
+       "Structure": 6.2193
+      },
+      {
+       "Melody": 6.5848,
+       "Arrangement": 7.2141,
+       "Musicality": 5.6633,
+       "Vocal": 6.8414,
+       "Instrumental": 7.0135,
+       "Mixing": 6.6449,
+       "Structure": 6.2381
+      }
+     ],
+     "take_mean7": [
+      6.7131,
+      6.5415,
+      6.6052,
+      6.6
+     ]
+    },
+    {
+     "prompt_idx": 15,
+     "n_takes": 1,
+     "takes": [
+      {
+       "Melody": 6.1257,
+       "Arrangement": 6.461,
+       "Musicality": 5.4674,
+       "Vocal": 6.5983,
+       "Instrumental": 6.716,
+       "Mixing": 6.4141,
+       "Structure": 6.1566
+      }
+     ],
+     "take_mean7": [
+      6.277
+     ]
+    },
+    {
+     "prompt_idx": 100,
+     "n_takes": 2,
+     "takes": [
+      {
+       "Melody": 7.0429,
+       "Arrangement": 6.7638,
+       "Musicality": 5.763,
+       "Vocal": 6.7553,
+       "Instrumental": 6.5952,
+       "Mixing": 6.7306,
+       "Structure": 6.6398
+      },
+      {
+       "Melody": 6.4816,
+       "Arrangement": 6.7873,
+       "Musicality": 5.8577,
+       "Vocal": 7.0613,
+       "Instrumental": 6.6585,
+       "Mixing": 6.6727,
+       "Structure": 6.4125
+      }
+     ],
+     "take_mean7": [
+      6.6129,
+      6.5617
+     ]
+    }
+   ],
+   "best_of_k": {
+    "1 (取最好)": 6.5343,
+    "2": 6.5078,
+    "3 (全取=均分)": 6.5012
+   }
+  }
+ ]
+}

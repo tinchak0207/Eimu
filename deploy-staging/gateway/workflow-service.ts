@@ -1,6 +1,6 @@
 // 画布工作流服务（Workflow Service）
 //
-// 项目负责人策略 v2：Deepseek 透过 workflow_* 工具填内容，本服务展开节点流并执行。
+// 暴君策略 v2：Deepseek 透过 workflow_* 工具填内容，本服务展开节点流并执行。
 // 本档案独立于 gateway index.ts（Bun 动态 import），接受注入的 emit 函数
 // （gateway 的 emitToSession）——保持 gateway 单档干净、本模组可测。
 //
@@ -26,95 +26,11 @@ import { getWorkflowTemplate, listWorkflowTemplates, leanTemplateForPlanOnly } f
 import { validateShotJson, parseShotCandidate, shotOutputParams } from "./video-prompt-schema"
 import { isRetryableNodeError } from "./error-classify"
 
-export interface EmitFn {
-  (state: unknown, name: string, data: unknown): void
-}
-
-export interface RunNodeFn {
-  /**
-   * 执行单一节点。upstream = 已完成的上游节点 id → content 映射。
-   * graph = 整个节点流（供 submit 解析上游 text/config 拿 prompt/参考）。
-   * node 本身 metadata 可能只有 config 的 model/size——prompt 常在上游。
-   */
-  (node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph, owner?: unknown): Promise<WorkflowNodeResult>
-}
-
-export interface WorkflowServiceOptions {
-  emit: EmitFn
-  runNode: RunNodeFn
-  reviewBatch?: (wf: ActiveWorkflow, nodes: WorkflowNode[]) => Promise<void>
-  /**
-   * S5a（2026-08-27）：错误人话化挂点（index.ts 注入 humanMessageFor）。
-   * 节点失败的 canvas.node.updated patch 在 errorDetails 原文之外补
-   * human_message 中文短句；未注入则维持旧载荷。
-   */
-  humanize?: (message: string) => string
-  /**
-   * 状态变更通知（持久化挂点，对齐 canvas 快照的 markDirty 模式）：
-   * start/addNode/connect/generate 的每次节点状态/结果变更后同步呼叫，
-   * gateway 在这里把 workflow 快照镜像回 session（随防抖落盘）。
-   * owner 是 start 时绑定的 session 物件（可能为 null——恢复路径会重新绑定）。
-   */
-  onDirty?: (wf: ActiveWorkflow) => void
-  /**
-   * S4（2026-08-27）：整图币耗估价挂点（gateway 注入，同步签名）。
-   * 用于 canvas.plan 的 cost_hint。null = 估不出（不许编数）。未注入回 null。
-   */
-  estimateGraphCoins?: (graph: WorkflowGraph) => number | null
-  /**
-   * R8（2026-09-10 多镜展开修复）：可用视频模型动态选型挂点（gateway 注入）。
-   * 大片模板 shotN_gen 不再写死 model=minimax-h3（该模型当前不可用），start 时
-   * 由 gateway 查 /v1/model-status 选当前可用的视频模型回填。回 null/undefined =
-   * 挂点不可用（探测故障），回退引擎默认（与旧行为一致，submit 前仍有 F2 failover
-   * 兜底）。轮子 = index.ts 的 resolveActiveModel 同源（/v1/model-status 判活）。
-   */
-  pickDefaultVideoModel?: (owner?: unknown) => Promise<string | null>
-  /**
-   * 2026-09-24 协作确认闸（collaborate 档专属）：批次间挂点，语义与 R9 中途闸
-   *（midBatchBudgetGate）同构——回非 null 字串＝暂停，该字串即回给呼叫端/用户的
-   * 诚实原因；回 null＝照跑。gateway 注入的实作只认 interaction_mode === "collaborate"，
-   * auto/preset 两档恒回 null（护城河：全自动零新增阻塞）。
-   * 未注入（测试/旧呼叫端）＝恒 null，与旧行为逐位元一致。
-   */
-  awaitingApproval?: (wf: ActiveWorkflow) => Promise<string | null>
-}
-
-export interface ActiveWorkflow {
-  workflowId: string
-  templateId: string
-  graph: WorkflowGraph
-  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota" | "paused_awaiting_approval" | "review_pending" | "review_partial" | "review_failed"
-  nodeStatus: Record<string, "pending" | "running" | "success" | "error" | "skipped">
-  nodeContent: Record<string, string>
-  nodeCost: Record<string, number>
-  owner: unknown // 建立时绑定的 session；emit 事件送回这个 session，后台执行不受 stateForWorkflow 影响
-  // 流式搭建去重：plan 只发一次；节点/连线按 id/边去重，generate 再呼叫 emitGraph 只补增量。
-  planEmitted: boolean
-  emittedNodes: Set<string>
-  emittedConnections: Set<string>
-}
+import { splitIntoBatches, extractBalanceLocal } from "./workflow-service-nodes"
+import { computeSwimlanePositions } from "./workflow-service-swimlane"
+import type { ActiveWorkflow, WorkflowServiceOptions } from "./workflow-service-types"
 
 let workflowCounter = 0
-
-/**
- * 同层并行分批（2026-08-27）：把 topo order 按「依赖深度」切层——层 L 的节点只依赖层 < L
- * 的节点，同层节点互不依赖 → 可并行；批间严格串行（下游等上游）。order 为 topo 序，前驱必已分层。
- */
-function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
-  const layerOf = new Map<string, number>()
-  const batches: string[][] = []
-  for (const nodeId of order) {
-    let layer = 0
-    for (const c of graph.connections) {
-      if (c.to !== nodeId) continue
-      const fromLayer = layerOf.get(c.from)
-      if (fromLayer !== undefined && fromLayer + 1 > layer) layer = fromLayer + 1
-    }
-    layerOf.set(nodeId, layer)
-    ;(batches[layer] ??= []).push(nodeId)
-  }
-  return batches
-}
 
 /**
  * R5-B（2026-08-28）：可重试错误识别——poll timeout / 上游 5xx / 网络抖动类
@@ -122,111 +38,6 @@ function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
  * 0920 收口：原单条正则 RETRYABLE_NODE_ERROR 并入 error-classify.ts 的单一
  * 有序表 ERROR_RULES（与人话翻译同源同序），判定改走 isRetryableNodeError。
  */
-
-/** 沿上游config解析数值字段（用于秒数等参数）；报价不再以metadata价格作真源。 */
-export function resolveNodeUnitPrice(node: WorkflowNode, graph: WorkflowGraph, field = "unit_price_coins"): number | null {
-  const self = node.metadata[field]
-  if (typeof self === "number" && self > 0) return self
-  const connections = Array.isArray(graph?.connections) ? graph.connections : []
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
-  const upstreamOf = (id: string) =>
-    connections
-      .filter((c) => c.to === id)
-      .map((c) => nodes.find((n) => n.id === c.from))
-      .filter((n): n is WorkflowNode => Boolean(n))
-  let frontier = upstreamOf(node.id)
-  for (let depth = 0; depth < 2 && frontier.length; depth++) {
-    for (const up of frontier) {
-      if (up.kind === "config") {
-        const v = up.metadata[field]
-        if (typeof v === "number" && v > 0) return v
-      }
-    }
-    frontier = frontier.flatMap((up) => upstreamOf(up.id))
-  }
-  return null
-}
-
-/** 视频报价仅使用目录明确的币/秒字段；模板锚点与历史档位不是账本。 */
-export function resolveVideoPerSecond(
-  node: WorkflowNode,
-  graph: WorkflowGraph,
-  catalogLookup?: (tier: "720p" | "1080p" | "default") => number | null,
-): number | null {
-  const value = catalogLookup?.(videoQualityTier(node, graph))
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
-}
-/**
- * R5-D2：影片档位探测——quality 栏位（节点自身或上游 config ≤2 层；index.ts 提交
- * 视频时原样透传 cfg.quality）含 "1080" → 1080P 档；含 "720" 或缺省 → 720P 档
- *（保守取低档）。resolution/definition 栏位同名同判。
- */
-function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1080p" | "default" {
-  const scan = (meta: Record<string, unknown>): string | null => {
-    for (const k of ["quality", "resolution", "definition"]) {
-      const v = meta[k]
-      if (typeof v === "string" && v) return v
-      if (typeof v === "number") return String(v)
-    }
-    return null
-  }
-  const selfQ = scan(node.metadata)
-  if (selfQ?.includes("1080")) return "1080p"
-  if (selfQ?.includes("720")) return "720p"
-  const connections = Array.isArray(graph?.connections) ? graph.connections : []
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
-  const upstreamOf = (id: string) =>
-    connections
-      .filter((c) => c.to === id)
-      .map((c) => nodes.find((n) => n.id === c.from))
-      .filter((n): n is WorkflowNode => Boolean(n))
-  let frontier = upstreamOf(node.id)
-  for (let depth = 0; depth < 2 && frontier.length; depth++) {
-    for (const up of frontier) {
-      if (up.kind === "config") {
-        const q = scan(up.metadata)
-        if (q?.includes("1080")) return "1080p"
-        if (q?.includes("720")) return "720p"
-      }
-    }
-    frontier = frontier.flatMap((up) => upstreamOf(up.id))
-  }
-  return "default"
-}
-
-/** 余额解析（与 gateway fetchBalance/extractBalance 同构：balance_coins/balance/coins/credit，递归 data）。 */
-function extractBalanceLocal(data: unknown): number | null {
-  if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>
-    for (const k of ["balance_coins", "balance", "coins", "credit"]) {
-      if (typeof obj[k] === "number") return obj[k]
-    }
-    if (obj.data && typeof obj.data === "object") return extractBalanceLocal(obj.data)
-  }
-  return null
-}
-
-/** 节点的结构化 shot JSON（metadata.shot），给 index.ts 的 submitWorkflowNode 编译 prompt 用。没有则 null。 */
-export function resolveNodeShot(node: { kind: string; metadata: Record<string, unknown> }): unknown {
-  return node.metadata.shot !== undefined ? node.metadata.shot : null
-}
-
-/**
- * R5-D2：image 节点模型名解析——自身 metadata.model → 直接上游 config 的 model
- *（引擎对缺 model 的 image 节点用 pixai-tsubaki2，index.ts submitWorkflowNode
- * 文档行为）；取不到回 null（= 走引擎 pixai 预设）。
- */
-function resolveImageModelName(node: WorkflowNode, graph: WorkflowGraph): string | null {
-  if (typeof node.metadata.model === "string" && node.metadata.model) return node.metadata.model
-  const connections = Array.isArray(graph?.connections) ? graph.connections : []
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
-  for (const c of connections) {
-    if (c.to !== node.id) continue
-    const up = nodes.find((n) => n.id === c.from)
-    if (up && up.kind === "config" && typeof up.metadata.model === "string" && up.metadata.model) return up.metadata.model
-  }
-  return null
-}
 
 export class WorkflowService {
   private workflows = new Map<string, ActiveWorkflow>()
@@ -310,7 +121,7 @@ export class WorkflowService {
     const owner = wf.owner as { apiKey?: string } | null | undefined
     const key = owner?.apiKey
     if (!key) return null
-    const base = (process.env.PLATFORM_BASE || "https://image.eimu.dev").replace(/\/+$/, "")
+    const base = (process.env.PLATFORM_BASE || "https://image.tinchak0207.xyz").replace(/\/+$/, "")
     const quotaUrl = process.env.QUOTA_URL || `${base}/v1/quota`
     try {
       const res = await fetch(quotaUrl, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(5000) })
@@ -396,7 +207,7 @@ export class WorkflowService {
   }
 
   /**
-   * 0920 项目负责人裁定（压缩垃圾时间）：骨架上画布路径**禁**走视频模型探测——
+   * 0920 暴君裁定（压缩垃圾时间）：骨架上画布路径**禁**走视频模型探测——
    * start() 对 multiShot 模板会 await pickDefaultVideoModel（上限 5s fail-open），
    * 而那 5 秒对「让用户看见骨架」零贡献（节点 metadata.model 由 config 节点
    * defaults 或 workflow_generate 时的动态选型接手，startSync 的 videoModel 只是
@@ -1146,104 +957,7 @@ export class WorkflowService {
   }
 }
 
-// ── 泳道座标（2026-09-21 分层重排）─────────────────────────────────────────
-// 旧版「每主节点独占一行、衍生卡向右排」会让主链长距离跳线（feature_film 的
-// script→shot1 跨 10 行、char_view1→shot1_gen 跨 8 行）纵贯切穿整列卡片。
-// 新版改 DAG 分层：主链按最长路径深度分栏（栏间距＝一跳），栏内 barycenter
-// 排序压交叉；每个工序的衍生卡（工具/配方/门禁）垂直挂在该工序正下方，
-// 行内串联线走干净垂直脊柱。所有主链连线＝相邻栏位短跳线，零长距离贯穿。
-const SWIM_CARD_W = 300 // 与前端 CARD_W 同值
-const SWIM_MAIN_H = 220 // 主节点高
-const SWIM_GAP_X = 80 // 栏间距（一跳连线的呼吸空间）
-const SWIM_DERIVED_H = 150 // 衍生卡高
-const SWIM_DERIVED_GAP = 24 // 衍生卡间距
-const SWIM_BLOCK_GAP_Y = 60 // 同栏相邻工序块的间距
-
-const isDerivedRole = (role: string) => /__tool_\d+$/.test(role) || /__note_\d+$/.test(role) || /__gate$/.test(role)
-
-// 导出供 E2E 断言用（2026-09-20 Route A 验收；09-21 签名加 connections 参数）。
-export function computeSwimlanePositions(
-  nodes: { id: string; role: string }[],
-  connections: { from: string; to: string }[] = [],
-): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>()
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const conns = (Array.isArray(connections) ? connections : []).filter(
-    (c) => byId.has(c.from) && byId.has(c.to),
-  )
-
-  const mains = nodes.filter((n) => !isDerivedRole(n.role))
-
-  // 衍生卡按 role 前缀归到父工序（nodes 阵列序＝tools→notes→gate 的铺卡序）
-  const derivedByParent = new Map<string, { id: string }[]>()
-  const mainByRole = new Map(mains.map((n) => [n.role, n]))
-  for (const n of nodes) {
-    if (!isDerivedRole(n.role)) continue
-    const parentRole = n.role.slice(0, n.role.lastIndexOf("__"))
-    if (!mainByRole.has(parentRole)) continue
-    const list = derivedByParent.get(parentRole) ?? []
-    list.push(n)
-    derivedByParent.set(parentRole, list)
-  }
-
-  // 最长路径分层（只看主链连线；衍生卡不在 depth 表里，自动被排除）
-  const depth = new Map<string, number>()
-  for (const n of mains) depth.set(n.id, 0)
-  for (let iter = 0; iter < mains.length; iter++) {
-    let changed = false
-    for (const c of conns) {
-      const fd = depth.get(c.from)
-      if (fd === undefined) continue
-      const nd = fd + 1
-      if (nd > (depth.get(c.to) ?? 0)) {
-        depth.set(c.to, nd)
-        changed = true
-      }
-    }
-    if (!changed) break
-  }
-
-  const maxDepth = Math.max(0, ...mains.map((n) => depth.get(n.id) ?? 0))
-  const columns: { id: string; role: string }[][] = Array.from({ length: maxDepth + 1 }, () => [])
-  for (const n of mains) columns[depth.get(n.id) ?? 0].push(n)
-
-  // barycenter：向左栏看齐排序，压低跨栏连线交叉（无上游者保持原序）
-  const upstreamOf = new Map<string, string[]>()
-  for (const c of conns) {
-    if (depth.has(c.from) && depth.has(c.to)) {
-      upstreamOf.set(c.to, [...(upstreamOf.get(c.to) ?? []), c.from])
-    }
-  }
-  for (let d = 1; d < columns.length; d++) {
-    const refIndex = new Map(columns[d - 1].map((n, i) => [n.id, i]))
-    const scored = columns[d].map((n, i) => {
-      const ups = (upstreamOf.get(n.id) ?? [])
-        .map((id) => refIndex.get(id))
-        .filter((v): v is number => v !== undefined)
-      return { n, i, bary: ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : i }
-    })
-    scored.sort((a, b) => a.bary - b.bary || a.i - b.i)
-    columns[d] = scored.map((s) => s.n)
-  }
-
-  // 座标：栏 x 按深度推进；栏内工序块（主节点＋下方衍生脊柱）垂直堆叠
-  const blockH = (role: string) => {
-    const derived = derivedByParent.get(role) ?? []
-    return derived.length
-      ? SWIM_MAIN_H + SWIM_DERIVED_GAP + derived.length * (SWIM_DERIVED_H + SWIM_DERIVED_GAP)
-      : SWIM_MAIN_H
-  }
-  for (let d = 0; d < columns.length; d++) {
-    let y = 0
-    for (const n of columns[d]) {
-      positions.set(n.id, { x: d * (SWIM_CARD_W + SWIM_GAP_X), y })
-      let cy = y + SWIM_MAIN_H + SWIM_DERIVED_GAP
-      for (const dc of derivedByParent.get(n.role) ?? []) {
-        positions.set(dc.id, { x: d * (SWIM_CARD_W + SWIM_GAP_X), y: cy })
-        cy += SWIM_DERIVED_H + SWIM_DERIVED_GAP
-      }
-      y += blockH(n.role) + SWIM_BLOCK_GAP_Y
-    }
-  }
-  return positions
-}
+export type { EmitFn, RunNodeFn, WorkflowServiceOptions, ActiveWorkflow } from "./workflow-service-types"
+export { resolveNodeUnitPrice, resolveVideoPerSecond } from "./workflow-service-pricing"
+export { resolveNodeShot } from "./workflow-service-nodes"
+export { computeSwimlanePositions } from "./workflow-service-swimlane"

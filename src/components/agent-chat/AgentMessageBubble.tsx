@@ -74,7 +74,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   // 单一 write path 语义不变：open 受控于 state（初值＝是否串流中），使用者点 summary
   // 造成的 toggle 由下面 handler 回写，之后串流 delta 更新或父层 re-render 只会
   // 照著这个值渲染，不会把它打回收合——手动展开／收合优先于任何自动行为。
-  // 2026-09-27 项目负责人裁定 supersede：思考中展开、结算后自动收合成「已思考 · N 秒」
+  // 2026-09-27 暴君裁定 supersede：思考中展开、结算后自动收合成「已思考 · N 秒」
   // 一行（展开的内部推理占半屏）。使用者一旦手动点过 summary，自动收合就不再介入。
   const reasoningStreaming = item.kind === "assistant" && item.streaming === true;
   const [reasoningOpen, setReasoningOpen] = useState(reasoningStreaming);

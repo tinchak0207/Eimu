@@ -77,7 +77,7 @@ export async function handleAbortSession(key: string, id: string): Promise<Respo
   // aborted（UI 明示「已中止，未生效」）。顺序刻意在这里——abort 已落地、收尾帧
   // 之前，且 flushPendingSteers 看到 turnAborted 也会自己再挡一道（双保险）。
   dropPendingSteers(state, "aborted")
-  // 0920 项目负责人裁定（停止闸）：用户终止＝连子代理一起停。此前 abort 只杀主会话
+  // 0920 暴君裁定（停止闸）：用户终止＝连子代理一起停。此前 abort 只杀主会话
   // 在途 turn，子代理各自独立子会话照跑，跑完 wakeParent 又把父会话唤起来——
   // 用户视角「按了终止它又自己活了，刹不住车」。此处一并停掉本会话名下全部
   // 在跑子代理（不再唤醒、不再换模重投、不再交付闸门重派）。

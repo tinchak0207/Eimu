@@ -1,7 +1,7 @@
 /**
  * 生成 lens-language skill 的 SKILL.md（单一真源：src/lib/lens-language-library.ts）。
  *
- * 用途：VPS `/opt/eimu-harness/workspace/.opencode/skills/lens-language/SKILL.md`
+ * 用途：VPS `/opt/agent-harness/workspace/.opencode/skills/lens-language/SKILL.md`
  * 铁律：SKILL.md 内词条逐字等于 library（本脚本为唯一生成路径，禁止手改两份）。
  *
  * 用法：npx tsx tools/gen-lens-skill.ts > /tmp/lens-language-SKILL.md

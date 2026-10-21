@@ -28,7 +28,7 @@ function row(
     model_id: modelId,
     kind: "image_generate",
     status,
-    failure_class: status === "succeeded" ? null : "deadline_exceeded",
+    failure_class: status === "succeeded" ? null : "upstream_protocol",
     created_at: createdAt,
     finished_at: status === "queued" ? null : new Date(createdAt.getTime() + 3 * MIN),
     updated_at: createdAt,
@@ -100,6 +100,25 @@ test("user_input / cancelled 失败不计入样本：5 单用户侧失败不熔�
   const { sql } = fakeSql(rows);
   assert.equal((await readUnavailableModels(sql, { now, env: {} })).size, 0);
   assert.deepEqual(await checkModelAvailability("gpt-image-2", { sql, now, env: {} }), { allowed: true, probe: false });
+});
+
+test("deadline_exceeded 不计入样本：排队/窗口耗尽的假死单不得判死模型", async () => {
+  __resetModelBreakerStateForTests();
+  const rows = [
+    ...failures("gpt-image-2", 6, 5, { failure_class: "deadline_exceeded" }),
+    // 排除类之外的 2 单真实失败仍计入（< 5 样本门槛，不熔断）。
+    ...failures("gpt-image-2", 2, 80),
+  ];
+  const { sql } = fakeSql(rows);
+  assert.equal(
+    (await readUnavailableModels(sql, { now, env: {} })).size,
+    0,
+    "deadline_exceeded 是容量/排队超时，不是渠道坏，不得进熔断分母",
+  );
+  assert.deepEqual(await checkModelAvailability("gpt-image-2", { sql, now, env: {} }), {
+    allowed: true,
+    probe: false,
+  });
 });
 
 test("样本 ≥10 且成功率 <20% → unavailable；恰 20% 不熔断", async () => {

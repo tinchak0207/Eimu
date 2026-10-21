@@ -9,7 +9,7 @@ const SITE_URL = getSiteUrlFromEnv();
 /**
  * 分页标题＝站点介绍的第一句，也是被误读最狠的一格。
  *
- * 2026-09-27 项目负责人纠正：旧值「在线生成 GPT Image 2 / Nano Banana Pro 图片 | Eimu」
+ * 2026-09-27 暴君纠正：旧值「在线生成 GPT Image 2 / Nano Banana Pro 图片 | Eimu」
  * 让人在浏览器分页上读成「又一个 Image/Banana 镜像站」——用模型名开场的介绍，
  * 等于自己认领中转站那个位子。现在整站（layout metadata／本页／manifest／JSON-LD）
  * 都取自 lib/site-copy.ts 单一真源：先讲我们自己的承诺，模型名降级到关键词与

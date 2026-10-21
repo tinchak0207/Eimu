@@ -1,6 +1,6 @@
 ---
 name: image-gen
-description: 生图备援渠道（付费，仅当 agent-pixai 免费池不可用时使用）。用户要「生成图片、把这张图改一下、放大图片」时，若 agent-pixai 已失败或用户明确要求平台付费渠道，用它。走 image.eimu.dev 平台 API，生图非同步（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），改图同步 10-30s。
+description: 生图备援渠道（付费，仅当 agent-pixai 免费池不可用时使用）。用户要「生成图片、把这张图改一下、放大图片」时，若 agent-pixai 已失败或用户明确要求平台付费渠道，用它。走 image.tinchak0207.xyz 平台 API，生图非同步（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），改图同步 10-30s。
 license: internal
 metadata:
   audience: coding-agent
@@ -9,7 +9,7 @@ metadata:
 ## 我负责什么
 呼叫我们平台的图像 API（OpenAI 相容）。**只负责 API 呼叫与状态判断，不负责构思 prompt 内容**。
 
-## API 总览（Base: https://image.eimu.dev/v1，认证 Bearer）
+## API 总览（Base: https://image.tinchak0207.xyz/v1，认证 Bearer）
 | 动作 | 端点 | 同步? | 花费 |
 |---|---|---|---|
 | 生图 | POST /v1/images/generations | 非同步(202) | 见定价表 |

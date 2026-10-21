@@ -26,7 +26,7 @@ import type {
 import { EDITOR_ASPECTS } from "./editor/aspect"
 
 // 与 gateway/index.ts L433 同值；env 可覆盖（测试用）。
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/eimu-harness/workspace"
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 const TIMELINES_DIR = path.join(WORKSPACE_DIR, "timelines")
 
 // 保留策略：最近 20 版 + 每 10 版里程碑版（v % 10 === 0），其余删。

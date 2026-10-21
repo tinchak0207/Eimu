@@ -169,7 +169,7 @@ export const HARNESS_TOOL_ID_LIST = [
   //   style_aligned_batch 复用 style_anchor_sref 抽取段 + outlier_audit 审计核心，
   //   dry_run 报价 + 真发射 2 张 2/2 成功审计离群 0 +
   //   /experimental/tool/ids 活体注册确认。style_lora_train_optional 三处侦查无训练通道，
-  //   08-31 项目负责人裁定模板卡片已移除（证据链见 docs/template-honesty-audit.md 附录））
+  //   08-31 暴君裁定模板卡片已移除（证据链见 docs/template-honesty-audit.md 附录））
   "virtual_tryon",
   "hand_contact_repair",
   "style_aligned_batch",

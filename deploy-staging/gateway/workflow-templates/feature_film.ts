@@ -111,14 +111,45 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "shot1",
         kind: "text",
         title: "镜头 1 脚本",
-        deliverable: "镜头脚本（景别/机位/运镜/秒数=台词折算+反应拍 + J/L-cut 转场标记；情绪时序链「听见→停顿→眼神→表情→说话」拆反应镜头）",
+        deliverable: "镜头脚本＝状态变化 + 动作 beat 时间线（state_change.from → beats[].at_seconds/action/environment_change → state_change.to；每镜至少一次可见状态变化与一次环境变化）+ 景别/机位/运镜/秒数=台词折算+反应拍 + J/L-cut 转场标记",
         gate: "当前授权优先：完全访问或自动模式经独立评审自行通过，只有无持续授权或用户明确要求亲自签核时才执行以下人工停点；分镜人工批准门禁：镜头脚本给用户过目确认节奏与构图后才准渲染影片",
         notes: [
-          "每镜写清摄影语言：景别（远全中近特）、机位角度、运镜（推拉摇移跟）、秒数=台词折算时长+反应拍，情绪时序链排进镜头设计不拍满面瘫对白",
+          "每镜先回答「什么在变」：主体动作、空间关系、环境状态至少一项；答不出来＝这一镜不能开拍。只写景别/机位/运镜/静帧外观＝静态六槽，模型只会做慢推",
+          "写 `state_change:{from,to}` 与 `beats:[{at_seconds?,action,environment_change?}]`：action 用物理动词+身体机制+对象交互（压低重心起步冲刺/跃起挥刀/落地滑行），不写「缓缓抬头」这类形容词；at_seconds 严格递增且不越镜头时长",
+          "每镜至少一次环境变化（光/风/尘/人群/门帘/水动）；动作/走位/多人/空间关系镜头必须接 3D 预演节点，单人物微表情/产品特写才可跳过",
           "转场预埋 J/L-cut：声音先入或延后 0.5-1s，剪辑阶段直接按标记执行；单镜 3-8 秒为宜，超长拆段拼接",
         ],
       },
-      // R8（2026-09-10 项目负责人裁定）：shot1_gen 不再写死 model=minimax-h3 / duration=5s——
+      // 3D 预演（2026-10-20 影片范式改革）：kind 必须是 text——gateway 会 skip director kind 节点，
+      // 预演能力通过 tools 卡接入 director-engine / blender。位置在镜头脚本之后、影片配置之前；
+      // 连线保留 shot1→shot1_gen 直连（expandTemplate 的 R8 多镜克隆依赖这条原型边），
+      // 另加 shot1→previz→shot1_gen 保证预演卡按顺序铺开。注意连线本身不传图：
+      // 预演帧要成为参考条件，必须把 URL 写进该镜 shot.previz.keyframes（workflow-gw
+      // 会并入 reference_images），否则预演只是文本交付。
+      {
+        role: "previz",
+        kind: "text",
+        title: "3D 预演（白模 blocking / 机位路径 / 动作模板）",
+        deliverable: "每镜白模 blocking + 机位路径 + 动作模板，渲染首/中/尾关键帧；预演帧作为视频生成的参考条件，不是成片；交付含预演帧 + GLB，`.blend` 仅在 blender_* 真实可用时交付，否则明确标注缺失",
+        gate: "预演穿模/遮挡矛盾/走位方向冲突不得进入生成；预演帧只锁 blocking 与构图，动作过程仍由 beats 时间线表达；`.blend` 缺失不算失败，但交付必须写明；预演帧/GLB 不得伪造",
+        notes: [
+          "能力闸门（2026-10-20 现场）：先查真实工具表，确认 blender_exec/blender_render/blender_export_gltf 是否真的可用（不看 SKILL 宣称、不看工具文件存在）；不可用 → 用 bash + 自建几何 + 光栅渲染出首/中/尾关键帧与 GLB，并记下每帧机位/动作参数；禁止用二维文生图冒充 3D 预演；`.blend` 缺失必须在交付标注",
+          "动作/走位/多人/空间关系镜头先用 director-engine 白模（L1，免费）或 Blender（L2）定 blocking、机位路径与动作模板；渲染首/中/尾关键帧后，把关键帧 + 运镜 + beats 一起交给视频模型",
+          "预演帧必须落成 URL 写进该镜 shot.previz.keyframes（网关会把它们并进 reference_images 传给视频模型）；只放在节点交付文本里不会进生成；首/中/尾至少各一帧",
+          "预演帧是参考条件，不是成片也不是首帧硬锁：首帧负责起点，beats 负责过程；单人物微表情/产品特写等不涉及精确几何的镜头可跳过预演，直接首帧 I2V",
+          "机位路径与动作事件对齐（跟拍从哪个动作起、急推落在哪个 beat），预演阶段发现的穿模/遮挡/轴线错误先改白模，不留给视频模型猜",
+        ],
+        tools: [
+          { id: "director_manage_shot", input: "镜头操作指令", output: "白模镜头序列更新结果" },
+          { id: "director_set_camera_keyframe", input: "机位关键帧（时点+位置）", output: "机位路径时间线" },
+          { id: "director_set_motion_keyframe", input: "动作关键帧（时点+姿态）", output: "动作模板时间线" },
+          // 能力闸门（2026-10-20 现场）：blender_* 在当前生产席位实际为 false，保留卡面但标记不可用。
+          { id: "blender_exec", input: "Blender 建模/摆位脚本", output: "白模场景与动作", unsupported: true },
+          { id: "blender_render", input: "白模镜头 + 帧范围", output: "首/中/尾关键帧 PNG", unsupported: true },
+          { id: "bash", input: "自建几何/光栅渲染脚本", output: "预演帧 + GLB" },
+        ],
+      },
+      // R8（2026-09-10 暴君裁定）：shot1_gen 不再写死 model=minimax-h3 / duration=5s——
       // 该模型当前不可用且 5s≠agent 计划时长，写死 = 每个大片任务都被逼手动
       // update_node。model 留空由 workflow-service.start 动态选可用视频模型
       //（/v1/model-status 判活）回填；duration_seconds 留空由 content 里该镜
@@ -128,20 +159,22 @@ export const featureFilmTemplate: WorkflowTemplate =
         kind: "config",
         title: "镜头 1 影片配置",
         defaults: { size: "16:9", kind: "video", },
-        deliverable: "影片生成配置（模型由 workflow-service 动态选活、时长对齐镜头脚本折算；单镜 3-8 秒，超长拆段拼接防崩坏）",
+        deliverable: "影片生成配置（模型由 workflow-service 动态选活、时长对齐镜头脚本折算；动作镜头优先 T2V 或用预演关键帧作参考条件，首帧不是默认条件；单镜 3-8 秒，超长拆段拼接防崩坏）",
       },
       {
         role: "shot1_video",
         kind: "video",
         title: "镜头 1 影片",
-        deliverable: "镜头 MP4（带元数据：时长/分辨率/首尾帧缩略图），以角色四视图+场景图为参考保跨镜一致",
+        deliverable: "镜头 MP4（带元数据：时长/分辨率/首/中/尾帧缩略图），以角色四视图+场景图+预演关键帧为参考保跨镜一致与动作落点",
         gate: "逐镜抽帧质检：抽首/中/尾 3 帧比对角色漂移/形变/闪帧，不合格即重生成",
         notes: [
+          "首帧不是默认条件：动作镜头优先 T2V，或把预演首/中/尾关键帧当参考条件（不锁构图）；只有必须精确复现构图/姿态时才当首帧，且 beats 必须写全",
           "镜头间链式衔接：下一镜起始帧可引用上一镜尾帧（last-frame 链），辅助动作连续；camera.start/end/trajectory/timing/parallax 或时间 keyframes 写入镜头；dolly 为物理位移、zoom 为固定机位变焦，合法 static 保留；首帧跳变不算运镜",
-          "运动提示词只描述起止帧之间的运动与情绪变化，不重复描述静态外观；单镜时长 3-8 秒，超长拆多段生成后拼接防运动幅度过大崩坏",
+          "模型输出必须过 `video_evidence action=motion` 验收：逐镜读 median_diff/static_ratio，verdict=static 即重做或如实标未达标；全片不得每镜都慢推，至少一镜主体在画面内明显位移",
         ],
         tools: [
-          { id: "last_frame_video_chain", input: "镜头首尾帧 + 镜头顺序", output: "逐镜镜头视频链" },
+          { id: "last_frame_video_chain", input: "预演关键帧/首尾帧 + 镜头顺序", output: "逐镜镜头视频链" },
+          { id: "video_evidence", input: "镜头 MP4", output: "动态证据（motion 指标 median_diff/static_ratio + 帧/边界）" },
           { id: "image_generate", input: "prompt + 模型 + 尺寸/张数", output: "图片 URL + 实际花费" },
           { id: "canvas_apply_ops", input: "节点/连线操作指令", output: "画布更新结果" },
         ],
@@ -172,7 +205,9 @@ export const featureFilmTemplate: WorkflowTemplate =
       { fromRole: "scene", toRole: "scene_gen" },
       { fromRole: "scene_gen", toRole: "scene_img" },
       { fromRole: "script", toRole: "shot1" },
-      { fromRole: "shot1", toRole: "shot1_gen" },
+      { fromRole: "shot1", toRole: "previz" },
+      { fromRole: "shot1", toRole: "shot1_gen" }, // 直连保留：expandTemplate R8 以此为多镜克隆原型边
+      { fromRole: "previz", toRole: "shot1_gen" }, // 3D 预演 → 影片
       { fromRole: "char_view1", toRole: "shot1_gen" }, // 角色参考 → 影片
       { fromRole: "scene_img", toRole: "shot1_gen" }, // 场景参考 → 影片
       { fromRole: "shot1_gen", toRole: "shot1_video" },

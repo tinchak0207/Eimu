@@ -36,7 +36,7 @@
 //
 // 【用法】
 //   node tools/prune-desktop-releases.mjs            # 干跑（预设，只印计画，不删）
-//   node tools/prune-desktop-releases.mjs --apply    # 真的删（破坏性，需项目负责人下令）
+//   node tools/prune-desktop-releases.mjs --apply    # 真的删（破坏性，需暴君下令）
 //   node tools/prune-desktop-releases.mjs --keep 3   # 保留最近 3 个版本
 //
 // 【凭证】

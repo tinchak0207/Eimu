@@ -41,6 +41,10 @@ function sharedDoc(overrides: Partial<AgentMemoryDocInput> = {}): AgentMemoryDoc
     evidence: "tool result line one",
     evidenceKind: "tool_result",
     selfScore: 5,
+    // shared 自 4ea47695 起 fail-closed：无 contributorKey 一律 pending_review，
+    // 不进 INDEX 也不注入。fixture 补上提出者，需要立即 active 的用例传
+    // corroborationMin: 1（生产缺省门槛为 2）。
+    contributorKey: "owner-a-hash",
     ...overrides,
   };
 }
@@ -85,6 +89,7 @@ test("payload 两栏：private doc 原物件（含 body、驼峰栏位不动）+
     batchId: "inj-1",
     docs: [privateDoc(), sharedDoc({ slug: "lighting-rule" })],
     now: NOW,
+    corroborationMin: 1,
   });
   assert.equal(ingested.accepted.length, 2);
 
@@ -157,7 +162,7 @@ test("共享索引 repo 侧不截断（字符预算归 gateway）：>800 字元�
       description: `shared knowledge item ${index + 1} marker${index + 1} padded padded`,
     }),
   );
-  const ingested = await ingestMemoryDocs({ batchId: "inj-5", docs, now: NOW });
+  const ingested = await ingestMemoryDocs({ batchId: "inj-5", docs, now: NOW, corroborationMin: 1 });
   assert.equal(ingested.accepted.length, 20);
 
   const payload = await buildMemoryInjectionPayload(CROSS_OWNER_KEY);

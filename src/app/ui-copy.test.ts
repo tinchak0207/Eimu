@@ -5,6 +5,19 @@ import { join } from "node:path";
 
 const root = process.cwd();
 
+const PRICING_CAROUSEL_MODULES = [
+  "src/components/PricingPlanCarousel.tsx",
+  "src/components/PricingPlanCarousel/card-faces.tsx",
+  "src/components/PricingPlanCarousel/geometry.ts",
+  "src/components/PricingPlanCarousel/plan-placeholder.ts",
+  "src/components/PricingPlanCarousel/slider-math.ts",
+  "src/components/PricingPlanCarousel/types.ts",
+];
+
+function readPricingCarousel(): string {
+  return PRICING_CAROUSEL_MODULES.map(read).join("\n");
+}
+
 function read(relPath: string) {
   return readFileSync(join(root, relPath), "utf8");
 }
@@ -16,11 +29,13 @@ test("navbar exposes wallet, history and top-up controls on mobile", () => {
   assert.doesNotMatch(source, /openAuth|openLogin|openRegister/);
   assert.match(source, /mobile-nav-actions/);
   assert.match(source, /mobile-wallet-balance/);
-  // 2026-08-27 项目负责人裁定：余额 + 「+」合体胶囊——充值/签到收进「+」浮层，
+  // 2026-08-27 暴君裁定：余额 + 「+」合体胶囊——充值/签到收进「+」浮层，
   // 导航栏不再有独立充值按钮与 CheckinCalendar 图标。
   assert.match(source, /<WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" \/>/);
   assert.doesNotMatch(source, /CheckinCalendar/);
-  assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\.5/);
+  // 2026-10-04 全站规格对齐：间距 token 收成 gap-1（≥sm 才回 gap-1.5），
+  // 窄屏动作簇的「同排 + 靠右 + 不换行」语义不变。
+  assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\b/);
   // 极简 header：所有动作（历史/文档）只显图标，文字恒 sr-only。
   assert.match(source, /sr-only/);
   assert.doesNotMatch(source, /sr-only sm:not-sr-only/, "动作文字不得在桌面恢复显示");
@@ -29,7 +44,7 @@ test("navbar exposes wallet, history and top-up controls on mobile", () => {
   assert.doesNotMatch(source, /mobile-nav-actions[\s\S]{0,180}overflow-x-auto/);
   assert.doesNotMatch(source, /href="\/history"[\s\S]{0,220}hidden sm:flex/);
   // 「文档」手机端隐藏（≥sm 才显示）；历史与余额保持手机端可见。
-  // 2026-09-27 项目负责人裁定：审查页整页撤除（从未使用），故不再钉它的 aria-label。
+  // 2026-09-27 暴君裁定：审查页整页撤除（从未使用），故不再钉它的 aria-label。
   assert.match(source, /hidden[\s\S]{0,320}?sm:flex[\s\S]{0,200}?aria-label="文档"/);
   assert.doesNotMatch(source, /href="\/review"/);
   // 钥匙独立按钮 + 专属 key 菜单（复制/管理，无退出）；名字右侧是退出按钮。
@@ -45,7 +60,7 @@ test("wallet badge can be compacted for mobile navigation", () => {
   const source = read("src/components/WalletBadge.tsx");
   assert.match(source, /showCheckin = true/);
   assert.match(source, /max-w-full/);
-  // 2026-08-27 项目负责人裁定：余额 + 「+」合体胶囊；「+」菜单有两项（充值/签到），
+  // 2026-08-27 暴君裁定：余额 + 「+」合体胶囊；「+」菜单有两项（充值/签到），
   // 签到后不可选并标注冷却；完成态绿勾挂在「+」入口上（header 无签到横幅文字）。
   assert.match(source, /aria-label="余额操作"/);
   assert.match(source, /aria-expanded=\{plusOpen\}/);
@@ -148,7 +163,7 @@ test("pricing page removes the bottom external store link and uses zh-CN locale"
   const layout = read("src/app/layout.tsx");
 
   assert.doesNotMatch(pricing, /前往充值商店/);
-  assert.doesNotMatch(pricing, /href="https:\/\/store\.eimu\.xyz"/);
+  assert.doesNotMatch(pricing, /href="https:\/\/store\.tinchak0207\.xyz"/);
   assert.match(layout, /<html lang="zh-CN"/);
 });
 
@@ -161,7 +176,9 @@ test("pricing copy uses simplified Chinese with a standard close affordance", ()
   assert.doesNotMatch(pricing, /返回做图/);
   assert.match(pricing, /兑换码/);
   assert.match(pricing, /兑换成功/);
-  assert.doesNotMatch(pricing, /兑换码/);
+  // 只做大陆生意：页面不得残留繁体字形。d22fa6ee 的机械转简体把这条否定断言
+  // 也转成了简体，导致与上一行自相矛盾；这里用码点还原原意（不写入繁体字形）。
+  assert.doesNotMatch(pricing, /\u5151\u63db\u78bc/, "价格页不得出现繁体「兌換碼」");
 });
 
 test("pricing page is a focused compact panel with plan carousel", () => {
@@ -178,7 +195,7 @@ test("pricing page is a focused compact panel with plan carousel", () => {
 
 test("pricing plans are selectable carousel cards with in-card checkout closure", () => {
   const pricing = read("src/components/PricingClient.tsx");
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
 
   // App Store 收银架构：点前卡即选，选中卡内展开支付方式分段 + 唯一支付 CTA；
   // 未选中卡只有「选择此方案」。
@@ -193,10 +210,10 @@ test("pricing plans are selectable carousel cards with in-card checkout closure"
 });
 
 test("pricing custom plan prices by the single-source 0.045 RMB per coin constant", () => {
-  // 2026-09-07 项目负责人裁定：自定义档 0.045 RMB/金币，价格常量单点定义在 plans.ts，
+  // 2026-09-07 暴君钦定：自定义档 0.045 RMB/金币，价格常量单点定义在 plans.ts，
   // 页面展示与 checkout/notify 服务端计价共用同一解析器，客户端传价不参与计价。
   const plans = read("src/lib/plans.ts");
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
   const checkout = read("src/app/api/payments/mapay/checkout/route.ts");
   const notify = read("src/app/api/payments/mapay/notify/route.ts");
 
@@ -225,7 +242,7 @@ test("pricing page exposes docs link and redeem anchor for cdk delivery", () => 
 test("pricing checkout keeps WeChat first and still routes through mapay", () => {
   const pricing = read("src/components/PricingClient.tsx");
   // 2026-09-07 carousel 化：收银台（支付方式分段）随卡面迁入 PricingPlanCarousel。
-  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const carousel = readPricingCarousel();
 
   assert.match(carousel, /微信支付/);
   assert.match(carousel, /支付宝支付/);

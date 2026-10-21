@@ -74,16 +74,16 @@ test("解析失败退回纯文本段，不吞内容", () => {
 });
 
 test("影片/音频直链（含裸 URL）转成 video/audio span，不留裸链接", () => {
-  const v = JSON.stringify(parseAgentMarkdown("S02 预览：https://store.eimu.dev/image-data/files/generation/jobs/a58c/000-b9.mp4"));
+  const v = JSON.stringify(parseAgentMarkdown("S02 预览：https://store.tinchak0207.xyz/image-data/files/generation/jobs/a58c/000-b9.mp4"));
   assert.match(v, /"k":"video"/);
   assert.doesNotMatch(v, /"k":"link"/);
-  const a = JSON.stringify(parseAgentMarkdown("[成曲](https://store.eimu.dev/uploads/x.m4a)"));
+  const a = JSON.stringify(parseAgentMarkdown("[成曲](https://store.tinchak0207.xyz/uploads/x.m4a)"));
   assert.match(a, /"k":"audio"/);
 });
 
 test("平台参考图目录（无扩展名）补判为图片，且只有精确前缀才命中", () => {
   // generation/references/ 三个写入点落盘前都过 validateImageBuffer => 目录只存图片。
-  const bare = "https://store.eimu.dev/image-data/files/generation/references/9f2c1d3e4b5a6978";
+  const bare = "https://store.tinchak0207.xyz/image-data/files/generation/references/9f2c1d3e4b5a6978";
   assert.equal(isImageUrl(bare), true);
   const imgs = parseAgentMarkdown(`看这张 ${bare}`)[0];
   assert.ok(imgs.type === "p");
@@ -91,13 +91,13 @@ test("平台参考图目录（无扩展名）补判为图片，且只有精确�
   // 同形但换主机：不认（防把任意站点的 /files/ 当图片）。
   assert.equal(isImageUrl("https://evil.example/image-data/files/generation/references/9f2c1d3e4b5a6978"), false);
   // 同主机但目录是图影混居的 jobs：不认（见下一条歧义用例）。
-  assert.equal(isImageUrl("https://store.eimu.dev/image-data/files/generation/jobs/dd1869c0/000-b040b36747ec"), false);
+  assert.equal(isImageUrl("https://store.tinchak0207.xyz/image-data/files/generation/jobs/dd1869c0/000-b040b36747ec"), false);
 });
 
 test("平台音频目录（无扩展名）补判为音频：music-gen 与 /agent/v1/audio/", () => {
-  assert.equal(isAudioUrl("https://store.eimu.dev/image-data/files/uploads/music-gen-1727000000"), true);
-  assert.equal(isAudioUrl("https://store.eimu.dev/agent/v1/audio/tts_mukadd47_ugkpykpi"), true);
-  const a = JSON.stringify(parseAgentMarkdown("成曲 https://store.eimu.dev/agent/v1/audio/tts_mukadd47_ugkpykpi"));
+  assert.equal(isAudioUrl("https://store.tinchak0207.xyz/image-data/files/uploads/music-gen-1727000000"), true);
+  assert.equal(isAudioUrl("https://store.tinchak0207.xyz/agent/v1/audio/tts_mukadd47_ugkpykpi"), true);
+  const a = JSON.stringify(parseAgentMarkdown("成曲 https://store.tinchak0207.xyz/agent/v1/audio/tts_mukadd47_ugkpykpi"));
   assert.match(a, /"k":"audio"/);
   assert.doesNotMatch(a, /"k":"link"/);
 });
@@ -108,10 +108,10 @@ test("混居/非媒体形状（歧义）一律留裸链接，不画媒体卡", (
   // agent-batch3/：实测同目录有 .png 与 .wav，且无稳定命名契约。
   // /v1/images/<id>/result：默认回 JSON 且须 bearer 金钥（<img> 送不出 Authorization）。
   const ambiguous = [
-    "https://store.eimu.dev/image-data/files/generation/jobs/dd1869c0-fa54-48d8-8e83-65b536cec6c2/000-b040b36747ec",
-    "https://store.eimu.dev/image-data/files/uploads/media-1790874887852-3m62z4",
-    "https://store.eimu.dev/image-data/files/agent-batch3/amx-landscape_169-1790873310155-8ec57e",
-    "https://image.eimu.dev/v1/images/abc/result",
+    "https://store.tinchak0207.xyz/image-data/files/generation/jobs/dd1869c0-fa54-48d8-8e83-65b536cec6c2/000-b040b36747ec",
+    "https://store.tinchak0207.xyz/image-data/files/uploads/media-1790874887852-3m62z4",
+    "https://store.tinchak0207.xyz/image-data/files/agent-batch3/amx-landscape_169-1790873310155-8ec57e",
+    "https://image.tinchak0207.xyz/v1/images/abc/result",
   ];
   for (const url of ambiguous) {
     assert.equal(isImageUrl(url), false, url);

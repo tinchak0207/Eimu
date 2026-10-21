@@ -29,7 +29,7 @@ function makeEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
     prompt: "Prompt:\n一只猫",
     generatedAt: 1_700_000_000_000,
     results: [
-      { provider: "image_eimu", modelId: IMAGE_MODEL, image: null, imageUrl: "https://example.com/a.png" },
+      { provider: "image_tinchak", modelId: IMAGE_MODEL, image: null, imageUrl: "https://example.com/a.png" },
     ],
     source: "server",
     ...overrides,

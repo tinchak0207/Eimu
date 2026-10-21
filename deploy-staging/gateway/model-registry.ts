@@ -16,7 +16,7 @@ import { normalizeUserSettings } from "./sessions-http.ts"
 // 每轮把 model 覆盖塞进 promptBody（opencode prompt schema 的 model 栏位，per-message 生效，
 // 实测同一 session 内两条消息可用不同模型）。所有重试/重放路径共用 lastPromptBody，model 随体重放。
 // max 档不配置 = 天然禁用。opencode 1.18 的 variants 机制对 openai-compatible 渠道不透传 options，弃用。
-// Agent model registry（单一真源，2026-08-29）：/opt/eimu-harness/agent-models.json
+// Agent model registry（单一真源，2026-08-29）：/opt/agent-harness/agent-models.json
 // 承载 providers + bindings（persona 主模型、跨渠道 fallbacks）。
 // gen-opencode.ts 从它生成 opencode.json 的 provider/model/small_model；
 // 本档读它决定 persona 主模型与抖动重试的 failover 链。按 mtime 缓存，变了才重读。
@@ -35,7 +35,7 @@ export type AgentModelRegistry = {
     fallbacks?: Record<string, string[]>
   }
 }
-export const AGENT_MODEL_REGISTRY_PATH = process.env.AGENT_MODEL_REGISTRY || "/opt/eimu-harness/agent-models.json"
+export const AGENT_MODEL_REGISTRY_PATH = process.env.AGENT_MODEL_REGISTRY || "/opt/agent-harness/agent-models.json"
 export let agentModelRegistryCache: { mtimeMs: number; data: AgentModelRegistry } | null = null
 export let agentModelRegistryWarned = false
 
@@ -76,7 +76,7 @@ export const PERSONA_MODEL_THOUGHTFUL = { providerID: "hublinuxdo", modelID: "de
 
 export function personaModel(state: SessionState): AgentModelRef {
   const persona = normalizeUserSettings(loadUserSettings(state.apiKey)).persona === "thoughtful" ? "thoughtful" : "efficient"
-  // 黏性快路（2026-09-21 项目负责人裁定）：上一轮 failover 实证可用的渠道钉在本 session，
+  // 黏性快路（2026-09-21 暴君裁定）：上一轮 failover 实证可用的渠道钉在本 session，
   // 直接用它，不再每轮从死主模型重跑重试链；persona 不符时自动绕过（尊重用户切模式）。
   const sticky = state.stickyModel
   if (sticky && sticky.persona === persona) return { providerID: sticky.providerID, modelID: sticky.modelID }

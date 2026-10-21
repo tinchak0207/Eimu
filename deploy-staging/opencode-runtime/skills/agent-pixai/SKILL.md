@@ -41,7 +41,7 @@ kotone bridge 内部会把 content 直接喂给 PixAI 的图像模型。如果 c
 5. 风格必须与模型匹配：momoka-v1=二次元插画、kotone-v2=综合、gaku-v1=综合
 6. **content 必须全部用英文，禁止中文 prompt**（产生图像的模型吃英文效果好）
 
-## API（Base: https://store.eimu.dev/kotone/v1，认证 Bearer）
+## API（Base: https://store.tinchak0207.xyz/kotone/v1，认证 Bearer）
 | 动作 | 端点 | 方式 |
 |---|---|---|
 | 模型清单 | GET /v1/models | 同步 |

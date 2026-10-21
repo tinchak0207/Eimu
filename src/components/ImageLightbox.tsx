@@ -12,7 +12,7 @@ interface ImageLightboxProps {
 }
 
 /**
- * 全屏放大灯箱：从 ImageDisplay 的 zoom portal 逐字搬出复用（2026-09-10 项目负责人
+ * 全屏放大灯箱：从 ImageDisplay 的 zoom portal 逐字搬出复用（2026-09-10 暴君
  * 裁定：参考图缩图点击放大与生成图「点一下放大」必须是同一个窗口）。
  * 挂载即 pushState + 监听 Esc / 浏览器后退；点背板关闭；img 阻止冒泡。
  */

@@ -108,7 +108,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  /* 精度（2026-09-27 项目负责人「不要渲染成 GTA3 级古董贴图」）：
+  /* 精度（2026-09-27 暴君「不要渲染成 GTA3 级古董贴图」）：
      dpr=1 的机器原本 ratio 1.0 = 零超取样，边缘全是阶梯；这里给一个超取样地板，
      弱机也至少 1.75 倍渲染再降采样；dpr 高的机器最多 2（再上去是白烧 fill rate）。 */
   const ratioFloor = compact ? 1.25 : 1.75;

@@ -69,7 +69,7 @@ lib/smartsearch/
 
 ```bash
 # 1) 以 PYTHONPATH 直查解析路径（两者都必须是 lib/smartsearch/ 底下）
-PYTHONPATH=/opt/eimu-harness/workspace/.opencode/lib/smartsearch python3 -c \
+PYTHONPATH=/opt/agent-harness/workspace/.opencode/lib/smartsearch python3 -c \
   "import httpx,typing_extensions,sys;print(httpx.__file__);print(typing_extensions.__file__);print(typing_extensions.__version__)"
 #   期望：.../lib/smartsearch/httpx/__init__.py、.../lib/smartsearch/typing_extensions.py、4.16.0
 # 2) 只在 PYTHONPATH（禁用系统 site-packages）能跑整条 CLI import 链

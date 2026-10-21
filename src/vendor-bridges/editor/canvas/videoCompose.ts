@@ -1,7 +1,7 @@
 /**
  * videoCompose — ffmpeg 探测边界抽取（F-SHARDING 片3）。
  *
- * 来源：/home/user/Desktop/kunpeng-vendor src/lib/canvas/videoCompose.ts @ 872a58b。
+ * 来源：/home/lenovo/Desktop/kunpeng-vendor src/lib/canvas/videoCompose.ts @ 872a58b。
  * 逐行抽取 L13/L15-48：CommandResult、shellQuote、ffmpegCandidates（候选表第一位
  * `~/.kunpeng/bin/ffmpeg`，VPS 静态二进制落位即命中）、detectFfmpeg。
  * 其余 232 行（浏览器媒体探测/旧画布合成路径，DOM API）不进 harness 主链

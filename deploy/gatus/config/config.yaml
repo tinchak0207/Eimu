@@ -14,7 +14,7 @@ endpoints:
   # 改打控制面就绪探针。告警外发未配置密钥，见文件末尾注释，不打开。
   - name: 控制面就绪
     group: Production
-    url: https://store.eimu.dev/image-control/api/readyz
+    url: https://store.tinchak0207.xyz/image-control/api/readyz
     method: GET
     interval: 15m
     client:
@@ -29,7 +29,7 @@ endpoints:
 
   - name: Agent 网关健康
     group: Production
-    url: https://store.eimu.dev/agent/healthz
+    url: https://store.tinchak0207.xyz/agent/healthz
     method: GET
     interval: 15m
     client:
@@ -47,7 +47,7 @@ endpoints:
   # 并回 repo，repo 从此是两条探针的唯一天源。
   - name: 风控绊线（金丝雀/异常注册）
     group: Risk
-    url: https://store.eimu.dev/risk/status.json
+    url: https://store.tinchak0207.xyz/risk/status.json
     interval: 5m
     conditions:
       - "[STATUS] == 200"
@@ -64,7 +64,7 @@ endpoints:
   # 用假 200 假装健康的那条。修好前刻意红著，逼履约。
   - name: mPay 付款对帐（已付款 vs 已履约）
     group: Production
-    url: https://store.eimu.dev/image-control/api/payments/mapay/health
+    url: https://store.tinchak0207.xyz/image-control/api/payments/mapay/health
     interval: 30m
     client:
       timeout: 60s

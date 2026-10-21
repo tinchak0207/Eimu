@@ -94,7 +94,7 @@ const HEADER = `/**
  * \`npx tsx tools/export-blender-tools-staging.ts\` 重导出（根治 T2 部署漂移）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
- *   本档整份                 → /opt/eimu-harness/workspace/.opencode/lib/blender-tools-impl.ts
+ *   本档整份                 → /opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts
  *   blender_tools_adapter.ts → 同目录 blender-tools-adapter.ts
  *                              （wrapBlenderTool：BlenderToolDef 描述符 → opencode tool() 机械包装）
  *   三个 3 行 adapter        → .opencode/tools/blender_{exec,render,export_gltf}.ts

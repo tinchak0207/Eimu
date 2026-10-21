@@ -20,9 +20,9 @@ test("admin passwords are verified from a salted scrypt hash", () => {
 
 test("admin session tokens reject tampering and expiry", () => {
   const secret = "test-session-secret-with-enough-entropy";
-  const token = createAdminSessionToken("eimu", secret, 1_000, 60);
+  const token = createAdminSessionToken("tinchak0207", secret, 1_000, 60);
 
-  assert.deepEqual(verifyAdminSessionToken(token, secret, 1_030), { username: "eimu" });
+  assert.deepEqual(verifyAdminSessionToken(token, secret, 1_030), { username: "tinchak0207" });
   assert.equal(verifyAdminSessionToken(`${token}x`, secret, 1_030), null);
   assert.equal(verifyAdminSessionToken(token, secret, 1_061), null);
 });

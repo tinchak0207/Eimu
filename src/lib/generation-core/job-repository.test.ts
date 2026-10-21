@@ -31,7 +31,11 @@ test("extendGenerationDeadlineJob 返回实际写入的新 deadline_at（供内�
   assert.equal(result.getTime(), written.getTime());
   const update = calls.find((call) => call.sql.includes("UPDATE generation_job"));
   assert.ok(update);
-  assert.match(update.sql, /GREATEST\(deadline_at/);
+  // 生产现形状：取得真实容量后从当前时刻重设执行预算（deadline/execution_deadline 皆 now()+interval）；
+  // GREATEST 累加只属于排队观测窗口 extendGenerationQueueDeadline。
+  assert.match(update.sql, /SET deadline_at = now\(\) \+ \(/);
+  assert.match(update.sql, /execution_deadline_at = now\(\) \+ \(/);
+  assert.doesNotMatch(update.sql, /GREATEST/);
   assert.match(update.sql, /RETURNING deadline_at/);
 });
 

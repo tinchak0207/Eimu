@@ -545,7 +545,7 @@ export async function runEdit(
 // VLM 读图通道（new-api，2026-08-31 实弹验证）。key 仅进程内使用，严禁入返回值/日志。
 // ---------------------------------------------------------------------------
 
-const CP_ENV = "/opt/eimu-control-plane/.env.control-plane"
+const CP_ENV = "/opt/image-control-plane/.env.control-plane"
 let vlmBases: string[] | null = null
 let vlmKey: string | null = null
 

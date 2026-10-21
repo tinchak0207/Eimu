@@ -191,7 +191,7 @@ function mockBillingSql(input: {
     if (sql.includes("SELECT * FROM billing_operation")) {
       return [{ id: "refund-1", amount, status: opStatus, attempt_count: input.claimedAttemptNo - 1 }];
     }
-    if (sql.includes("SELECT * FROM generation_job WHERE id =")) {
+    if (sql.includes("FROM generation_job job WHERE job.id =")) {
       return input.jobRow ? [{ ...input.jobRow, status: jobStatus }] : [];
     }
     if (sql.includes("attempt_count = attempt_count + 1")) {
@@ -352,7 +352,7 @@ test("FG-b：429 重放一次后成功——退款只落地一次、两次金额
 });
 
 test("FG-b：quota_exhausted(402) fail-fast 后的应退额精确（退款语义不随裁决改变）", async () => {
-  // 402 由 registry 原生硬停 fail-fast（项目负责人 08-29 裁定），退款立刻发生；
+  // 402 由 registry 原生硬停 fail-fast（暴君 08-29 裁定），退款立刻发生；
   // 金额仍是 billingAmount - committed：requested 3 完成 1 → 应退 30 - floor(30/3) = 20。
   const partial = mockBillingSql({ claimedAttemptNo: 1, amount: 20 });
   const partialAmounts: number[] = [];

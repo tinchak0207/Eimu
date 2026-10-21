@@ -12,8 +12,8 @@
 // 同构 tools/music_gen.ts 模式。
 //
 // staging 落位（VPS 同步落位命令见档尾）：
-//   staging/web-search-tools/web_search_impl.ts → /opt/eimu-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）
-//   staging/web-search-tools/search_web.ts      → /opt/eimu-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名）
+//   staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）
+//   staging/web-search-tools/search_web.ts      → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名）
 //
 // 命名域铁律（2026-09-10 VPS 八轮对照实锤）：opencode 1.18.14 保留 websearch/web_search
 // 工具命名域，自订工具档名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE，
@@ -44,8 +44,8 @@ const IMPL_HEADER = `/**
  * 零依赖、无 import，除本注释头外与真源逐行等价。
  * 禁止手改本档——改真源后跑 \`npx tsx tools/export-web-search-tools-staging.ts\` 重导出。
  *
- * 落位：/opt/eimu-harness/workspace/.opencode/lib/web_search_impl.ts
- * env：TAVILY_API_KEY（Tavily Search API 鉴权，写 /opt/eimu-harness/.env 与
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts
+ * env：TAVILY_API_KEY（Tavily Search API 鉴权，写 /opt/agent-harness/.env 与
  *      .env.opencode 双档）。
  */
 
@@ -135,6 +135,6 @@ writeFile(THIN_TARGET, THIN_HEADER + THIN_TEMPLATE);
 if (!CHECK) {
   console.log("验收：npx tsx tools/export-web-search-tools-staging.ts --check");
   console.log("VPS 落位（scp 后 sudo install 落位）：");
-  console.log("  staging/web-search-tools/web_search_impl.ts → /opt/eimu-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）");
-  console.log("  staging/web-search-tools/search_web.ts → /opt/eimu-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名 search_web）");
+  console.log("  staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）");
+  console.log("  staging/web-search-tools/search_web.ts → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名 search_web）");
 }

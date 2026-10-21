@@ -1,5 +1,5 @@
 {
-  "name": "eimu",
+  "name": "ai-sdk-image-generator",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "lint": "next lint",
     "test": "npx --yes tsx --test \"src/**/*.test.ts\"",
     "healthz": "curl -sS --max-time 8 http://localhost:3000/api/healthz",
-    "smoke:image": "curl -sS --max-time 120 -w '\\nHTTP %{http_code}\\n' -H 'Content-Type: application/json' -d '{\"prompt\":\"A premium skincare bottle on a soft ivory background\",\"provider\":\"image_eimu\",\"modelId\":\"gpt-image-2\"}' http://localhost:3000/api/generate-images | head -c 400",
+    "smoke:image": "curl -sS --max-time 120 -w '\\nHTTP %{http_code}\\n' -H 'Content-Type: application/json' -d '{\"prompt\":\"A premium skincare bottle on a soft ivory background\",\"provider\":\"image_tinchak\",\"modelId\":\"gpt-image-2\"}' http://localhost:3000/api/generate-images | head -c 400",
     "bizkey:issue": "npx tsx tools/issue-biz-key.ts",
     "bizkey:list": "npx tsx tools/issue-biz-key.ts --list",
     "promo:issue": "npx tsx tools/issue-promo-code.ts",
@@ -69,7 +69,5 @@
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.3"
-  },
-  "description": "Agent-driven AI creation workbench: canvas, generation control plane, and agent runtime.",
-  "license": "AGPL-3.0"
+  }
 }

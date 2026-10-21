@@ -32,6 +32,12 @@ export interface RegistryChannelClaim {
   unitPriceCnyPerSecond?: Record<string, number>;
   /** 核价来源原文＋日期，例 "GET https://www.gway.dev/api/pricing 2026-09-28 vip quota_type=1"。 */
   priceSource?: string;
+  /**
+   * 本认领**真实可交付**的分辨率档位（seed 生成 DB capability 时用它，缺省才照抄 catalog）。
+   * 用途：同一平台模型被多渠道认领时，没有该能力的上游（如原生 openai_video 出片、无超分）
+   * 不得在 capability 里虚报 catalog 的 2k/4k，否则调度会把高阶档派给它而必然失败。
+   */
+  resolutions?: string[];
 }
 
 export interface RegistryChannel {
@@ -58,7 +64,7 @@ export interface RegistryChannel {
 export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // REGISTRY-ENTRIES-START（脚本插入点，此注释与结束标记之间的条目由工具维护，手改会被覆盖）
 {
-    // xiaoyxiao（api.xiaoyxiao.xyz，2026-09-27 项目负责人裁定）：**视频唯一权威渠道**。
+    // xiaoyxiao（api.xiaoyxiao.xyz，2026-09-27 暴君裁定）：**视频唯一权威渠道**。
     // 上游协议与我方既有 openai_video 轮子同型（禁造新轮子）：POST {base}/videos
     // 创建、GET {base}/videos/{id} 轮询；成品 URL 在**顶层 `url`**（extractOutputUrl
     // 已支援该形状，2026-09-27 实弹）。请求体走 sd4 族形状（model/prompt/
@@ -92,14 +98,15 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       // 旧映射 minimax-h3-933-2k-支持真人 在 xiaoyxiao 与 gway 皆回
       // `no per_request price configured for resolution "2k"`（gway 该变体 video_pricing.by_group["*"].tiers=[]，
       // 且仅支持 resolution=2k，成本闸禁 2k）；故两渠道均不再认领该变体。
-      { modelId: "minimax-h3", supplierModelId: "minimax-h3-a", kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz:18443/api/pricing 2026-10-02 (quota_type=1, model_price=1.6)" },
+      // 原生出片无超分 ⇒ 真实档位只有 720p/1080p（2026-10-20；不得虚报 catalog 的 2k/4k）。
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-a", kinds: ["video_generate"], unitPriceCny: 1.6, resolutions: ["720p", "1080p"], priceSource: "GET https://api.xiaoyxiao.xyz:18443/api/pricing 2026-10-02 (quota_type=1, model_price=1.6)" },
     ],
   },
 
 {
     // gway（极途Gway，api.gway.dev，2026-09-28）：xiaoyxiao 的直接上游（取证见记忆
     // 2026-09-28-xiaoyxiao-upstream-chain-0928）。同名模型挂 vip 分组、单价恒＝xiaoyxiao−¥0.1。
-    // 现为**备用渠道**（priority 2，xiaoyxiao 失败才轮到）；项目负责人裁定 xiaoyxiao 余额跑完即搬家至此。
+    // 现为**备用渠道**（priority 2，xiaoyxiao 失败才轮到）；暴君裁定 xiaoyxiao 余额跑完即搬家至此。
     // 协议、模型名、成本闸白名单与 xiaoyxiao 完全同型。V-03（2026-09-28）起成本闸按
     //（供给 label, supplierModelId）读下方 claim 的 unitPriceCny，gway 的真实单价进闸。
     label: "gway",
@@ -122,7 +129,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
-    // dmc（dmc.cc，2026-10-13 项目负责人指定为影片**首发上游**；2026-10-18 上游改址
+    // dmc（dmc.cc，2026-10-13 暴君指定为影片**首发上游**；2026-10-18 上游改址
     // api.ll2.cn）：与 metaso 同形的 MiniMax 官方协议（POST {base}/v2/video_generation
     // 建任务、GET {base}/v2/query/video_generation/{id} 轮询），见 dmc-upstream.ts。
     // 上游只出 768P、整数 1–15 秒，模型名固定 MiniMax-H3。
@@ -148,12 +155,16 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "dmc",
     claims: [
-      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.05 }, priceSource: "GET https://api.ll2.cn/api/pricing 2026-10-18 (H3 768P: seconds × 0.007353 USD/s × usd_exchange_rate=6.8 = ¥0.05/s)；auto-hd 超分的 1080p/2k/4k 档待 upstream 开通后另计（2026-10-18 实测无 channel）" },
+      // 2026-10-20：高清链路＝H3 768P + auto-hd 超分，四档全通。每档上游总成本＝
+      // H3 ¥0.05/s ＋ auto-hd 分档单价（GET /api/pricing 2026-10-20 实查，汇率 6.8）：
+      // 720p ≈¥0.0083/s、1080p ≈¥0.015/s、2k ≈¥0.0267/s、4k ≈¥0.06/s（按输出秒计）。
+      // ⇒ 0.05 / 0.065 / 0.0767 / 0.11（元／输出秒）。
+      { modelId: "minimax-h3", supplierModelId: "MiniMax-H3", kinds: ["video_generate"], unitPriceCnyPerSecond: { "720p": 0.05, "1080p": 0.065, "2k": 0.0767, "4k": 0.11 }, resolutions: ["720p", "1080p", "2k", "4k"], priceSource: "GET https://api.ll2.cn/api/pricing 2026-10-20 (H3 768P ¥0.05/s + auto-hd 分档：720p $0.001225490196/s / 1080p $0.002205882353/s / 2k $0.003921568627/s / 4k $0.008823529412/s × usd_exchange_rate=6.8)" },
     ],
   },
 
 {
-    // miaowuai（喵呜API，api.miaowuai.store，2026-10-12 项目负责人指定）：影片生成
+    // miaowuai（喵呜API，api.miaowuai.store，2026-10-12 暴君指定）：影片生成
     // **默认渠道**——协议与我方既有 openai_video 轮子同型（new-api 上游：POST
     // {base}/videos 创建、GET {base}/videos/{id} 轮询，completed 顶层 `url`，与
     // xiaoyxiao 实弹形状相同），adapter 零改动。认领 minimax-h3 → 上游
@@ -173,8 +184,9 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "openai_video",
     claims: [
-      { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
-      // seedance-2.0-mini（2026-10-13 项目负责人指定）：上游按**秒**计价，与 minimax-h3-max
+      // 原生出片无超分 ⇒ 真实档位只有 720p/1080p（2026-10-20；不得虚报 catalog 的 2k/4k）。
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-max", kinds: ["video_generate"], unitPriceCny: 2.0, resolutions: ["720p", "1080p"], priceSource: "GET https://api.miaowuai.store/api/pricing 2026-10-12 (quota_type=1, model_price=0.2857142857142857 USD × usd_exchange_rate=7 = ¥2.00)" },
+      // seedance-2.0-mini（2026-10-13 暴君指定）：上游按**秒**计价，与 minimax-h3-max
       // 的按次固定价不同型——`video_api.pricing.unit="per_second"`，rules：480p
       // 0.012857142857142857 USD/s、720p 0.028571428571428574 USD/s，站点
       // usd_exchange_rate=7 ⇒ ¥0.09/s、¥0.2/s。上游名与平台名同名直传；sizes 480p/720p、
@@ -252,7 +264,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
         // （adobe2api 403 额度枯竭、sub2api 524），改图全军覆没。
         kinds: ["image_generate", "image_edit"],
         unitPriceCny: 0.016,
-        priceSource: "供应商公开价目页（运行时核价）",
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
       },
       // 0.016＝1K/2K/4K 统一价，来源与日期见 priceSource（站点公开价目，免 key 唯读实查）。
       // 上游模型名与我方同名，`GET /v1/models` 实证无分组后缀（非 -g75 等变体），故 supplierModelId=null 直传。
@@ -262,14 +274,14 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
         supplierModelId: null,
         kinds: ["image_generate", "image_edit"],
         unitPriceCny: 0.016,
-        priceSource: "供应商公开价目页（运行时核价）",
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
       },
       {
         modelId: "gpt-image-2.5-sunburst",
         supplierModelId: null,
         kinds: ["image_generate", "image_edit"],
         unitPriceCny: 0.016,
-        priceSource: "供应商公开价目页（运行时核价）",
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
       },
     ],
   },
@@ -303,7 +315,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // 片X 未落盘（deploy-staging/blender-modal/ 不存在）、CNB 无实体节点——注册即虚报能力。
   // NODES-PLAN §5：节点 ≥3 且异构＋需要场景档分发时才评估 Flamenco 3。
   //
-  // 2026-09-27 项目负责人裁定（视频渠道重整）：metaso／tokenmix／cangyuansuanli／napi／
+  // 2026-09-27 暴君裁定（视频渠道重整）：metaso／tokenmix／cangyuansuanli／napi／
   // drama／adobe2api-plus 六条 registry 条目**自本表移除**（连同 env:filmera 由
   // seed 的 RETIRED_SUPPLIER_LABELS 一并停用）——视频供货唯一权威改为 xiaoyxiao，
   // 其余渠道不得再藉 seed 复活（它们在控面已 supplier.enabled=false + capability
@@ -328,7 +340,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
   {
-    // agnes-video（免费兜底视频档，2026-10-13 项目负责人指定）：与既有 agnes（图片）同一上游
+    // agnes-video（免费兜底视频档，2026-10-13 暴君指定）：与既有 agnes（图片）同一上游
     // base，但视频走 /v1/videos 异步协议。**一个 supplier 只有一个 adapter_type**，图片与
     // 视频协议不同，故拆成两条 registry 条目（`env:agnes` 图片、`env:agnes-video` 视频）。
     //
@@ -351,7 +363,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     chatImageModels: [],
     adapterType: "openai_video",
     claims: [
-      { modelId: "agnes-video-2.5-flash", supplierModelId: "agnes-video-2.5-flash", kinds: ["video_generate"], unitPriceCny: 0, priceSource: "free tier（agnes 平台自有免费额度，上游成本 ¥0，2026-10-13 项目负责人指定为免费兜底）" },
+      { modelId: "agnes-video-2.5-flash", supplierModelId: "agnes-video-2.5-flash", kinds: ["video_generate"], unitPriceCny: 0, priceSource: "free tier（agnes 平台自有免费额度，上游成本 ¥0，2026-10-13 暴君指定为免费兜底）" },
     ],
   },
 

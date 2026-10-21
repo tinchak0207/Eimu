@@ -375,7 +375,7 @@ export function effectiveVideoPrompt(prompt: string, postProduction: NormalizedV
 // ── upstream 栏位映射（未校准的唯一落点）───────────────────────────────────
 
 /**
- * 续片／改片的上游栏位名。**状态＝未校准**（见档头）。校准方式：项目负责人点名后对
+ * 续片／改片的上游栏位名。**状态＝未校准**（见档头）。校准方式：暴君点名后对
  * 上游出一笔真单，用回应形状验栏位语义，然后**只改本表**，并把
  * `VIDEO_POST_PRODUCTION_UPSTREAM_SEMANTICS` 改字串＋补真单 request id 到注解。
  *
@@ -392,7 +392,7 @@ export const VIDEO_POST_PRODUCTION_UPSTREAM_FIELD = {
 
 export const VIDEO_POST_PRODUCTION_UPSTREAM_SEMANTICS = "upstream-field-mapping-unverified" as const;
 
-/** 真提交开关（默认关闭；校准完成后由项目负责人下令开，同 NEWAPI_VIDEO_KERNEL 影子期手法）。 */
+/** 真提交开关（默认关闭；校准完成后由暴君下令开，同 NEWAPI_VIDEO_KERNEL 影子期手法）。 */
 export function videoPostProductionUpstreamEnabled(): boolean {
   const value = (process.env.VIDEO_POST_PRODUCTION_UPSTREAM ?? "").trim().toLowerCase();
   return value === "1" || value === "true";

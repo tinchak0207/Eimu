@@ -1,7 +1,7 @@
 /**
  * Agent Prompt Optimizer — Vercel 端呼叫 VPS gateway 的同步 prompt 优化。
  *
- * 优化链：Agent 层（deepseek，走 store.eimu.dev/agent/v1/optimize-prompt）
+ * 优化链：Agent 层（deepseek，走 store.tinchak0207.xyz/agent/v1/optimize-prompt）
  * → 失败 fallback 规则层（invisible-prompt-director）→ 原 prompt。
  * 全程服务端背景执行，用户无感。
  */
@@ -27,7 +27,7 @@ export async function optimizeVideoPromptWithAgent(
   rawPrompt: string,
   options: DirectorOptions = {},
 ): Promise<OptimizeResult> {
-  const origin = (process.env.AGENT_GATEWAY_ORIGIN ?? "https://store.eimu.dev").replace(/\/+$/, "");
+  const origin = (process.env.AGENT_GATEWAY_ORIGIN ?? "https://store.tinchak0207.xyz").replace(/\/+$/, "");
   const key = process.env.AGENT_OPTIMIZE_KEY?.trim();
   if (!key) return { ok: false, prompt: rawPrompt, usedAgent: false };
 

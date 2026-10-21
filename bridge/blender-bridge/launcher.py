@@ -60,7 +60,7 @@ def default_blender_bin():
     if env_bin and os.path.isfile(env_bin):
         return env_bin
     for cand in sorted(glob.glob(
-            "/home/user/Applications/blender-5.2*-linux-x64/blender")):
+            "/home/lenovo/Applications/blender-5.2*-linux-x64/blender")):
         if os.path.isfile(cand):
             return cand
     return shutil.which("blender")

@@ -1,12 +1,12 @@
 // workflow-dsl/schema.ts — AI 画笔的紧凑宣告式 DSL：型别定义与手写校验。
 //
-// 角色（项目负责人裁定 2026-09-02）：画布图为唯一运行时真相；AI 不直接吐 CanvasAgentOp，
+// 角色（暴君裁定 2026-09-02）：画布图为唯一运行时真相；AI 不直接吐 CanvasAgentOp，
 // 而是吐本档定义的 WorkflowDslSource，由 compile.ts 编译成既有 8-op DSL。
 // 契约真源 = src/lib/canvas/types.ts 的 CanvasAgentOp（L239-247）；
 // 栏位语义对齐 src/lib/agent-templates.ts 的 AgentPipelineStep。
 //
 // 零新依赖：repo 无 zod，校验全手写。错误文案一律简体中文（gateway 文案铁律），
-// 且每条 message 自带修复提示（教学式报错，2026-09-02 项目负责人追加）——
+// 且每条 message 自带修复提示（教学式报错，2026-09-02 暴君追加）——
 // agent 不用翻文档就能改对；简短建议另放可选 hint 栏位。
 
 /** 校验议题：step = 步骤 id（档级问题缺省）、field = 栏位名、message = 简体中文问题+修复提示、hint = 简短修复建议（可选，2026-09-02 教学式报错追加）。 */

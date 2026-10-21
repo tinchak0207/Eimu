@@ -10,7 +10,7 @@
 // 这条路：Bearer B端/agent key → biz_api_key.userId → **我方帐本**（account_ledger）
 // → { balance_coins }。
 //
-// REQ-E1a（项目负责人 2026-09-23 裁定）：客户可见余额的权威归我方帐本；new-api 的
+// REQ-E1a（暴君 2026-09-23 裁定）：客户可见余额的权威归我方帐本；new-api 的
 // users.quota 降格为「上游供货水位」。故不再直接读 users.quota，而是：
 //   ① 确保该身份有上线基线（ensureAccountOpening，以 new-api 当时余额种入、幂等）
 //   ② 读我方帐本 → 可用余额（REQ-D3：永久池 + 未过期订阅池，读取时 lazy 判定过期）

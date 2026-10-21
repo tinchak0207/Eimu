@@ -254,7 +254,17 @@ export interface SupplierGenerationInput {
    * 不需要实现。
    */
   onProviderRequestStarted?: () => Promise<void>;
-  onProviderTaskSubmitted?: (providerTaskId: string, protocol: ProviderProtocol) => Promise<void>;
+  /**
+   * 第三参 `options.replacePrevious`（2026-10-20 DMC auto-hd）：上游链路拆成两段时
+   * （H3 出片 → auto-hd 超分），第二段任务提交后必须把对帐指针从第一段**CAS 推进**
+   * 到第二段。带 `replacePrevious` 时 worker 走 `replaceProviderTaskId`（只允许从
+   * 期望值推进，绝不无条件覆盖）；不带时行为与旧版一字不差。
+   */
+  onProviderTaskSubmitted?: (
+    providerTaskId: string,
+    protocol: ProviderProtocol,
+    options?: { replacePrevious?: string },
+  ) => Promise<void>;
 }
 
 export interface SupplierGenerationOutput {
@@ -262,6 +272,14 @@ export interface SupplierGenerationOutput {
   url: string | null;
   providerRequestId?: string;
   providerTaskId?: string;
+  /**
+   * 上游产物 URL 需要鉴权下载时的请求头（2026-10-20 DMC auto-hd：成片是
+   * `{base}/v1/tasks/{id}/artifacts/video/content` 相对路径，无 Bearer 返回 401）。
+   * **卫生铁律**：含 secret，只准直接交给 `persistOutputArtifact` 的 fetch；
+   * worker 在 `checkpointProviderOutput` 前必须剥离，绝不入 evidence／
+   * provider_result_json／加密 receipt／日志／DB 明文。
+   */
+  downloadHeaders?: Record<string, string>;
   httpStatus: number;
   endpointLabel: string;
   supplierModelId: string;
@@ -276,5 +294,11 @@ export interface SupplierGenerationOutput {
  */
 export type ProviderTaskPollResult =
   | { state: "running" }
-  | { state: "succeeded"; url: string | null; base64: string | null }
+  | {
+      state: "succeeded";
+      url: string | null;
+      base64: string | null;
+      /** 上游产物需鉴权下载时的请求头（只进 fetch，绝不落库/入日志）。 */
+      downloadHeaders?: Record<string, string>;
+    }
   | { state: "failed"; reason: string };

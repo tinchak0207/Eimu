@@ -43,5 +43,5 @@ export function buildGoogleDisplayName(profile: GoogleProfile) {
 }
 
 export function buildGoogleEmail(profile: GoogleProfile) {
-  return `google-${profile.sub}@oauth.eimu.dev`;
+  return `google-${profile.sub}@oauth.tinchak0207.xyz`;
 }

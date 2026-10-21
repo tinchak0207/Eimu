@@ -1,8 +1,8 @@
 // Agent 对话代理层的闸道封装。
 //
 // 为什么 gateway 在 store 域名而不是 image 域名：nginx 只在
-// https://store.eimu.dev 底下挂了 /agent/ 这组 route，
-// https://image.eimu.dev 的 /agent/ 开头路径是 404 —— 打错域名等于整条对话功能不可用。
+// https://store.tinchak0207.xyz 底下挂了 /agent/ 这组 route，
+// https://image.tinchak0207.xyz 的 /agent/ 开头路径是 404 —— 打错域名等于整条对话功能不可用。
 //
 // 命名：站上的 GATEWAY_* env 已经指 New API 计费闸道（生图那条链），
 // 这里一律用 AGENT_GATEWAY_* 前缀，避免两个「闸道」在 config 里互相污染。
@@ -19,7 +19,7 @@ import {
   stripInternalSuccessKeys,
 } from "@/lib/upstream-sanitizer";
 
-export const AGENT_GATEWAY_DEFAULT_ORIGIN = "https://store.eimu.dev";
+export const AGENT_GATEWAY_DEFAULT_ORIGIN = "https://store.tinchak0207.xyz";
 
 /** 10 秒硬超时：对话代理不该把请求挂死。 */
 const AGENT_GATEWAY_TIMEOUT_MS = 10_000;

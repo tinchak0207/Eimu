@@ -12,7 +12,7 @@
 //
 // 现状：价格**全部是 placeholder（null = 未配置）**。未配置一律回
 // price_not_configured，**绝不当成 0 元**（0 元成立订单 = 诚实性事故）。
-// 项目负责人给数字时只改下方 TEAM_SEAT_PRICING 的 null（单位：元 / 每席位 / 周期），
+// 暴君给数字时只改下方 TEAM_SEAT_PRICING 的 null（单位：元 / 每席位 / 周期），
 // 其余代码零改动。
 //
 // 本档是纯函式层：不碰 DB、不碰 process.env、不碰网络，可直接在 node --test 下测。
@@ -55,7 +55,7 @@ export const TEAM_SEAT_TIER_LABELS: Record<TeamSeatTier, string> = {
 /** 金额币别：与 plans.ts 的 price 同一口径（元）——不新增第二种币别。 */
 export const TEAM_SEAT_PRICING_CURRENCY = "CNY";
 
-/** 每席位单价：档位 × 周期（单位：元 / 每席位 / 周期）。null = 待项目负责人填。 */
+/** 每席位单价：档位 × 周期（单位：元 / 每席位 / 周期）。null = 待暴君填。 */
 export type TeamSeatPriceTable = Record<TeamSeatTier, Record<TeamSeatCycle, number | null>>;
 
 /**

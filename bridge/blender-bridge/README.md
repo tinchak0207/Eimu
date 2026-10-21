@@ -11,7 +11,7 @@ Image Studio 3D 导演工作站 P0-2。轮子：[ahujasid/blender-mcp](https://g
 ## 一行起全栈
 
 ```bash
-python3 /home/user/Desktop/image-app/bridge/blender-bridge/server.py
+python3 /home/lenovo/Desktop/image-app/bridge/blender-bridge/server.py
 ```
 
 （server 内建 supervisor：首个请求自动拉起 Blender；也可先手动 `python3 …/launcher.py` 预热）
@@ -20,7 +20,7 @@ python3 /home/user/Desktop/image-app/bridge/blender-bridge/server.py
 
 | 变数 | 默认 | 说明 |
 |---|---|---|
-| `BLENDER_BIN` | 抓 `/home/user/Applications/blender-5.2*-linux-x64/blender` | blender 执行档 |
+| `BLENDER_BIN` | 抓 `/home/lenovo/Applications/blender-5.2*-linux-x64/blender` | blender 执行档 |
 | `BLENDER_WORK` | repo 根 `.blender-work/`（已入 `.gitignore`） | job 工作目录 / `out/` 产物根 / `blender.log`（引擎日志，launch 时轮转留一代 `.1`）与 `job-output.log`（Python 层输出）所在 |
 | `BLENDER_BRIDGE_CONCURRENCY` | `1` | 执行槽数（同时跑几个脚本；>1 时多 job 会打进同一 blender 进程，addon 帮浦单线程天然串行，健康检查/GPU 探针会与执行互抢，建议保持 1） |
 | `BLENDER_BRIDGE_QUEUE_DEPTH` | `16` | 排队深度上限，满了立即 429 `queue_full` |

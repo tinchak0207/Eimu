@@ -7,7 +7,7 @@
  *      uploads/ba-deng-liu-zhao/tracks.json（无歌词也登记：lyrics_plain 缺省、
  *      lyric_status=aligning，但不排队对齐）——播放器打开即有歌名/可播，不再依赖本机 worker。
  *   2) 有歌词再排队对齐：LYRIC_ALIGN_WEBHOOK（本机 GPU worker，VPS 经 ssh -R）
- *      否则落盘 QUEUE_DIR（VPS: /opt/eimu-harness/state/lyric-align-queue）。
+ *      否则落盘 QUEUE_DIR（VPS: /opt/agent-harness/state/lyric-align-queue）。
  *
  * 降级：store 写入 / webhook / 队列失败只打日志；播放器 deep-link 未命中仍可注入临时曲目。
  * 写通道：IMAGE_DATA_STORE_BASE（默认取本机可达的 store 入口）＋ IMAGE_DATA_API_KEY（母钥）。
@@ -26,7 +26,7 @@ export type LyricAlignEnqueueInput = {
 
 const DEFAULT_QUEUE =
   process.env.LYRIC_ALIGN_QUEUE_DIR?.trim() ||
-  path.join(process.env.DIRECTOR_DATA_ROOT?.trim() || "/opt/eimu-harness/state", "lyric-align-queue")
+  path.join(process.env.DIRECTOR_DATA_ROOT?.trim() || "/opt/agent-harness/state", "lyric-align-queue")
 
 /** 近期已 enqueue 的音频 URL，避免同轮 audios[] / 安全网重复投递。 */
 const recent = new Map<string, number>()
@@ -109,7 +109,7 @@ function collectAudioUrls(parsed: unknown): string[] {
 // ── 出曲即入库（store tracks.json 同步 upsert） ───────────────────────────────
 // 写通道＝本机可达的 store 入口（IMAGE_DATA_STORE_BASE；容器 image-data-api，
 // 宿主与 gateway 同一台）。母钥读 IMAGE_DATA_API_KEY；缺失时只打日志、退回队列路径。
-const STORE_BASE = (process.env.IMAGE_DATA_STORE_BASE?.trim() || "https://store.eimu.dev/image-data").replace(/\/+$/, "")
+const STORE_BASE = (process.env.IMAGE_DATA_STORE_BASE?.trim() || "https://store.tinchak0207.xyz/image-data").replace(/\/+$/, "")
 const TRACKS_PATHNAME = process.env.LYRIC_ALIGN_TRACKS_PATH?.trim() || "uploads/ba-deng-liu-zhao/tracks.json"
 /** 专辑正文曲目统一归到这张专辑。 */
 const TRACK_ARTIST = "把灯留着"

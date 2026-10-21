@@ -30,6 +30,8 @@ const CREATE_CALL = /(submitGenerationCommand|createGenerationJob)\s*\(/;
 const DEFINITION_FILES = new Set([
   "src/lib/generation-core/command-service.ts",
   "src/lib/generation-core/job-repository.ts",
+  // <1000 行重构：createGenerationJob 实体拆到 job-repository/write.ts，仍是定义不是入口。
+  "src/lib/generation-core/job-repository/write.ts",
 ]);
 
 /** 真的经过 enforceQuotaGate 的入口（清单由现场扫描得出；少一个就要修闸门，不是修清单）。 */

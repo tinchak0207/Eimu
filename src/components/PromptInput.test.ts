@@ -21,7 +21,7 @@ const PROMPT_INPUT_SURFACE = [
 ].map(read).join("\n\n");
 
 test("prompt input appends example snippets and replaces the previous one on repeat clicks", () => {
-  // 2026-09-05 项目负责人裁定：连点模板不叠加——新模板替换上一次插入的模板，
+  // 2026-09-05 暴君裁定：连点模板不叠加——新模板替换上一次插入的模板，
   // 用户手打文字照旧保留（replacePromptSnippet 内部先摘掉旧模板再插入新模板）。
   const source = PROMPT_INPUT_SURFACE;
   assert.match(source, /replacePromptSnippet/);

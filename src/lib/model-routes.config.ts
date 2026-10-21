@@ -4,7 +4,7 @@
 // （scheduler.ts acquireSupplierLease 按 array_position 排序，健康度/负载只在
 // 同一条路由内做平手判定之后的细排——不会再有 supply_tier 压过 priority 的暗规则）。
 //
-// 双架构约定（项目负责人 2026-10-01 裁定「new-api 调度碾压但兼容性一般，双架构命中注定」）：
+// 双架构约定（暴君 2026-10-01 裁定「new-api 调度碾压但兼容性一般，双架构命中注定」）：
 //   - `"newapi"` = 这一步整体交给 new-api（imagesite-new-api），它**内部**的渠道
 //     顺序／权重／重试在 new-api 后台调（它的强项），控面不再假装成多个渠道重排一次。
 //   - 其他 label = 控面直连渠道（new-api 没有 adapter 的协议：视频异步、adobe2api
@@ -35,7 +35,8 @@ export const NEWAPI_SUPERSEDED_LABELS: ReadonlySet<string> = new Set(["hublinuxd
 
 export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // ── 图片：GPT 系 ──
-  // 路由按成本与可用性排序：主渠道失败时按阵列顺序回落到备用渠道。
+  // yyds 放首位＝1K/2K/4K 统一 0.016 元/次（站方公开价目 /api/v1/model-plaza 2026-10-03 实查），
+  // 比 adobe2api（自有额度，常枯竭）与 newapi 便宜；yyds 失败照阵列顺序往下落。
   "gpt-image-2": ["yyds", "adobe2api", "newapi"],
   "gpt-image-2.5-flare": ["yyds", "adobe2api", "newapi"],
   "gpt-image-2.5-sunburst": ["yyds", "adobe2api", "newapi"],
@@ -73,7 +74,7 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   "seedance-2.0": ["xiaoyxiao", "gway"],
   "seedance-2.5-480p": ["xiaoyxiao", "gway"],
   "seedance-2.5-720p": ["xiaoyxiao", "gway"],
-  // 2026-10-13 项目负责人裁定：影片生成首发上游改 dmc（dmc.cc，MiniMax 官方协议，
+  // 2026-10-13 暴君裁定：影片生成首发上游改 dmc（dmc.cc，MiniMax 官方协议，
   // 按秒 ¥0.10/s，实弹 2×5s 对帐一致）；miaowuai（¥2.00/次）与 xiaoyxiao 退为备援。
   "minimax-h3": ["dmc", "miaowuai", "xiaoyxiao"],
   // 2026-10-13：seedance-2.0-mini 以 miaowuai 重新上架（上游 seedance-2.0-mini 同名直传，
