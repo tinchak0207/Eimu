@@ -6,7 +6,11 @@ name: CI
 
 on:
   push:
-  pull_request:
+  # 2026-10-21：tinchak0207 账号的 GitHub-hosted runner 被账号级账单锁拦住
+  # （job 在 2s 内 startup failure，runner 为空、steps 为 0）。临时改用本机
+  # self-hosted runner（label: eimu-local）。刻意不跑 pull_request：公开仓的
+  # 外部 PR 代码不应在维护者机器上执行。
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,7 +19,7 @@ concurrency:
 jobs:
   typecheck:
     name: Typecheck (tsc --noEmit)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eimu-local]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,7 +35,7 @@ jobs:
 
   gateway-typecheck:
     name: Gateway typecheck (tsc --noEmit)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eimu-local]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,7 +55,7 @@ jobs:
 
   test:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, eimu-local]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
