@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://eimu.dev/promo/eimu-promo.mp4" title="播放 Eimu 宣传片">
-    <img src="[public/promo/eimu-promo-poster.jpg](https://github.com/user-attachments/assets/2d1a30ab-4e18-4f16-aef1-e79951f8f05a)" alt="Eimu 宣传片" width="100%">
+    <img src="https://github.com/user-attachments/assets/2d1a30ab-4e18-4f16-aef1-e79951f8f05a" alt="Eimu 宣传片" width="100%">
   </a>
 </p>
 
