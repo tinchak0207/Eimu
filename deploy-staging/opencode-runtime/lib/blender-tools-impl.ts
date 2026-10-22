@@ -117,6 +117,16 @@ export function bridgeUrl(): string {
 }
 
 /**
+ * 桥鉴权头：桥的 /v1/execute 与 /v1/cancel 要求 Bearer 必须等于桥进程的
+ * BLENDER_BRIDGE_TOKEN；桥未设 token 时一律 401（永不当匿名）。本端与桥必须
+ * 成对配置：env 有 token 才发头，没有就不发（供无鉴权的本地开发桥）。
+ */
+export function bridgeAuthHeaders(): Record<string, string> {
+  const token = process.env.BLENDER_BRIDGE_TOKEN
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+/**
  * 产物取回入口（片 AJ）：桥主机与 agent 沙箱异构、沙箱不自持档案，产物一律经
  * 桥 GET /v1/artifact 取回。取回 base = 桥地址（env BLENDER_BRIDGE_URL 已含
  * 隧道语义：VPS 侧 127.0.0.1:8765 经 blender-bridge-tunnel 反向隧道达桥主机）。
@@ -225,7 +235,7 @@ async function bridgeExecute(
   try {
     response = await fetch(`${bridgeUrl()}/v1/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...bridgeAuthHeaders() },
       body: JSON.stringify({ script, timeout_ms: timeoutMs }),
       signal,
     })

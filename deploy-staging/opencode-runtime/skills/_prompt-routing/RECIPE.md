@@ -77,8 +77,61 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：本席 blender_* 可用则 `blender_exec`→`blender_render`／`blender_export_gltf`（先 asset_search 查 blender-3d-assets）；orchestrator／creator／director3d 表内关闭时必须派工具表含所需 blender_* 的 Expert；若无具备席位则诚实报告断路，禁止口述直调或二维文生图冒充。席位不可用时可用 bash+自建几何+光栅渲染产预演帧/GLB 并标注 `.blend` 未交付。**主动选用**：精确几何／多角度一致／空间布局／产品 360° 时优先真 Blender 席位（本机零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
-| 实时白模预演／武侠打斗预演／一句话跟拍编排（可播，非 Blender 静帧） | **先载 `skill previs-director`**：`director_get_state` →（可选 `director_propose_plans`，武侠关键词金样居首）→ `director_manage_shot` / `director_upsert_action` → 播 → `director_capture_previz`。闭集只许 CLOSED_ACTIONS／CLOSED_CAMERA_MOVES＋normalize*；金样 `docs/evidence/previs-harness-20261022/s2-golden/`；验收 A1–A20 双侧。**禁止**改走 blender 静帧冒充实时预演主路径（要 `.blend`/成品渲染才用 `skill blender-director`） | —
+| **单物体（立方体／球体／圆柱等，未要转台/多视角）** | **快路径：本回合三连，不研究/不评审/不派 Expert，目标 30 秒内** ① `blender_exec` 用下方模板建几何+材质+三点光+相机，保存 `out/<name>.blend`；② `blender_render`（`scene_blend_path:"out/<name>.blend"`，`render_engine:"eevee"`，`output_name:"<name>_hero"`）出 1024 主视图（eevee 默认快档，用户要照片级才 cycles）；③ `blender_export_gltf`（同一 .blend，`output_name:"<name>"`）出 GLB；④ **直接交付两个回执里的 `public_urls`**（图片出卡、GLB 给链接）；桥产物不要调 `image_upload`／`document_upload`（文件在桥主机），也不要 `ls` 本机 `out/` 拿同名旧文件顶替；不要 `read_image` 自检（1024 PNG 常超 1MB 上限） | bash+自建几何+光栅渲染（桥不可用时；标注 `.blend` 未交付） |
+| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：本席 blender_* 可用则 `blender_exec`→`blender_render`／`blender_export_gltf`（先 asset_search 查 blender-3d-assets）；本席表内确实关闭时才派工具表含所需 blender_* 的 Expert；若无具备席位则诚实报告断路，禁止口述直调或二维文生图冒充。席位不可用时可用 bash+自建几何+光栅渲染产预演帧/GLB 并标注 `.blend` 未交付。**主动选用**：精确几何／多角度一致／空间布局／产品 360° 时优先真 Blender 席位（本机零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+
+单物体模板（实测 1024 主视图质量档；只改几何与名字，`out/` 是桥唯一公网化目录，渲染交给 `blender_render` 不在 exec 里做）：
+
+```python
+import bpy, math, os
+name = "cube"                     # 改成 cube / sphere / cylinder …
+bpy.ops.wm.read_factory_settings(use_empty=True)
+if name == "sphere":
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1, segments=96, ring_count=48, location=(0, 0, 1))
+    bpy.ops.object.shade_smooth()
+else:
+    bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 1))
+obj = bpy.context.object; obj.name = name
+mat = bpy.data.materials.new("Matte"); mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.42, 0.44, 0.47, 1)
+bsdf.inputs["Roughness"].default_value = 0.5
+obj.data.materials.append(mat)
+bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, 0))     # 深色无缝地面
+plane = bpy.context.object
+pm = bpy.data.materials.new("Floor"); pm.use_nodes = True
+pb = pm.node_tree.nodes["Principled BSDF"]
+pb.inputs["Base Color"].default_value = (0.035, 0.037, 0.042, 1)
+pb.inputs["Roughness"].default_value = 0.7
+plane.data.materials.append(pm)
+cam_data = bpy.data.cameras.new("Cam"); cam = bpy.data.objects.new("Cam", cam_data)
+bpy.context.collection.objects.link(cam); bpy.context.scene.camera = cam
+cam.location = (5.1, -5.1, 3.9); cam_data.lens = 60
+cam.rotation_euler = (math.radians(62), 0, math.radians(45))
+for nm, loc, rot, energy, size in (
+    ("Key", (3.5, -3.5, 5.5), (math.radians(50), 0, math.radians(45)), 450, 4.0),
+    ("Fill", (-4.0, -2.0, 3.0), (math.radians(70), 0, math.radians(-60)), 100, 5.0),
+    ("Rim", (-1.5, 4.5, 4.5), (math.radians(55), 0, math.radians(200)), 420, 3.0),
+):
+    d = bpy.data.lights.new(nm, "AREA"); d.energy = energy; d.size = size
+    o = bpy.data.objects.new(nm, d); o.location = loc; o.rotation_euler = rot
+    bpy.context.collection.objects.link(o)
+w = bpy.context.scene.world or bpy.data.worlds.new("World"); bpy.context.scene.world = w
+w.use_nodes = True
+w.node_tree.nodes["Background"].inputs[0].default_value = (0.015, 0.016, 0.02, 1)
+w.node_tree.nodes["Background"].inputs[1].default_value = 0.3
+sc = bpy.context.scene
+try:
+    sc.render.engine = "BLENDER_EEVEE_NEXT"
+except Exception:
+    sc.render.engine = "BLENDER_EEVEE"
+sc.render.resolution_x = 1024; sc.render.resolution_y = 1024
+sc.view_settings.view_transform = "AgX"
+sc.view_settings.exposure = -1.1
+sc.eevee.taa_render_samples = 128
+os.makedirs(os.path.join(os.getcwd(), "out"), exist_ok=True)
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(os.getcwd(), "out", name + ".blend"))
+```
 
 ## §商品图
 
