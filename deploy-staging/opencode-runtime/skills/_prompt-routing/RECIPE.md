@@ -3,8 +3,7 @@
 > 本档是 AGENTS.md「§1 路由决策表」移出的**细则正文**（逐字保留，只改存放位置）。
 > AGENTS.md 每轮只留「触发词 → 域 → 本档 §节」的指针；模型判域后**动该域前先读对应节**。
 > 音乐域不外移（唯一活链路）：音乐细则在 `skill music-director`；本档 §音乐 仅保留其路由行以便对表。
-> 上层手册（工作区根，与 `attach/` 同框）：`attach/workflow-video-rules.md`（影片/工作流）、
-> `attach/attachment-handbook.md`（附件）、`attach/film-delivery-handbook.md`（成片）、`attach/storyboard-qc-handbook.md`（分镜门）。
+> 按需载体（均在 `_prompt-routing/`，禁止引用不存在的 `attach/`）：本档 §影片／§剪辑／§3D；`attachments.md`（附件）；`storyboard-gate.md`（分镜门）；成片铁律见 `creator-guide.md` 自主剪接段与本档 §剪辑。
 
 ## §图片
 
@@ -25,9 +24,9 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途直接 blender_exec） | — |
-| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长策略按 attach/workflow-video-rules.md §4b（按条计费，尽量打满时长档）**） | — |
-| 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读 attach/workflow-video-rules.md** | — |
+| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途：本席 blender_* 可用则调用，否则派工具表含 blender_* 的 Expert；无具备席位则诚实报告断路） | — |
+| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长按条计费、尽量打满时长档（细则见本档 §影片与 `skill video-director`）**） | — |
+| 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读本档 §影片（及 `skill video-director`）；禁止引用不存在的 `attach/`** | — |
 | 关键帧驱动影片／图生视频／起止关键帧 | `image_generate` 影片模型传 `reference_images:[起帧URL,止帧URL]`；`last_frame_video_chain` 每镜 shots 传 `first_frame_url`／`last_frame_url`；工作流视频节点 metadata 传首尾同名字段或 `reference_images`，也可连接对应图片节点。minimax-h3 最多 9 张有序图参考；28 张／14 镜按每镜 2 张注入。上游 image_urls 是图片驱动参考，不承诺像素级首尾硬锁；禁止声称本站影片端不接受图片而改成纯文生视频。 | — |
 | 影片拆解（链接或上传影片：讲了什么/分镜/台词/反推提示词/翻拍/去字幕/下载） | 链接先 `video_fetch`（首次 action=prepare）落本地 → `video_analyze`（场景切点+代表帧+词级台词；提示词反推回 vlm_unavailable 时对代表帧跑 read-image 补）；只要台词稿 `video_transcribe`；去字幕 `video_desubtitle`；翻拍/换角重做 `video_remake_plan`；抽帧/切段/探针 `video_evidence`；台词折算秒数写进分镜 `video_measure` | ffmpeg 抽帧 + read-image |
 
@@ -78,7 +77,7 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：blender_* 可用时直接调用 blender_exec 建模（不必派 Expert；先 asset_search 查 blender-3d-assets 现成件）→ blender_render（eevee 快稿；转台/360° 传 turntable: true 出 mp4）→ 交付 public_urls；要网页可交互预览加 blender_export_gltf；不可用时走 bash + 自建几何 + 光栅渲染，产出预演帧/GLB 并标注 `.blend` 未交付，禁止二维文生图冒充。**主动选用**：精确几何／同一物体多角度一致／空间布局／产品 360° 时不走文生图，直接 Blender（本机渲染，零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：本席 blender_* 可用则 `blender_exec`→`blender_render`／`blender_export_gltf`（先 asset_search 查 blender-3d-assets）；orchestrator／creator／director3d 表内关闭时必须派工具表含所需 blender_* 的 Expert；若无具备席位则诚实报告断路，禁止口述直调或二维文生图冒充。席位不可用时可用 bash+自建几何+光栅渲染产预演帧/GLB 并标注 `.blend` 未交付。**主动选用**：精确几何／多角度一致／空间布局／产品 360° 时优先真 Blender 席位（本机零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
 
 ## §商品图
 
