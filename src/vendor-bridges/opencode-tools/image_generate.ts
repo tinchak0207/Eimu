@@ -151,9 +151,12 @@ async function normalizeReferenceImages(
         const mime=(response.headers.get("content-type")??"image/png").split(";")[0]
         if(!mime.startsWith("image/"))throw new Error("reference_not_image")
         const frozen=await uploadImageBytes(`data:${mime};base64,${Buffer.concat(chunks).toString("base64")}`,sessionID,signal)
-        if(!frozen.url)throw new Error("reference_snapshot_missing")
+        if(!frozen.url)throw Object.assign(new Error("reference_snapshot_missing"),{code:"reference_snapshot_missing"})
         images.push(frozen.url);fingerprints.push(hash.digest("hex"));continue
-      }catch {return {ok:false,message:`第 ${i+1} 张参考图无法验证内容hash；未生成，请恢复原canonical参考地址。`}}
+      }catch (e: any) {
+        const detail = [e?.code, e?.message].filter(Boolean).join(": ") || String(e)
+        return { ok: false, message: `第 ${i + 1} 张参考图处理失败：${detail}` }
+      }
     }
     if (!looksLikeAgentPath(src)) {
       return {
