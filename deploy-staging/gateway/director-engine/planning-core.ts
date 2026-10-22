@@ -362,3 +362,68 @@ function planDuration(plan: DirectorPlan): number {
 }
 
 /* ── 白名单切除：consultDirectorPlan——LLM 呼叫点切除，二期 quickChat 替换点 ── */
+
+
+/* ── S2 skill-wire：金样加载 + 武侠关键词优先（供 director_propose_plans） ── */
+const GOLDEN_PLAN_REL = 'docs/evidence/previs-harness-20261022/s2-golden/wuxia-cherry-plan.json';
+
+const WUXIA_GOLDEN_HINT =
+  /武侠|打斗|樱花|剑客|仙侠|剑气|符阵|魔物|恶魔|大招|花瓣|斩|对打|战斗短片|动作镜头/;
+
+export function promptPrefersWuxiaGolden(prompt: string): boolean {
+  return WUXIA_GOLDEN_HINT.test(String(prompt ?? ''));
+}
+
+/** 读取 S2 武侠金样 DirectorPlan（多候选路径，兼容 gateway cwd） */
+export function compileReferenceWuxiaPlan(planOrRootOrPath?: DirectorPlan | string): DirectorPlan {
+  if (planOrRootOrPath && typeof planOrRootOrPath === 'object') {
+    if (!Array.isArray(planOrRootOrPath.shots)) throw new Error('金样缺少 shots');
+    return planOrRootOrPath;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolve } = require('node:path') as typeof import('node:path');
+  const arg = typeof planOrRootOrPath === 'string' ? planOrRootOrPath : undefined;
+  const candidates: string[] = [];
+  if (arg && arg.endsWith('.json')) candidates.push(arg);
+  else if (arg) candidates.push(resolve(arg, GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), '..', GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), '../..', GOLDEN_PLAN_REL));
+  // 自本文件位置上溯（CJS/tsx 下 __dirname 可用；失败则跳过）
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const here = typeof __dirname !== 'undefined' ? __dirname : '';
+    if (here) candidates.push(resolve(here, '../../..', GOLDEN_PLAN_REL));
+  } catch { /* ignore */ }
+  const path = candidates.find((p) => existsSync(p));
+  if (!path) throw new Error(`金样未找到: ${candidates.join(' | ')}`);
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as DirectorPlan;
+  if (!raw?.shots || !Array.isArray(raw.shots)) throw new Error(`金样缺少 shots: ${path}`);
+  return raw;
+}
+
+/**
+ * 命中武侠关键词时把金样插为第一候选，保留原 fallback，合计 ≤3。
+ */
+export function withWuxiaGoldenFirst(
+  plans: DirectorPlan[],
+  prompt: string,
+  goldenRootOrPath?: string,
+): DirectorPlan[] {
+  if (!promptPrefersWuxiaGolden(prompt)) return plans;
+  try {
+    const golden = compileReferenceWuxiaPlan(goldenRootOrPath);
+    const tagged: DirectorPlan = {
+      ...structuredClone(golden),
+      id: `plan-${nanoid(7)}`,
+      name: golden.name?.includes('金样') ? golden.name : `武侠金样·${golden.name || '樱花剑客'}`,
+      summary: `S2 金样优先 · ${golden.summary || String(prompt).slice(0, 80)}`,
+      createdAt: Date.now(),
+    };
+    return [tagged, ...plans].slice(0, 3);
+  } catch {
+    return plans;
+  }
+}

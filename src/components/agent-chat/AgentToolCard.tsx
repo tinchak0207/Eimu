@@ -247,6 +247,7 @@ const TOOL_TITLES: Record<string, string> = {
   director_upsert_action: "更新分镜动作",
   director_project_control: "项目控制",
   director_prepare_export: "准备导出",
+  director_capture_previz: "截预演关键帧",
   // ── 资产与交付 ──
   asset_search: "搜索资产",
   asset_get: "读取资产",

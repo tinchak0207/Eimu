@@ -1,0 +1,13 @@
+{
+  "bloomOnInitially": false,
+  "bloomForEvidence": false,
+  "hud1": "SEEK shot=正常×1 timeScale=1 contentT=1.25s local=1.25s",
+  "hud2": "SEEK shot=慢动作×0.4 timeScale=0.4 contentT=3.75s local=1.25s",
+  "clock": {
+    "after1sWallOnSlow": 2.9,
+    "after1sWallOnNormal": 1,
+    "expectedSlow": 2.9,
+    "expectedNormal": 1
+  },
+  "errors": []
+}

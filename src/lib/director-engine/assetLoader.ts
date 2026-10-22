@@ -6,7 +6,7 @@
  * 失败一律回传结构化错误（GltfLoadOutcome ok:false），不 throw。
  *
  * 边界：本档只提供载入入口；引擎挂点见 DirectorEngine.setGltfAsset。
- * 不解析 DRACO/KTX2 压缩资产；动画 clip 本片不播放（PRD 裁定只保留展示壳吃 glTF）。
+ * 不解析 DRACO/KTX2 压缩资产。成功时回传 glTF animations（供 AnimationMixer）；无 clip 时 clips=[]，展示壳行为不变。
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -17,7 +17,7 @@ export const GLTF_DEFAULT_TARGET_HEIGHT_M = 1.75;
 
 /** 结构化 loader 介面：真身 GLTFLoader 满足此形状；测试可注入 mock */
 export interface GltfLoaderLike {
-  loadAsync(url: string): Promise<{ scene: THREE.Object3D }>;
+  loadAsync(url: string): Promise<{ scene: THREE.Object3D; animations?: THREE.AnimationClip[] }>;
 }
 
 export interface GltfAssetOptions {
@@ -40,6 +40,8 @@ export type GltfLoadOutcome =
       scaleFactor: number;
       /** 落地对齐的 y 位移量（加到 position.y 使 min.y=0） */
       groundOffsetY: number;
+      /** glTF 内 AnimationClip（无则为空数组；调用方挂 AnimationMixer） */
+      clips: THREE.AnimationClip[];
     }
   | { ok: false; stage: GltfLoadStage; message: string };
 
@@ -88,12 +90,13 @@ export async function loadGltfAsset(
     if (!object) {
       return { ok: false, stage: 'load', message: 'glTF 解析结果缺少 scene' };
     }
+    const clips = Array.isArray(gltf.animations) ? gltf.animations.slice() : [];
     const norm = applyGltfNormalization(object, opts.targetHeightM);
     if (!norm) {
       return { ok: false, stage: 'empty', message: 'glTF 资产无可渲染几何（空场景）' };
     }
     parent.add(object);
-    return { ok: true, object, ...norm };
+    return { ok: true, object, clips, ...norm };
   } catch (err) {
     return {
       ok: false,

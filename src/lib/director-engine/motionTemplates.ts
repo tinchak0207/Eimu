@@ -1,8 +1,9 @@
 import { nanoid } from 'nanoid';
 import { animatedJoints } from './playback';
 import type { DirectorActionId, DirectorMotionKeyframe, Vec3 } from './types';
+export { ACTION_TO_KAYKIT_CLIP, kaykitClipForAction } from './clipMap';
 
-export type MotionCategory = '基础' | '走位' | '视线' | '交流' | '手部' | '姿态' | '情绪' | '专项';
+export type MotionCategory = '基础' | '走位' | '视线' | '交流' | '手部' | '姿态' | '情绪' | '专项' | '打斗';
 
 export interface MotionTemplate {
   id: DirectorActionId;
@@ -53,6 +54,35 @@ export const MOTION_TEMPLATES: MotionTemplate[] = [
     ['read', '阅读', '双手持卷或书阅读', 2], ['write', '书写', '一手扶持一手落笔', 2], ['sew', '缝纫', '低头双手连续走针', 2],
     ['open-door', '开门', '伸手并拉开门', 1.5], ['close-door', '关门', '转身将门合上', 1.4], ['push', '推物', '双手向前施力', 1.5], ['pull', '拉物', '重心后移拉动物体', 1.5],
     ['enter-car', '进入车辆', '靠近并进入车辆', 2.2, true, 1.5], ['exit-car', '离开车辆', '从车辆中出来并站稳', 2.2, true, 1.5],
+  ]),
+  ...row('打斗', [
+    ['idle-combat', '战斗待机', '持械战斗待机呼吸', 2],
+    ['run-combat', '战斗跑动', '战斗姿态快跑', 1.6, true, 3.2],
+    ['slash', '横斩', '单手横斩', 1.0],
+    ['chop', '下劈', '单手下劈斩击', 1.0],
+    ['stab', '突刺', '单手突刺', 0.9],
+    ['jump-attack', '跳劈', '跳跃下劈', 1.2],
+    ['dodge-forward', '向前闪避', '向前翻滚闪避', 0.8, true, 1.4],
+    ['hit-react', '受击', '受击后仰反应', 0.7],
+    ['slash-spin', '回旋斩', '原地回旋横扫', 1.0],
+    ['slash-diagonal', '斜劈', '斜向斩击', 0.75],
+    ['slash-combo', '连斩', '连续斩击', 1.4],
+    ['jump', '腾跃', '起跳腾空', 0.7, true, 0.8],
+    ['flip-air', '空中翻身', '空中翻转', 0.8],
+    ['land', '落地', '落地收势', 0.5],
+    ['roll', '翻滚', '地面翻滚起身', 0.9, true, 1.6],
+    ['dash', '突进', '短距突进', 0.55, true, 2.0],
+    ['charge', '蓄力', '起手蓄势', 1.0],
+    ['knockback', '击退', '被击退踉跄', 0.8, true, -1.4],
+    ['slide-land', '落地滑行', '单膝滑地', 0.9, true, -1.0],
+    ['cast-summon', '召唤', '举手召唤法阵', 1.2],
+    ['cast-circle', '结阵', '释放地面符阵', 1.1],
+    ['cast-release', '释放', '符阵爆发', 0.9],
+    ['raise-sword', '举剑', '单手举剑指天', 1.2],
+    ['shout', '喊招', '怒喝蓄势', 1.0],
+    ['shockwave', '冲击波', '砸地冲击波', 1.3],
+    ['launch', '击飞', '敌人被击飞', 1.0, true, 0.5],
+    ['wipe-blood', '擦血', '擦嘴角血迹', 1.2],
   ]),
 ];
 

@@ -149,7 +149,14 @@ export type DirectorActionId =
   | 'look-up' | 'look-down' | 'look-at' | 'reach' | 'hold'
   | 'idle-breathe' | 'listen' | 'hesitate' | 'bow' | 'cross-arms'
   | 'hands-on-hips' | 'clap' | 'drink' | 'phone' | 'hand-over'
-  | 'receive' | 'step-back' | 'step-forward' | 'glance' | 'inspect' | 'knock';
+  | 'receive' | 'step-back' | 'step-forward' | 'glance' | 'inspect' | 'knock'
+  | 'slash' | 'chop' | 'stab' | 'jump-attack' | 'dodge-forward'
+  | 'hit-react' | 'idle-combat' | 'run-combat'
+  /* S2 武侠金样补齐（kebab-case；clipMap 同名） */
+  | 'slash-spin' | 'slash-diagonal' | 'slash-combo' | 'jump' | 'flip-air' | 'land'
+  | 'roll' | 'dash' | 'charge' | 'knockback' | 'slide-land'
+  | 'cast-summon' | 'cast-circle' | 'cast-release'
+  | 'raise-sword' | 'shout' | 'shockwave' | 'launch' | 'wipe-blood';
 
 export interface DirectorElementState {
   position: Vec3;
@@ -173,6 +180,8 @@ export interface DirectorActionClip {
   locked?: boolean;
   source?: 'agent' | 'template' | 'manual' | 'legacy';
   keyframes?: DirectorMotionKeyframe[];
+  /** 可选：覆盖 ACTION_TO_KAYKIT_CLIP，playback 优先用此名驱动 AnimationMixer */
+  clipName?: string;
 }
 
 export type DirectorKeyframeInterpolation = 'hold' | 'linear' | 'smooth' | 'ease-in' | 'ease-out';
@@ -214,6 +223,12 @@ export interface DirectorCameraKeyframe {
 export interface DirectorSequenceShot extends DirectorShot {
   startSec: number;
   durationSec: number;
+  /**
+   * 镜头内容时钟倍率（可选，缺省 1）。
+   * 0.35≈升格慢动作：小视口按 wall_dt * timeScale 推进 content t，
+   * 旧计划无此字段时行为不变。
+   */
+  timeScale?: number;
   cameraEnd: { position: Vec3; target: Vec3; fov: number; rollDeg?: number };
   cameraMove: DirectorCameraMove;
   cameraKeyframes?: DirectorCameraKeyframe[];
@@ -222,6 +237,11 @@ export interface DirectorSequenceShot extends DirectorShot {
   sourceFrameId?: string;
   thumbnailPath?: string;
   notes?: string;
+  /**
+   * 预演参考（与 gateway ShotJson.previz 同形，禁第二套 schema）。
+   * keyframes = https URL[]；workflow-gw-submit 会并进 video reference_images。
+   */
+  previz?: { motion_ref?: string; keyframes?: string[] };
 }
 
 export interface DirectorPlan {

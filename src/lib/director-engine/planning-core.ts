@@ -16,6 +16,7 @@ import type {
 } from './types';
 import { createMotionKeyframes } from './motionTemplates';
 import { cameraPatchFromTemplate } from './cameraTemplates';
+import { normalizeActionId, normalizeCameraMove } from './actionClipCatalog';
 
 interface RawAction {
   elementName?: string;
@@ -57,11 +58,31 @@ const ACTIONS = new Set<DirectorActionId>([
   'sew', 'read', 'write', 'speak', 'nod', 'shake-head', 'look-up', 'look-down', 'look-at', 'reach', 'hold',
   'idle-breathe', 'listen', 'hesitate', 'bow', 'cross-arms', 'hands-on-hips', 'clap', 'drink', 'phone',
   'hand-over', 'receive', 'step-back', 'step-forward', 'glance', 'inspect', 'knock',
+  'slash', 'chop', 'stab', 'jump-attack', 'dodge-forward', 'hit-react', 'idle-combat', 'run-combat',
+  'slash-spin', 'slash-diagonal', 'slash-combo', 'jump', 'flip-air', 'land', 'roll', 'dash', 'charge',
+  'knockback', 'slide-land', 'cast-summon', 'cast-circle', 'cast-release',
+  'raise-sword', 'shout', 'shockwave', 'launch', 'wipe-blood',
 ]);
 
 /* 2026-09-03 暴君裁定白名单偏离：ACTION_KEYWORDS 加繁体变体，函数体不动。
    逐词对照 vendor 简体原词补同义繁写（繁体紧跟原词；同形词如 展卷/步行/跪下 不重复），禁止发明新词/新动作。 */
 const ACTION_KEYWORDS: Array<{ action: DirectorActionId; pattern: RegExp }> = [
+  { action: 'slash', pattern: /横斩|挥斩|斩击/ },
+  { action: 'chop', pattern: /劈砍|下劈|竖砍/ },
+  { action: 'stab', pattern: /突刺|刺击|戳刺/ },
+  { action: 'slash-combo', pattern: /连斩|连击/ },
+  { action: 'slash-spin', pattern: /回旋斩|旋斩/ },
+  { action: 'jump-attack', pattern: /跳斩|跳劈/ },
+  { action: 'flip-air', pattern: /空中翻身|翻身/ },
+  { action: 'roll', pattern: /翻滚/ },
+  { action: 'dash', pattern: /突进/ },
+  { action: 'hit-react', pattern: /受击|命中反应/ },
+  { action: 'cast-summon', pattern: /召唤符|召唤/ },
+  { action: 'cast-circle', pattern: /结阵|符阵/ },
+  { action: 'raise-sword', pattern: /举剑/ },
+  { action: 'shout', pattern: /喊招|怒喝/ },
+  { action: 'wipe-blood', pattern: /擦血/ },
+  { action: 'shockwave', pattern: /冲击波|砸地/ },
   { action: 'sew', pattern: /走针|走针|落针|落针|缝制|缝制|缝纫|缝纫|刺绣|刺绣|针线|针线|针尖.*布料|针尖.*布料|穿刺布料|针穿|针穿|丝线绷紧|丝线绷紧/ },
   { action: 'read', pattern: /阅读|阅读|展卷|看卷|竹简上读|竹简上读|读它们|读它们|山海图.*(?:读|看)|山海图.*(?:读|看)/ },
   { action: 'write', pattern: /书写|书写|写字|写字|记录|记录|落笔|落笔/ },
@@ -334,3 +355,150 @@ function planDuration(plan: DirectorPlan): number {
 }
 
 /* ── 白名单切除：consultDirectorPlan——LLM 呼叫点切除，二期 quickChat 替换点 ── */
+
+
+/* ── S2：闭集 beat → DirectorPlan（不改 LLM 呼叫；供 agent/skill） ── */
+export interface ClosedBeatAction {
+  elementName?: string;
+  action: string;
+  startSec?: number;
+  durationSec?: number;
+  moveX?: number;
+  moveZ?: number;
+}
+
+export interface ClosedBeat {
+  name?: string;
+  durationSec?: number;
+  cameraMove?: string;
+  shotScale?: DirectorShotScale;
+  cameraYawDeg?: number;
+  cameraPitchDeg?: number;
+  timeScale?: number;
+  notes?: string;
+  actions?: ClosedBeatAction[];
+}
+
+/** 闭集 beats → 合法 DirectorPlan（名单外 action/camera 经 normalize* 纠偏） */
+export function buildPlanFromClosedBeats(
+  beats: ClosedBeat[],
+  base: DirectorPlan,
+  elements: DirectorElement[],
+  meta?: { name?: string; summary?: string },
+): DirectorPlan {
+  const raw: RawPlan = {
+    name: meta?.name ?? '闭集编排',
+    summary: meta?.summary ?? `${beats.length} 镜闭集`,
+    shots: beats.map((beat) => ({
+      name: beat.name,
+      durationSec: beat.durationSec,
+      cameraMove: normalizeCameraMove(beat.cameraMove ?? 'static'),
+      shotScale: beat.shotScale,
+      cameraYawDeg: beat.cameraYawDeg,
+      cameraPitchDeg: beat.cameraPitchDeg,
+      actions: (beat.actions ?? []).map((a) => ({
+        elementName: a.elementName,
+        action: normalizeActionId(a.action),
+        startSec: a.startSec,
+        durationSec: a.durationSec,
+        moveX: a.moveX,
+        moveZ: a.moveZ,
+      })),
+    })),
+  };
+  const adapted = adaptBaseForMotion(base, { ...raw, shots: raw.shots?.map((s, i) => ({
+    ...s,
+    durationSec: beats[i]?.durationSec ?? s.durationSec,
+  })) });
+  // 扩展镜数至 beats.length
+  const count = Math.max(1, beats.length);
+  let cursor = 0;
+  const totalHint = beats.reduce((s, b) => s + Math.max(0.4, b.durationSec ?? 2), 0) || planDuration(base);
+  const stretched: DirectorPlan = {
+    ...adapted,
+    shots: Array.from({ length: count }, (_, index) => {
+      const src = structuredClone(adapted.shots[index % Math.max(1, adapted.shots.length)] ?? adapted.shots[0]);
+      const dur = Math.max(0.4, beats[index]?.durationSec ?? totalHint / count);
+      const shot = { ...src, id: `shot-${nanoid(7)}`, startSec: cursor, durationSec: dur, actions: [], notes: beats[index]?.notes, timeScale: beats[index]?.timeScale } as DirectorSequenceShot;
+      cursor += dur;
+      return shot;
+    }),
+  };
+  const plan = buildPlans([raw], stretched, elements)[0];
+  // 回填 timeScale / notes（buildPlans 不感知）
+  plan.shots = plan.shots.map((shot, i) => ({
+    ...shot,
+    timeScale: beats[i]?.timeScale,
+    notes: beats[i]?.notes ?? shot.notes,
+  }));
+  if (meta?.name) plan.name = meta.name;
+  if (meta?.summary) plan.summary = meta.summary;
+  return plan;
+}
+
+const GOLDEN_PLAN_REL = 'docs/evidence/previs-harness-20261022/s2-golden/wuxia-cherry-plan.json';
+
+/**
+ * 读取 S2 武侠金样 DirectorPlan。
+ * - 传入已解析对象：直接校验返回
+ * - 传入 .json 路径或仓库根：node 懒加载 fs（避免进浏览器 bundle）
+ */
+export function compileReferenceWuxiaPlan(planOrRootOrPath?: DirectorPlan | string): DirectorPlan {
+  if (planOrRootOrPath && typeof planOrRootOrPath === 'object') {
+    if (!Array.isArray(planOrRootOrPath.shots)) throw new Error('金样缺少 shots');
+    return planOrRootOrPath;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { readFileSync } = require('node:fs') as typeof import('node:fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolve } = require('node:path') as typeof import('node:path');
+  const arg = typeof planOrRootOrPath === 'string' ? planOrRootOrPath : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { existsSync } = require('node:fs') as typeof import('node:fs');
+  const candidates: string[] = [];
+  if (arg && arg.endsWith('.json')) candidates.push(arg);
+  else if (arg) candidates.push(resolve(arg, GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), '..', GOLDEN_PLAN_REL));
+  candidates.push(resolve(process.cwd(), '../..', GOLDEN_PLAN_REL));
+  const path = candidates.find((p) => existsSync(p));
+  if (!path) throw new Error(`金样未找到: ${candidates.join(' | ')}`);
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as DirectorPlan;
+  if (!raw?.shots || !Array.isArray(raw.shots)) throw new Error(`金样缺少 shots: ${path}`);
+  return raw;
+}
+
+
+/* ── S2 skill-wire：武侠/打斗关键词 → 金样作 propose 第一候选 ── */
+const WUXIA_GOLDEN_HINT =
+  /武侠|打斗|樱花|剑客|仙侠|剑气|符阵|魔物|恶魔|大招|花瓣|斩|对打|战斗短片|动作镜头/;
+
+/** 用户文本是否应优先推出 S2 武侠金样 */
+export function promptPrefersWuxiaGolden(prompt: string): boolean {
+  return WUXIA_GOLDEN_HINT.test(String(prompt ?? ''));
+}
+
+/**
+ * 命中武侠关键词时，把 compileReferenceWuxiaPlan() 插为第一候选，
+ * 其后保留原 fallback（合计最多 3）。金样读失败则原样返回。
+ */
+export function withWuxiaGoldenFirst(
+  plans: DirectorPlan[],
+  prompt: string,
+  goldenRootOrPath?: string,
+): DirectorPlan[] {
+  if (!promptPrefersWuxiaGolden(prompt)) return plans;
+  try {
+    const golden = compileReferenceWuxiaPlan(goldenRootOrPath);
+    const tagged: DirectorPlan = {
+      ...structuredClone(golden),
+      id: `plan-${nanoid(7)}`,
+      name: golden.name?.includes('金样') ? golden.name : `武侠金样·${golden.name || '樱花剑客'}`,
+      summary: `S2 金样优先 · ${golden.summary || String(prompt).slice(0, 80)}`,
+      createdAt: Date.now(),
+    };
+    return [tagged, ...plans].slice(0, 3);
+  } catch {
+    return plans;
+  }
+}

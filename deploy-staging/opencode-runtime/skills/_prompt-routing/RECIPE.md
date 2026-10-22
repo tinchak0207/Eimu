@@ -78,6 +78,7 @@
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
 | 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：本席 blender_* 可用则 `blender_exec`→`blender_render`／`blender_export_gltf`（先 asset_search 查 blender-3d-assets）；orchestrator／creator／director3d 表内关闭时必须派工具表含所需 blender_* 的 Expert；若无具备席位则诚实报告断路，禁止口述直调或二维文生图冒充。席位不可用时可用 bash+自建几何+光栅渲染产预演帧/GLB 并标注 `.blend` 未交付。**主动选用**：精确几何／多角度一致／空间布局／产品 360° 时优先真 Blender 席位（本机零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+| 实时白模预演／武侠打斗预演／一句话跟拍编排（可播，非 Blender 静帧） | **先载 `skill previs-director`**：`director_get_state` →（可选 `director_propose_plans`，武侠关键词金样居首）→ `director_manage_shot` / `director_upsert_action` → 播 → `director_capture_previz`。闭集只许 CLOSED_ACTIONS／CLOSED_CAMERA_MOVES＋normalize*；金样 `docs/evidence/previs-harness-20261022/s2-golden/`；验收 A1–A20 双侧。**禁止**改走 blender 静帧冒充实时预演主路径（要 `.blend`/成品渲染才用 `skill blender-director`） | —
 
 ## §商品图
 

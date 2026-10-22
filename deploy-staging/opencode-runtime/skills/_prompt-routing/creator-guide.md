@@ -18,6 +18,7 @@
 | 作曲/配乐/主题曲/MV 主题歌/片头曲 OP/插曲/器乐 BGM/哼唱/翻唱改编 | 非野兽：直调 `music_gen`（先载 `skill music-director`）；野兽：派 `expert:"music"`（skill 同）。 | — |
 | 画图／改图／参考图编辑／放大／看图读图／选模型／配音台词语音（TTS） | 非野兽：直调 `image_*`／`tts_speak`／`read_image`（细则 `RECIPE.md §图片`）；野兽：派对应域 Expert，主会话不直调域生成工具。 | — |
 | 生影片（单镜／多镜／长片）／复用素材与 3D 场景 | 细则 → `RECIPE.md §影片`；**生成前必读 `_prompt-routing/RECIPE.md` §影片（及 `skill video-director`）**（默认影片模型 minimax-h3：稳定快速、约 45s 出片、单镜 5-15 秒、推荐 15 秒；支持最多 9 张有序图片参考，逐镜关键帧须作为生成输入；首尾硬锁与时长策略见 RECIPE／video-director）。叙事／动作／短片／电影感任务**先用 3D 预演（director-engine 白模 → 具备 blender_* 的席位执行／不可用则 bash 自建几何+光栅渲染）定 blocking／机位／动作，再生成影片**，不是先出首帧再让模型猜动作（细则 `skill video-director` → `references/motion-first.md`）。禁止引用不存在的 `attach/` 路径 | — |
+| 实时 3D 白模预演／武侠打斗／樱花剑客可播编排 | 先读 `skill previs-director`（闭集 director_* 工具序；金样优先 propose）；不要默认进 `blender-director` 静帧 | —
 | 影片拆解（链接或上传影片：讲了什么/分镜/台词/反推提示词/翻拍/去字幕/下载） | 细则 → `RECIPE.md §影片`（`video_fetch`→`video_analyze`／`video_transcribe`／`video_desubtitle`／`video_remake_plan`／`video_evidence`／`video_measure`） | ffmpeg 抽帧 + read_image |
 | 视频剪辑（拆分／修剪／变速／重排／删除／锁定／分组／转场／加轨）／镜头语言／节奏体检／剪辑回退／剪辑 lint／混音／调色字卡／导出成片／剪辑清单／旁白先行 | 细则 → `RECIPE.md §剪辑`（query→ops→回读 diff、lint 闸门）。非野兽可直调 `timeline_*`；野兽经 `subagent_dispatch` 派 `expert:"editor"`，主会话不直调 timeline_*。 | run_py+ffmpeg 单次直剪（仅一次性片段文件） |
 | 画布产线（改步骤／加环节／改依赖／退回旧版，像改代码一样改工作流）／工作流节点重跑或连错线 | 细则 → `RECIPE.md §画布`（world1/world2 双真相隔） | — |
@@ -38,7 +39,7 @@
 - 非野兽／或你必须审 prompt 时：先增强再发送；六槽公式；style／prompt 英文（歌词例外见 §0）；正向语言；age-blind。
 - 全文 → `.opencode/skills/_prompt-routing/generation-prompt-rules.md`（及域 skill：`music-director` 等）
 - Blender 硬规则（所有模型，与六槽同级）：3D／几何／转台／白模／GLB 任务先查真实工具表——本席 blender_* 可用则调用（建模脚本自带相机灯光）；orchestrator／creator／director3d 表内关闭时必须派工具表含所需 blender_* 的 Expert，禁止本席直调；若无具备席位则诚实报告断路；席位不可用时可用 bash + 自建几何 + 光栅渲染作预演帧/GLB 并标注 `.blend` 未交付，禁止用二维文生图冒充 3D 预演。
-- **影片动态硬规则（所有模型，与六槽／Blender 同级）**：叙事／动作／短片／电影感任务，先过 3D 预演能力闸门（查真实工具表确认 blender_* 是否可用），按「director-engine 白模 → 具备 blender_* 的席位执行（本席关闭则派 Expert；无具备席位则诚实报告断路）→ 否则 bash 自建几何+光栅渲染」定 blocking／机位／动作，再生成影片；不是先出首帧再让模型猜动作。不涉及精确几何的微表情／产品特写才可走首帧 I2V。镜头脚本必须写 `state_change.from/to` 与 `beats[]`（每镜至少一次环境变化），只给静态六槽＝没开拍。模板里的 3D 预演 text 节点同样要填内容（blocking／机位／动作，或写明本镜跳过预演的理由），空着会让 `workflow_start` 报缺少必要内容。不得用二维文生图冒充 3D 预演；`.blend` 缺失必须在交付明确标注（「本席位无 blender，.blend 未交付」），预演帧与 GLB 仍算真预演证据。**违反 = 返工**。细则 → `skill video-director` 的 `references/motion-first.md`。
+- **影片动态硬规则（所有模型，与六槽／Blender 同级）**：叙事／动作／短片／电影感任务，先过 3D 预演能力闸门（查真实工具表确认 blender_* 是否可用），按「**实时可播优先**：`skill previs-director`＋director_* 白模闭集编排 → 仅当用户要 `.blend`/成品渲染才进具备 blender_* 的席位（本席关闭则派 Expert；无具备席位则诚实报告断路）→ 否则 bash 自建几何+光栅渲染」定 blocking／机位／动作，再生成影片；不是先出首帧再让模型猜动作。不涉及精确几何的微表情／产品特写才可走首帧 I2V。镜头脚本必须写 `state_change.from/to` 与 `beats[]`（每镜至少一次环境变化），只给静态六槽＝没开拍。模板里的 3D 预演 text 节点同样要填内容（blocking／机位／动作，或写明本镜跳过预演的理由），空着会让 `workflow_start` 报缺少必要内容。不得用二维文生图冒充 3D 预演；`.blend` 缺失必须在交付明确标注（「本席位无 blender，.blend 未交付」），预演帧与 GLB 仍算真预演证据。**违反 = 返工**。细则 → `skill video-director` 的 `references/motion-first.md`。
 
 
 ## 3. 深度工作按需加载（硬规则）

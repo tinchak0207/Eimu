@@ -43,11 +43,11 @@ export const HARNESS_TOOL_ID_LIST = [
   // ↓ 2026-10-10 F2：workspace 文稿入库平台 blob，聊天可点开
   "document_upload",
   "detail_page_manifest",
-  // ↓ 2026-09-02 3D导演台实装（16 director_* 工具：VPS .opencode/tools/ 落位 +
+  // ↓ 2026-09-02 3D导演台实装（18 director_* 工具（含 manage_group + capture_previz）：VPS .opencode/tools/ 落位 +
   //   lib/director-common.ts 共用传输/守卫层 + lib/director/ 纯函数链（kunpeng 轮子：motionTemplates/
   //   cameraTemplates/poses/playback/pathCurve/types + nanoid shim）+ gateway /agent/v1/director 六路由（片3）；
-  //   活体注册确认：bun build 16/16 过 + opencode-server 重启后 /experimental/tool/ids 列出
-  //   16 id + 实弹 bun 直调 smoke 16 工具全闭环（真 gateway session，42 项断言 PASS））
+  //   活体注册确认：bun build 18/18 过 + opencode-server 重启后 /experimental/tool/ids 列出
+  //   18 id + 实弹 bun 直调 smoke 18 工具全闭环（真 gateway session，42 项断言 PASS））
   "director_apply_proposal",
   "director_create_element",
   "director_delete",
@@ -55,6 +55,7 @@ export const HARNESS_TOOL_ID_LIST = [
   "director_manage_plan",
   "director_manage_shot",
   "director_prepare_export",
+  "director_capture_previz",
   "director_project_control",
   "director_propose_plans",
   "director_select",

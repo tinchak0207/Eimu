@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { nanoid } from "nanoid"
-import { fallbackPlans } from "./director-engine/planning-core"
+import { fallbackPlans, withWuxiaGoldenFirst } from "./director-engine/planning-core"
 import { planDuration } from "./director-engine/playback"
 import type { DirectorCameraMove, DirectorPlan } from "./director-engine/types"
 import { PROPOSAL_TTL_MS, assertSessionId, clone, loadCurrent, sessionDir, withSessionLock } from "./director-store.ts"
@@ -157,6 +157,8 @@ export async function createDirectorProposals(
     // （覆盖 >8 循环、prompt「镜头N」节区数量与目标不一致、bare base 默认 4 镜等路径）。
     const genBase = targetCount ? resizePlanShotCount(clone(base), Math.min(targetCount, 8)) : base
     let plans = fallbackPlans(clone(genBase), clone(doc.elements), trimmed)
+    // S2 skill-wire：武侠/打斗等关键词 → 金样插第一候选（保留 2 条 fallback，合计 ≤3）
+    plans = withWuxiaGoldenFirst(plans, trimmed)
     if (targetCount) plans = plans.map((plan) => resizePlanShotCount(plan, targetCount))
     pruneProposals()
     const ids: string[] = []
