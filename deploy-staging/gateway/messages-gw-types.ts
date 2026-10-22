@@ -706,19 +706,19 @@ export const BEAST_STABLE_CORE_V3: BeastFrameModule = {
 export const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
   research: {
     name: "stage-research", source: "inline:research-contract", target: "tail", cacheHint: "stable",
-    content: "【研究】任何非平凡创作都先由窄领域研究子代理研究前人作品与原料，建立取舍依据；用户给齐创意约束也不跳过研究。独立研究方向并发推进，结论转为具体创作约束，避免多专家照抄同一修辞。短原料按需求逐字嵌入；长原料带关键节与可达来源，源文不得被摘要偷偷改写。",
+    content: "【研究】非平凡创作先研究前人作品，结论写成可执行约束。简单确定性任务不派研究。细则在派遣手册，本段不重复。",
   },
   creation: {
     name: "stage-creation", source: "inline:creation-contract", target: "tail", cacheHint: "stable",
-    content: "【创作】研究结论进入任务书后制作，沿用已注册模板与现有工具。任务书写明预期时间、原料真源、可改白名单、必读记忆及冲突判准、预算和当前授权、交付物、真实验收方法。不能只给目标让专家重新找路线。领域模板与材料由网关按现有派遣机制补齐；有依赖的任务在真实前置产物完成后启动，音乐驱动画面时以实际音乐时长、节拍和段落为准。返工限定需要改动的范围，保留已合格部分。",
+    content: "【创作】任务书写目标、材料、预算、授权和验收。领域做法由专家读本域技能，不把技能正文或过往记忆抄进任务书。",
   },
   critique: {
     name: "stage-critique", source: "inline:critique-contract", target: "tail", cacheHint: "stable",
-    content: "【独立评审】作者与验收者分离。计入成品的专家交付物须经过 critic，核实 verdict、issues、evidence、qc；退回后返工并再次评审。多个评审方向并发，低于现有质量阈值的产物继续打磨。核对每个契约必填字段、数字计算、跨文件设定与实际媒体；工具成功回执或作者自称通过不代替实际产物证据。交付闸门失败项不能被完成话术覆盖；评审席位不可用时明示未独立审核，不将未审核产物标成已通过。",
+    content: "【独立评审】作者与 critic 分离。成品须有独立审阅回执；没有感知通路就标未验。细则在派遣手册，本段不重复。",
   },
   "dispatch-verify": {
     name: "stage-dispatch-verify", source: "inline:dispatch-contract", target: "tail", cacheHint: "stable",
-    content: "【并发与接续】独立任务常态保持至少3路并发；有严格依赖时按依赖执行。一路完成即验收、补派必要工作，再报告进展。长任务后台执行，由完成事件续接，不轮询或sleep等待。超出预期2倍时按现有停止接口纠偏；中断后先核对真实产物与状态，不重复生成已完成部分。渠道可用性来自现场只读能力与真实交付证据，复用产物注明来源与检查结果。最终交付在全部必要工作和独立审核完成后形成，途中以实际在途状态收尾。",
+    content: "【并发与接续】独立任务按真实依赖并发。完成通知后验收并补派，不轮询。细则在派遣手册，本段不重复。",
   },
 }
 
