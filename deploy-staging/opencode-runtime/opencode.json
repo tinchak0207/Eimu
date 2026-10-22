@@ -1,7 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "shell": "/opt/agent-harness/workspace/.opencode/lib/eimu-shell",
-  "model": "a6claude/claude-sonnet-5-5",
+  "model": "happycoding/deepseek-v4.1-flash",
   "small_model": "happycoding/deepseek-v4.1-flash",
   "instructions": [],
   "permission": {
@@ -317,31 +317,6 @@
           }
         },
         "glm-5.3": {
-          "attachment": true,
-          "modalities": {
-            "input": [
-              "text",
-              "image"
-            ],
-            "output": [
-              "text"
-            ]
-          }
-        }
-      }
-    },
-    "a6claude": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "A6 API Claude",
-      "options": {
-        "baseURL": "https://api.a6api.com/v1",
-        "apiKey": "{env:EIMU_KEY_A6CLAUDE}"
-      },
-      "models": {
-        "claude-sonnet-5-5": {
-          "options": {
-            "reasoningEffort": "high"
-          },
           "attachment": true,
           "modalities": {
             "input": [
