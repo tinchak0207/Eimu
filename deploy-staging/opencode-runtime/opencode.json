@@ -1,8 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "shell": "/opt/agent-harness/workspace/.opencode/lib/eimu-shell",
-  "model": "happycoding/deepseek-v4.1-flash",
-  "small_model": "happycoding/deepseek-v4.1-flash",
+  "model": "a6api/deepseek-v4.1-flash-1017",
+  "small_model": "a6api/deepseek-v4.1-flash-1017",
   "instructions": [],
   "permission": {
     "bash": {
@@ -216,7 +216,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "A6 API Direct",
       "options": {
-        "baseURL": "https://api-direct.a6api.com/v1",
+        "baseURL": "https://api.a6api.com/v1",
         "apiKey": "{env:EIMU_KEY_A6API}"
       },
       "models": {
@@ -239,7 +239,8 @@
         "qwen3.8-flash": {},
         "deepseek-v4-flash": {},
         "hy3": {},
-        "mimo-v2.5": {}
+        "mimo-v2.5": {},
+        "deepseek-v4.1-flash-1017": {}
       }
     },
     "stealth": {
