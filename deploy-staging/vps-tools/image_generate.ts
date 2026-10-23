@@ -268,17 +268,17 @@ async function resolveCharacterTags(
 
 export default tool({
   description:
-    "提交生图任务，回 task_id。【通路可用性宣告纪律】只有本工具真的成功出图（拿到 url，或 task 最终 succeeded）才可对用户说某模型/付费通路「可用、是活的」；参数错误（如 unsupported_size）、提交前被挡、确认被拒、insufficient_quota 都没有验证通路，不得据此宣称通路可用。insufficient_quota＝用户帐户余额不足（帐户层，换模型无效）；model_unavailable＝该模型通路故障（模型层，可换同类模型）——两者不可混报。size（仅 kind=image）只接受站点白名单（GET /v1/openapi.json 的 ImageGenerationRequest.size.enum，目前为 1024x1024/1536x1024/1024x1536/2048x2048/4096x4096，要 16:9 横图用 1536x1024），白名单外在确认扣费前就会被拒。此工具是「非同步」的：完成时间不定（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），harness 会自动续接结果。不要用本工具等待/轮询结果，提交后立即交还控制权。预估花费 ≤0.1 币的低成本草稿（如 gpt-image-2 单张）会直接执行、不需确认；其余会先跳出扣费确认。\n\n【重要分流】用户要「影片/大片/电影/名场面/分镜脚本/角色四视图/多镜头」时，必须用 workflow_* 工具建工作流（workflow_start + workflow_add_node + workflow_connect + workflow_generate），不要用本工具生单张图。本工具只用于单张图片生成。\n\n【影片参考与时长】kind=video 可带 reference_images；minimax-h3 支持最多 9 张有序图片参考、5–15 秒，推荐 15 秒。图片参考可驱动画面，但不保证锁定首尾帧。\n\n【task_id 纪律】回给用户的 task_id 必须是工具返回的完整 UUID（36 字元、含连字号），原样照抄，严禁截断或缩写（例如只写前 8 位）——短 id 在平台永远查不到任务。\n\n【角色一致性与 tag 角色卡】要用「同一张脸」时，优先把该角色的参考图（三视图／定妆照）用 reference_images 带上——这比只写文字描述可靠。也可以在 prompt 里写行内实体 tag `@[角色:名称]`（种类字可用 角色/场景/风格/道具/音频，繁简皆可）：平台会用该用户角色卡库里同名同 kind 的卡自动展开它的描述片段并附上它的参考图；卡库里没有同名卡时 tag 会原样保留（不会报错）。用 character_card_list 可以列出该用户已有的卡（名称/种类/参考图）——先查再写 tag，不要凭记忆猜名字。",
+    "提交生图任务，回 task_id。【通路可用性宣告纪律】只有本工具真的成功出图（拿到 url，或 task 最终 succeeded）才可对用户说某模型/付费通路「可用、是活的」；参数错误（如 unsupported_size）、提交前被挡、确认被拒、insufficient_quota 都没有验证通路，不得据此宣称通路可用。insufficient_quota＝用户帐户余额不足（帐户层，换模型无效）；model_unavailable＝该模型通路故障（模型层，可换同类模型）——两者不可混报。size（仅 kind=image）只接受站点白名单（GET /v1/openapi.json 的 ImageGenerationRequest.size.enum，目前为 1024x1024/1536x1024/1024x1536/2048x2048/4096x4096，要 16:9 横图用 1536x1024），白名单外在确认扣费前就会被拒。此工具是「非同步」的：完成时间不定（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），harness 会自动续接结果。不要用本工具等待/轮询结果，提交后立即交还控制权。预估花费 ≤0.1 币的低成本草稿会直接执行、不需确认（默认 gpt-image-2.5-flare 通常需确认，用 image_quote 查准价）；其余会先跳出扣费确认。\n\n【重要分流】用户要「影片/大片/电影/名场面/分镜脚本/角色四视图/多镜头」时，必须用 workflow_* 工具建工作流（workflow_start + workflow_add_node + workflow_connect + workflow_generate），不要用本工具生单张图。本工具只用于单张图片生成。\n\n【影片参考与时长】kind=video 可带 reference_images；minimax-h3 支持最多 9 张有序图片参考、5–15 秒，推荐 15 秒。图片参考可驱动画面，但不保证锁定首尾帧。\n\n【task_id 纪律】回给用户的 task_id 必须是工具返回的完整 UUID（36 字元、含连字号），原样照抄，严禁截断或缩写（例如只写前 8 位）——短 id 在平台永远查不到任务。\n\n【角色一致性与 tag 角色卡】要用「同一张脸」时，优先把该角色的参考图（三视图／定妆照）用 reference_images 带上——这比只写文字描述可靠。也可以在 prompt 里写行内实体 tag `@[角色:名称]`（种类字可用 角色/场景/风格/道具/音频，繁简皆可）：平台会用该用户角色卡库里同名同 kind 的卡自动展开它的描述片段并附上它的参考图；卡库里没有同名卡时 tag 会原样保留（不会报错）。用 character_card_list 可以列出该用户已有的卡（名称/种类/参考图）——先查再写 tag，不要凭记忆猜名字。",
   args: {
     prompt: tool.schema.string().describe("生成提示词"),
-    model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2"),
+    model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2.5-flare"),
     size: tool.schema.string().optional().describe("尺寸，如 1024x1024"),
     n: tool.schema.number().int().min(1).max(4).optional().describe("生成张数，预设 1"),
     kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
     quality: tool.schema
       .enum(["standard", "hd"])
       .optional()
-      .describe("standard 或 hd，预设 standard。部分模型 hd 较贵（如 gpt-image-2 标准 1 币 / hd 2 币）"),
+      .describe("standard 或 hd，预设 standard。部分模型按解析度分档计价（默认 gpt-image-2.5-flare：1k/2k/4k，用 image_quote 查准价）"),
     duration_seconds: tool.schema
       .number()
       .min(5)
@@ -296,7 +296,7 @@ export default tool({
       ),
   },
   async execute(args, context) {
-    const model = args.model ?? "gpt-image-2"
+    const model = args.model ?? "gpt-image-2.5-flare"
     // 模型可用性强制探测（2026-08-15）：不可用不得提交，避免把请求发给坏渠道。
     const probe = await probeModelAvailable(model, context.sessionID, context.abort)
     if (probe.availability === "unavailable") {

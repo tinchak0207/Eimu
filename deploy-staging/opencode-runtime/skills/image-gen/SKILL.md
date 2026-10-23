@@ -26,7 +26,9 @@ metadata:
 | pixai-reference-pro | 0.00097 币 | 最便宜 |
 | pixai-tsubaki2 / pixai-haruka-v2 / pixai-tsubaki-11 / pixai-hoshino-v2 | 0.001 币 | 二次元/插画，极便宜 |
 | sensenova-u1-fast | 0.1 币 | 通用草稿 |
+| gpt-image-2.5-flare | 用 image_quote 查（站点 1k/2k/4k 分档） | **默认生图模型**：批量/迭代首选，延迟约 GPT Image 2 一半 |
 | gpt-image-2 / adobe-firefly / gemini-2.5-flash-image / flux-kontext-max / flux-kontext-pro / flux-1.1-pro | 1 币 | 成品 |
+| gpt-image-2.5-sunburst | 用 image_quote 查 | 旗舰精修；非默认 |
 | gemini-3.1-flash-image / gpt-image-1.5 / flux-2-pro / flux-2 / flux-1.1-ultra / runway-gen-4-image | 2 币 | 高阶成品 |
 | gemini-3-image | 4 币 | 高阶 |
 | gpt-image | 6 币 | 最贵，只在用户明确要求时用 |
@@ -35,7 +37,7 @@ metadata:
 部分模型 hd 比 standard 贵（如 runway-gen-4-image：标准 2 / hd 4），用 image_quote 查准价。
 
 ## 步骤化工作流：生图
-1. 未指定模型 → 二次元/插画类需求用 pixai-tsubaki2（0.001 币），其余用 sensenova-u1-fast（0.1 币）；告知用户用了哪个与价钱。
+1. 未指定模型 → **一律用默认生图模型 `gpt-image-2.5-flare`**（批量/迭代首选；尺寸按站点 1k/2k/4k + 比例白名单，用 image_quote 查准价）；用户点名其他模型时才换。告知用户用了哪个与价钱。
 2. 先报价（用 image_quote 查即时单价），确认后才发请求。
 3. POST /v1/images/generations（response_format: "url"）。
 4. 收到 202 → 记 task_id，**不要开始轮询**。回报「已提交」并结束本回合；耗时一律说「通常几十秒到几分钟，高峰期可能排队更久，逾时自动退款」，不报精确秒数。回报给用户的 task_id 必须原样照抄完整 UUID（36 字元含连字号），严禁截断成前 8 位——短 id 在平台查不到任务。
@@ -57,6 +59,6 @@ metadata:
 | 402 insufficient_quota | 余额不足 | 告知用户充值，不重试 |
 
 ## 省钱纪律
-- 探索/草稿用 0.001-0.1 币那一层；1 币以上只在成品或用户指名时用。
+- 默认用 `gpt-image-2.5-flare`；用户明确要求省钱/草稿且未点名模型时，可改用 0.001-0.1 币层（pixai / sensenova）；更高单价只在用户指名或成品精修（如 sunburst）时用。
 - n 预设 1；>0.1 币的动作扣费前必先报价并等确认（≤0.1 币免确认，方便自由探索）。
 - 完全相同的 (model, prompt, size, n) 会命中快取，0 币直接回旧图——不必重发。

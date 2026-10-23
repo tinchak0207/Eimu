@@ -42,7 +42,7 @@ export function readGenerateInput(input: unknown): {
       : typeof obj.content === "string"
         ? obj.content
         : ""
-  const model = typeof obj.model === "string" && obj.model ? obj.model : "gpt-image-2"
+  const model = typeof obj.model === "string" && obj.model ? obj.model : "gpt-image-2.5-flare"
   const size = typeof obj.size === "string" && obj.size ? obj.size : "1024x1024"
   const nNum = typeof obj.n === "number" ? obj.n : typeof obj.count === "number" ? obj.count : 1
   const n = Number.isFinite(nNum) ? Math.max(1, Math.min(15, Math.floor(nNum))) : 1
@@ -63,7 +63,7 @@ export function readGenerateInput(input: unknown): {
 // S4：cost_hint 需查平台目录（async），函数签名改 async；两处呼叫点
 //（tool status running / completed 补发）均改 await，行为语义不变。
 // 自动制画布只给「真的会出图」的工具（2026-09-29 e2e 像素实锤）：原本 startsWith("image_")
-// 让 image_quote／image_get_result／image_upload 也各铺一组「(未填写内容) + gpt-image-2 · 1024x1024
+// 让 image_quote／image_get_result／image_upload 也各铺一组「(未填写内容) + gpt-image-2.5-flare · 1024x1024
 // 待处理」空节点，永远不会跑，还一路带到用户之后开的新对话画布上。
 export const AUTO_CANVAS_TOOLS = new Set(["image_generate", "image_edit", "image_upscale"])
 

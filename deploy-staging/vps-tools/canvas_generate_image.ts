@@ -15,7 +15,7 @@ export default tool({
     deviate_reason: tool.schema.string().optional().describe("偏离模板的理由（deviate_from_template=true 时必填）"),
     deviate_token: tool.schema.string().optional().describe("用户在 question 卡上批准偏离后，网关签发的 token；重试时原样带回"),
     prompt: tool.schema.string().describe("生成提示词"),
-    model: tool.schema.string().optional().describe("模型名，默认 gpt-image-2"),
+    model: tool.schema.string().optional().describe("模型名，默认 gpt-image-2.5-flare"),
     size: tool.schema.string().optional().describe("尺寸，如 1024x1024（默认）"),
     count: tool.schema.number().int().min(1).max(4).optional().describe("张数 1-4，默认 1"),
     reference_node_ids: tool.schema

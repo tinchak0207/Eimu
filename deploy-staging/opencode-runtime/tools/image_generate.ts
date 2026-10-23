@@ -280,7 +280,7 @@ export default tool({
     reference_version: tool.schema.string().optional().describe("已冻结canonical/reference版本"),
     style_version: tool.schema.string().optional().describe("已冻结STYLE LOCK版本"),
     style_lock: tool.schema.string().optional().describe("项目固定风格前缀，工具逐字附加；同项目不允许改变"),
-    model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2"),
+    model: tool.schema.string().optional().describe("模型名，预设 gpt-image-2.5-flare"),
     size: tool.schema
       .string()
       .optional()
@@ -292,7 +292,7 @@ export default tool({
     quality: tool.schema
       .enum(["standard", "hd"])
       .optional()
-      .describe("standard 或 hd，预设 standard。部分模型 hd 较贵（如 gpt-image-2 标准 1 币 / hd 2 币）"),
+      .describe("standard 或 hd，预设 standard。部分模型按解析度分档计价（默认 gpt-image-2.5-flare：1k/2k/4k，用 image_quote 查准价）"),
     duration_seconds: tool.schema
       .number()
       .min(5)
@@ -310,7 +310,7 @@ export default tool({
       ),
   },
   async execute(args, context) {
-    const model = args.model ?? "gpt-image-2"
+    const model = args.model ?? "gpt-image-2.5-flare"
     // 模型准入只由控制面执行；工具不把排队/退款/下载失败算成模型故障。
     const kind = args.kind ?? "image"
     // 视频默认比例档 16:9：平台 VideoGenerationRequest.size 接受 "16:9" 或 "1920x1080"，
