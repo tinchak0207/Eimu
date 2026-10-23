@@ -8,7 +8,7 @@ export default tool({
     "发布版本化交付物（Artifact）：读本地文件、算 sha256/bytes、写版本。",
     "何时用：有真实成品文件要交付、需要可访问链接与版本时；只是登记具型产物用 artifact_register。",
     "何时不用：文件还没生成、或只是中间草稿时不要发布。",
-    "关键约束：上限 16MiB、只接受常规文件（拒绝 symlink/hardlink）；sha256 不变不产生新版本；expected_version 做乐观并发；只有返回 slug/version/url/sha256 才算成功。",
+    "关键约束：上限 16MiB、只接受常规文件（拒绝 symlink/hardlink）；sha256 不变不产生新版本；expected_version 做乐观并发；返回 slug/version/sha256 表示本地版本已登记；deliverable=true（有可访 url）才算对用户交付。无 url 时只登记本地版本，不算交付——交付前须先有可访 URL（如 image_upload）再 publish 或补 url。",
     "失败处置：version_conflict 先 artifact_get 读最新版本再发布；artifact_publish_failed 按 gateway 文本修正；network_error 稍后重试。",
     "互指：复核元数据用 artifact_get，真实探测用 artifact_verify；artifact_register 只登记不产生版本。",
     "示例：artifact_publish({name:film_final_cut, path:/opt/agent-harness/workspace/out/final.mp4})",
@@ -60,8 +60,12 @@ export default tool({
           { title: "发布失败", http_status: resp.status },
         )
       }
+      const deliverable = Boolean(data.url)
       return ok({
-        title: `已发布 ${data.slug} v${data.version}`,
+        title: deliverable
+          ? `已发布 ${data.slug} v${data.version}`
+          : `已登记本地版本（无公网 URL，不可当交付）`,
+        deliverable,
         slug: data.slug,
         version: data.version,
         url: data.url,

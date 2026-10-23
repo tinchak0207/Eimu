@@ -127,6 +127,17 @@ function summarizeToolUsage(msgs: Array<{ parts?: unknown[] }>): {
 }
 
 /** 压缩后新增的 summary/compaction 讯息正文（PostCompact hook 输入）。 */
+
+/** P3-A4：摘要正文含探针/INTERNAL/账本倾倒则拒推进水位（语义门；对照 0918 只认 error）。 */
+function isCompactSummaryPoisoned(summary: string): boolean {
+  if (!summary) return false
+  const s = summary.toLowerCase()
+  if (summary.includes("【生成结果耐久收件箱】")) return true
+  if (s.includes("verify_no_row")) return true
+  if (summary.includes("账本：")) return true
+  return false
+}
+
 function extractCompactedSummary(
   msgs: Array<{ info?: { summary?: boolean; mode?: string }; parts?: Array<{ type?: string; text?: string }> }>,
   fromIndex: number,
@@ -523,6 +534,15 @@ async function maybeCompactSessionUnlocked(state: SessionState): Promise<void> {
             `[gateway] session compact FAILED (summary errored, 水位不推进): ${state.sessionId} err=${JSON.stringify(badSummary.info?.error)}`,
           )
           recordCompactFailure("summary errored")
+          return
+        }
+        // P3-A4：本次新增 summary 若吸入收件箱/verify/账本探针，水位不推进、不 PostCompact。
+        const poisonSummary = extractCompactedSummary(verifyMsgs, count)
+        if (isCompactSummaryPoisoned(poisonSummary)) {
+          console.warn(
+            `[gateway] session compact REJECTED (probe/ledger poison in summary, 水位不推进): ${state.sessionId}`,
+          )
+          recordCompactFailure("probe/ledger poison in summary")
           return
         }
         state.compact = { lastCount: count, at: Date.now() }

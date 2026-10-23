@@ -244,7 +244,11 @@ export async function drainGenerationInbox(): Promise<void> {
         kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}),
         download_tool: r.artifacts.some((a) => typeof a?.mimeType === "string" && a.mimeType.startsWith("video/")) ? "video_fetch" : "image_result_download",
         delivery_id: `generation:${r.task_id}` }))
-      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
+      // P3-A1：完整 jobs 仍供 claim/notify 逻辑字段来源；wake 正文只给短列表，禁止 JSON.stringify(jobs) 进模型上下文。
+      const jobLines = jobs
+        .map((j) => `- task_id=${j.task_id} delivery_id=${j.delivery_id} kind=${j.kind} status=${j.status} download_tool=${j.download_tool}`)
+        .join("\n")
+      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${jobLines}`
       const agent = generationParent(consumer)?.consumer_agent
       const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
       let ownTurnGen: number | undefined
