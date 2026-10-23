@@ -20,27 +20,24 @@
 
 ## 先看成片
 
-<table>
-  <tr>
-    <td width="34%" align="center" valign="top">
-      <img src="docs/preview/14-prompt-marvel-15s.png" alt="手机随口一句：做一个漫威级别的战斗影片，大概15秒">
-    </td>
-    <td width="66%" valign="top">
-      <video src="https://github.com/user-attachments/assets/1df9ea54-0cde-4365-9613-b1ae0a81511d"></video>
-    </td>
-  </tr>
-</table>
-
-<p align="center"><sub>左：我随便让它「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 想出「暴雨大坝 · 义体战士对重装机甲」。右：它做出来的影片，记得打开声音，它设计了配乐/sub></p>
+<p align="center">
+  <img src="docs/preview/14-prompt-marvel-15s.png" alt="手机随口一句：做一个漫威级别的战斗影片，大概15秒" width="32%">
+</p>
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/16b73a40-0102-4e19-b1d8-1cd0b2b88b11"></video>
+  <video src="https://github.com/user-attachments/assets/1df9ea54-0cde-4365-9613-b1ae0a81511d"></video>
+</p>
+
+<p align="center"><sub>左：我随便让它「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 想出「暴雨大坝 · 义体战士对重装机甲」。右：它做出来的影片，记得打开声音，它设计了配乐</sub></p>
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/839f0a76-2005-4a64-8a17-cc314033a256"></video>
   <br>
   <sub>宣传片，49 秒。点一下就播。</sub>
 </p>
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/71c8cdfb-c692-4b74-934f-3450ae5f82d2"></video>
+  <video src="https://github.com/user-attachments/assets/3b2141f3-85d1-4b35-ba7a-21e1c8344c27"></video>
   <br>
   <sub>完整成片，2 分 41 秒，字幕已烧录。点一下就播。</sub>
 </p>
