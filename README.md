@@ -20,14 +20,29 @@
 
 ## 先看成片
 
+<table>
+  <tr>
+    <td width="34%" align="center" valign="top">
+      <img src="docs/preview/14-prompt-marvel-15s.png" alt="手机随口一句：做一个漫威级别的战斗影片，大概15秒">
+    </td>
+    <td width="66%" valign="top">
+      <video src="https://github.com/user-attachments/assets/1df9ea54-0cde-4365-9613-b1ae0a81511d"></video>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>左：随口一句「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 落成「暴雨大坝 · 义体战士对重装机甲」。右：同一条链路交出的约 15 秒成片，点一下就播。</sub></p>
+
 <p align="center">
-  <img src="docs/preview/14-prompt-marvel-15s.png" alt="手机随口一句：做一个漫威级别的战斗影片，大概15秒" width="32%">
-  &nbsp;&nbsp;
-  <a href="docs/preview/15-dam-mech-15s.mp4" title="播放约15秒成片：暴雨大坝·义体战士对重装机甲">
-    <img src="docs/preview/15-dam-mech-poster.jpg" alt="成片海报：暴雨大坝·义体战士 vs 重装机甲" width="60%">
-  </a>
+  <video src="https://github.com/user-attachments/assets/16b73a40-0102-4e19-b1d8-1cd0b2b88b11"></video>
   <br>
-  <sub>左：随口一句「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 落成「暴雨大坝 · 义体战士对重装机甲」。右：同一条链路交出的约 15 秒成片（点海报播放 <a href="[docs/preview/15-dam-mech-15s.mp4](https://store.tinchak0207.xyz/image-data/files/uploads/media-1792723470754-e8817d.mp4)">mp4</a>）。</sub>
+  <sub>宣传片，49 秒。点一下就播。</sub>
+</p>
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/71c8cdfb-c692-4b74-934f-3450ae5f82d2"></video>
+  <br>
+  <sub>完整成片，2 分 41 秒，字幕已烧录。点一下就播。</sub>
 </p>
 
 扔进去的提示词长这样：
