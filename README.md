@@ -2,7 +2,7 @@
 
 # Eimu
 
-**剪辑和分镜已经死了，现在人人都是导演。**
+**不用学提示词设计和分镜，现在你也是导演。**
 
 *Cursor of video · Vibe Directing*
 
