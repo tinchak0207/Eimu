@@ -27,7 +27,7 @@
     <img src="docs/preview/15-dam-mech-poster.jpg" alt="成片海报：暴雨大坝·义体战士 vs 重装机甲" width="60%">
   </a>
   <br>
-  <sub>左：随口一句「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 落成「暴雨大坝 · 义体战士对重装机甲」。右：同一条链路交出的约 15 秒成片（点海报播放 <a href="docs/preview/15-dam-mech-15s.mp4">mp4</a>）。</sub>
+  <sub>左：随口一句「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 落成「暴雨大坝 · 义体战士对重装机甲」。右：同一条链路交出的约 15 秒成片（点海报播放 <a href="[docs/preview/15-dam-mech-15s.mp4](https://store.tinchak0207.xyz/image-data/files/uploads/media-1792723470754-e8817d.mp4)">mp4</a>）。</sub>
 </p>
 
 扔进去的提示词长这样：
