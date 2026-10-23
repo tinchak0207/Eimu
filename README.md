@@ -31,7 +31,7 @@
   </tr>
 </table>
 
-<p align="center"><sub>左：随口一句「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 落成「暴雨大坝 · 义体战士对重装机甲」。右：同一条链路交出的约 15 秒成片，点一下就播。</sub></p>
+<p align="center"><sub>左：我随便让它「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 想出「暴雨大坝 · 义体战士对重装机甲」。右：它做出来的影片，记得打开声音，它设计了配乐/sub></p>
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/16b73a40-0102-4e19-b1d8-1cd0b2b88b11"></video>
