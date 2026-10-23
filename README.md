@@ -6,7 +6,7 @@
 
 *Cursor of video · Vibe Directing*
 
-随口一扔，编译器吞掉中间所有脏活，交出来的是能播的片子。
+给Eimu一个点子，Eimu自己设计，生成，反思，迭代，给你一段你挑剔不了的素材。
 
 [**打开工作台**](https://eimu.dev/) · [先看成片](#先看成片) · [为什么好玩](#为什么好玩) · [证据](#证据不是形容词) · [上手](#3-分钟上手) · [文档](https://eimu.dev/docs) · [English](README.en.md)
 
