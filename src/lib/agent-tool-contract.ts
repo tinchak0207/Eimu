@@ -224,7 +224,8 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
       "Use canvas_apply_ops only for what a DSL cannot express (node position/size/hand-wired connections). " +
       "NEVER hand-assemble add_node + connect_nodes to build a whole production-line structure (it bypasses the compiler and breaks reversibility). " +
       "TEMPLATE INSERTION: when the canvas carries a user template (node ids prefixed tpl-), write generation into the template's existing -gen node via update_node {metadata.prompt/model/size} then run_generation on that id. " +
-      "To add one step/role, put add_node AND connect_nodes in the SAME batch, wiring the new node into the existing graph (at least one inbound edge from an existing node; cross-lane fan-in is legal and needs no prior delete_connections). " +
+      "SAME-batch add_node + connect_nodes is ONLY for non-dsl / non-production-line nodes that do not yet exist on the canvas (e.g. reference images / notes): wire the new node into the existing graph (at least one edge to an existing node; cross-lane fan-in is legal and needs no prior delete_connections). " +
+      "To add a production-line step (including 'one more role' style dsl nodes) or change production-line structure, always workflow_write add a step — never hand-assemble ops for the line. " +
       "A new node sharing (type, role) with an open template slot, or an un-wired floating generation node, is rejected with the exact wiring fix (code=TEMPLATE_SLOT_OPEN) — add the wiring and retry, do not route around it. " +
       "DEVIATION: deviate_from_template=true is ignored unless accompanied by deviate_token issued by the gateway after the user actually approved via the question tool.",
     inputSchema: {

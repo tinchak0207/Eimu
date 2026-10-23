@@ -1,0 +1,3020 @@
+{
+  "version": 2,
+  "elements": [
+    {
+      "id": "hero",
+      "kind": "mannequin",
+      "name": "红衣剑客",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "rotationDeg": {
+        "x": 0,
+        "y": 90,
+        "z": 0
+      },
+      "scale": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      },
+      "color": "#c43c3c",
+      "visible": true,
+      "groupId": null,
+      "poseId": "stand",
+      "joints": {},
+      "heightM": 1.7
+    },
+    {
+      "id": "enemy-1",
+      "kind": "mannequin",
+      "name": "长角恶魔甲",
+      "position": {
+        "x": 3,
+        "y": 0,
+        "z": 1.2
+      },
+      "rotationDeg": {
+        "x": 0,
+        "y": -90,
+        "z": 0
+      },
+      "scale": {
+        "x": 1.15,
+        "y": 1.15,
+        "z": 1.15
+      },
+      "color": "#3a2a4a",
+      "visible": true,
+      "groupId": "enemies",
+      "poseId": "stand",
+      "joints": {},
+      "heightM": 2.0
+    },
+    {
+      "id": "enemy-2",
+      "kind": "mannequin",
+      "name": "长角恶魔乙",
+      "position": {
+        "x": 3.2,
+        "y": 0,
+        "z": -1.4
+      },
+      "rotationDeg": {
+        "x": 0,
+        "y": -90,
+        "z": 0
+      },
+      "scale": {
+        "x": 1.1,
+        "y": 1.1,
+        "z": 1.1
+      },
+      "color": "#2e2438",
+      "visible": true,
+      "groupId": "enemies",
+      "poseId": "stand",
+      "joints": {},
+      "heightM": 1.95
+    },
+    {
+      "id": "enemy-3",
+      "kind": "mannequin",
+      "name": "长角恶魔丙",
+      "position": {
+        "x": 5,
+        "y": 0,
+        "z": 0.4
+      },
+      "rotationDeg": {
+        "x": 0,
+        "y": -90,
+        "z": 0
+      },
+      "scale": {
+        "x": 1.2,
+        "y": 1.2,
+        "z": 1.2
+      },
+      "color": "#352840",
+      "visible": true,
+      "groupId": "enemies",
+      "poseId": "stand",
+      "joints": {},
+      "heightM": 2.1
+    },
+    {
+      "id": "enemy-crowd",
+      "kind": "crowd",
+      "name": "远景敌群",
+      "position": {
+        "x": 10,
+        "y": 0,
+        "z": 0
+      },
+      "rotationDeg": {
+        "x": 0,
+        "y": -90,
+        "z": 0
+      },
+      "scale": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      },
+      "color": "#2a2030",
+      "visible": true,
+      "groupId": "enemies",
+      "rows": 3,
+      "cols": 5,
+      "spacing": 1.4,
+      "poseId": "stand"
+    }
+  ],
+  "groups": [
+    {
+      "id": "enemies",
+      "name": "恶魔群"
+    }
+  ],
+  "plans": [
+    {
+      "id": "plan-wuxia-cherry-ref",
+      "name": "樱花草原剑客·参考金样",
+      "summary": "30.00s · 15 镜 · 闭集运镜/打斗 · 对照 reference/shots.json",
+      "createdAt": 1761120000000,
+      "shots": [
+        {
+          "id": "shot-s01",
+          "name": "冲刺开场",
+          "position": {
+            "x": 2.5553899006620755,
+            "y": 1.6036680706074362,
+            "z": 7.020876049971444
+          },
+          "target": {
+            "x": 0.0,
+            "y": 0.95,
+            "z": 0
+          },
+          "fov": 45,
+          "rollDeg": 0,
+          "focalLengthMm": 35,
+          "shotScale": "wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000000,
+          "startSec": 0.0,
+          "durationSec": 1.3,
+          "cameraEnd": {
+            "position": {
+              "x": 3.7553899006620757,
+              "y": 1.6036680706074362,
+              "z": 7.020876049971444
+            },
+            "target": {
+              "x": 1.2,
+              "y": 0.95,
+              "z": 0
+            },
+            "fov": 45,
+            "rollDeg": 0
+          },
+          "cameraMove": "follow",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 0.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 2.2,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 2.0,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 4.5,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 8.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s01-0",
+              "elementId": "hero",
+              "action": "run-combat",
+              "startSec": 0.0,
+              "durationSec": 0.7,
+              "from": {
+                "x": 0.0,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 2.2,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "run-combat",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s01-1",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 0.5,
+              "durationSec": 0.7,
+              "from": {
+                "x": 2.2,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 2.6,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "主角从左向右冲入草原，起手横斩"
+        },
+        {
+          "id": "shot-s02",
+          "name": "首次接敌",
+          "position": {
+            "x": 3.8151834943579774,
+            "y": 2.0479761159252448,
+            "z": 4.53512654146306
+          },
+          "target": {
+            "x": 2.6,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000001,
+          "startSec": 1.3,
+          "durationSec": 2.03,
+          "cameraEnd": {
+            "position": {
+              "x": 3.8151834943579774,
+              "y": 2.0479761159252448,
+              "z": 4.53512654146306
+            },
+            "target": {
+              "x": 2.6,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "handheld",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 2.6,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 4.800000000000001,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 4.6,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 7.1,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 10.6,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s02-0",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 0.1,
+              "durationSec": 0.6,
+              "from": {
+                "x": 2.6,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 2.9,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s02-1",
+              "elementId": "hero",
+              "action": "chop",
+              "startSec": 0.7,
+              "durationSec": 0.7,
+              "from": {
+                "x": 2.9,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.1,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "chop",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s02-2",
+              "elementId": "enemy-1",
+              "action": "hit-react",
+              "startSec": 1.3,
+              "durationSec": 0.6,
+              "from": {
+                "x": 4.800000000000001,
+                "y": 0,
+                "z": 1.2
+              },
+              "to": {
+                "x": 5.200000000000001,
+                "y": 0,
+                "z": 1.2
+              },
+              "templateId": "hit-react",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "与近身敌交锋：劈砍、横斩、命中"
+        },
+        {
+          "id": "shot-s03",
+          "name": "踩背腾空翻身",
+          "position": {
+            "x": 3.5728181761970697,
+            "y": 2.8481116483963778,
+            "z": 4.382869672536556
+          },
+          "target": {
+            "x": 2.8000000000000003,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000002,
+          "startSec": 3.33,
+          "durationSec": 2.17,
+          "cameraEnd": {
+            "position": {
+              "x": 3.5728181761970697,
+              "y": 4.448111648396377,
+              "z": 4.382869672536556
+            },
+            "target": {
+              "x": 2.8000000000000003,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "crane-up",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 2.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 5.0,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 4.800000000000001,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 7.300000000000001,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 10.8,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s03-0",
+              "elementId": "hero",
+              "action": "jump",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 2.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.0000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "jump",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s03-1",
+              "elementId": "hero",
+              "action": "flip-air",
+              "startSec": 0.45,
+              "durationSec": 0.7,
+              "from": {
+                "x": 3.0000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.0000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "flip-air",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s03-2",
+              "elementId": "hero",
+              "action": "land",
+              "startSec": 1.1,
+              "durationSec": 0.4,
+              "from": {
+                "x": 3.0000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.3000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "land",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s03-3",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 1.5,
+              "durationSec": 0.55,
+              "from": {
+                "x": 3.3000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "腾空翻身（升格）→落地反手斩 · slowMotion · localSlow(partial)"
+        },
+        {
+          "id": "shot-s04",
+          "name": "前景遮挡转场+环绕",
+          "position": {
+            "x": 6.873639722090225,
+            "y": 1.4683475651887592,
+            "z": 3.6630211811412945
+          },
+          "target": {
+            "x": 3.8000000000000003,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000003,
+          "startSec": 5.5,
+          "durationSec": 0.95,
+          "cameraEnd": {
+            "position": {
+              "x": 4.8989063543423885,
+              "y": 1.4683475651887592,
+              "z": 0.9689540416864664
+            },
+            "target": {
+              "x": 3.8000000000000003,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "orbit",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 6.0,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-2": {
+              "position": {
+                "x": 5.800000000000001,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 8.3,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 11.8,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s04-0",
+              "elementId": "hero",
+              "action": "turn",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "turn",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s04-1",
+              "elementId": "hero",
+              "action": "charge",
+              "startSec": 0.4,
+              "durationSec": 0.5,
+              "from": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "charge",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "背身→3/4侧身，蓄势"
+        },
+        {
+          "id": "shot-s05",
+          "name": "召唤花瓣符阵+旋斩",
+          "position": {
+            "x": 4.216755626400633,
+            "y": 1.4683475651887592,
+            "z": 4.763538607229299
+          },
+          "target": {
+            "x": 3.8000000000000003,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000004,
+          "startSec": 6.45,
+          "durationSec": 2.45,
+          "cameraEnd": {
+            "position": {
+              "x": 5.716755626400633,
+              "y": 1.4683475651887592,
+              "z": 4.763538607229299
+            },
+            "target": {
+              "x": 5.300000000000001,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "follow",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 6.0,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 5.800000000000001,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 8.3,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 11.8,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s05-0",
+              "elementId": "hero",
+              "action": "cast-summon",
+              "startSec": 0.0,
+              "durationSec": 0.7,
+              "from": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "cast-summon",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s05-1",
+              "elementId": "hero",
+              "action": "slash-spin",
+              "startSec": 0.8,
+              "durationSec": 0.8,
+              "from": {
+                "x": 3.8000000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 4.0,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash-spin",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s05-2",
+              "elementId": "hero",
+              "action": "run-combat",
+              "startSec": 1.6,
+              "durationSec": 0.8,
+              "from": {
+                "x": 4.0,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 6.0,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "run-combat",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "符阵→回旋斩→冲刺斩"
+        },
+        {
+          "id": "shot-s06",
+          "name": "翻滚起身斩",
+          "position": {
+            "x": 6.0,
+            "y": 3.2676274578121056,
+            "z": 7.132923872213651
+          },
+          "target": {
+            "x": 6.0,
+            "y": 0.95,
+            "z": 0
+          },
+          "fov": 45,
+          "rollDeg": 0,
+          "focalLengthMm": 35,
+          "shotScale": "wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000005,
+          "startSec": 8.9,
+          "durationSec": 1.5,
+          "cameraEnd": {
+            "position": {
+              "x": 6.0,
+              "y": 3.2676274578121056,
+              "z": 6.062985291381604
+            },
+            "target": {
+              "x": 6.0,
+              "y": 0.95,
+              "z": 0
+            },
+            "fov": 45,
+            "rollDeg": 0
+          },
+          "cameraMove": "push",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 6.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 8.2,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 8.0,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 10.5,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 14.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s06-0",
+              "elementId": "hero",
+              "action": "roll",
+              "startSec": 0.0,
+              "durationSec": 0.55,
+              "from": {
+                "x": 6.0,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 7.4,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "roll",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s06-1",
+              "elementId": "hero",
+              "action": "stand-up",
+              "startSec": 0.5,
+              "durationSec": 0.4,
+              "from": {
+                "x": 7.4,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 7.6000000000000005,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "stand-up",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s06-2",
+              "elementId": "hero",
+              "action": "slash-diagonal",
+              "startSec": 0.9,
+              "durationSec": 0.55,
+              "from": {
+                "x": 7.6000000000000005,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 8.100000000000001,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash-diagonal",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "地面翻滚→起身斜劈"
+        },
+        {
+          "id": "shot-s07",
+          "name": "群战连斩",
+          "position": {
+            "x": 9.56884637869442,
+            "y": 1.718030884608314,
+            "z": 4.5206443183472995
+          },
+          "target": {
+            "x": 8.100000000000001,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000006,
+          "startSec": 10.4,
+          "durationSec": 2.9,
+          "cameraEnd": {
+            "position": {
+              "x": 9.56884637869442,
+              "y": 1.718030884608314,
+              "z": 4.5206443183472995
+            },
+            "target": {
+              "x": 8.100000000000001,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "handheld",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 8.100000000000001,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 10.3,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 10.100000000000001,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 12.600000000000001,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 16.1,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s07-0",
+              "elementId": "hero",
+              "action": "slash-combo",
+              "startSec": 0.0,
+              "durationSec": 1.2,
+              "from": {
+                "x": 8.100000000000001,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.600000000000001,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash-combo",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s07-1",
+              "elementId": "hero",
+              "action": "dodge",
+              "startSec": 1.2,
+              "durationSec": 0.6,
+              "from": {
+                "x": 9.600000000000001,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 10.400000000000002,
+                "y": 0,
+                "z": 0.4
+              },
+              "templateId": "dodge",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s07-2",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 1.9,
+              "durationSec": 0.8,
+              "from": {
+                "x": 10.400000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "敌群穿行连斩、闪避"
+        },
+        {
+          "id": "shot-s08",
+          "name": "俯拍花瓣符阵",
+          "position": {
+            "x": 11.000000000000002,
+            "y": 7.093640332167439,
+            "z": 4.301823272632846
+          },
+          "target": {
+            "x": 11.000000000000002,
+            "y": 0.95,
+            "z": 0
+          },
+          "fov": 45,
+          "rollDeg": 0,
+          "focalLengthMm": 35,
+          "shotScale": "wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000007,
+          "startSec": 13.3,
+          "durationSec": 1.1,
+          "cameraEnd": {
+            "position": {
+              "x": 11.000000000000002,
+              "y": 8.693640332167439,
+              "z": 4.301823272632846
+            },
+            "target": {
+              "x": 11.000000000000002,
+              "y": 0.95,
+              "z": 0
+            },
+            "fov": 45,
+            "rollDeg": 0
+          },
+          "cameraMove": "crane-up",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 13.200000000000003,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 13.000000000000002,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 15.500000000000002,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 19.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s08-0",
+              "elementId": "hero",
+              "action": "cast-circle",
+              "startSec": 0.0,
+              "durationSec": 0.55,
+              "from": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "cast-circle",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s08-1",
+              "elementId": "hero",
+              "action": "cast-release",
+              "startSec": 0.5,
+              "durationSec": 0.55,
+              "from": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "cast-release",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "符阵中心结阵释放"
+        },
+        {
+          "id": "shot-s09",
+          "name": "大全景被围/击退落地",
+          "position": {
+            "x": 16.941608412449423,
+            "y": 2.5700772115207853,
+            "z": 10.291167649041059
+          },
+          "target": {
+            "x": 11.000000000000002,
+            "y": 0.9,
+            "z": 0
+          },
+          "fov": 50,
+          "rollDeg": 0,
+          "focalLengthMm": 24,
+          "shotScale": "extreme-wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000008,
+          "startSec": 14.4,
+          "durationSec": 1.1,
+          "cameraEnd": {
+            "position": {
+              "x": 16.05036715058201,
+              "y": 2.5700772115207853,
+              "z": 8.7474925016849
+            },
+            "target": {
+              "x": 11.000000000000002,
+              "y": 0.9,
+              "z": 0
+            },
+            "fov": 50,
+            "rollDeg": 0
+          },
+          "cameraMove": "push",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 13.200000000000003,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 13.000000000000002,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 15.500000000000002,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 19.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s09-0",
+              "elementId": "hero",
+              "action": "knockback",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.800000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "knockback",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s09-1",
+              "elementId": "hero",
+              "action": "slide-land",
+              "startSec": 0.45,
+              "durationSec": 0.6,
+              "from": {
+                "x": 9.800000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slide-land",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "被击退、单膝滑地"
+        },
+        {
+          "id": "shot-s10",
+          "name": "推近特写擦血",
+          "position": {
+            "x": 9.419743742371375,
+            "y": 1.7859787642172071,
+            "z": 1.97473904862553
+          },
+          "target": {
+            "x": 9.000000000000002,
+            "y": 1.43,
+            "z": 0
+          },
+          "fov": 28,
+          "rollDeg": 0,
+          "focalLengthMm": 85,
+          "shotScale": "close-up",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000009,
+          "startSec": 15.5,
+          "durationSec": 1.63,
+          "timeScale": 0.4,
+          "cameraEnd": {
+            "position": {
+              "x": 9.356782181015669,
+              "y": 1.7859787642172071,
+              "z": 1.6785281913317005
+            },
+            "target": {
+              "x": 9.000000000000002,
+              "y": 1.43,
+              "z": 0
+            },
+            "fov": 28,
+            "rollDeg": 0
+          },
+          "cameraMove": "push",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 11.200000000000003,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-2": {
+              "position": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 13.500000000000002,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 17.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s10-0",
+              "elementId": "hero",
+              "action": "crouch",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "crouch",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s10-1",
+              "elementId": "hero",
+              "action": "wipe-blood",
+              "startSec": 0.4,
+              "durationSec": 0.8,
+              "from": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "wipe-blood",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s10-2",
+              "elementId": "hero",
+              "action": "look-at",
+              "startSec": 1.1,
+              "durationSec": 0.5,
+              "from": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "look-at",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "蹲地特写擦血怒视（升格） · slowMotion"
+        },
+        {
+          "id": "shot-s11",
+          "name": "起身连斩",
+          "position": {
+            "x": 10.791269290709483,
+            "y": 1.4683475651887592,
+            "z": 4.4335470723633685
+          },
+          "target": {
+            "x": 9.000000000000002,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000010,
+          "startSec": 17.13,
+          "durationSec": 4.17,
+          "cameraEnd": {
+            "position": {
+              "x": 11.239086613386853,
+              "y": 1.6683475651887592,
+              "z": 5.5419338404542104
+            },
+            "target": {
+              "x": 9.000000000000002,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "pull",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 11.200000000000003,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 11.000000000000002,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 13.500000000000002,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 17.0,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s11-0",
+              "elementId": "hero",
+              "action": "dash",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 9.000000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 10.800000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "dash",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s11-1",
+              "elementId": "hero",
+              "action": "slash-diagonal",
+              "startSec": 0.5,
+              "durationSec": 0.7,
+              "from": {
+                "x": 10.800000000000002,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 11.200000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash-diagonal",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s11-2",
+              "elementId": "hero",
+              "action": "stab",
+              "startSec": 1.3,
+              "durationSec": 0.7,
+              "from": {
+                "x": 11.200000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 12.000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "stab",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s11-3",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 2.2,
+              "durationSec": 0.8,
+              "from": {
+                "x": 12.000000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 12.500000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s11-4",
+              "elementId": "hero",
+              "action": "roll",
+              "startSec": 3.3,
+              "durationSec": 0.7,
+              "from": {
+                "x": 12.500000000000004,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "roll",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "突进弧斩突刺横斩翻滚"
+        },
+        {
+          "id": "shot-s12",
+          "name": "举剑喊招",
+          "position": {
+            "x": 14.131573788747419,
+            "y": 2.3286664729747066,
+            "z": 3.070807069428009
+          },
+          "target": {
+            "x": 13.700000000000003,
+            "y": 1.2,
+            "z": 0
+          },
+          "fov": 35,
+          "rollDeg": 0,
+          "focalLengthMm": 65,
+          "shotScale": "medium-close",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000011,
+          "startSec": 21.3,
+          "durationSec": 2.4,
+          "cameraEnd": {
+            "position": {
+              "x": 14.131573788747419,
+              "y": 2.3286664729747066,
+              "z": 3.070807069428009
+            },
+            "target": {
+              "x": 13.700000000000003,
+              "y": 2.7,
+              "z": 0
+            },
+            "fov": 35,
+            "rollDeg": 0
+          },
+          "cameraMove": "tilt-up",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 15.900000000000002,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 15.700000000000003,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 18.200000000000003,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 21.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s12-0",
+              "elementId": "hero",
+              "action": "stand-up",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "stand-up",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s12-1",
+              "elementId": "hero",
+              "action": "shout",
+              "startSec": 0.5,
+              "durationSec": 0.8,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "shout",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s12-2",
+              "elementId": "hero",
+              "action": "raise-sword",
+              "startSec": 1.3,
+              "durationSec": 1.0,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "raise-sword",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "起身怒喊、举剑指天"
+        },
+        {
+          "id": "shot-s13",
+          "name": "天空巨剑砸地冲击波",
+          "position": {
+            "x": 14.235453536324526,
+            "y": 5.251823272632845,
+            "z": 6.120261925887813
+          },
+          "target": {
+            "x": 13.700000000000003,
+            "y": 0.95,
+            "z": 0
+          },
+          "fov": 45,
+          "rollDeg": 0,
+          "focalLengthMm": 35,
+          "shotScale": "wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000012,
+          "startSec": 23.7,
+          "durationSec": 2.83,
+          "cameraEnd": {
+            "position": {
+              "x": 14.235453536324526,
+              "y": 5.251823272632845,
+              "z": 6.120261925887813
+            },
+            "target": {
+              "x": 13.700000000000003,
+              "y": 2.45,
+              "z": 0
+            },
+            "fov": 45,
+            "rollDeg": 0
+          },
+          "cameraMove": "tilt-up",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 15.900000000000002,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-2": {
+              "position": {
+                "x": 15.700000000000003,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-3": {
+              "position": {
+                "x": 18.200000000000003,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 21.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s13-0",
+              "elementId": "hero",
+              "action": "cast-summon",
+              "startSec": 0.0,
+              "durationSec": 0.6,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "cast-summon",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s13-1",
+              "elementId": "hero",
+              "action": "shockwave",
+              "startSec": 0.7,
+              "durationSec": 1.0,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "shockwave",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s13-2",
+              "elementId": "enemy-crowd",
+              "action": "launch",
+              "startSec": 1.6,
+              "durationSec": 1.0,
+              "from": {
+                "x": 21.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 21.700000000000003,
+                "y": 2.5,
+                "z": 0
+              },
+              "templateId": "launch",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "巨剑砸地、冲击波、击飞（升格） · slowMotion · localSlow(partial)"
+        },
+        {
+          "id": "shot-s14",
+          "name": "花海转身冲向镜头",
+          "position": {
+            "x": 13.700000000000003,
+            "y": 2.0479761159252448,
+            "z": -4.695108483522267
+          },
+          "target": {
+            "x": 13.700000000000003,
+            "y": 1.05,
+            "z": 0
+          },
+          "fov": 40,
+          "rollDeg": 0,
+          "focalLengthMm": 50,
+          "shotScale": "medium",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000013,
+          "startSec": 26.53,
+          "durationSec": 2.9,
+          "cameraEnd": {
+            "position": {
+              "x": 13.700000000000003,
+              "y": 2.247976115925245,
+              "z": -5.868885604402834
+            },
+            "target": {
+              "x": 13.700000000000003,
+              "y": 1.05,
+              "z": 0
+            },
+            "fov": 40,
+            "rollDeg": 0
+          },
+          "cameraMove": "pull",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 15.900000000000002,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-2": {
+              "position": {
+                "x": 15.700000000000003,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 18.200000000000003,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 21.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s14-0",
+              "elementId": "hero",
+              "action": "stand",
+              "startSec": 0.0,
+              "durationSec": 0.5,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "stand",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s14-1",
+              "elementId": "hero",
+              "action": "turn",
+              "startSec": 0.5,
+              "durationSec": 0.7,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "turn",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s14-2",
+              "elementId": "hero",
+              "action": "run-combat",
+              "startSec": 1.3,
+              "durationSec": 1.0,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": -2.5
+              },
+              "templateId": "run-combat",
+              "source": "template",
+              "intensity": 1
+            },
+            {
+              "id": "act-s14-3",
+              "elementId": "hero",
+              "action": "slash",
+              "startSec": 2.3,
+              "durationSec": 0.55,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": -0.4
+              },
+              "templateId": "slash",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "花海站立→转身→冲向镜头"
+        },
+        {
+          "id": "shot-s15",
+          "name": "收尾大全景",
+          "position": {
+            "x": 16.85757553747126,
+            "y": 1.6036680706074362,
+            "z": 6.7714425921388015
+          },
+          "target": {
+            "x": 13.700000000000003,
+            "y": 0.95,
+            "z": 0
+          },
+          "fov": 45,
+          "rollDeg": 0,
+          "focalLengthMm": 35,
+          "shotScale": "wide",
+          "primaryElementId": "hero",
+          "aspect": "16:9",
+          "createdAt": 1761120000014,
+          "startSec": 29.43,
+          "durationSec": 0.57,
+          "cameraEnd": {
+            "position": {
+              "x": 18.05757553747126,
+              "y": 1.6036680706074362,
+              "z": 6.7714425921388015
+            },
+            "target": {
+              "x": 14.900000000000002,
+              "y": 0.95,
+              "z": 0
+            },
+            "fov": 45,
+            "rollDeg": 0
+          },
+          "cameraMove": "follow",
+          "elementStates": {
+            "hero": {
+              "position": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": 90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": true
+            },
+            "enemy-1": {
+              "position": {
+                "x": 15.900000000000002,
+                "y": 0,
+                "z": 1.2
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-2": {
+              "position": {
+                "x": 15.700000000000003,
+                "y": 0,
+                "z": -1.4
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-3": {
+              "position": {
+                "x": 18.200000000000003,
+                "y": 0,
+                "z": 0.5
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            },
+            "enemy-crowd": {
+              "position": {
+                "x": 21.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "rotationDeg": {
+                "x": 0,
+                "y": -90,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              },
+              "visible": false
+            }
+          },
+          "actions": [
+            {
+              "id": "act-s15-0",
+              "elementId": "hero",
+              "action": "run",
+              "startSec": 0.0,
+              "durationSec": 0.55,
+              "from": {
+                "x": 13.700000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "to": {
+                "x": 15.200000000000003,
+                "y": 0,
+                "z": 0
+              },
+              "templateId": "run",
+              "source": "template",
+              "intensity": 1
+            }
+          ],
+          "notes": "草原奔跑挥剑"
+        }
+      ]
+    }
+  ],
+  "activePlanId": "plan-wuxia-cherry-ref",
+  "activeShotId": "shot-s01",
+  "aspect": "16:9",
+  "origin": {
+    "kind": "free",
+    "title": "previs-harness S2 武侠金样",
+    "prompt": "樱花草原剑客 vs 长角恶魔 30s 参考编译"
+  },
+  "exports": [],
+  "currentTimeSec": 0,
+  "playing": false,
+  "updatedAt": 1761120000000
+}

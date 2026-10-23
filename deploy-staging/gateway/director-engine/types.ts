@@ -214,6 +214,8 @@ export interface DirectorCameraKeyframe {
 export interface DirectorSequenceShot extends DirectorShot {
   startSec: number;
   durationSec: number;
+  /** 镜头内容时钟倍率（可选，缺省 1）。与前端 playback timeScale 对齐。 */
+  timeScale?: number;
   cameraEnd: { position: Vec3; target: Vec3; fov: number; rollDeg?: number };
   cameraMove: DirectorCameraMove;
   cameraKeyframes?: DirectorCameraKeyframe[];
@@ -222,6 +224,8 @@ export interface DirectorSequenceShot extends DirectorShot {
   sourceFrameId?: string;
   thumbnailPath?: string;
   notes?: string;
+  /** 与 ShotJson.previz 同形；keyframes → gateway reference_images */
+  previz?: { motion_ref?: string; keyframes?: string[] };
 }
 
 export interface DirectorPlan {

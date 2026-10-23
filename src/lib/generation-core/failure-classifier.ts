@@ -94,7 +94,7 @@ const HUMAN_FAILURE_MESSAGES: Record<FailureClass, string> = {
   authentication: "上游凭证失效，已暂停该渠道并等待人工恢复。",
   quota_exhausted: "上游额度不足，已停止重试，请充值或恢复其它渠道。",
   rate_limited: "上游限流，稍后会自动重试。",
-  overloaded: "上游暂时过载，正在换渠道重试。",
+  overloaded: "上游暂时不可用；若无可用渠道会立即失败并退款，请换模型或稍后再试。",
   network: "网络异常，正在重试。",
   malformed_output: "上游返回的成品无法解码，已换渠道重试。",
   empty_result: "上游返回空结果，已换渠道重试。",

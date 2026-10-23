@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eimu · B站封面 B（铺开）</title>
+<style>
+@font-face { font-family: "Geist"; src: url(../src/app/fonts/GeistVF.woff) format("woff"); font-weight: 100 900; }
+@font-face { font-family: "GeistMono"; src: url(../src/app/fonts/GeistMonoVF.woff) format("woff"); font-weight: 100 900; }
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; }
+body { position: relative; font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smoothing: antialiased;
+  background: url(out/bgB4.png) center / cover no-repeat; }
+/* 左上柔光：让文字下方的画布更干净（不改变节点本体） */
+.scrim { position: absolute; inset: 0; background:
+  radial-gradient(1000px 640px at 22% 26%, rgba(242,245,250,.7), rgba(242,245,250,.3) 50%, transparent 75%); }
+.brand { position: absolute; left: 294px; top: 104px; display: flex; align-items: center; gap: 18px; height: 70px; padding: 0 30px 0 26px; border-radius: 99px;
+  background: rgba(255,255,255,.66); border: 1.5px solid rgba(255,255,255,.95); box-shadow: 0 14px 34px rgba(45,49,66,.10), inset 0 1.5px 0 #fff; backdrop-filter: blur(20px); }
+.brand b { font: 700 38px "Geist"; letter-spacing: -.03em; color: #141824; }
+.brand span { width: 2px; height: 28px; background: rgba(27,32,48,.18); }
+.brand em { font: 500 25px "Noto Sans CJK SC"; font-style: normal; color: #4d5670; letter-spacing: .06em; }
+.h { position: absolute; left: 286px; font-family: "Noto Sans CJK SC"; font-weight: 900; letter-spacing: -.02em; line-height: 1; white-space: nowrap; }
+.h1 { top: 206px; font-size: 156px; color: #111624; }
+.h2 { top: 380px; font-size: 92px; letter-spacing: -.01em; background: linear-gradient(95deg, #2f7bff 0%, #6a6cf5 45%, #ec4d92 100%); -webkit-background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 18px rgba(244,246,250,.95)) drop-shadow(0 0 6px rgba(244,246,250,.9)); }
+.h2 .n { font-family: "Geist"; font-weight: 800; letter-spacing: -.04em; }
+.prompt { position: absolute; left: 294px; top: 506px; height: 72px; border-radius: 99px; display: flex; align-items: center; gap: 12px; padding: 0 12px 0 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.7)); border: 1.5px solid rgba(255,255,255,.98);
+  box-shadow: 0 22px 50px rgba(45,49,66,.16), 0 4px 12px rgba(45,49,66,.06), inset 0 2px 0 #fff; backdrop-filter: blur(24px) saturate(180%); }
+.prompt .q { font: 600 30px "Noto Sans CJK SC"; color: #141824; white-space: nowrap; }
+.prompt .send { width: 50px; height: 50px; border-radius: 50%; background: #2d3142; display: grid; place-items: center; box-shadow: 0 10px 22px rgba(45,49,66,.26); }
+</style>
+</head>
+<body>
+<div class="scrim"></div>
+<div class="brand"><b>Eimu</b><span></span><em>许愿式 AI 影像工作台</em></div>
+<div class="h h1">一句话</div>
+<div class="h h2">铺开 <span class="n">21</span> 个生成节点</div>
+<div class="prompt">
+  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#2f7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+  <div class="q">生成秦始皇骑北极熊的电影</div>
+  <div class="send"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div>
+</div>
+</body>
+</html>

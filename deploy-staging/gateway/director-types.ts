@@ -35,7 +35,7 @@ export interface DirectorCapabilities {
   supported_ops: string[]
   /** 群组写路径边界声明（R3-⑤ 完成后如实标 true） */
   group_write: boolean
-  /** 导出边界诚实声明：工具面只能设范围+save，渲染/序列帧导出在前端画布 */
+  /** 导出边界诚实声明：可截关键帧写 previz.keyframes；仍不保证 MP4 */
   export_boundary: string
 }
 
@@ -45,7 +45,7 @@ export const DIRECTOR_CAPABILITIES: DirectorCapabilities = {
   poses: POSE_PRESETS.map((p) => p.id),
   supported_ops: KNOWN_OPS,
   group_write: true,
-  export_boundary: "prepare_export 仅设置导出范围与保存标记，不会执行渲染导出；白模渲染/序列帧导出在前端画布",
+  export_boundary: "可截关键帧并写 previz.keyframes（director_capture_previz / 前端 capturePlanKeyframes）；仍不保证 MP4",
 }
 
 /** undo 历史快照（kunpeng directorStore.ts L39-45 HistorySnapshot 同构：JSON 序列化） */

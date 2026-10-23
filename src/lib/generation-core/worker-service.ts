@@ -220,6 +220,23 @@ export function failFastClassForExhaustedSupply(input: {
   return null;
 }
 
+/**
+ * 图片 5xx 后无可租健康账号 → fail-fast（2026-10-23）。
+ * 条件：kind 为 image_generate/image_edit；诊断 accounts_unhealthy/suppliers_cooldown；
+ * 且本单已有 HTTP ≥500 的 attempt。视频路径不进（上游真异步保留排队/冷却等待）。
+ */
+export function shouldFailFastImageAfter5xxUnhealthy(input: {
+  kind: GenerationKind;
+  diagnosisReason: SupplierUnavailabilityReason;
+  attempts: ReadonlyArray<{ providerHttpStatus: number | null }>;
+}): boolean {
+  if (input.kind !== "image_generate" && input.kind !== "image_edit") return false;
+  if (input.diagnosisReason !== "accounts_unhealthy" && input.diagnosisReason !== "suppliers_cooldown") return false;
+  return input.attempts.some(
+    (attempt) => typeof attempt.providerHttpStatus === "number" && attempt.providerHttpStatus >= 500,
+  );
+}
+
 /** 病灶 D：把 extend 实际写入 DB 的 deadline 同步回内存 job.deadlineAt，消除语义漂移。 */
 export function applyExtendedDeadline(job: GenerationJob, extendedTo: Date | null): void {
   if (extendedTo) job.deadlineAt = extendedTo;
@@ -321,8 +338,8 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         // supplier_excluded = 本单所有合格供给都已试过并被 acquire 永久排除（同单不复用）。
         // 继续排队只会在 queueMaxWait（默认 120 分钟）空转，客户端 15 分钟就判超时，
         // 用户端表现为进度条 100% 卡死。诊断文案本就承诺 fail fast，这里兑现。
-        // 只对 supplier_excluded 生效；capacity_saturated / suppliers_cooldown /
-        // accounts_unhealthy 仍按原逻辑排队等待。
+        // capacity_saturated 仍可排队等容量；图片在已有 5xx + accounts_unhealthy/
+        // suppliers_cooldown 时见下方 shouldFailFastImageAfter5xxUnhealthy（视频不进）。
         if (diagnosis.reason === "supplier_excluded") {
           const excludedFailureClass: FailureClass = (lastFailureClass ?? "overloaded") as FailureClass;
           await failGenerationJob({
@@ -330,6 +347,22 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             workerId,
             failureClass: excludedFailureClass,
             failureDetail: `No untried supplier remains after ${jobAttempts.length} attempt(s): ${lastFailureDetail ?? diagnosis.detail}`,
+          }, sql);
+          await refundFailure(job, completed, workerId, sql);
+          await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
+          return;
+        }
+        if (shouldFailFastImageAfter5xxUnhealthy({
+          kind: job.kind,
+          diagnosisReason: diagnosis.reason,
+          attempts: jobAttempts,
+        })) {
+          const excludedFailureClass: FailureClass = (lastFailureClass ?? "overloaded") as FailureClass;
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: excludedFailureClass,
+            failureDetail: `Image supply unavailable after HTTP 5xx (${diagnosis.reason}); fail-fast instead of queueMaxWait: ${lastFailureDetail ?? diagnosis.detail}`,
           }, sql);
           await refundFailure(job, completed, workerId, sql);
           await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });

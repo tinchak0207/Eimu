@@ -1,0 +1,31 @@
+{
+  "hud": "captured=3 labels=start,mid,end times=0.00/1.50/2.96 field=shot.previz.keyframes gateway=workflow-gw-submit.ts:403-412",
+  "saved": [
+    {
+      "file": "01-start.png",
+      "shotId": "shot-s4",
+      "label": "start",
+      "timeSec": 0,
+      "bytes": 59510
+    },
+    {
+      "file": "02-mid.png",
+      "shotId": "shot-s4",
+      "label": "mid",
+      "timeSec": 1.5,
+      "bytes": 69028
+    },
+    {
+      "file": "03-end.png",
+      "shotId": "shot-s4",
+      "label": "end",
+      "timeSec": 2.9583333333333335,
+      "bytes": 65042
+    }
+  ],
+  "field_path": "shot.previz.keyframes",
+  "gateway_consume": "deploy-staging/gateway/workflow-gw-submit.ts:403-412",
+  "schema": "deploy-staging/gateway/video-prompt-schema.ts:144 previz?: { motion_ref?; keyframes?: string[] }",
+  "tool": "director_capture_previz",
+  "errors": []
+}

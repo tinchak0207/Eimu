@@ -199,8 +199,16 @@ export async function drainGenerationInbox(): Promise<void> {
       if (generationMaintenanceEnabled()) continue
       // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
       if (receipt.kind === "message" && receipt.notified_at !== null) continue
-      // An accepted prompt is not an ACK. Back off exponentially, then keep a 12h floor so nothing is silently lost.
+      // 2026-10-23：过时通知硬闸——notify 次数封顶后不再唤醒（避免用户走后 12h 地板无限烧 token）。
+      const NOTIFY_HARD_CAP = 10
       const count = receipt.notify_count || 0
+      if (count >= NOTIFY_HARD_CAP) continue
+      // 已通知过且父会话无 SSE 客户端（用户已离开）→ 推迟重投；用户重连后下一轮 drain 会再投一次。
+      if (receipt.notified_at) {
+        const live = resolveSession(receipt.parent_gw)
+        if (!live || live.clients.size === 0) continue
+      }
+      // An accepted prompt is not an ACK. Back off exponentially, then keep a 12h floor so nothing is silently lost.
       const backoff = count >= 8 ? 12*3600_000 : Math.min(12*3600_000, 10*60_000 * 2 ** Math.max(0, count - 1))
       if (receipt.notified_at && Date.now() - receipt.notified_at < backoff) continue
       if (statuses[receipt.consumer_oc]?.type && statuses[receipt.consumer_oc].type !== "idle") continue

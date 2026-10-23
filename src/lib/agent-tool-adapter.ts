@@ -30,7 +30,7 @@ function generationHandler(toolId: "image_generate" | "image_edit", submit: Gene
       tenantId: context.tenantId ?? context.sessionId,
       source: "web",
       kind,
-      modelId: typeof input.model === "string" && input.model ? input.model : "gpt-image-2",
+      modelId: typeof input.model === "string" && input.model ? input.model : "gpt-image-2.5-flare",
       prompt: String(input.prompt ?? ""),
       size: typeof input.size === "string" ? input.size : null,
       quality: typeof input.quality === "string" ? input.quality : null,

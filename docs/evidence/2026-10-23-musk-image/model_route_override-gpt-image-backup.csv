@@ -1,0 +1,4 @@
+model_id,route,note,updated_by,updated_at
+gpt-image-2,"{yyds,adobe2api,newapi}",yyds 1K/2K/4K 統一 0.016，最便宜 ⇒ 首選（站方公開價目 /api/v1/model-plaza 2026-10-03 實查）,zcode-agent-20261003,2026-10-03 05:28:59.639088+00
+gpt-image-2.5-flare,"{yyds,adobe2api,newapi}",yyds 0.016（1K/2K/4K）⇒ 首選；原本 route 完全沒接 yyds，能力列剛補上,zcode-agent-20261003,2026-10-03 05:28:59.639088+00
+gpt-image-2.5-sunburst,"{yyds,adobe2api,newapi}",同 flare，yyds 0.016 為目前已知最低,zcode-agent-20261003,2026-10-03 05:28:59.639088+00

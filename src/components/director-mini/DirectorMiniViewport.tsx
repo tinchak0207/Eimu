@@ -10,7 +10,7 @@
 //      GET_SUBPATHS）→ activePlan + elements → evaluateDirectorFrame(plan, elements, 0)
 //      → engine.syncElements + applyCameraPose。revision prop 变化时重拉（后续变更
 //      反映到已挂载视口）；播放中换数据不打断，idle 重摆 t=0。
-//   3. 播放：▶ rAF 推进（t += dt，末尾 loop），每帧 evaluateDirectorFrame →
+//   3. 播放：▶ rAF 推进（t += dt * shot.timeScale，缺省 1；末尾 loop），每帧 evaluateDirectorFrame →
 //      syncElements + applyCameraPose——照 vendor export.ts 轮子用法逐句对齐。
 //      applyCameraPose 动的是场景内拍摄机 rig，不抢用户 OrbitControls 自由视角。
 //   4. 降级：WebGL 初始化失败 → 显示 SVG 示意 + 「3D 视口不可用，显示示意图」。
@@ -21,13 +21,14 @@
 // 防止 InfiniteCanvas 容器级 wheel 缩放连动。
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Play, Pause, Sparkles } from "lucide-react";
+import { Play, Pause, Sparkles, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { authHeaders } from "@/lib/canvas/client";
 import { uploadAgentAttachments } from "@/lib/agent-chat-client";
 import { buildAssetUrl, mintUploadsTicket } from "@/lib/agent-uploads";
-import { evaluateDirectorFrame, planDuration, shotAtTime } from "@/lib/director-engine/playback";
+import { exportPlanPrevizKeyframes } from "@/lib/director-previz-export";
+import { evaluateDirectorFrame, planDuration, resolveShotTimeScale, shotAtTime } from "@/lib/director-engine/playback";
 import { describeShot } from "@/lib/director-engine/shotDescription";
 import { motionTemplate } from "@/lib/director-engine/motionTemplates";
 import { cameraTemplate } from "@/lib/director-engine/cameraTemplates";
@@ -223,13 +224,26 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
   // 重复点会堆第二笔计费请求）；失败回 idle 并在视口内如实报错。
   const [renderPhase, setRenderPhase] = useState<"idle" | "uploading" | "requested">("idle");
   const [renderError, setRenderError] = useState<string | null>(null);
+  // S4：预演关键帧导出（首/中/尾 → upload → shot.previz.keyframes）
+  const [previzPhase, setPrevizPhase] = useState<"idle" | "working" | "done">("idle");
+  const [previzMsg, setPrevizMsg] = useState<string | null>(null);
 
   // 播放帧套用：与 vendor export.ts 逐句对齐（evaluate → syncElements → applyCameraPose）。
+  // 有 glTF mixer 时顺带按 action→clip 映射 seek；无 mixer 回退程序化关节。
   const applyFrameAt = useCallback((timeSec: number) => {
     const engine = engineRef.current;
     const plan = planRef.current;
     if (!engine || !plan) return;
-    const frame = evaluateDirectorFrame(plan, elementsRef.current, timeSec);
+    const frame = evaluateDirectorFrame(plan, elementsRef.current, timeSec, {
+      hasMixer: () => engine.hasGltfMixer,
+      driveMixer: (req) => {
+        engine.playClip(req.clipName, {
+          timeSec: req.timeSec,
+          loop: req.loop,
+          clampWhenFinished: !req.loop,
+        });
+      },
+    });
     if (!frame) return;
     engine.syncElements(frame.elements);
     engine.applyCameraPose(frame.camera);
@@ -252,8 +266,11 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
       const dt = lastTsRef.current ? (ts - lastTsRef.current) / 1000 : 0;
       lastTsRef.current = ts;
       const duration = planDuration(plan);
-      timeRef.current = duration > 0 ? (timeRef.current + dt) % duration : 0;
+      // S3：按当前 shot.timeScale 推进内容时钟（缺省 1；0.35≈升格）。
+      const scale = resolveShotTimeScale(shotAtTime(plan, timeRef.current));
+      timeRef.current = duration > 0 ? (timeRef.current + dt * scale) % duration : 0;
       applyFrameAt(timeRef.current);
+      engineRef.current?.updateMixer(dt);
       rafRef.current = requestAnimationFrame(tick);
     },
     [applyFrameAt, stopPlayback],
@@ -321,12 +338,46 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
     }
   }, [sessionId, renderPhase]);
 
+  const exportPrevizKeyframes = useCallback(async () => {
+    const engine = engineRef.current;
+    const plan = planRef.current;
+    if (!engine || !plan || plan.shots.length === 0 || previzPhase === "working") return;
+    setPrevizMsg(null);
+    setPrevizPhase("working");
+    try {
+      // 默认只导当前镜（首/中/尾 3 张），与网关「至少各一帧」文案对齐。
+      const shot = shotAtTime(plan, timeRef.current);
+      const result = await exportPlanPrevizKeyframes(engine, plan, elementsRef.current, sessionId, {
+        shotIds: [shot.id],
+        times: [0, 0.5, 1],
+        width: 1280,
+      });
+      if (result.uploadError) {
+        setPrevizPhase("idle");
+        setPrevizMsg(`预演关键帧已截取但未写回：${result.uploadError}`);
+        return;
+      }
+      const n = result.uploaded.length;
+      setPrevizPhase("done");
+      setPrevizMsg(`已写回 ${shot.name} 的 previz.keyframes（${n} 张）`);
+    } catch (err) {
+      setPrevizPhase("idle");
+      setPrevizMsg(err instanceof Error ? err.message : String(err).slice(0, 200));
+    }
+  }, [sessionId, previzPhase]);
+
   // 错误行 6 秒自清（点击可立即关）；只清提示，不动按钮状态。
   useEffect(() => {
     if (!renderError) return;
     const timer = window.setTimeout(() => setRenderError(null), 6000);
     return () => window.clearTimeout(timer);
   }, [renderError]);
+
+  useEffect(() => {
+    if (!previzMsg) return;
+    const timer = window.setTimeout(() => setPrevizMsg(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [previzMsg]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -471,6 +522,22 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
             {playing ? <Pause className="h-3.5 w-3.5" aria-hidden="true" /> : <Play className="h-3.5 w-3.5" aria-hidden="true" />}
             {playing ? "暂停" : "预演"}
           </button>
+          <button
+            type="button"
+            onClick={exportPrevizKeyframes}
+            disabled={!dataReady || previzPhase === "working"}
+            aria-label="导出预演关键帧"
+            title="截取本镜首/中/尾并写回 shot.previz.keyframes（供视频 reference_images）"
+            className={cn(
+              "absolute bottom-2 left-1/2 inline-flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/45 px-3 text-[12px] font-medium text-white/90",
+              "backdrop-blur-sm transition-colors duration-200 hover:bg-black/60",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+              "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            )}
+          >
+            <Camera className={cn("h-3.5 w-3.5", previzPhase === "working" && "animate-pulse")} aria-hidden="true" />
+            {previzPhase === "idle" ? "导出预演关键帧" : previzPhase === "working" ? "截帧上传中…" : "关键帧已写回"}
+          </button>
           {/* C4 生成闭环入口：右下角，样式对齐左下「预演」钮。 */}
           <button
             type="button"
@@ -498,6 +565,16 @@ export function DirectorMiniViewport({ sessionId, className, revision, topViewSv
           className="absolute bottom-12 left-1/2 max-w-[88%] -translate-x-1/2 rounded-full bg-[rgba(154,42,42,0.88)] px-3 py-1 text-[12px] leading-snug text-white backdrop-blur-sm"
         >
           生成请求失败：{renderError}
+        </button>
+      )}
+
+      {previzMsg && (
+        <button
+          type="button"
+          onClick={() => setPrevizMsg(null)}
+          className="absolute bottom-12 left-1/2 max-w-[88%] -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[12px] leading-snug text-white backdrop-blur-sm"
+        >
+          {previzMsg}
         </button>
       )}
     </div>

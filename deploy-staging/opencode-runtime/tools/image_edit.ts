@@ -38,7 +38,7 @@ const PIXAI_BRIDGE_MODELS = new Set([
 
 export default tool({
   description:
-    "图生图改图。支援改图的模型以平台目录 edit=true 为准（GET /v1/model-status），预设 gpt-image-2。除 pixai 系为同步（10-30s 直接回图）外，其余模型是「非同步」任务制：提交后回 task_id，完成时间不定（空闲几十秒到几分钟，高峰排队更久、逾时自动退款），harness 会自动续接结果并出图卡——提交后立即交还控制权，不要轮询。超过 0.1 币会先跳出扣费确认。",
+    "图生图改图。支援改图的模型以平台目录 edit=true 为准（GET /v1/model-status），预设 gpt-image-2。除 pixai 系为同步（10-30s 直接回图）外，其余模型是「非同步」任务制：提交后回 task_id，完成时间不定（通常几十秒到几分钟；供给不可用会诚实失败并自动退款），harness 会自动续接结果并出图卡——提交后立即交还控制权，不要轮询。超过 0.1 币会先跳出扣费确认。",
   args: {
     project:tool.schema.string().describe("继承稳定项目；付费沿用现有授权，不另换预算作用域"),
     request_id:tool.schema.string().describe("稳定原请求ID，恢复不能另换ID"),
@@ -166,7 +166,7 @@ export default tool({
               kind: "image_edit",
               model,
               estimated_cost_coins: estimate,
-              note: "改图任务已提交。完成时间不定：空闲时通常几十秒到几分钟，高峰期可能排队更久，逾时会自动退款——对用户报耗时时用这个分档说法，不要报精确秒数。harness 会自动续接结果并出图卡。不要轮询。回报 task_id 给用户时必须原样照抄完整 UUID（36 字符含连字符），严禁截断成前 8 位——短 id 在平台查不到任务。",
+              note: "改图任务已提交。完成时间不定：通常几十秒到几分钟；若供给不可用会诚实失败并自动退款——对用户报耗时不要编造「高峰排队」，不要报精确秒数。harness 会自动续接结果并出图卡。不要轮询。回报 task_id 给用户时必须原样照抄完整 UUID（36 字符含连字符），严禁截断成前 8 位——短 id 在平台查不到任务。",
             },
             { poller_ok: reg.ok, poller_error: reg.error },
           )

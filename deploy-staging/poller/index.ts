@@ -345,9 +345,10 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
   // 旧代码把它当「未知状态」无限 backoff——退款真实发生但用户永远看不到失败帧。
   if (status === "refunded") {
     const detail = errorText ? `（平台原因：${errorText}）` : "";
+    // 2026-10-23：禁「没排上队／高峰排队」假叙事。refunded 多为供给不可用／deadline／渠道失败后退款。
     const message =
-      `${task.kind === "video" ? "这部影片" : "这张图"}没排上队，费用已全额退回${detail}（task_id: ${task.task_id}）。` +
-      `请用一句口语向用户说明：这次生成没成功、费用已退回，并主动问要不要换个时段或换个模型重试。不要输出技术细节。`;
+      `${task.kind === "video" ? "这部影片" : "这张图"}生成失败，费用已全额退回${detail}（task_id: ${task.task_id}）。` +
+      `请用一句口语向用户说明：这次没成功、费用已退回，并主动问要不要换模型或稍后再试。禁止说「没排上队」「高峰排队」「换个时段再试」这类把供给故障说成排队的话；不要输出技术细节。`;
     return {
       done: true,
       outcome: "failed",

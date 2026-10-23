@@ -25,7 +25,7 @@ export function harnessInternalHeaders(): Record<string, string> {
 }
 
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024 // 20MB
-const referenceSnapshots=new Map<string,{sha256:string;url:string|null;mediaId:string}>()
+const referenceSnapshots=new Map<string,{sha256:string;url:string;mediaId:string}>()
 
 // ---------------------------------------------------------------------------
 // 定价表（原散落在各 tool 的 IMAGE_PRICES / edit / upscale / video 估价）
@@ -729,13 +729,16 @@ export async function resolveMediaId(
  * 按本地路径直读字节 —— 聊天附件落盘 workspace/uploads/<sid>/，工具与附件
  * 同机（opencode-server 沙箱读得到），此前只能吃 URL，本地路径被 fetch 拒
  * （「fetch() URL is invalid」），agent 被迫绕道 base64/起 HTTP server 连环失败。
+ * 平台回执常只有 mediaId、无公网 url：用同一批字节走网关 /internal/media/upload
+ *（与 publicImageUrl 本地分支同合同）补档；补档失败则抛 upload_failed，禁止写入
+ * url 为空的 referenceSnapshots 毒缓存。
  * 抛错带 .code → classifyError 诚实归因，不再一律 network_error 冒充上游。
  */
 export async function uploadImageBytes(
   imageSource: string,
   sessionID: string,
   signal?: AbortSignal,
-): Promise<{ mediaId: string; url: string | null; sha256:string }> {
+): Promise<{ mediaId: string; url: string; sha256:string }> {
   const src = (imageSource || "").trim()
   if (!src) throw Object.assign(new Error("图片地址为空，请传 http(s)/data URL 或本地绝对路径"), { code: "bad_request" })
   let buf: Buffer
@@ -774,8 +777,51 @@ export async function uploadImageBytes(
   }
   const body = (await resp.json().catch(() => ({}))) as Record<string, any>
   const mediaId = body?.mediaId || body?.media_id || body?.id || body?.data?.[0]?.id || body?.url || ""
-  const receipt={mediaId,url:body?.url||body?.data?.[0]?.url||null,sha256:createHash("sha256").update(buf).digest("hex")}
-  for(const id of [receipt.mediaId,receipt.url])if(id)referenceSnapshots.set(id,receipt)
+  // 平台 /uploads 成功常只回 mediaId、不回公网 url；缺 url 时用同一批字节走网关
+  // /internal/media/upload（与 publicImageUrl 本地分支同合同）补 durable 公网地址。
+  let url: string | null = typeof body?.url === "string" ? body.url : (typeof body?.data?.[0]?.url === "string" ? body.data[0].url : null)
+  if (typeof url === "string") url = url.trim() || null
+  if (!url || !/^https?:\/\//i.test(url)) {
+    const baseName = (() => {
+      try {
+        const leaf = src.split("/").pop()?.split("?")[0]?.split("#")[0] || ""
+        if (/\.(png|jpe?g|webp|gif)$/i.test(leaf)) return leaf
+      } catch { /* ignore */ }
+      if (/jpeg/i.test(mimeType)) return "image.jpg"
+      if (/webp/i.test(mimeType)) return "image.webp"
+      if (/gif/i.test(mimeType)) return "image.gif"
+      return "image.png"
+    })()
+    const res = await fetch(`${GATEWAY}/internal/media/upload?session_id=${sessionID}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path_b64: buf.toString("base64"), filename: baseName }),
+      signal,
+    }).catch((e) => {
+      throw Object.assign(
+        new Error(`平台入库无公网 URL 且网关补档失败：${(e as Error).message}`),
+        { code: "upload_failed" },
+      )
+    })
+    const data = (await res.json().catch(() => ({}))) as Record<string, any>
+    if (!res.ok || !data?.ok || typeof data.url !== "string" || !data.url) {
+      const hint = typeof data?.error === "string" && data.error ? data.error : `图片入库失败（HTTP ${res.status}）`
+      throw Object.assign(
+        new Error(`平台入库无公网 URL 且网关补档失败：${hint}`),
+        { code: "upload_failed" },
+      )
+    }
+    url = data.url as string
+  }
+  if (!url || !/^https?:\/\//i.test(url)) {
+    throw Object.assign(
+      new Error("平台入库无公网 URL 且网关补档失败：未得到 durable http(s) 地址"),
+      { code: "upload_failed" },
+    )
+  }
+  const receipt = { mediaId, url, sha256: createHash("sha256").update(buf).digest("hex") }
+  // 毒缓存：只在非空 http(s) durable url 时写入；禁止留下 url:null 的 snapshot。
+  for (const id of [receipt.mediaId, receipt.url]) if (id) referenceSnapshots.set(id, receipt)
   return receipt
 }
 
@@ -807,7 +853,9 @@ async function readLocalImageBytes(src: string,sessionID:string): Promise<{ buff
 
 /**
  * 把任意图片来源归一成「改图端点可直接引用的 image 值」（2026-09-13 durable 改图链）：
- * - http(s) URL / data:image URI：原样放行（data URI 上限 ~4MB，站点端另有硬校验）。
+ * - http(s) URL：经 uploadImageBytes 冻结为 durable 公网 URL（平台 /uploads 常只回 mediaId；
+ *   缺 url 时同函数内网关 /internal/media/upload 补档，不另开第三条上传通道）。
+ * - data:image URI：原样放行（data URI 上限 ~4MB，站点端另有硬校验）。
  * - media: 前缀：只属 pixai 域，durable 链明确拒绝（诚实报错，不再 fetch 炸 URL invalid）。
  * - 本地绝对/相对路径：沙箱内读位元组 → 网关 /internal/media/upload（video_upload 同合同，
  *   网关已放行 image/*）→ 平台公网 URL。网关读不到 agent 私有 /tmp，故位元组由沙箱侧送上。

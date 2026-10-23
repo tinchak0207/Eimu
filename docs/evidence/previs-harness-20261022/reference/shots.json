@@ -1,0 +1,295 @@
+{
+  "source": "329c2d7d…b147fd5f55866de2004523533b8a88eb6147e.mp4",
+  "durationSec": 30.0,
+  "resolution": "1280x720",
+  "fps": 30,
+  "frames": 900,
+  "uniqueFramesMpdecimate": 852,
+  "shotCount": 15,
+  "cutMethod": "ffmpeg scene>0.25 仅 6 点、>0.35 零点；以 64x36 灰度逐帧差 + 4fps 网格目检切分为'机位段落'。硬切仅 26.53s、29.43s；17.13s 为跳切；其余为生成式连续镜头内的前景遮挡/闪光/推拉转换。",
+  "shots": [
+    {
+      "id": "S01",
+      "name": "冲刺开场",
+      "startSec": 0.0,
+      "durationSec": 1.3,
+      "shotScale": "wide",
+      "cameraMove": "track_follow",
+      "cameraAngle": "平视略低",
+      "transitionIn": "硬起",
+      "slowMotion": false,
+      "enemies": "远处敌群 8+，最近 1 只在画右中景",
+      "vfx": "粉色剑气拖尾、花瓣粒子少量",
+      "notes": "主角从左向右冲入草原，0.4s 起手横斩带粉色剑气",
+      "actions": [
+        "冲刺",
+        "横斩"
+      ]
+    },
+    {
+      "id": "S02",
+      "name": "首次接敌",
+      "startSec": 1.3,
+      "durationSec": 2.03,
+      "shotScale": "medium_wide",
+      "cameraMove": "handheld_shake+truck",
+      "cameraAngle": "低机位平视",
+      "transitionIn": "生成式连续（前景敌人掠过）",
+      "slowMotion": false,
+      "enemies": "近身 2 只（左右夹击），背景敌群",
+      "vfx": "剑气弧、命中花瓣爆裂、泛光",
+      "notes": "与 2 只长角恶魔近身交锋：1.7s 劈砍、2.0s 命中花瓣爆散、2.5s 横斩剑气",
+      "actions": [
+        "横斩",
+        "劈砍",
+        "命中反应"
+      ]
+    },
+    {
+      "id": "S03",
+      "name": "踩背腾空翻身",
+      "startSec": 3.33,
+      "durationSec": 2.17,
+      "shotScale": "medium_wide",
+      "cameraMove": "crane_up_follow",
+      "cameraAngle": "低机位仰拍",
+      "transitionIn": "闪光/剑气弧 动作匹配",
+      "slowMotion": true,
+      "enemies": "脚下 1 只被踩恶魔，远景敌群",
+      "vfx": "花瓣爆散柱、剑气",
+      "notes": "3.3s 大弧斩→3.75s 踩恶魔背部腾空→4.0–4.25s 空中翻身（略升格）→4.5s 落地反手斩→5.0s 站定",
+      "actions": [
+        "腾跃",
+        "空中翻身",
+        "落地",
+        "横斩"
+      ]
+    },
+    {
+      "id": "S04",
+      "name": "前景遮挡转场+环绕",
+      "startSec": 5.5,
+      "durationSec": 0.95,
+      "shotScale": "medium",
+      "cameraMove": "orbit",
+      "cameraAngle": "平视",
+      "transitionIn": "前景遮挡划像（黑色恶魔身躯掠过）",
+      "slowMotion": false,
+      "enemies": "远景敌群",
+      "vfx": "无/少量花瓣",
+      "notes": "主角背身→3/4 侧身，蓄势起手结印",
+      "actions": [
+        "转身",
+        "蓄力"
+      ]
+    },
+    {
+      "id": "S05",
+      "name": "召唤花瓣符阵+旋斩",
+      "startSec": 6.45,
+      "durationSec": 2.45,
+      "shotScale": "medium_wide",
+      "cameraMove": "truck_lateral_follow",
+      "cameraAngle": "平视",
+      "transitionIn": "闪光（符阵亮起）",
+      "slowMotion": false,
+      "enemies": "1 只近身（左侧），背景敌群",
+      "vfx": "花瓣符阵、长剑气拖尾、花瓣粒子",
+      "notes": "6.5s 身后亮起樱花圆形符阵→7.25s 恶魔从左扑来→7.5s 回旋斩→8.0–8.5s 侧向冲刺斩，剑气横贯画面",
+      "actions": [
+        "召唤",
+        "回旋斩",
+        "冲刺斩"
+      ]
+    },
+    {
+      "id": "S06",
+      "name": "翻滚起身斩",
+      "startSec": 8.9,
+      "durationSec": 1.5,
+      "shotScale": "wide",
+      "cameraMove": "low_static→push",
+      "cameraAngle": "贴地低机位",
+      "transitionIn": "生成式连续",
+      "slowMotion": false,
+      "enemies": "1 只正面恶魔，敌群逐渐逼近",
+      "vfx": "剑气、花瓣",
+      "notes": "9.0s 地面翻滚→9.5s 起身→10.0s 斜劈恶魔，粉色剑气",
+      "actions": [
+        "翻滚",
+        "起身",
+        "斜劈"
+      ]
+    },
+    {
+      "id": "S07",
+      "name": "群战连斩",
+      "startSec": 10.4,
+      "durationSec": 2.9,
+      "shotScale": "medium_wide",
+      "cameraMove": "handheld_follow",
+      "cameraAngle": "平视/略低",
+      "transitionIn": "前景遮挡划像×2（11.5s、12.5s）",
+      "slowMotion": false,
+      "enemies": "四周 10+ 只，1–2 只贴身前景",
+      "vfx": "剑气、花瓣、尘土",
+      "notes": "在敌群中穿行：10.5、11.0、12.0、12.75s 连续劈砍，敌人扑击",
+      "actions": [
+        "连斩",
+        "闪避",
+        "命中反应"
+      ]
+    },
+    {
+      "id": "S08",
+      "name": "俯拍花瓣符阵",
+      "startSec": 13.3,
+      "durationSec": 1.1,
+      "shotScale": "wide",
+      "cameraMove": "crane_up(top_down)",
+      "cameraAngle": "高机位俯拍",
+      "transitionIn": "闪光溶出",
+      "slowMotion": false,
+      "enemies": "环形包围 10+",
+      "vfx": "大型地面符阵、泛光、花瓣漩涡",
+      "notes": "主角立于巨大樱花符阵中心，周围敌人被符阵弹开",
+      "actions": [
+        "结阵",
+        "释放"
+      ]
+    },
+    {
+      "id": "S09",
+      "name": "大全景被围/击退落地",
+      "startSec": 14.4,
+      "durationSec": 1.1,
+      "shotScale": "extreme_wide",
+      "cameraMove": "slow_push",
+      "cameraAngle": "平视略高",
+      "transitionIn": "符阵溶出（生成式连续）",
+      "slowMotion": false,
+      "enemies": "三面包围 20+",
+      "vfx": "少量花瓣",
+      "notes": "主角被击退、单膝滑地；敌群合围",
+      "actions": [
+        "击退",
+        "落地滑行"
+      ]
+    },
+    {
+      "id": "S10",
+      "name": "推近特写擦血",
+      "startSec": 15.5,
+      "durationSec": 1.63,
+      "shotScale": "close_up",
+      "cameraMove": "push_in",
+      "cameraAngle": "低机位平视",
+      "transitionIn": "生成式连续推镜",
+      "slowMotion": true,
+      "enemies": "背景虚化敌群",
+      "vfx": "浅景深、轮廓光",
+      "notes": "蹲地特写，擦嘴角血、抬眼怒视（动作缓、近升格）",
+      "actions": [
+        "蹲伏",
+        "擦血",
+        "表情"
+      ]
+    },
+    {
+      "id": "S11",
+      "name": "起身连斩",
+      "startSec": 17.13,
+      "durationSec": 4.17,
+      "shotScale": "medium_wide",
+      "cameraMove": "handheld_follow+pull_out",
+      "cameraAngle": "平视",
+      "transitionIn": "跳切（特写→中全景快速拉出）",
+      "slowMotion": false,
+      "enemies": "2–3 只近身轮番，背景敌群",
+      "vfx": "剑气弧、花瓣爆裂、动态模糊",
+      "notes": "17.2s 起身突进→17.5s 弧斩→18.75s 突刺剑气→19.5s 横斩→20.0s 花瓣爆散→20.75s 前景恶魔遮挡→21.0s 翻滚",
+      "actions": [
+        "突进",
+        "弧斩",
+        "突刺",
+        "横斩",
+        "翻滚"
+      ]
+    },
+    {
+      "id": "S12",
+      "name": "举剑喊招",
+      "startSec": 21.3,
+      "durationSec": 2.4,
+      "shotScale": "medium→medium_close",
+      "cameraMove": "push_in+tilt_up",
+      "cameraAngle": "低机位仰拍",
+      "transitionIn": "生成式连续",
+      "slowMotion": false,
+      "enemies": "身后敌群一排",
+      "vfx": "天空开始泛粉光",
+      "notes": "21.5s 起身→22.0–22.5s 中近景怒喊→22.8s 单手举剑指天，镜头随剑上摇",
+      "actions": [
+        "起身",
+        "喊招",
+        "举剑"
+      ]
+    },
+    {
+      "id": "S13",
+      "name": "天空巨剑砸地冲击波",
+      "startSec": 23.7,
+      "durationSec": 2.83,
+      "shotScale": "wide→sky",
+      "cameraMove": "tilt_up(上摇)",
+      "cameraAngle": "平视→仰",
+      "transitionIn": "闪白/泛光",
+      "slowMotion": true,
+      "enemies": "敌群 10+ 被同时击飞",
+      "vfx": "巨剑光柱、天空符阵、冲击波、强泛光、花雨",
+      "notes": "23.7s 天降巨型光剑→24.0s 砸地冲击波→24.3–25.0s 敌人被击飞空中（略升格）→25.5–26.5s 镜头上摇至天空符阵+花雨",
+      "actions": [
+        "召唤",
+        "冲击波",
+        "击飞"
+      ]
+    },
+    {
+      "id": "S14",
+      "name": "花海转身冲向镜头",
+      "startSec": 26.53,
+      "durationSec": 2.9,
+      "shotScale": "medium_wide",
+      "cameraMove": "static→dolly_back",
+      "cameraAngle": "低机位",
+      "transitionIn": "硬切",
+      "slowMotion": false,
+      "enemies": "无敌人",
+      "vfx": "花海、漫天花瓣、剑气",
+      "notes": "花海中站立持剑→27–28s 转身正对→28.5s 冲向镜头，花瓣风暴、剑气横扫 29.0s",
+      "actions": [
+        "站立",
+        "转身",
+        "冲刺",
+        "横斩"
+      ]
+    },
+    {
+      "id": "S15",
+      "name": "收尾大全景",
+      "startSec": 29.43,
+      "durationSec": 0.57,
+      "shotScale": "wide",
+      "cameraMove": "track_follow",
+      "cameraAngle": "平视",
+      "transitionIn": "硬切",
+      "slowMotion": false,
+      "enemies": "无/远景",
+      "vfx": "少量花瓣",
+      "notes": "主角在绿草原上奔跑挥剑",
+      "actions": [
+        "奔跑"
+      ]
+    }
+  ]
+}

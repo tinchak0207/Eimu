@@ -15,6 +15,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import {
   ASPECT_RATIOS,
   type AspectId,
@@ -72,6 +77,21 @@ export class DirectorEngine {
   private pendingTextures = 0;
   /** 片E 资产模式挂点：已载入的 glTF 资产根（不在 objects diff 集内，元素同步不受影响） */
   private gltfAssetRoot: THREE.Object3D | null = null;
+  /** 有 AnimationClip 时挂在资产根上的 mixer；无 clip 时保持 null（旧展示壳） */
+  private gltfMixer: THREE.AnimationMixer | null = null;
+  private gltfClips = new Map<string, THREE.AnimationClip>();
+  private gltfCurrentAction: THREE.AnimationAction | null = null;
+  private gltfCurrentClipName: string | null = null;
+  /** true = 时间线 seek 驱动（playClip 带 timeSec）；false = 自由跑 updateMixer(dt) */
+  private gltfMixerTimelineLocked = false;
+  /** S3 美观：主方向光（投射阴影）与半球光引用，便于 dispose。 */
+  private keyLight: THREE.DirectionalLight | null = null;
+  private hemiLight: THREE.HemisphereLight | null = null;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envMap: THREE.Texture | null = null;
+  /** S3：three 自带 UnrealBloom（无 postprocessing 包时的轻量替代）；失败则回落直渲。 */
+  private composer: EffectComposer | null = null;
+  private bloomEnabled = false;
 
   onTransformCommit?: (id: string, t: { position: Vec3; rotationDeg: Vec3; scale: Vec3 }, mode: 'translate' | 'rotate' | 'scale') => void;
   onPick?: (id: string | null, additive: boolean) => void;
@@ -103,20 +123,43 @@ export class DirectorEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
-    // 灯光
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-    sun.position.set(6, 10, 4);
+    // 灯光（S3：半球 + 强方向光 + 阴影；可选 PMREM/HDRI 异步叠加）
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.hemiLight = new THREE.HemisphereLight(0xb1c7ff, 0x3a2f28, 0.45);
+    this.scene.add(this.hemiLight);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.28));
+    const sun = new THREE.DirectionalLight(0xfff2e0, 1.05);
+    sun.position.set(6, 12, 4);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 60;
+    sun.shadow.camera.left = -18;
+    sun.shadow.camera.right = 18;
+    sun.shadow.camera.top = 18;
+    sun.shadow.camera.bottom = -18;
+    sun.shadow.bias = -0.0004;
+    this.keyLight = sun;
     this.scene.add(sun);
+    this.tryLoadStudioEnvironment('/hdri/studio_small_09.hdr');
+    this.setupBloomComposer();
 
-    // 地面
+    // 地面（接收阴影的浅灰平面；网格保留作参考）
     this.grid = new THREE.GridHelper(40, 40, 0x3a3f47, 0x262a30);
     this.scene.add(this.grid);
     this.ground = new THREE.Mesh(
       new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshBasicMaterial({ visible: false }),
+      new THREE.MeshStandardMaterial({
+        color: 0x1c2026,
+        roughness: 0.92,
+        metalness: 0.04,
+        transparent: true,
+        opacity: 0.92,
+      }),
     );
     this.ground.rotation.x = -Math.PI / 2;
+    this.ground.receiveShadow = true;
     this.ground.userData.isGround = true;
     this.scene.add(this.ground);
 
@@ -219,7 +262,8 @@ export class DirectorEngine {
     this.orbit.update();
     this.faceBillboards();
     this.shotCameraHelper.update();
-    this.renderer.render(this.scene, this.camera);
+    if (this.composer && this.bloomEnabled) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
     if (this.monitorRenderer) {
       const gizmoWasVisible = this.gizmoHelper.visible;
       this.setShotHelpersVisible(false);
@@ -251,6 +295,8 @@ export class DirectorEngine {
     this.isDisposed = true;
     this.loadGeneration += 1;
     this.loadSlots.clear();
+    this.clearGltfMixer();
+    this.gltfAssetRoot = null;
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
@@ -266,6 +312,18 @@ export class DirectorEngine {
       if (Array.isArray(mat)) mat.forEach((x) => disposeMaterialTextures(x));
       else if (mat) disposeMaterialTextures(mat);
     });
+    if (this.composer) {
+      this.composer.dispose();
+      this.composer = null;
+    }
+    if (this.envMap) {
+      this.envMap.dispose();
+      this.envMap = null;
+    }
+    this.pmrem?.dispose();
+    this.pmrem = null;
+    this.keyLight = null;
+    this.hemiLight = null;
     this.renderer.dispose();
     this.monitorRenderer?.dispose();
     this.monitorRenderer?.domElement.remove();
@@ -292,11 +350,74 @@ export class DirectorEngine {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    if (this.composer) {
+      this.composer.setSize(w, h);
+      this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
   }
 
   get texturesReady(): boolean {
     return this.pendingTextures === 0;
   }
+
+  /** S3：尝试加载工作室 HDRI → PMREM；失败则保留半球+方向光（不抛）。 */
+  private tryLoadStudioEnvironment(url: string): void {
+    try {
+      this.pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.pmrem.compileEquirectangularShader();
+      const generation = this.beginLoad('env-hdri');
+      new RGBELoader().load(
+        url,
+        (texture) => {
+          if (this.loadIsStale('env-hdri', generation) || this.isDisposed) {
+            texture.dispose();
+            return;
+          }
+          const env = this.pmrem!.fromEquirectangular(texture).texture;
+          texture.dispose();
+          this.envMap = env;
+          this.scene.environment = env;
+          // 略降背景对比，避免 HDRI 抢戏；雾色保持深灰预演调性
+          this.scene.background = new THREE.Color(0x12151a);
+        },
+        undefined,
+        () => {
+          // 无 public HDRI 或加载失败：保持 Directional+Hemisphere 加强档
+        },
+      );
+    } catch {
+      // PMREM / RGBE 不可用时静默跳过
+    }
+  }
+
+  /** S3：three 自带 UnrealBloomPass（微光档）。默认关闭，避免过曝吃掉脚/地面；可选 setBloomEnabled(true)。 */
+  private setupBloomComposer(): void {
+    try {
+      const w = this.container.clientWidth || 800;
+      const h = this.container.clientHeight || 600;
+      const composer = new EffectComposer(this.renderer);
+      composer.addPass(new RenderPass(this.scene, this.camera));
+      // strength/radius/threshold：微光（旧 0.28 在人物+emissive 下会过曝）
+      const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.08, 0.4, 0.9);
+      composer.addPass(bloom);
+      composer.addPass(new OutputPass());
+      this.composer = composer;
+      this.bloomEnabled = false; // 默认关；调用方显式开启
+    } catch {
+      this.composer = null;
+      this.bloomEnabled = false;
+    }
+  }
+
+  /** S3 自验：开关轻量 bloom（不影响灯光/阴影）。 */
+  setBloomEnabled(enabled: boolean): void {
+    this.bloomEnabled = Boolean(enabled && this.composer);
+  }
+
+  get bloomActive(): boolean {
+    return Boolean(this.composer && this.bloomEnabled);
+  }
+
 
   // ── 元素同步 ────────────────────────────────────────────────────────────────
 
@@ -331,7 +452,14 @@ export class DirectorEngine {
         obj = this.buildObject(el);
         if (el.kind === 'mannequin') attachActorLabel(obj, el.name, el.color, el.bodyType === 'animal' ? Math.max(0.8, el.heightM * 0.55) : el.heightM);
         else if (el.kind === 'crowd') attachActorLabel(obj, el.name, el.color, 1.95);
-        obj.traverse((o) => { o.userData.elementId = el.id; });
+        obj.traverse((o) => {
+          o.userData.elementId = el.id;
+          const mesh = o as THREE.Mesh;
+          if (mesh.isMesh) {
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+          }
+        });
         this.scene.add(obj);
         this.objects.set(el.id, obj);
       }
@@ -862,6 +990,17 @@ export class DirectorEngine {
    * （替换白模由呼叫端把对应元素 visible:false）。单资产槽，重复呼叫替换旧资产。
    * 不 throw：失败回传结构化错误并触发 onGltfAssetError；url=null 卸载现有资产。
    */
+  private clearGltfMixer(): void {
+    if (this.gltfCurrentAction) {
+      this.gltfCurrentAction.stop();
+      this.gltfCurrentAction = null;
+    }
+    this.gltfCurrentClipName = null;
+    this.gltfMixerTimelineLocked = false;
+    this.gltfMixer = null;
+    this.gltfClips.clear();
+  }
+
   async setGltfAsset(url: string | null, opts?: { targetHeightM?: number }): Promise<GltfLoadOutcome | null> {
     const generation = this.beginLoad("gltf");
     if (this.gltfAssetRoot) {
@@ -869,6 +1008,7 @@ export class DirectorEngine {
       disposeGltfObject(this.gltfAssetRoot);
       this.gltfAssetRoot = null;
     }
+    this.clearGltfMixer();
     if (this.isDisposed || !url) return null;
     const holder = new THREE.Group();
     holder.userData.isDirectorGltfAsset = true;
@@ -888,10 +1028,21 @@ export class DirectorEngine {
       }
       this.scene.add(holder);
       this.gltfAssetRoot = holder;
+      // 有 clip → 挂 AnimationMixer（three 官方用法：mixer 绑 glTF scene）；无 clip → 旧展示壳
+      if (outcome.clips.length > 0) {
+        const root = outcome.object;
+        this.gltfMixer = new THREE.AnimationMixer(root);
+        this.gltfClips.clear();
+        for (const clip of outcome.clips) {
+          if (clip?.name) this.gltfClips.set(clip.name, clip);
+        }
+        holder.userData.hasAnimationMixer = true;
+      }
       return outcome;
     } catch (err) {
       this.scene.remove(holder);
       disposeGltfObject(holder);
+      this.clearGltfMixer();
       if (this.gltfAssetRoot === holder) this.gltfAssetRoot = null;
       if (this.loadIsStale("gltf", generation)) return null;
       throw err;
@@ -903,6 +1054,76 @@ export class DirectorEngine {
   /** 当前已挂载的 glTF 资产根（未挂载为 null） */
   get gltfAsset(): THREE.Object3D | null {
     return this.gltfAssetRoot;
+  }
+
+  /** 是否已挂带动画的 mixer（无 clip 的展示壳为 false） */
+  get hasGltfMixer(): boolean {
+    return this.gltfMixer !== null;
+  }
+
+  /** 已载入 clip 名列表 */
+  listGltfClips(): string[] {
+    return [...this.gltfClips.keys()];
+  }
+
+  /**
+   * 播放/对齐指定 clip。
+   * - 传 timeSec：时间线 seek（paused + mixer.update(0)），与 action startSec/durationSec 对齐
+   * - 不传 timeSec：自由播放，由 updateMixer(dt) 推进
+   * loop=true → LoopRepeat；否则 LoopOnce + clampWhenFinished
+   */
+  playClip(
+    name: string,
+    opts?: { timeSec?: number; loop?: boolean; clampWhenFinished?: boolean; timeScale?: number },
+  ): boolean {
+    if (!this.gltfMixer) return false;
+    const clip = this.gltfClips.get(name);
+    if (!clip) return false;
+    const loop = opts?.loop ?? false;
+    const clampWhenFinished = opts?.clampWhenFinished ?? true;
+    if (this.gltfCurrentClipName !== name || !this.gltfCurrentAction) {
+      this.gltfCurrentAction?.fadeOut(0.05);
+      const action = this.gltfMixer.clipAction(clip);
+      action.reset();
+      action.enabled = true;
+      if (loop) {
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.clampWhenFinished = false;
+      } else {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = clampWhenFinished;
+      }
+      action.play();
+      this.gltfCurrentAction = action;
+      this.gltfCurrentClipName = name;
+    }
+    const action = this.gltfCurrentAction;
+    if (!action) return false;
+    if (typeof opts?.timeScale === 'number') action.setEffectiveTimeScale(opts.timeScale);
+    if (typeof opts?.timeSec === 'number') {
+      const t = Math.max(0, opts.timeSec);
+      // 循环：对 clip.duration 取模；非循环：clamp 到末帧
+      action.time = loop && clip.duration > 1e-6
+        ? t % clip.duration
+        : Math.min(t, Math.max(0, clip.duration - 1e-4));
+      action.paused = true;
+      this.gltfMixerTimelineLocked = true;
+      this.gltfMixer.update(0);
+    } else {
+      action.paused = false;
+      this.gltfMixerTimelineLocked = false;
+    }
+    return true;
+  }
+
+  /** 推进 mixer。时间线锁定时只 flush（seek 已在 playClip 完成）；自由模式用 dt。 */
+  updateMixer(dt: number): void {
+    if (!this.gltfMixer) return;
+    if (this.gltfMixerTimelineLocked) {
+      this.gltfMixer.update(0);
+      return;
+    }
+    if (dt > 0) this.gltfMixer.update(dt);
   }
 
   setPanorama(imagePath: string | null): void {

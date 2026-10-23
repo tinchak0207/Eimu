@@ -27,6 +27,10 @@ export const MULTI_STEP_AV_TEMPLATES = new Set<string>([
 const MUSIC_INTENT_RE =
   /(?:\bMV\b|\bOP\b|主题曲|片头曲|片尾曲|角色歌|作词|作曲|编曲|歌词|BGM|配乐|歌曲|音乐|专辑|单曲|FlowMusic|flowmusic|lyria)/i
 
+/** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。 */
+const TEXT_ONLY_RE =
+  /(?:只要文字|只要歌词|只写歌词|只写文字|仅要文字|只要方案|文字稿即可|不要生成|不生成音频|不要音频|不要调用\s*music_gen|不要报价)/i
+
 /** 多镜／成片制作意图关键词（模板漏判兜底）。 */
 const MULTI_SHOT_AV_RE =
   /(?:多镜|分镜|成片|长片|短剧|预告片|纪录片|广告片|宣传片|剧集|番剧|短片|storyboard|shot\s*list|镜头表)/i
@@ -42,10 +46,12 @@ export interface AvIntentInput {
 
 /** 是否命中「多步影音制作」意图（硬闸覆盖面；首期＝music + 多镜视频）。 */
 export function isMultiStepAvProductionIntent(input: AvIntentInput): boolean {
+  const p = typeof input.prompt === "string" ? input.prompt : ""
+  // 纯文字委托不是媒体生产：不拦收盘、不逼写画布（2026-10-21 实测：歌词正文被闸门挤成「见上一条」）。
+  if (p.trim() && TEXT_ONLY_RE.test(p) && !MULTI_SHOT_AV_RE.test(p)) return false
   const tid = typeof input.templateId === "string" ? input.templateId.trim() : ""
   if (tid && MULTI_STEP_AV_TEMPLATES.has(tid)) return true
   if (input.musicExpertSeen === true) return true
-  const p = typeof input.prompt === "string" ? input.prompt : ""
   if (!p.trim()) return false
   if (MUSIC_INTENT_RE.test(p)) return true
   if (MULTI_SHOT_AV_RE.test(p)) return true

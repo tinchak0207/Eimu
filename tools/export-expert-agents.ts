@@ -413,8 +413,10 @@ function syncLyricistBindings(): string[] {
       console.log(`EXPORT_OK：${path}（歌词域绑定）`);
     }
   };
+  // 文学公式只活在 lyricist/fang-wenshan 技能。这里只替换已误贴进 music 提示词的旧长段，
+  // 不再把同一段盖进每个 agent，也不再盖进 orchestrator 派遣手册。
   const replaceHandoff = (text: string): string => text.replace(
-    /【歌词文学接收与谱曲交接】[^\n]*/g,
+    /【歌词(?:文学接收与谱曲交接|交接)】[^\n]*/g,
     LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE,
   );
   const runtimePath = join(HARNESS_RUNTIME_ROOT, "opencode.json");
@@ -423,9 +425,9 @@ function syncLyricistBindings(): string[] {
   const currentPrompt: string = runtime.agent.lyricist.prompt;
   const roleStart = currentPrompt.indexOf("【你的角色：歌词专家");
   const basePrompt = roleStart < 0 ? currentPrompt.split("\n\n")[0] : currentPrompt.slice(0, roleStart).trimEnd();
-  runtime.agent.lyricist.prompt = `${basePrompt}\n\n【你的角色：歌词专家】${LYRICIST_PERSONA_PROMPT}\n\n${LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE}`;
-  for (const agent of Object.values(runtime.agent) as { prompt?: string }[]) {
-    if (typeof agent.prompt === "string") agent.prompt = replaceHandoff(agent.prompt);
+  runtime.agent.lyricist.prompt = `${basePrompt}\n\n【你的角色：歌词专家】${LYRICIST_PERSONA_PROMPT}`;
+  if (typeof runtime.agent.music?.prompt === "string") {
+    runtime.agent.music.prompt = replaceHandoff(runtime.agent.music.prompt);
   }
   sync(runtimePath, `${JSON.stringify(runtime, null, 2)}\n`);
   const declarationPath = join(SYNC_DIR, AGENTS_JSON);
@@ -434,11 +436,14 @@ function syncLyricistBindings(): string[] {
   declarations.lyricist.prompt = LYRICIST_PERSONA_PROMPT;
   sync(declarationPath, `${JSON.stringify(declarations, null, 2)}\n`);
   const musicSkillPath = join(HARNESS_RUNTIME_ROOT, "skills", "music-director", "SKILL.md");
-  sync(musicSkillPath, replaceHandoff(readFileSync(musicSkillPath, "utf8")));
+  const musicSkill = readFileSync(musicSkillPath, "utf8");
+  if (musicSkill.includes("【歌词文学接收与谱曲交接】") || musicSkill.includes("【歌词交接】")) {
+    sync(musicSkillPath, replaceHandoff(musicSkill));
+  }
   const playbookPath = join(SYNC_DIR, "orchestrator-dispatch-playbook.md");
-  const playbook = replaceHandoff(readFileSync(playbookPath, "utf8")).replace(
-    "验收核对文学转化、情绪推进、主旨、韵律和可唱性。",
-    "创作方法采用 fang-wenshan 上游技能，评分卡是自评，作品验收须阅读正文。",
+  const playbook = readFileSync(playbookPath, "utf8").replace(
+    /【歌词文学接收与谱曲交接】[^\n]*\n?/g,
+    "",
   );
   sync(playbookPath, playbook);
   const assetsPath = join(root, "src", "lib", "expert-gateway-assets.json");

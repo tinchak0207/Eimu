@@ -263,7 +263,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     const lyricsReason = lyricsFirstBlockReason(expertId, { lyricsDelivered: lyrics.length > 0, lyricsInFlight }, dispatchGuards.lyricsDependency);
     if (lyricsReason) return Response.json({ ok: false, code: "lyrics_first", error: lyricsReason, blocked: "lyrics_first" }, { status: 409 });
     if (expertId === "music" && lyrics.length && dispatchGuards.lyricsDependency !== false) {
-      prompt += `\n\n【已交付歌词来源】${lyrics.at(-1)!.relPath}。先 read 完整文件；歌词创作方法采用 .opencode/skills/fang-wenshan/SKILL.md。发现具体正文问题时引用唱句及影响，回交 lyricist 定向修订。ok:true、交付字段、qc 与上游评分卡均不能代替作品验收；公开版没有 lyrics/catalog，不能宣称完成全库查重。交接完整正文与文件路径，music 不从摘要重写歌词。用户提供完整原词且未要求精修时原样谱曲；没有真实旋律时，可唱性评分仅为文字自评。`;
+      prompt += `\n\n【已交付歌词来源】${lyrics.at(-1)!.relPath}。先 read 完整文件，原样用于谱曲，不从摘要改写。正文问题回交 lyricist。字数与 Z% 只引用回执，不心算。`;
     }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本轮已有 critic 审核动作，
     // 机器 pass 的触发判据据此豁免（不重复派遣）。登记有界 Map。
@@ -359,7 +359,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         }
       }
       if (meta.specKey && typeof tpl[meta.specKey] === "string" && tpl[meta.specKey]) {
-        prompt = `【系统注入·军团模板】以下模板骨架由网关按任务类型自动注入，与你的任务书同效；〔括号〕栏由你填。\n\n${tpl[meta.specKey]}\n\n---\n\n【任务书原文】\n${prompt}`
+        prompt = `【系统注入·任务类型清单】只核对本任务真正要交付的部分。与本次交付物无关的条目跳过并写明原因，清单不是第二份任务。\n\n${tpl[meta.specKey]}\n\n---\n\n【任务书原文】\n${prompt}`
         templateInjected = true
       }
     } catch (e) {

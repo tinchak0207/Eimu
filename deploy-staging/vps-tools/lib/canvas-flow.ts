@@ -126,7 +126,7 @@ export function compileGenerationFlow(input: GenerationFlowInput, snapshotState:
   const stamp = Date.now().toString(36)
   const textId = `agent-${stamp}-t`
   const configId = `agent-${stamp}-c`
-  const model = typeof input.model === "string" && input.model ? input.model : "gpt-image-2"
+  const model = typeof input.model === "string" && input.model ? input.model : "gpt-image-2.5-flare"
   const size = typeof input.size === "string" && input.size ? input.size : "1024x1024"
   const rawCount = typeof input.count === "number" && Number.isFinite(input.count) ? Math.floor(input.count) : 1
   const count = Math.max(1, Math.min(4, rawCount))

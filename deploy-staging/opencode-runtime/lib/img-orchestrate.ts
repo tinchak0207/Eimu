@@ -98,7 +98,7 @@ async function inlineImageForVlm(u: string): Promise<string> {
   }
 }
 
-export const ORCH_DEFAULT_MODEL = "pixai-tsubaki2"
+export const ORCH_DEFAULT_MODEL = "gpt-image-2.5-flare"
 export const ORCH_DEFAULT_SIZE = "1024x1024"
 // R9-C2（2026-09-30）：原本地硬写 SUPPORTED_SIZES（缺 4096x4096，与站点漂移）已移除，改读站点真源，见 supportedImageSizes()。
 

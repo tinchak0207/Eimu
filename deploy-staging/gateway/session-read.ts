@@ -1,7 +1,7 @@
 // session-read.ts —— 自 index.ts 第二阶段 Wave3 无损抽取（2026-09-19）：会话读取与中止——
 // handleTranscript/handleAbortSession＋前导注释（原 index.ts 5531–5600 行，逐行原样搬运）。
 import { jsonError } from "./gw-lib.ts"
-import { isSystemWakeText } from "./system-wake.ts"
+import { isSystemWakeText, isInternalMechanismText, stripSystemReminders } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { opencodeFetch, opencodeJson } from "./opencode-client.ts"
 import { stripStaleTurnTextFromReplay } from "./sse-core.ts"
@@ -37,13 +37,23 @@ export async function handleTranscript(key: string, id: string, req: Request): P
   if (Array.isArray(msgs)) {
     const tail = msgs.slice(-limit)
     for (const m of tail) {
-      let role = m?.info?.role === "user" ? "user" : "assistant"
+      // 2026-10-23：禁止把 system/developer 映射成 assistant（否则手机/调试 transcript 会把内部指令当助手气泡）。
+      const rawRole = typeof m?.info?.role === "string" ? m.info.role : "assistant"
+      if (rawRole === "developer") continue
+      let role = rawRole === "user" ? "user" : rawRole === "system" ? "system" : rawRole === "assistant" ? "assistant" : "assistant"
       if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))) role = "system"
+      if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isInternalMechanismText(p.text))) continue
+      if (role === "system") {
+        const wake = Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))
+        if (!wake) continue
+      }
       const parts: Array<{ type: "text"; text: string } | { type: "tool"; tool: string; input: unknown }> = []
       if (Array.isArray(m?.parts)) {
         for (const p of m.parts) {
           if (p?.type === "text" && typeof p.text === "string") {
-            parts.push({ type: "text", text: p.text })
+            const text = stripSystemReminders(p.text)
+            if (text.length === 0) continue
+            parts.push({ type: "text", text })
           } else if (p?.type === "tool" && typeof p.tool === "string") {
             parts.push({ type: "tool", tool: p.tool, input: p.state?.input ?? null })
           }

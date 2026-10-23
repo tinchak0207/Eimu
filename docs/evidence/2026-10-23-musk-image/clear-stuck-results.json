@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-23T00:15:00+08:00",
+  "authorized": "clear-stuck",
+  "already_refunded_audit": [
+    {"id": "a47e5b9c-234a-49e2-8071-6f5c94118e0a", "status": "refunded", "kind": "image_edit", "note": "prior supplier_excluded fail-fast"},
+    {"id": "ca011cb0-8372-487c-8264-67c8450c41f2", "status": "refunded", "kind": "image_edit", "note": "prior supplier_excluded fail-fast"}
+  ],
+  "cleared": [
+    {"id": "f1a25bf5-b503-4d63-9092-cd2b642778af", "kind": "image_generate", "modelId": "gemini-3.1-flash-image", "billingAmount": 1000000, "refundResult": "applied", "statusAfter": "refunded"},
+    {"id": "66dab217-a623-4a9d-b0f9-6a7964171335", "kind": "image_edit", "modelId": "gpt-image-2", "billingAmount": 500000, "refundResult": "applied", "statusAfter": "refunded"},
+    {"id": "4f8f6339-75a4-429d-ae31-5198678320a1", "kind": "image_edit", "modelId": "gpt-image-2", "billingAmount": 500000, "refundResult": "applied", "statusAfter": "refunded"},
+    {"id": "5c19ac48-1965-49f7-9da9-00477cab8261", "kind": "image_generate", "modelId": "gpt-image-2.5-flare", "billingAmount": 1500000, "refundResult": "applied", "statusAfter": "refunded"}
+  ],
+  "override_before": {
+    "gpt-image-2": ["yyds", "adobe2api", "newapi"],
+    "gpt-image-2.5-flare": ["yyds", "adobe2api", "newapi"],
+    "gpt-image-2.5-sunburst": ["yyds", "adobe2api", "newapi"]
+  },
+  "override_after": "DELETED (effective = MODEL_ROUTES [a6api])",
+  "note_edit": "a6api capability is image_generate only; do not claim a6 edit until live-verified"
+}

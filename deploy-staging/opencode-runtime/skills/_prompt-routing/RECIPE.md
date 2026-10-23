@@ -3,8 +3,7 @@
 > 本档是 AGENTS.md「§1 路由决策表」移出的**细则正文**（逐字保留，只改存放位置）。
 > AGENTS.md 每轮只留「触发词 → 域 → 本档 §节」的指针；模型判域后**动该域前先读对应节**。
 > 音乐域不外移（唯一活链路）：音乐细则在 `skill music-director`；本档 §音乐 仅保留其路由行以便对表。
-> 上层手册（工作区根，与 `attach/` 同框）：`attach/workflow-video-rules.md`（影片/工作流）、
-> `attach/attachment-handbook.md`（附件）、`attach/film-delivery-handbook.md`（成片）、`attach/storyboard-qc-handbook.md`（分镜门）。
+> 按需载体（均在 `_prompt-routing/`，禁止引用不存在的 `attach/`）：本档 §影片／§剪辑／§3D；`attachments.md`（附件）；`storyboard-gate.md`（分镜门）；成片铁律见 `creator-guide.md` 自主剪接段与本档 §剪辑。
 
 ## §图片
 
@@ -25,9 +24,9 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途直接 blender_exec） | — |
-| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长策略按 attach/workflow-video-rules.md §4b（按条计费，尽量打满时长档）**） | — |
-| 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读 attach/workflow-video-rules.md** | — |
+| 复用素材/3D 场景/视频 prompt/人物动作（建模/场景/风格/视频/运镜/动作复用） | 先 `asset_search` 查库（免费）：视频/运镜/风格/prompt 类查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包，命中引用原文；人物/动作类查 mhr/cmu-mocap 包；3D/素材类查 blender-3d-assets 与用户资产包；查空才自编自造，命中用 `asset_activate` 取内容注入 image_generate / workflow（3D 用途：本席 blender_* 可用则调用，否则派工具表含 blender_* 的 Expert；无具备席位则诚实报告断路） | — |
+| 生影片（单镜） | 报价经 `subagent_dispatch` 派 `expert:"video-director"` 执行 `video_quote`（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：默认 minimax-h3（可靠稳定快速、约 45s 出片、单镜 5–15s、推荐 15s）；时长按条计费、尽量打满时长档（细则见本档 §影片与 `skill video-director`）**） | — |
+| 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读本档 §影片（及 `skill video-director`）；禁止引用不存在的 `attach/`** | — |
 | 关键帧驱动影片／图生视频／起止关键帧 | `image_generate` 影片模型传 `reference_images:[起帧URL,止帧URL]`；`last_frame_video_chain` 每镜 shots 传 `first_frame_url`／`last_frame_url`；工作流视频节点 metadata 传首尾同名字段或 `reference_images`，也可连接对应图片节点。minimax-h3 最多 9 张有序图参考；28 张／14 镜按每镜 2 张注入。上游 image_urls 是图片驱动参考，不承诺像素级首尾硬锁；禁止声称本站影片端不接受图片而改成纯文生视频。 | — |
 | 影片拆解（链接或上传影片：讲了什么/分镜/台词/反推提示词/翻拍/去字幕/下载） | 链接先 `video_fetch`（首次 action=prepare）落本地 → `video_analyze`（场景切点+代表帧+词级台词；提示词反推回 vlm_unavailable 时对代表帧跑 read-image 补）；只要台词稿 `video_transcribe`；去字幕 `video_desubtitle`；翻拍/换角重做 `video_remake_plan`；抽帧/切段/探针 `video_evidence`；台词折算秒数写进分镜 `video_measure` | ffmpeg 抽帧 + read-image |
 
@@ -78,7 +77,61 @@
 
 | 用户意图 | 首选路径 | 备援 |
 |---|---|---|
-| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：blender_* 可用时直接调用 blender_exec 建模（不必派 Expert；先 asset_search 查 blender-3d-assets 现成件）→ blender_render（eevee 快稿；转台/360° 传 turntable: true 出 mp4）→ 交付 public_urls；要网页可交互预览加 blender_export_gltf；不可用时走 bash + 自建几何 + 光栅渲染，产出预演帧/GLB 并标注 `.blend` 未交付，禁止二维文生图冒充。**主动选用**：精确几何／同一物体多角度一致／空间布局／产品 360° 时不走文生图，直接 Blender（本机渲染，零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+| **单物体（立方体／球体／圆柱等，未要转台/多视角）** | **快路径：本回合三连，不研究/不评审/不派 Expert，目标 30 秒内** ① `blender_exec` 用下方模板建几何+材质+三点光+相机，保存 `out/<name>.blend`；② `blender_render`（`scene_blend_path:"out/<name>.blend"`，`render_engine:"eevee"`，`output_name:"<name>_hero"`）出 1024 主视图（eevee 默认快档，用户要照片级才 cycles）；③ `blender_export_gltf`（同一 .blend，`output_name:"<name>"`）出 GLB；④ **直接交付两个回执里的 `public_urls`**（图片出卡、GLB 给链接）；桥产物不要调 `image_upload`／`document_upload`（文件在桥主机），也不要 `ls` 本机 `out/` 拿同名旧文件顶替；不要 `read_image` 自检（1024 PNG 常超 1MB 上限） | bash+自建几何+光栅渲染（桥不可用时；标注 `.blend` 未交付） |
+| 3D/建模/搭场景/产品转台/白模/等距 3D 图标/室内建筑/机位预演 | 先查真实工具表：本席 blender_* 可用则 `blender_exec`→`blender_render`／`blender_export_gltf`（先 asset_search 查 blender-3d-assets）；本席表内确实关闭时才派工具表含所需 blender_* 的 Expert；若无具备席位则诚实报告断路，禁止口述直调或二维文生图冒充。席位不可用时可用 bash+自建几何+光栅渲染产预演帧/GLB 并标注 `.blend` 未交付。**主动选用**：精确几何／多角度一致／空间布局／产品 360° 时优先真 Blender 席位（本机零扣费），渲染图可再 image_edit 风格化 | image_generate（只要氛围图、不在意几何时） |
+
+单物体模板（实测 1024 主视图质量档；只改几何与名字，`out/` 是桥唯一公网化目录，渲染交给 `blender_render` 不在 exec 里做）：
+
+```python
+import bpy, math, os
+name = "cube"                     # 改成 cube / sphere / cylinder …
+bpy.ops.wm.read_factory_settings(use_empty=True)
+if name == "sphere":
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1, segments=96, ring_count=48, location=(0, 0, 1))
+    bpy.ops.object.shade_smooth()
+else:
+    bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 1))
+obj = bpy.context.object; obj.name = name
+mat = bpy.data.materials.new("Matte"); mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.42, 0.44, 0.47, 1)
+bsdf.inputs["Roughness"].default_value = 0.5
+obj.data.materials.append(mat)
+bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, 0))     # 深色无缝地面
+plane = bpy.context.object
+pm = bpy.data.materials.new("Floor"); pm.use_nodes = True
+pb = pm.node_tree.nodes["Principled BSDF"]
+pb.inputs["Base Color"].default_value = (0.035, 0.037, 0.042, 1)
+pb.inputs["Roughness"].default_value = 0.7
+plane.data.materials.append(pm)
+cam_data = bpy.data.cameras.new("Cam"); cam = bpy.data.objects.new("Cam", cam_data)
+bpy.context.collection.objects.link(cam); bpy.context.scene.camera = cam
+cam.location = (5.1, -5.1, 3.9); cam_data.lens = 60
+cam.rotation_euler = (math.radians(62), 0, math.radians(45))
+for nm, loc, rot, energy, size in (
+    ("Key", (3.5, -3.5, 5.5), (math.radians(50), 0, math.radians(45)), 450, 4.0),
+    ("Fill", (-4.0, -2.0, 3.0), (math.radians(70), 0, math.radians(-60)), 100, 5.0),
+    ("Rim", (-1.5, 4.5, 4.5), (math.radians(55), 0, math.radians(200)), 420, 3.0),
+):
+    d = bpy.data.lights.new(nm, "AREA"); d.energy = energy; d.size = size
+    o = bpy.data.objects.new(nm, d); o.location = loc; o.rotation_euler = rot
+    bpy.context.collection.objects.link(o)
+w = bpy.context.scene.world or bpy.data.worlds.new("World"); bpy.context.scene.world = w
+w.use_nodes = True
+w.node_tree.nodes["Background"].inputs[0].default_value = (0.015, 0.016, 0.02, 1)
+w.node_tree.nodes["Background"].inputs[1].default_value = 0.3
+sc = bpy.context.scene
+try:
+    sc.render.engine = "BLENDER_EEVEE_NEXT"
+except Exception:
+    sc.render.engine = "BLENDER_EEVEE"
+sc.render.resolution_x = 1024; sc.render.resolution_y = 1024
+sc.view_settings.view_transform = "AgX"
+sc.view_settings.exposure = -1.1
+sc.eevee.taa_render_samples = 128
+os.makedirs(os.path.join(os.getcwd(), "out"), exist_ok=True)
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(os.getcwd(), "out", name + ".blend"))
+```
 
 ## §商品图
 

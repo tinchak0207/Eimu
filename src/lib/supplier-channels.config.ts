@@ -196,6 +196,25 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
+    // a6api（https://api.a6api.com/v1，2026-10-22 暴君裁定）：gpt image 系列
+    // （gpt-image-2 / 2.5-flare / 2.5-sunburst）**唯一**供货商。
+    // 上游 images/generations 实测三款全 200 真出图（b64，2026-10-22）；
+    // 上游名与平台名同名直传。image_edit 未在此渠道实弹验证，不虚报能力。
+    label: "a6api",
+    baseUrlEnv: "A6API_BASE_URL",
+    apiKeyEnv: "A6API_API_KEY",
+    enabledEnv: null,
+    tier: "managed_pool",
+    sitePriority: 11,
+    chatImageModels: [],
+    claims: [
+      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate"] },
+      { modelId: "gpt-image-2.5-flare", supplierModelId: null, kinds: ["image_generate"] },
+      { modelId: "gpt-image-2.5-sunburst", supplierModelId: null, kinds: ["image_generate"] },
+    ],
+  },
+
+  {
     label: "hublinuxdo",
     baseUrlEnv: "HUBLINUXDO_BASE_URL",
     apiKeyEnv: "HUBLINUXDO_API_KEY",
@@ -210,24 +229,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     // chatImageModels 存「上游真名」，viaChatImage 按 upstreamModel 匹配。
     chatImageModels: ["gemini-3-pro-image", "gemini-3.1-flash-image", "gemini-2.5-flash-image"],
     claims: [
-      {
-        modelId: "gpt-image-2",
-        supplierModelId: null,
-        kinds: ["image_generate"],
-      },
-      // 2026-09-11 实测：hub 上游 /v1/images/generations 对 gpt-image-2.5-flare 与
-      // gpt-image-2.5-sunburst 均 200 真出图（b64），上游名与平台名同名直传，
-      // 故由 hub 认领（adobe2api 路径 408 未通）。kinds 只认 image_generate。
-      {
-        modelId: "gpt-image-2.5-flare",
-        supplierModelId: null,
-        kinds: ["image_generate"],
-      },
-      {
-        modelId: "gpt-image-2.5-sunburst",
-        supplierModelId: null,
-        kinds: ["image_generate"],
-      },
+      // 2026-10-22 暴君裁定：gpt image 系列（gpt-image-2 / 2.5-flare / 2.5-sunburst）
+      // 供货商全部换成 a6api（见本表 a6api 条目），hub 不再认领。
       {
         modelId: "gemini-3-image",           // nano-banana-pro（花名）
         supplierModelId: "gemini-3-pro-image", // 上游真名
@@ -254,36 +257,10 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     tier: "managed_pool",
     sitePriority: 11,
     chatImageModels: [],
-    claims: [
-      {
-        modelId: "gpt-image-2",
-        supplierModelId: null,
-        // 2026-09-14 实测：yyds /v1/images/edits 收 gpt-image-2 多模态改图
-        // （HTTP 200 / 24.9s / 1.85MB PNG，b64_json 直回）。此前只宣告
-        // image_generate，使 gpt-image-2 的 edit 能力表只剩死渠道
-        // （adobe2api 403 额度枯竭、sub2api 524），改图全军覆没。
-        kinds: ["image_generate", "image_edit"],
-        unitPriceCny: 0.016,
-        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
-      },
-      // 0.016＝1K/2K/4K 统一价，来源与日期见 priceSource（站点公开价目，免 key 唯读实查）。
-      // 上游模型名与我方同名，`GET /v1/models` 实证无分组后缀（非 -g75 等变体），故 supplierModelId=null 直传。
-      // 2026-10-14 生产成功请求证明 flare/sunburst 的 images/edits 能力；保留hub原契约。
-      {
-        modelId: "gpt-image-2.5-flare",
-        supplierModelId: null,
-        kinds: ["image_generate", "image_edit"],
-        unitPriceCny: 0.016,
-        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
-      },
-      {
-        modelId: "gpt-image-2.5-sunburst",
-        supplierModelId: null,
-        kinds: ["image_generate", "image_edit"],
-        unitPriceCny: 0.016,
-        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
-      },
-    ],
+    // 2026-10-22 暴君裁定：gpt image 系列供货商全部换成 a6api，yyds 清空认领。
+    // 保留空条目＝seed 维护 supplier 行并将旧 capability 收回（is_current=false），
+    // 调度路由（model-routes.config.ts）已不再含 yyds，不会再有尝试。
+    claims: [],
   },
 
 {

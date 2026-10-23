@@ -1,5 +1,6 @@
 import type {
   DirectorActionClip,
+  DirectorActionId,
   DirectorCameraKeyframe,
   DirectorElement,
   DirectorKeyframeInterpolation,
@@ -12,6 +13,7 @@ import type {
 import type { CameraPose } from './types';
 import { findPose } from './poses';
 import { evaluatePathSegment } from './pathCurve';
+import { isKaykitLoopableAction, kaykitClipForAction } from './clipMap';
 
 export interface DirectorFrameState {
   shot: DirectorSequenceShot;
@@ -20,7 +22,30 @@ export interface DirectorFrameState {
   elements: DirectorElement[];
 }
 
-const MOVING_ACTIONS = new Set(['walk', 'fast-walk', 'run', 'follow', 'pass-by', 'dodge', 'enter-car', 'exit-car']);
+/** evaluate 时驱动引擎 AnimationMixer 的回调（元素侧有 mixer 才传） */
+export interface DirectorMixerDriveRequest {
+  elementId: string;
+  action: DirectorActionId;
+  clipName: string;
+  /** 动作内相对时间（已 clamp / 可循环取模由 playClip 处理） */
+  timeSec: number;
+  durationSec: number;
+  loop: boolean;
+}
+
+export type DirectorMixerDriver = (req: DirectorMixerDriveRequest) => void;
+
+export interface EvaluateDirectorFrameOptions {
+  /**
+   * 若提供：当 action 有 Kaykit 映射（或 clipName）且 driver 认领该 elementId 时，
+   * 走 mixer；否则回退 animatedJoints。
+   * hasMixer(elementId) 为 false/缺省时不驱动该元素的 mixer。
+   */
+  driveMixer?: DirectorMixerDriver;
+  hasMixer?: (elementId: string) => boolean;
+}
+
+const MOVING_ACTIONS = new Set(['walk', 'fast-walk', 'run', 'run-combat', 'follow', 'pass-by', 'dodge', 'dodge-forward', 'enter-car', 'exit-car']);
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -137,7 +162,13 @@ export function animatedJoints(action: DirectorActionClip['action'], progress: n
   return Object.fromEntries(Object.entries(preset).map(([joint, value]) => [joint, { x: value.x * blend, y: value.y * blend, z: value.z * blend }])) as Partial<Record<JointName, Vec3>>;
 }
 
-function applyAction(element: DirectorElement, action: DirectorActionClip, localTimeSec: number): DirectorElement {
+function applyAction(
+  element: DirectorElement,
+  action: DirectorActionClip,
+  localTimeSec: number,
+  opts?: { skipJoints?: boolean },
+): DirectorElement {
+  const skipJoints = opts?.skipJoints === true;
   const keyframeSample = samplePair(action.keyframes ?? [], Math.max(0, localTimeSec - action.startSec));
   if (keyframeSample) {
     const { left, right, progress } = keyframeSample;
@@ -149,12 +180,12 @@ function applyAction(element: DirectorElement, action: DirectorActionClip, local
       ...element,
       position,
       rotationDeg,
-      ...(element.kind === 'mannequin' ? { poseId: action.templateId ?? actionPose(action.action), joints: scaleJoints(lerpJoints(left.joints, right.joints, progress), element.motionScale ?? 1) } : {}),
+      ...(element.kind === 'mannequin' && !skipJoints ? { poseId: action.templateId ?? actionPose(action.action), joints: scaleJoints(lerpJoints(left.joints, right.joints, progress), element.motionScale ?? 1) } : {}),
     } as DirectorElement;
   }
   const rawProgress = clamp01((localTimeSec - action.startSec) / Math.max(0.01, action.durationSec));
   const progress = ease(rawProgress);
-  const moving = MOVING_ACTIONS.has(action.action) || action.from.x !== action.to.x || action.from.z !== action.to.z;
+  const moving = MOVING_ACTIONS.has(action.action) || action.from.x !== action.to.x || action.from.z !== action.to.z || action.action === 'run-combat' || action.action === 'dodge-forward';
   const pathYaw = Math.atan2(action.to.x - action.from.x, action.to.z - action.from.z) * 180 / Math.PI;
   return {
     ...element,
@@ -162,8 +193,15 @@ function applyAction(element: DirectorElement, action: DirectorActionClip, local
     rotationDeg: action.fromRotationDeg && action.toRotationDeg
       ? lerpVec(action.fromRotationDeg, action.toRotationDeg, progress)
       : moving && Math.hypot(action.to.x - action.from.x, action.to.z - action.from.z) > 0.05 ? { ...element.rotationDeg, y: pathYaw } : element.rotationDeg,
-    ...(element.kind === 'mannequin' ? { poseId: actionPose(action.action), joints: scaleJoints(animatedJoints(action.action, rawProgress, action.durationSec), element.motionScale ?? 1) } : {}),
+    ...(element.kind === 'mannequin' && !skipJoints ? { poseId: actionPose(action.action), joints: scaleJoints(animatedJoints(action.action, rawProgress, action.durationSec), element.motionScale ?? 1) } : {}),
   } as DirectorElement;
+}
+
+/** Shot 级内容时钟倍率；缺省 / 非法值回落 1，保持旧计划兼容。 */
+export function resolveShotTimeScale(shot: DirectorSequenceShot | null | undefined): number {
+  const scale = shot?.timeScale;
+  if (typeof scale !== 'number' || !Number.isFinite(scale) || scale <= 0) return 1;
+  return scale;
 }
 
 export function planDuration(plan: DirectorPlan): number {
@@ -176,7 +214,12 @@ export function shotAtTime(plan: DirectorPlan, timeSec: number): DirectorSequenc
     ?? plan.shots[plan.shots.length - 1];
 }
 
-export function evaluateDirectorFrame(plan: DirectorPlan, baseElements: DirectorElement[], timeSec: number): DirectorFrameState | null {
+export function evaluateDirectorFrame(
+  plan: DirectorPlan,
+  baseElements: DirectorElement[],
+  timeSec: number,
+  opts?: EvaluateDirectorFrameOptions,
+): DirectorFrameState | null {
   const shot = shotAtTime(plan, timeSec);
   if (!shot) return null;
   const localTimeSec = Math.max(0, Math.min(shot.durationSec, timeSec - shot.startSec));
@@ -211,9 +254,28 @@ export function evaluateDirectorFrame(plan: DirectorPlan, baseElements: Director
     const actions = shot.actions
       .filter((action) => action.elementId === base.id && localTimeSec >= action.startSec)
       .sort((a, b) => a.startSec - b.startSec);
+    const mixerOk = Boolean(opts?.driveMixer) && (opts?.hasMixer?.(base.id) ?? false);
     for (const action of actions) {
-      if (localTimeSec <= action.startSec + action.durationSec) element = applyAction(element, action, localTimeSec);
-      else element = applyAction(element, action, action.startSec + action.durationSec);
+      const at = localTimeSec <= action.startSec + action.durationSec
+        ? localTimeSec
+        : action.startSec + action.durationSec;
+      const clipName = kaykitClipForAction(action.action, action.clipName);
+      if (mixerOk && clipName) {
+        const localActionT = Math.max(0, at - action.startSec);
+        const loop = isKaykitLoopableAction(action.action);
+        opts!.driveMixer!({
+          elementId: base.id,
+          action: action.action,
+          clipName,
+          timeSec: localActionT,
+          durationSec: action.durationSec,
+          loop,
+        });
+        // mixer 驱动骨骼时仍更新位移/朝向，但跳过程序化 joints
+        element = applyAction(element, action, at, { skipJoints: true });
+      } else {
+        element = applyAction(element, action, at);
+      }
     }
     return element;
   });

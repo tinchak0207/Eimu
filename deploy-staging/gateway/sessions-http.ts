@@ -15,7 +15,7 @@ import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
-import { isSystemWakeText } from "./system-wake.ts"
+import { isSystemWakeText, isInternalMechanismText, stripSystemReminders } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
@@ -91,20 +91,23 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
         messages: [],
       })
     }
-    const msgs = (await res.json()) as Array<{
-      info?: { role?: string; time?: { created?: number } }
-      parts?: Array<{ type?: string; text?: string }>
-    }>
-    const messages = (Array.isArray(msgs) ? msgs : []).map((m) => ({
-      role: m.info?.role ?? "unknown",
-      created_at: m.info?.time?.created ?? null,
-      text: (m.parts ?? [])
-        .filter((p) => p.type === "text" && typeof p.text === "string")
-        .map((p) => p.text as string)
-        .join("\n")
-        .slice(0, 20_000),
-      has_tool_parts: (m.parts ?? []).some((p) => p.type === "tool"),
-    }))
+    const raw = await res.json()
+    // 与 /messages 同口径：经 slimHistoryMessages 过滤后再投影，避免本端点原样回传 system/developer/内部指令。
+    const slim = slimHistoryMessages(Array.isArray(raw) ? raw : [])
+    const messages = slim.map((m) => {
+      const msg = m as { info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }
+      const parts = Array.isArray(msg.parts) ? msg.parts : []
+      return {
+        role: msg.info?.role ?? "unknown",
+        created_at: null as number | null,
+        text: parts
+          .filter((p) => p.type === "text" && typeof p.text === "string")
+          .map((p) => p.text as string)
+          .join("\n")
+          .slice(0, 20_000),
+        has_tool_parts: parts.some((p) => p.type === "tool"),
+      }
+    })
     return Response.json({
       session_id: id,
       opencode_session_id: state.opencodeSessionId,
@@ -191,6 +194,20 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
         const q = p as Record<string, unknown> | null
         return !!q && q.type === "text" && isSystemWakeText(q.text)
       })) info.role = "system"
+      // 2026-10-23：客户端历史只暴露产品可见角色。developer / 非唤醒 system / 耐久收件箱等机制文一律不回传。
+      // 子代理唤醒（已改写成 system + isSystemWakeText）保留，供前端还原 subagent_result。
+      if (info.role === "developer") continue
+      if (info.role === "system") {
+        const wake = partsSrc.some((p) => {
+          const q = p as Record<string, unknown> | null
+          return !!q && q.type === "text" && isSystemWakeText(q.text)
+        })
+        if (!wake) continue
+      }
+      if (info.role === "user" && partsSrc.some((p) => {
+        const q = p as Record<string, unknown> | null
+        return !!q && q.type === "text" && isInternalMechanismText(q.text)
+      })) continue
       const parts: unknown[] = []
       for (const rawPart of partsSrc) {
         try {
@@ -207,7 +224,7 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 收口（SSE 帧已由 sse-core 收口，此端点原样透传 opencode 存储文本，
               // 刷新/重进会话时模型正文会从简体变回繁体）。仅对非 user 讯息转换，
               // 用户自己输入的文字逐字保留；转换在剥离之后进行。
-              let text = stripTailInjectedPayload(part.text)
+              let text = stripSystemReminders(stripTailInjectedPayload(part.text))
               // 2026-10-11 缺口C：顺序＝先剥离尾端注入块、再抹除会话凭证 ⟦gw:<nonce>⟧、
               // 最后才 T2S。真注入块与模型复述会把会话级凭证/内部提示原文写进存储文本，
               // 而历史端点是用户可见通道（SSE 干净、只有此处漏）。凭证一律抹为空串
@@ -223,8 +240,9 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
             if (typeof part.text === "string") {
               // 非上述分支的 text/reasoning（含 assistant 正文与 assistant/user 的 reasoning）：
               // 同样抹除凭证；非 user 再过 T2S，user 自己输入的文字逐字保留（凭证除外）。
-              let text = part.text.replace(GW_TOKEN_RE, "")
+              let text = stripSystemReminders(part.text).replace(GW_TOKEN_RE, "")
               if (info.role !== "user") text = t2sVisibleText(text)
+              if (text.length === 0) continue
               parts.push(text === part.text ? part : { ...part, text })
               continue
             }
