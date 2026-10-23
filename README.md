@@ -28,15 +28,12 @@ https://github.com/user-attachments/assets/1df9ea54-0cde-4365-9613-b1ae0a81511d
 
 <p align="center"><sub>左：我随便让它「做一个漫威级别的战斗影片，大概 15 秒。」→ Agent 想出「暴雨大坝 · 义体战士对重装机甲」。右：它做出来的影片，记得打开声音，它设计了配乐</sub></p>
 
-https://github.com/user-attachments/assets/16b73a40-0102-4e19-b1d8-1cd0b2b88b11
-
-<p align="center"><sub>宣传片，49 秒。</sub></p>
 
 https://github.com/user-attachments/assets/71c8cdfb-c692-4b74-934f-3450ae5f82d2
 
-<p align="center"><sub>完整成片，2 分 41 秒，字幕已烧录。</sub></p>
+<p align="center"><sub>我让它“做一个百合番剧MV"，它作曲作词，设计世界观做出来的完整成片，2 分 41 秒，记得开声音。</sub></p>
 
-扔进去的提示词长这样：
+用"Vibe"思考，不要设计提示词了。例如：
 
 > 「做一个漫威级别的战斗影片，大概 15 秒。」
 
