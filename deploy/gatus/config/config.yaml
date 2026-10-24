@@ -27,6 +27,34 @@ endpoints:
       hide-port: true
       hide-errors: false
 
+  # 生图链路端到端探针：此前只在 VPS 上存在，repo 没有 ⇒ 单向覆盖会冲掉它。
+  # 2026-10-24 依「双向 diff 取并集」并回 repo，之后两边同源。
+  - name: Gemini 3.1 Flash Image - 1K generation
+    group: Production
+    url: https://image.tinchak0207.xyz/v1/images/generations
+    method: POST
+    interval: 2h
+    headers:
+      Authorization: "Bearer ${IMAGE_API_KEY}"
+      Content-Type: application/json
+    body: |
+      {"model":"gemini-3.1-flash-image","prompt":"Uptime monitor probe. Create a single minimal blue square on a white background.","size":"1024x1024","n":1,"routing_hint":"hub"}
+    client:
+      timeout: 10m
+    conditions:
+      # production 的 /v1/images/generations 是非同步 API：POST 一律回 202 + task body。
+      # 探測必須驗證「202 + task id 存在」，而不是寬鬆的 2xx——否則卡 202 也算成功。
+      # routing_hint=hub → 調度器固定走 hublinuxdo 渠道。
+      - "[STATUS] == 202"
+      - "[BODY].id != \"\""
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
+      badge:
+        response-time:
+          thresholds: [10000, 30000, 60000, 120000, 300000]
+
   - name: Agent 网关健康
     group: Production
     url: https://store.tinchak0207.xyz/agent/healthz
@@ -37,6 +65,27 @@ endpoints:
     conditions:
       - "[STATUS] == 200"
       - "[BODY].ok == true"
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
+
+  # VPS 根分割区容量。2026-10-24 盘写满 100% 导致 postgres 无限重启、
+  # agent key relay 全挂；当时没有任何探针看容量，靠用户截图才发现。
+  # 数值由 VPS 上 disk-metrics.timer 每 5 分钟写入 /var/www/certbot/diskz.json
+  # （disk-guard.timer 负责在低位回收），nginx 以 /risk/diskz.json 对本机与内网暴露。
+  # 走容器名直连 imagesite-nginx，避免绕到公网再被 deny 规则挡回。
+  - name: VPS 磁盘容量
+    group: Production
+    url: http://imagesite-nginx/risk/diskz.json
+    method: GET
+    interval: 5m
+    client:
+      timeout: 15s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].ok == true"
+      - "[BODY].freePercent >= 15"
     ui:
       hide-hostname: true
       hide-port: true
