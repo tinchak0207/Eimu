@@ -38,6 +38,11 @@
 /.gitignore
 # 微信小程序子工程（独立 Taro 应用，与站点建置无关）
 /miniapp/
+# 小程序打包产物（129MB，单档超 Vercel 100MB 上限会让整个部署失败）
+/miniapp.zip
+# 本地补丁暂存与记忆队列（工具产物，站点零引用）
+/.patch-staging/
+/.memory-queue/
 /.next/
 /.next-start-pricing-3002.err.log
 /.next-start-pricing-3002.log
