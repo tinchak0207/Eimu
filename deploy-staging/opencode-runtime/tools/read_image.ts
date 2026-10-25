@@ -1,10 +1,7 @@
-import { stat } from "node:fs/promises"
 import { tool } from "@opencode-ai/plugin/tool"
 import { readImageSource, VisionToolError } from "../lib/vision_impl"
 import { checkAgentPath } from "../lib/sandbox"
-
-const MAX_CONTEXT_BASE64_CHARS = 1024 * 1024
-const MAX_CONTEXT_RAW_BYTES = Math.floor((MAX_CONTEXT_BASE64_CHARS * 3) / 4)
+import { fitImageForContext } from "../lib/fit-image-context"
 
 function imageTooLarge(hint: string) {
   return {
@@ -13,14 +10,10 @@ function imageTooLarge(hint: string) {
   }
 }
 
-// 原生「中性读图」工具（2026-09-29 审计修复；2026-10-02 改为把原图交给当前模型自己看）。
+// 原生「中性读图」工具：把原图交给当前模型自己看。
 //
-// 背景：旧路径是 agent 走 bash 跑 skills/read-image/read_image.py，该脚本要 NEWAPI_API_KEY
-// ＋外网。审计把 agent 的 bash/run_py 关进无秘密、无网路的沙箱后，那条 bash 路径必然失效
-// （这正是防秘密外泄与 SSRF 的代价）。读图是常用能力，故上移为原生工具。
-//
-// 2026-10-02 起不再「另找一个视觉模型代看后回文字」：图以 attachments 形式随工具结果进
-// 当前模型自己的上下文（多模态模型直接看；无视觉模型由 gateway 端诚实告知不支援）。
+// 图以 attachments 形式随工具结果进当前模型自己的上下文（多模态模型直接看；无视觉模型由
+// gateway 端诚实告知不支援）。
 // 与 vision_analyze 的分工：vision_analyze 是「毒蛇评审」（打分＋逐维点评），本工具只负责
 // 把原图带进上下文。
 //
@@ -33,7 +26,7 @@ export default tool({
   description:
     "读图：把一张图片的原图（本地路径或公网 URL）直接交给当前模型查看，一步完成——原图以附件形式进入你的上下文，你自己看画面内容（主体/场景/风格/色彩/光线/可见文字）。" +
     "用户上传图片、问「这张图里有什么/描述这张图/是什么风格」等看图需求用它，一步完成。" +
-    "只接受图片文件（png/jpeg/webp/gif/bmp/avif/heic），音频/视频会被人话报错。" +
+    "只接受图片文件（png/jpeg/webp/gif/bmp/avif/heic），音频/视频会被人话报错。超过约 1MB 会自动压成 JPEG 再看，不会因为体积拒绝。" +
     "要对图片打分/审美点评用 vision_analyze；要反推可生图的提示词另走反推 skill。",
   args: {
     image_path: tool.schema
@@ -66,41 +59,44 @@ export default tool({
       }
     }
     try {
-      if (imageUrl?.startsWith("data:") && imageUrl.length > MAX_CONTEXT_BASE64_CHARS + 64) {
-        return imageTooLarge("图片数据超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
-      }
-      if (imagePath) {
-        try {
-          const info = await stat(imagePath)
-          if (info.size > MAX_CONTEXT_RAW_BYTES) {
-            return imageTooLarge("图片超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
-          }
-        } catch {
-          // 文件不存在交给 readImageSource 报错
-        }
-      }
       const image = await readImageSource(imageUrl, imagePath)
-      if (image.bytes.byteLength > MAX_CONTEXT_RAW_BYTES) {
-        return imageTooLarge("图片超过约 1MB。当前运行时不能缩放，已拒绝放入上下文。")
+      let bytes: Uint8Array = image.bytes
+      let mime = image.mime
+      let shrunk = false
+      try {
+        const fitted = await fitImageForContext({ bytes, mime })
+        bytes = fitted.bytes
+        mime = fitted.mime
+        shrunk = fitted.shrunk
+      } catch (error) {
+        const hint = error instanceof Error ? error.message : String(error)
+        return imageTooLarge(hint)
       }
-      const ext = image.mime.slice(image.mime.indexOf("/") + 1).replace(/[^a-z0-9]/gi, "") || "png"
-      const filename = imagePath ? imagePath.split(/[\\/]/).pop() || `image.${ext}` : `image.${ext}`
-      const label = imagePath ? filename : imageUrl!.startsWith("data:") ? `${image.mime} 数据` : imageUrl!.slice(0, 80)
+      const ext = mime.slice(mime.indexOf("/") + 1).replace(/[^a-z0-9]/gi, "") || "png"
+      const filename = shrunk
+        ? `image.${ext}`
+        : imagePath
+          ? imagePath.split(/[\\/]/).pop() || `image.${ext}`
+          : `image.${ext}`
+      const label = imagePath ? (imagePath.split(/[\\/]/).pop() || filename) : imageUrl!.startsWith("data:") ? `${mime} 数据` : imageUrl!.slice(0, 80)
       const question = args.question && args.question.trim() ? args.question.trim() : undefined
-      const base64 = Buffer.from(image.bytes).toString("base64")
+      const base64 = Buffer.from(bytes).toString("base64")
       return {
         title: `读图：${label}`,
         output: JSON.stringify({
           ok: true,
           attached: true,
-          mime: image.mime,
-          bytes: image.bytes.byteLength,
-          bytes_approx: `${(image.bytes.byteLength / 1024 / 1024).toFixed(2)} MB`,
-          note: "原图已随本次工具结果附上，请直接查看图像内容后作答。",
+          mime,
+          bytes: bytes.byteLength,
+          bytes_approx: `${(bytes.byteLength / 1024 / 1024).toFixed(2)} MB`,
+          shrunk,
+          note: shrunk
+            ? "原图超过上下文上限，已压成 JPEG 附上。请直接查看图像内容后作答。"
+            : "原图已随本次工具结果附上，请直接查看图像内容后作答。",
           duration_ms: Date.now() - t0,
           ...(question ? { user_focus: question } : {}),
         }),
-        attachments: [{ type: "file", mime: image.mime, filename, url: `data:${image.mime};base64,${base64}` }],
+        attachments: [{ type: "file", mime, filename, url: `data:${mime};base64,${base64}` }],
       }
     } catch (e) {
       const hint = e instanceof VisionToolError ? e.message : e instanceof Error ? e.message : String(e)
