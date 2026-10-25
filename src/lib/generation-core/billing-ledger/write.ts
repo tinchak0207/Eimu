@@ -9,6 +9,39 @@ import { claimBillingOperation, committedAmount, dueReservationJobs, ensureRefun
 import { billingRetryAt, classifyBillingFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
 import { DEFAULT_RECONCILE_BATCH, ZOMBIE_RECLAIM_BATCH, ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT } from "./types";
 import type { FailureClass, GenerationJob } from "../types";
+import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+
+/**
+ * 降档交付（2026-10-25）：该 job 的成片实际档位低于请求档位时，返回实际档位。
+ *
+ * 上游两段链路（H3 出 768P → auto-hd 超分）中第二段没跑成时，我们交付 H3 那一版
+ * 并在 attempt 的 provider_result_json.downgraded 里如实记下实际档位。结算必须认它，
+ * 否则会按原档全额扣费而只给低一档的成片。
+ */
+async function downgradedResolutionOfJob(jobId: string, sql: GenerationSql): Promise<string | null> {
+  const rows = await sql<{ provider_result_json: { downgraded?: { actualResolution?: string } } | null }[]>`
+    SELECT provider_result_json FROM generation_attempt
+    WHERE job_id = ${jobId} AND provider_result_json IS NOT NULL
+  `;
+  for (const row of rows) {
+    const actual = row.provider_result_json?.downgraded?.actualResolution;
+    if (typeof actual === "string" && actual.trim()) return actual.trim();
+  }
+  return null;
+}
+
+/** 按实际档位重算金额；目录里没有该档或算不出来时回 null（宁可不退也不乱退）。 */
+function downgradedAmount(job: GenerationJob, actualResolution: string): number | null {
+  const durationSeconds = Number(job.workflow?.durationSeconds ?? 0);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const count = Math.max(1, Number(job.requestedCount ?? 1));
+  const amount = generationCoins(job.modelId, {
+    resolution: actualResolution as never,
+    durationSeconds,
+    generateAudio: job.workflow?.generateAudio === true,
+  }) * count;
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
 
 /**
  * Claims a durable reserve record before the external debit. An ambiguous result
@@ -292,6 +325,22 @@ export async function reconcileGenerationBilling(input: {
 
   for (const job of await terminalReservedJobs(limit, sql)) {
     if (job.status === "succeeded") {
+      // 降档交付（2026-10-25）：对帐路径落库的成片如果没到请求档位（H3 出 768P、
+      // auto-hd 段没跑成），不能按原档全额 commit——按实际档重算并退差价。
+      // 否则「低清冒充高清」会从这条对帐通道漏出去。
+      const actualResolution = await downgradedResolutionOfJob(job.id, sql);
+      const settled = actualResolution ? downgradedAmount(job, actualResolution) : null;
+      if (settled !== null && settled < job.billingAmount) {
+        await commitGenerationBilling(job, settled, sql);
+        await refundGenerationBilling({
+          job,
+          amount: Math.round((job.billingAmount - settled) * 1e6) / 1e6,
+          executorId: input.executorId,
+          adapter: input.adapter,
+        }, sql);
+        summary.settlementAttempts += 1;
+        continue;
+      }
       await commitGenerationBilling(job, job.billingAmount, sql);
       summary.settlementAttempts += 1;
       continue;

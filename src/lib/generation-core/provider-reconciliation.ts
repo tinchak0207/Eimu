@@ -461,6 +461,9 @@ async function landReconciledArtifact(
           artifact_id: stored.id,
           delivery_url: stored.deliveryUrl,
           inserted: stored.inserted,
+          // 降档交付（2026-10-25）：记下实际档位，结算按它计费并退差价，
+          // 交付物本身仍是这份成片，不冒充请求档位、也不丢弃。
+          ...(input.result.downgraded ? { downgraded: input.result.downgraded } : {}),
         })) as never)},
         provider_next_poll_at = NULL,
         failure_class = NULL, failure_detail = NULL,
