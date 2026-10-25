@@ -3,7 +3,7 @@ import { classifyError, platformFetch, ok, fail } from "../lib/client"
 
 export default tool({
   description:
-    "查询图片模型列表、每张图片的币值成本与当下可用性（报价用，免费不扣费）。**选模硬规则：只从 available_models 里挑（已按近 24h 真实交付排序，proven_models＝近 24h 真出过图的，优先用）；availability=unavailable 的模型（无可用渠道／供应商停用／近期 0% 成功）不准提交、不准逐档试，试了只会白烧时间**。与 video_quote 同源判活（/v1/model-status）。",
+    "查询图片模型列表、每张图片的币值成本与当下可用性（报价用，免费不扣费）。图片模型只允许 gpt-image-2、gpt-image-2.5-flare、gpt-image-2.5-sunburst，其他图片模型不列出、不准提交。**选模硬规则：只从 available_models 里挑（已按近 24h 真实交付排序，proven_models＝近 24h 真出过图的，优先用）；availability=unavailable 的模型（无可用渠道／供应商停用／近期 0% 成功）不准提交、不准逐档试，试了只会白烧时间**。与 video_quote 同源判活（/v1/model-status）。",
   args: {
     model: tool.schema.string().optional().describe("若指定则只回这个模型的定价"),
   },
@@ -43,6 +43,8 @@ export default tool({
         // 图片报价工具只该列图片模型：明确标成 video 的一律剔除（含 args.model
         // 指定视频模型时也回空，让 agent 知道该模型不能当图片报价）。
         .filter((m: any) => !m.capabilities || m.capabilities?.mediaType !== "video")
+        // GPT_IMAGE_ONLY：除 gpt-image-2 / 2.5-flare / 2.5-sunburst 外的图片模型不准进入报价。
+        .filter((m: any) => m.id === "gpt-image-2" || m.id === "gpt-image-2.5-flare" || m.id === "gpt-image-2.5-sunburst")
         .filter((m: any) => (args.model ? m.id === args.model : true))
         .map((m: any) => {
           const s = statusById.get(m.id)

@@ -9,6 +9,10 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 
 创作前从原任务提取显式硬约束，交付前对照原任务逐项核对；不另造重复路径表。用户的 before/after/until/then（先、后、直到、再）是动作依赖，须同时保留在现有 camera.timing 与最终 shot.prompt 中。等待触发后才启动的机位不能写成全程匀速；没有给定秒点时保留事件触发，不编精确秒数。
 
+## MiniMax H3 Content IR
+
+模型是 minimax-h3 时，提交前读取 `.opencode/skills/minimax-h3/content-ir.md`，按官方 Content IR 改写。交给生成工具的 prompt 就是这份改写，不走六槽，不再包一层 shot JSON。身份图、风格图、动作参考用 Ref2VA 六栏；只有明确的首帧、尾帧、首尾帧才用 I2VA / L2VA / FL2VA。平台认出 IR 后不再追加运动合同。例子在 `minimax-h3/upstream/h3-prompt-writing/references/`。
+
 ## 动态优先（先于运镜）
 
 视频 = 帧间变化。先决定「这一镜里什么在变」，再决定机位怎么走；运镜不能替代主体动作。
@@ -26,7 +30,7 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 5. 根据真实目录模型、能力、输入限制和完整档位报价选路；交付规格要 1080p／2K／4K 时按 [references/models.md](references/models.md) 的「分辨率档位与高清交付」节选档——一次填对 `resolution` 提交，不许拆成低清出片再自行超分；不能把原生位姿张量控制当 prompt 保证。模型失败先识别主体/场景/机位哪层冲突，缩短动作或换合适路径，不堆同义运镜词。付费视频渠道（MiniMax H3／Seedance／miaowu）全断时，目录里的免费兜底档 `agnes-video-2.5-flash`（agnes 免费额度，480p/720p、5/10 秒、无参考图，队列限速）仍可出片——只在付费档不可用时用它，不因免费默认选它；细则见 [references/models.md](references/models.md)。
 6. shot.camera 交既有编译器与 chain。自然语言视频默认只填 movement、单一权威 trajectory 与必要 timing；start/end/parallax/keyframes 仍是平台支持的可选字段，保留用户显式字段与硬约束，不默认填满。keyframes 仅在任务确实要求分时控制时，从同一条已确定的路径推导；time_seconds 严格递增且位于镜头 duration 内，position 不得与轨迹方向或位置顺序冲突。无可靠空间依据或无法保持一致时，明确不能作该硬精确承诺，改用简洁运动方案，不编造位置。先 dry_run 核最终 submit_body，再在真实授权下制作。制作后由独立 critic 实际看时间序列，含开头相邻原帧及中尾覆盖；单帧、probe、首帧骤跳都不能证明连续运镜，缺感知标 PARTIAL，不伪签 PASS。
 
-按需读取（相对本目录）：动态优先与 beat 时间线先读 [references/motion-first.md](references/motion-first.md)，运动选型再读 [references/motion.md](references/motion.md)；模型提示与输入边界用 [references/models.md](references/models.md)。不把整库每轮注入。
+按需读取（相对本目录）：动态优先与 beat 时间线先读 [references/motion-first.md](references/motion-first.md)，运动选型再读 [references/motion.md](references/motion.md)；模型提示与输入边界用 [references/models.md](references/models.md)。minimax-h3 的 prompt 改写读 `.opencode/skills/minimax-h3/content-ir.md`。不把整库每轮注入。
 
 
 ## 批量逐帧与产物回收

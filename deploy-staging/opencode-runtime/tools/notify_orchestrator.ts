@@ -19,9 +19,9 @@ export default tool({
   description: [
     "子代理向派工方（orchestrator）上报的通道——这是「子→父」方向。",
     "**什么时候用**：任务遇到阻塞、需要派工方决策、或到达一个值得让派工方知道的里程碑（阶段完成、真实产物已落盘）。",
-    "**kind**：`progress`＝里程碑/阶段进展；`blocked`＝被卡住、无法自行推进；`question`＝需要派工方拿主意的决策，可带 `question` 对象（`header` 提问标题、`options` 候选答案、`is_blocking` 是否阻塞等待答复、`is_secret` 是否敏感）。",
-    "**父方忙碌时不会被打断**：消息进它的待读队列，回执 `delivery:\"skipped_inactive\"`、`parent_woken:false`；该回报**会在派工方下一次被唤醒时一并送达**（不保证立即）。父方空闲时唤醒一次，回 `delivery:\"accepted\"`、`parent_woken:true`。**唤醒有 60s 窗口限流，且按类别分道：progress／blocked（连同 `is_blocking:false` 的非阻塞提问）一道，`is_blocking:true` 的阻塞式提问另一道，各自独立计时——一类刚唤醒过不会抑制另一类。** 若回执带 `throttled:true`，表示**本类**在本窗口内已唤醒过父方、本条只入队：回报不会丢，会在派工方**下一次被唤醒时一并送达**（不保证立即，不会立刻被读到）。若你在等答复而长时间无回应，用 `subagent_status` 复核 `pending_questions`，别原地重投。等待唤醒不靠轮询——以本工具的真实回执为准。",
-    "**不要用它刷进度**：只为需要对方知晓或决策的事件上报，琐碎的过程日志不要投。上报内容不是正式交付，正式成果仍按任务书交付契约回传。",
+    "**kind**：`progress`＝里程碑/阶段进展，**只入队、不唤醒、不另开模型回合**（回执 `delivery:\"queued\"`、`parent_woken:false`）。`blocked`＝被卡住、无法自行推进；`question`＝需要派工方拿主意的决策，可带 `question` 对象（`header` 提问标题、`options` 候选答案、`is_blocking` 是否阻塞等待答复、`is_secret` 是否敏感）。",
+    "**父方忙碌时不会被打断**（blocked／question）：消息进它的待读队列，回执 `delivery:\"skipped_inactive\"`、`parent_woken:false`；该回报**会在派工方下一次被唤醒时一并送达**（不保证立即）。父方空闲时，blocked／question 唤醒一次，回 `delivery:\"accepted\"`、`parent_woken:true`。progress 无论父方忙闲都只入队。**唤醒有 60s 窗口限流，且按类别分道：blocked（连同 `is_blocking:false` 的非阻塞提问）一道，`is_blocking:true` 的阻塞式提问另一道，各自独立计时——一类刚唤醒过不会抑制另一类。** 若回执带 `throttled:true`，表示**本类**在本窗口内已唤醒过父方、本条只入队：回报不会丢，会在派工方**下一次被唤醒时一并送达**（不保证立即，不会立刻被读到）。若你在等答复而长时间无回应，用 `subagent_status` 复核 `pending_questions`，别原地重投。等待唤醒不靠轮询——以本工具的真实回执为准。",
+    "**不要用 progress 刷「还在排队」**：过程日志不要投。progress 不会让派工方开新回合，也不要等它被读到。上报内容不是正式交付，正式成果仍按任务书交付契约回传。",
     `**必填**：kind；text（kind=question 时可用非空 question.header 代替）。缺失会被拒并回传可照抄的完整参数示例。示例参数：${EXAMPLE_JSON}`,
   ].join("\n"),
   args: {
@@ -97,11 +97,13 @@ export default tool({
         ...(data.question_id !== undefined ? { question_id: data.question_id } : {}),
         note: throttled
           ? isBlockingQ
-            ? "派工方本 60s 窗口内已因提问被唤醒过（提问道独立计时，progress 不占这道），本条已入队、未再次唤醒；回报不会丢，会在派工方下一次被唤醒时一并送达（不保证立即，不会立刻被读到）。若你在等答复而长时间无回应，用 subagent_status 复核 pending_questions，不要原地重投。"
-            : "派工方本 60s 窗口内已被唤醒过（progress/blocked 类独立计时），本条已入队、未再次唤醒；回报不会丢，会在派工方下一次被唤醒时一并送达（不保证立即，不会立刻被读到）。不要原地空转重投——以真实回执为准。"
-          : delivery === "skipped_inactive"
-            ? "派工方当前忙碌，消息已进它的待读队列（不打断）；会在派工方下一次被唤醒时一并送达（不保证立即）。等待唤醒不靠轮询，以真实回执为准。"
-            : "派工方空闲，已唤醒一次。等待唤醒不靠轮询，以真实回执为准。",
+            ? "派工方本 60s 窗口内已因提问被唤醒过（提问道独立计时），本条已入队、未再次唤醒；回报不会丢，会在派工方下一次被唤醒时一并送达（不保证立即，不会立刻被读到）。若你在等答复而长时间无回应，用 subagent_status 复核 pending_questions，不要原地重投。"
+            : "派工方本 60s 窗口内已被唤醒过（blocked 类独立计时），本条已入队、未再次唤醒；回报不会丢，会在派工方下一次被唤醒时一并送达（不保证立即，不会立刻被读到）。不要原地空转重投——以真实回执为准。"
+          : delivery === "queued"
+            ? "进度已入队，不另开模型回合。继续做你手上的活，不要等派工方读这条，也不要隔一会儿再报一次「还在排队」。"
+            : delivery === "skipped_inactive"
+              ? "派工方当前忙碌，消息已进它的待读队列（不打断）；会在派工方下一次被唤醒时一并送达（不保证立即）。等待唤醒不靠轮询，以真实回执为准。"
+              : "派工方空闲，已唤醒一次。等待唤醒不靠轮询，以真实回执为准。",
       })
     } catch (e) {
       return fail("gateway_unreachable", (e as Error).message)

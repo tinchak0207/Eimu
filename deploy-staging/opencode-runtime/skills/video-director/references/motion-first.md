@@ -29,6 +29,7 @@ state_change.from  →  beats[]  →  state_change.to
 - 每镜至少一次可见状态变化；只有静态画面 + 六槽会被 `validateMotionContract` 拒收（invalid_shot）。
 - `environment_change` 每镜至少一项：不是每镜都要换场景，但每镜都要有环境层面的可观察变化（光变、风、尘、人流、门开、水动）。
 - 字段写法与编译细节以 `deploy-staging/gateway/video-prompt-schema.ts` 为准；本档只讲创作口径。
+- minimax-h3 的成片 prompt 以 `.opencode/skills/minimax-h3/content-ir.md` 为准。beats 仍用来设计动作；交给模型的字符串是 Content IR。参考图不是首尾帧时，prompt 直接写六栏原文，不要另存一份 shot JSON，否则编译器会把多张身份图收成首尾帧。
 
 ## 3. 动作 beat 怎么写
 
@@ -108,6 +109,6 @@ beats: [
 
 ## 8. 方法来源（方法参考，非逐字复制）
 
-- MiniMax-H3 官方 skills：`h3-prompt-writing`、`3d-animation-short-generator`——镜头/动作分层与 3D 预演到视频的思路。
+- MiniMax-H3 官方 skills 已入库 `.opencode/skills/minimax-h3/upstream/`。成片 prompt 按 `content-ir.md` 写，不在本档展开。
 - runcomfy 3D scene-to-video 工作流：白模场景 + 机位路径 → 视频生成的生产流程参考。
 - 本档为原创提炼，只吸收结构与方法，不复制原文与代码；具体模型能力与输入边界见 [models.md](models.md)，机位几何规则见 [motion.md](motion.md)。
