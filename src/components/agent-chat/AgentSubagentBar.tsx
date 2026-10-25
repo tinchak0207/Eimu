@@ -34,7 +34,7 @@ import { toolDisplayName } from "./AgentToolCard";
 // 状态标签查 agent-task-status.ts 单一语义表（ok=已完成、error=失败，都是
 // 语义表的权威值，不再本地字面维护）；圆点着色是本行的展示层，留在这里。
 // 色彩纪律（0920）：ios-blue＝运行、深灰＝完成、灰＝停止/等待、红＝失败。
-const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
+export const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   running: "bg-ios-blue",
   ok: "bg-foreground/60",
   error: "bg-ios-red",
@@ -52,7 +52,7 @@ const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
 // 行尾状态词（2026-09-20 对版预览）：与工具行同一套字面——用户看到的
 // 是「运行中…／完成／失败」，不是工单状态「已完成」。
 // 字面以 AgentToolCard 的状态词（STATUS_META）为单一真源；此处仅镜射。
-const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
+export const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
   running: "运行中…",
   ok: "完成",
   error: "失败",
@@ -60,7 +60,7 @@ const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
 };
 
 // 状态词着色：运行＝ios-blue，其余灰；只有失败用红（色彩纪律：红仅失败）。
-const STATUS_WORD_TONE: Record<AgentSubagentItem["status"], string> = {
+export const STATUS_WORD_TONE: Record<AgentSubagentItem["status"], string> = {
   running: "text-ios-blue",
   ok: "text-foreground/45",
   error: "text-ios-red",
@@ -162,13 +162,14 @@ function MarqueeLine({ text }: { text: string }) {
 
 interface SubagentCardProps {
   item: AgentSubagentItem;
-  sessionId?: string | null;
-  open: boolean;
-  onToggle: () => void;
+  /** 该子代理的整屏视图正在显示（折叠头 aria-expanded 由它决定）。 */
+  isViewing: boolean;
+  /** 打开整屏视图；未接线时行不可点（不崩溃）。 */
+  onOpen: () => void;
 }
 
-/** 面板距底的贴合阈值（px）：用户向上翻看时不抢滚动位置。 */
-const STICK_BOTTOM_PX = 24;
+/** 转录区距底的贴合阈值（px）：用户向上翻看时不抢滚动位置。 */
+export const STICK_BOTTOM_PX = 24;
 /** 运行中续拉间隔：2s 是「看起来实时」与请求量之间的折中。 */
 const TRANSCRIPT_POLL_MS = 2000;
 /** 远端列表的刷新间隔：只在列表里仍有 running 时启用，终态即停。 */
@@ -212,7 +213,7 @@ type TranscriptBlock =
   | { key: string; entry: Exclude<AgentSubagentTranscriptEntry, { k: "text" }> };
 
 /** 转录行渲染：顺序即网关 entries 顺序，不重排；仅把 cont 续块并回同一段正文。 */
-function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscriptEntry[] }) {
+export function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscriptEntry[] }) {
   // 网关会把长正文切成多条 text，续块带 cont:true。先归并成块再渲染：
   // 一段正文只出一个 <p>，否则每个切块各成一段，段落被硬生生拆开。
   const blocks: TranscriptBlock[] = [];
@@ -297,30 +298,25 @@ function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscript
 }
 
 /**
- * 子代理实时转录面板。
- * 约束：sessionId 缺失不发请求（只展示本地记录）；running 才轮询；
- * eof／终态／关闭／卸载即停；拉取失败降级成「本地记录」，不弹错。
+ * 子代理转录取数（轮询／offset／停止）的唯一实现。
+ * 行内面板与整屏视图共用这一份，禁止另写第二套轮询。
+ * 约束：sessionId 缺失不发请求；只在运行中续拉；终态／停止成功／卸载即停；
+ * 拉取失败把 loadError 交给视图降级成「本地记录」，不弹错。
  */
-function SubagentDetailPanel({
-  item,
-  sessionId,
-  runId,
-}: {
-  item: AgentSubagentItem;
-  sessionId?: string | null;
-  runId: string;
-}) {
-  const fallbackText = item.text || item.activity || item.lastLine || "";
+export function useSubagentTranscript(
+  sessionId: string | null | undefined,
+  runId: string,
+  running: boolean,
+) {
   const [entries, setEntries] = useState<AgentSubagentTranscriptEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [stopState, setStopState] = useState<"idle" | "stopping" | "stopped" | "failed">("idle");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
   const offsetRef = useRef(0);
-  const running = item.status === "running" && stopState !== "stopped";
+  // 停止成功后立刻停表：帧里的 status 可能滞后，不能只等 item.status 翻面。
+  const active = running && stopState !== "stopped";
 
-  // 轮询启停只由 running 决定：eof 是「本页读完了」的单次语义，不是调度信号——
+  // 轮询启停只由 active 决定：eof 是「本页读完了」的单次语义，不是调度信号——
   // 运行中的子代理每页都可能 eof:true，用它停表会让日志冻结在第一页。
   useEffect(() => {
     if (!sessionId || !runId) return;
@@ -339,7 +335,7 @@ function SubagentDetailPanel({
       }
     };
     void pull();
-    if (!running) {
+    if (!active) {
       return () => {
         cancelled = true;
       };
@@ -351,14 +347,7 @@ function SubagentDetailPanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [sessionId, runId, running]);
-
-  // 只有用户本来就在底部附近才跟随；向上翻看时新行不抢视窗。
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !stickRef.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [entries, loaded, loadError]);
+  }, [sessionId, runId, active]);
 
   const handleStop = async () => {
     if (!sessionId || !runId || stopState === "stopping" || stopState === "stopped") return;
@@ -376,47 +365,7 @@ function SubagentDetailPanel({
     }
   };
 
-  return (
-    <div className="flex min-w-0 flex-col gap-1 pb-1 pl-7 pr-2">
-      <div
-        ref={scrollRef}
-        onScroll={() => {
-          const el = scrollRef.current;
-          if (!el) return;
-          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
-        }}
-        className="agent-scroll-thin max-h-64 min-w-0 overflow-y-auto overflow-x-hidden"
-      >
-        <div className="flex min-w-0 flex-col gap-1">
-          {entries.length > 0 && <SubagentTranscriptLines entries={entries} />}
-          {loadError && (
-            <p className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">
-              日志暂时读不到，下面是本地记录
-            </p>
-          )}
-          {(!sessionId || loadError) && fallbackText && (
-            <p className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">{fallbackText}</p>
-          )}
-          {!sessionId && !fallbackText && <p className="text-ios-footnote text-foreground/45">暂无记录。</p>}
-          {loaded && !loadError && entries.length === 0 && (
-            <p className="text-ios-footnote text-foreground/45">暂无记录。</p>
-          )}
-        </div>
-      </div>
-      {running && (
-        <button
-          type="button"
-          onClick={handleStop}
-          disabled={stopState === "stopping"}
-          className="min-h-9 w-fit cursor-pointer touch-manipulation rounded-[10px] px-2 -mx-2 text-left text-ios-footnote text-ios-red transition-colors hover:bg-ios-red/[0.06] disabled:cursor-default disabled:opacity-50 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/25 [-webkit-tap-highlight-color:transparent]"
-        >
-          {stopState === "stopping" ? "正在停止…" : "停止"}
-        </button>
-      )}
-      {stopState === "stopped" && <p className="text-ios-footnote text-foreground/45">已停止</p>}
-      {stopState === "failed" && <p className="text-ios-footnote text-ios-red">停止失败，请重试</p>}
-    </div>
-  );
+  return { entries, loaded, loadError, stopState, handleStop };
 }
 
 /**
@@ -443,14 +392,14 @@ function SubagentToolLines({ entries }: { entries: AgentSubagentToolEntry[] }) {
   );
 }
 
-function SubagentCard({ item, sessionId, open, onToggle }: SubagentCardProps) {
+function SubagentCard({ item, isViewing, onOpen }: SubagentCardProps) {
   return (
     <div className="flex min-w-0 w-full flex-col">
-      {/* 整行即按钮：折叠态沿用原 div 的全部类名，外观零变化；展开态在下方追加面板。 */}
+      {/* 整行即按钮：点开的是整屏子代理视图（不再在行内展开转录面板）。 */}
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
+        onClick={onOpen}
+        aria-expanded={isViewing}
         className="agent-rise flex min-h-11 min-w-0 w-full cursor-pointer touch-manipulation items-center gap-2 rounded-[12px] px-2 -mx-2 text-left select-none transition-colors hover:bg-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
       >
         <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
@@ -489,7 +438,6 @@ function SubagentCard({ item, sessionId, open, onToggle }: SubagentCardProps) {
         />
       </button>
       {item.status === "running" && <SubagentToolLines entries={item.tools ?? []} />}
-      {open && <SubagentDetailPanel item={item} sessionId={sessionId} runId={item.subagentId} />}
     </div>
   );
 }
@@ -498,18 +446,22 @@ function AgentSubagentBarComponent({
   items: frameItems,
   initialOpen = false,
   sessionId = null,
+  viewingRunId = null,
+  onOpenRun,
 }: {
   items: AgentSubagentItem[];
   /** 测试／调试可强制初开；生产默认折叠（G3 R2 降噪）。 */
   initialOpen?: boolean;
-  /** 缺失时不发转录请求，详情面板只展示本地兜底（离线／测试可用）。 */
+  /** 缺失时不拉远端列表（离线／测试可用）。 */
   sessionId?: string | null;
+  /** 当前正在整屏查看的子代理 runId（行尾 aria-expanded 与高亮由它决定）。 */
+  viewingRunId?: string | null;
+  /** 点行 → 打开整屏视图；未接线时点击不做事。 */
+  onOpenRun?: (item: AgentSubagentItem) => void;
 }) {
   // G3（2026-10-10）：默认折叠——用户默认面靠 turn.status「进行中／本路刚完成」，
   // 展开才见跑马灯细节；手动展开优先于任何自动行为（新 started 不把收起的摊回去）。
   const [open, setOpen] = useState(initialOpen);
-  // 详情面板同一时间只开一路：轮询只有一份，避免多路并发把面板变成日志墙。
-  const [openRunId, setOpenRunId] = useState<string | null>(null);
   // 帧外的运行（刷新/回放窗口之外）：只有列表端点还能证明它们存在。
   const [remoteRuns, setRemoteRuns] = useState<AgentSubagentRunSummary[]>([]);
 
@@ -569,9 +521,8 @@ function AgentSubagentBarComponent({
         <SubagentCard
           key={item.id}
           item={item}
-          sessionId={sessionId}
-          open={openRunId === item.subagentId}
-          onToggle={() => setOpenRunId((cur) => (cur === item.subagentId ? null : item.subagentId))}
+          isViewing={viewingRunId === item.subagentId}
+          onOpen={() => onOpenRun?.(item)}
         />
       ))}
     </div>

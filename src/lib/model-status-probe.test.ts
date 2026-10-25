@@ -65,6 +65,33 @@ test("/models 200 但清单没有上游模型名 → 不算通，继续探下一
   assert.match(entry.note ?? "", /未列出上游模型 seedance-2\.0-900-特惠/);
 });
 
+test("routeLabels 只探测生效路由上的渠道", async () => {
+  const probed: string[] = [];
+  const entry = await probeModelStatus("seedance-2.0", {
+    env,
+    routeLabels: ["gway"],
+    probeFn: async (endpoint: ProbeEndpointInput) => {
+      probed.push(endpoint.label);
+      return { ok: true, status: 200, ms: 3, modelIds: ["seedance-2.0-900-特惠"] };
+    },
+  });
+  assert.deepEqual(probed, ["gway"]);
+  assert.equal(entry.availability, "available");
+  assert.equal(entry.channel_id, "env:gway");
+});
+
+test("routeLabels 对不上任何渠道 → 生效路由上无可用渠道，且不发探测", async () => {
+  const entry = await probeModelStatus("seedance-2.0", {
+    env,
+    routeLabels: ["a6api"],
+    probeFn: async () => {
+      throw new Error("should not probe");
+    },
+  });
+  assert.equal(entry.availability, "unavailable");
+  assert.equal(entry.note, "生效路由上无可用渠道");
+});
+
 test("所有渠道 /models 都不列该模型 → unavailable", async () => {
   const entry = await probeModelStatus("seedance-2.0", {
     env,

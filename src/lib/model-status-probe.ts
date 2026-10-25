@@ -86,6 +86,13 @@ export interface ModelStatusProbeOptions {
   recentStats?: unknown[];
   probeFn?: (endpoint: ProbeEndpointInput) => Promise<ProbeEndpointResult>;
   now?: () => Date;
+  /**
+   * 与调度器 resolveModelRoute().labels 同源。非空时只探测这些渠道；
+   * 对不上任何端点则 unavailable（生效路由上无可用渠道），不再拿路由外的渠道判活。
+   */
+  routeLabels?: readonly string[];
+  /** 每个模型的生效路由。给出时探测队列按它过滤。 */
+  resolveRoute?: (modelId: string) => Promise<readonly string[] | undefined>;
 }
 
 /** 渠道无 /models 能力的集合，与 channels/probe 的 UNPROBEABLE_CHANNEL_IDS 同源。 */
@@ -201,9 +208,17 @@ export async function probeModelStatus(
     checked_at: now().toISOString(),
   };
 
-  const queue = buildModelQueue(modelId, env, pools, overrides);
+  const built = buildModelQueue(modelId, env, pools, overrides);
+  const routeLabels = options.routeLabels;
+  const queue = routeLabels && routeLabels.length > 0
+    ? built.filter((endpoint) => routeLabels.includes(endpoint.label))
+    : built;
   if (queue.length === 0) {
-    return { ...base, availability: "unavailable" as const, note: "无可用渠道" };
+    return {
+      ...base,
+      availability: "unavailable" as const,
+      note: routeLabels && routeLabels.length > 0 ? "生效路由上无可用渠道" : "无可用渠道",
+    };
   }
 
   // 按队列顺位逐个探，任一渠道通即 available——与真实生成的 failover 同源。
@@ -307,9 +322,11 @@ export async function probeAllModelsStatus(options: ModelStatusProbeOptions = {}
 
   const startedAt = Date.now();
   const modelIds = [...new Set(GENERATION_MODEL_IDS)];
-  const models = await mapLimit(modelIds, PROBE_CONCURRENCY, (modelId) =>
-    probeModelStatus(modelId, { env, pools, overrides, probeFn, now }),
-  );
+  const resolveRoute = options.resolveRoute;
+  const models = await mapLimit(modelIds, PROBE_CONCURRENCY, async (modelId) => {
+    const routeLabels = resolveRoute ? await resolveRoute(modelId) : undefined;
+    return probeModelStatus(modelId, { env, pools, overrides, probeFn, now, routeLabels });
+  });
   const durationMs = Date.now() - startedAt;
 
   const snapshot: ModelStatusSnapshot = {

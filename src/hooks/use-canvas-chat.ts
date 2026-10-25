@@ -110,6 +110,11 @@ export { downstreamInvalidationIds } from "./canvas/canvas-chat-helpers";
 export function useCanvasChat(
   sessionId?: string | null,
   projectContext?: UseCanvasChatProjectContext,
+  /**
+   * 会话恢复时从远端快照拿到的 rev（2026-10-21）：直通 useCanvasProjectSync 的
+   * initialSnapshotRev。缺省/ null ⇒ 首次上行维持旧行为（rev=0）。
+   */
+  initialSnapshotRev?: number | null,
 ): UseCanvasChatReturn {
   const [canvas, dispatchCanvas] = useReducer(canvasReducer, CANVAS_INITIAL_STATE);
   const [plans, setPlans] = useState<CanvasPlanCard[]>([]);
@@ -381,10 +386,10 @@ export function useCanvasChat(
       styleId?: unknown;
       scriptType?: unknown;
       narrationVoice?: unknown;
-    }): boolean => {
+    }, allowEmpty = false): boolean => {
       if (!snapshot || typeof snapshot !== "object") return false;
       const restored = fromCanvasProject(snapshot);
-      if (restored.nodes.length === 0) return false;
+      if (restored.nodes.length === 0 && !allowEmpty) return false;
       everHadNodesRef.current = true;
       // 上行摘要刻意不带座标（版面权在前端 reducer，layout.ts 档头）：
       // fromCanvasProject 把缺座标补成 (0,0)，直接 load 会让所有卡叠在原点
@@ -652,8 +657,9 @@ export function useCanvasChat(
     setLoading,
     setActiveCanvasId,
     onRemoteSnapshot: (snapshot) => {
-      restoreAgentSnapshot(snapshot as Parameters<typeof restoreAgentSnapshot>[0]);
+      return restoreAgentSnapshot(snapshot as Parameters<typeof restoreAgentSnapshot>[0], true);
     },
+    initialSnapshotRev,
   });
 
   // ─────────────────────── P2-A：聊天内多画布（切换 / 新建 / 清单）

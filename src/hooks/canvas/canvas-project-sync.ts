@@ -80,7 +80,13 @@ export interface UseCanvasProjectSyncParams {
   /**
    * 快照 409：远端较新。调用方用这份快照替换本地，不要再把冲突前的本地快照写回去。
    */
-  onRemoteSnapshot?: (snapshot: Record<string, unknown>) => void;
+  onRemoteSnapshot?: (snapshot: Record<string, unknown>) => boolean;
+  /**
+   * 会话恢复时从 `fetchAgentCanvasSnapshotWithRev` 拿到的远端快照 rev（2026-10-21）。
+   * 写进 snapshotRevRef 供首次上行使用 —— 否则首发固定 rev=0，服务端 CAS 必然 409。
+   * 未恢复/拿不到时传 null（或省略）：首次上行保持旧行为发 0。
+   */
+  initialSnapshotRev?: number | null;
 }
 
 /**
@@ -96,7 +102,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     projectType, currentStep, episodes, styleId, scriptType, narrationVoice,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading, setActiveCanvasId,
-    onRemoteSnapshot,
+    onRemoteSnapshot, initialSnapshotRev,
   } = params;
 
   const createdAtRef = useRef<string | null>(null);
@@ -110,11 +116,19 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   saveStateRef.current = saveState;
   const snapshotRevRef = useRef<number | null>(null);
   const snapshotSessionRef = useRef<string | null>(null);
+  const snapshotEpochRef = useRef(0);
+  const snapshotWriteRef = useRef<Promise<void>>(Promise.resolve());
   const onRemoteSnapshotRef = useRef(onRemoteSnapshot);
   onRemoteSnapshotRef.current = onRemoteSnapshot;
   if (snapshotSessionRef.current !== (sessionId ?? null)) {
     snapshotSessionRef.current = sessionId ?? null;
-    snapshotRevRef.current = null;
+    // 换会话：**不得沿用上一会话的 rev**（会把新会话首帧带着旧会话的令牌打上去）。
+    snapshotRevRef.current = typeof initialSnapshotRev === "number" ? initialSnapshotRev : null;
+    snapshotEpochRef.current += 1;
+  } else if (snapshotRevRef.current === null && typeof initialSnapshotRev === "number") {
+    // 同会话内恢复快照晚到（异步 GET 回流）：此时还没有任何成功上行，采纳远端 rev。
+    // 已有 rev 时不再覆盖——那可能是本端刚写成功的新令牌或本端正在使用的基座。
+    snapshotRevRef.current = initialSnapshotRev;
   }
 
   // ─────────────────────── 进页初始化（只抓历史清单，不自动还原画布）
@@ -274,12 +288,39 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         // DSL namespace＝画布 project id（同一张画布＝一条产线；族4 的 workflow 名由此来）。
         ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
       });
-      if (snapshotRevRef.current !== null) snapshot.rev = snapshotRevRef.current;
-      void postCanvasSnapshot(sessionId, snapshot).then((result) => {
-        if (!mountedRef.current) return;
+      const epoch = snapshotEpochRef.current;
+      const projectId = projectIdRef.current;
+      const currentRequest = () => mountedRef.current && snapshotSessionRef.current === sessionId
+        && snapshotEpochRef.current === epoch && projectIdRef.current === projectId;
+      // 同一调用方串行提交；冲突恢复会使排队中的旧快照失效，不能给旧图套上新rev重投。
+      snapshotWriteRef.current = snapshotWriteRef.current.catch(() => {}).then(async () => {
+        if (!currentRequest()) return;
+        // rev 播种：首次上行用会话恢复拿到的远端 rev（未恢复时保持旧行为发 0）。
+        snapshot.rev = snapshotRevRef.current ?? 0;
+        const result = await postCanvasSnapshot(sessionId, snapshot);
+        if (!currentRequest()) return;
         if (result.conflict) {
-          if (result.rev !== null) snapshotRevRef.current = result.rev;
-          if (result.remote) onRemoteSnapshotRef.current?.(result.remote);
+          if (!result.remote || result.rev === null) return;
+          // 远端是Agent读面快照；覆盖本地前先用现有完整工程存档保留未提交劳动。
+          const local = canvasRef.current;
+          const conflictCopy = {
+            ...buildProject(),
+            id: `canvas-conflict-${crypto.randomUUID()}`,
+            title: `${titleRef.current || "画布"}（同步冲突前的本地副本）`,
+          };
+          const saved = await saveCanvasProject(conflictCopy);
+          if (!currentRequest()) return;
+          if (!saved.ok) { setSaveState("error"); return; }
+          setSavedProjects((prev) => [...toProjectSummaries([conflictCopy]), ...prev]);
+          // 存副本期间又有编辑：保留当前画布，下一次仍用旧令牌处理冲突。
+          if (canvasRef.current !== local) return;
+          // 409 可能是响应丢失的重试（此时远端内容即本端刚写的那份，应用远端无损）；
+          // 也可能是真冲突。无论哪种，用本地 3 秒前的旧快照 rebase 都会覆盖服务端
+          // agent 新写入的节点（远端数据回退、跨端 ping-pong），故一律不重投。
+          if (!onRemoteSnapshotRef.current) return;
+          if (!onRemoteSnapshotRef.current(result.remote)) return;
+          snapshotEpochRef.current += 1;
+          snapshotRevRef.current = result.rev;
           return;
         }
         if (result.ok && result.rev !== null) snapshotRevRef.current = result.rev;

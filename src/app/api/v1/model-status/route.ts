@@ -24,6 +24,7 @@ import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
 import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
+import { resolveModelRoute } from "@/lib/generation-core/model-routing";
 import { applyModelBiasReset, EMPTY_BIAS_RESET_WATERMARKS, readBiasResetWatermarks } from "@/lib/bias-reset";
 
 export const runtime = "nodejs";
@@ -109,13 +110,19 @@ export async function GET(req: NextRequest) {
     getRuntimeChannelOverrides(),
     getRecentModelStats(),
   ]);
-  const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides, recentStats });
+  const snapshot = await probeAllModelsStatus({
+    env: process.env,
+    pools,
+    overrides,
+    recentStats,
+    // 与 worker 同一张表：model_route_override 优先，否则 MODEL_ROUTES。
+    // 路由外的渠道不再参与判活。
+    resolveRoute: async (modelId) => (await resolveModelRoute(modelId)).labels,
+  });
 
-  // 每模型追加 last_24h（最近 24h 真实表现统计）。窗口内无样本的模型不带该字段——
-  // 没数据就诚实地不装有数据。availability 已由 probe 层用同一份统计裁决：
-  // 近 24h 有真实交付 → available（真实产物是最高证据，GET /models 探测的
-  // 404 假阴性不推翻它）；非 OpenAI 兼容渠道（metaso/filmera/adobe2api）探测
-  // 无意义，一律 unknown，绝不允许假阴性标 unavailable。
+  // 每模型追加 last_24h。窗口内无样本就不带该字段。
+  // last_24h 不把 availability 翻成 available。执行侧没有健康供应商时，
+  // 下面的 readSupplierHealthSignal 会压成 unavailable。
   const statsByModel = new Map(recentStats.map((stats) => [stats.modelId, stats]));
   // R7-E：渠道余额信号——连续 quota_exhausted 断流的模型覆写 availability=unavailable
   // + note「渠道欠费」，agent 提交前就换道，不把任务烧进死队列。探测/遥测故障 →

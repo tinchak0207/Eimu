@@ -251,7 +251,7 @@ async function readSnapshotResponse(sessionId: string): Promise<{
   if (!json || typeof json !== "object") return { status: res.status, state: null, rev: null };
   const body = json as Record<string, unknown>;
   const state =
-    body.state && typeof body.state === "object" && !Array.isArray(body.state)
+    body.has_state === false ? null : body.state && typeof body.state === "object" && !Array.isArray(body.state)
       ? (body.state as Record<string, unknown>)
       : body;
   return { status: res.status, state, rev: readSnapshotRev(body) ?? readSnapshotRev(state) };
@@ -264,7 +264,7 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
   if (!headers) return emptySnapshotPost();
   headers["Content-Type"] = "application/json";
   const revInState = readSnapshotRev(state);
-  const bodyState = stateWithRev(state, revInState);
+  const bodyState = stateWithRev(state, revInState ?? 0);
   try {
     const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
       method: "POST",
@@ -286,7 +286,6 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
       json = null;
     }
     if (res.status === 409) {
-      const rev = readSnapshotRev(json);
       let remote: Record<string, unknown> | null = null;
       let remoteRev: number | null = null;
       try {
@@ -296,7 +295,8 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
       } catch {
         remote = null;
       }
-      return emptySnapshotPost({ conflict: true, rev: rev ?? remoteRev, remote });
+      // 409只说明原请求过期。写令牌必须与随后读到的那份快照绑定；回读失败绝不洗新旧图。
+      return emptySnapshotPost({ conflict: true, rev: remote ? remoteRev : null, remote });
     }
     if (!res.ok) return emptySnapshotPost();
     return { ok: true, rev: readSnapshotRev(json), conflict: false, remote: null };
@@ -310,13 +310,24 @@ export async function postCanvasSnapshot(sessionId: string, state: unknown): Pro
  *  注意与上行刻意不同：不因「本端无 token」提前放弃 —— 权限判定是站内路由的职责
  *  （resolveAgentCaller），本端拦截会让 LOCAL_TEST 与 token 恢复中的窗口永远拿不到回填。 */
 export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Record<string, unknown> | null> {
+  return (await fetchAgentCanvasSnapshotWithRev(sessionId)).state;
+}
+
+/**
+ * 下行＋乐观锁 rev（2026-10-21）：恢复快照时必须把服务端当前 rev 一并交给上行同步。
+ * 否则刷新/续跑后的第一帧快照只能发 rev=0，服务端 CAS 必然 409（并把当前画布换回旧远端）。
+ * 无快照/失败时 state 与 rev 皆为 null —— 调用端据此保持旧行为（首发 0），不猜测 rev。
+ */
+export async function fetchAgentCanvasSnapshotWithRev(
+  sessionId: string,
+): Promise<{ state: Record<string, unknown> | null; rev: number | null }> {
   try {
     const pulled = await readSnapshotResponse(sessionId);
     const state = pulled.state;
-    if (!state || !Array.isArray(state.nodes) || state.nodes.length === 0) return null;
-    return state;
+    if (!state || !Array.isArray(state.nodes) || state.nodes.length === 0) return { state: null, rev: null };
+    return { state, rev: pulled.rev };
   } catch {
-    return null;
+    return { state: null, rev: null };
   }
 }
 

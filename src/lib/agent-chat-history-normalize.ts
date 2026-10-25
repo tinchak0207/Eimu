@@ -138,6 +138,19 @@ function toolErrorText(raw: unknown): string | undefined {
 const SUBAGENT_WAKE_RE =
   /^【子代理(完成|失败)·系统自动唤醒】subagent\s+([0-9A-Za-z]+)（label="([^"]*)"）已(?:完成|失败)。(?:结果摘要|失败原因)：/;
 
+/** 与 gateway/system-wake.ts 同口径：进度、队列、阻塞、提问不进用户气泡。 */
+const HIDDEN_BUS_HEAD_RE = /^\s*【子代理(?:进度回报|报告阻塞|提问)·系统自动唤醒】|^\s*【子代理回报队列·系统事实】/;
+const TERMINAL_WAKE_RE = /【子代理(?:完成|失败)·系统自动唤醒】/;
+
+function isHiddenSubagentBusText(text: string): boolean {
+  return HIDDEN_BUS_HEAD_RE.test(text) && !TERMINAL_WAKE_RE.test(text);
+}
+
+function clientVisibleWakeText(text: string): string {
+  const i = text.search(TERMINAL_WAKE_RE);
+  return i > 0 ? text.slice(i) : text;
+}
+
 /** 唤醒讯息尾部固定的续跑指令行（给模型的指令，不是产出内容）。 */
 const SUBAGENT_WAKE_TAIL = "请基于以上真实结果继续推进";
 
@@ -318,9 +331,15 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
       }
       const text = texts.join("\n");
 
+      // 进度回报 / 回报队列是系统事实，idle 回来不得画成用户气泡。
+      if (isHiddenSubagentBusText(text)) {
+        drop("system-bus");
+        continue;
+      }
+
       // 旧版网关历史里唤醒讯息仍是 user role（431b39b5 前）：同样还原成产出卡，
       // 绝不画成用户气泡。新网关已改 system role（下方分支），此处保留兼容。
-      const wake = parseSubagentWake(text);
+      const wake = parseSubagentWake(clientVisibleWakeText(text));
       if (wake !== null) {
         order += 1;
         items.push(subagentReportItem(wake, order));
@@ -363,7 +382,11 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         drop(type);
       }
       const text = texts.join("\n");
-      const wake = parseSubagentWake(text);
+      if (isHiddenSubagentBusText(text)) {
+        drop("system-message");
+        continue;
+      }
+      const wake = parseSubagentWake(clientVisibleWakeText(text));
       if (wake !== null) {
         order += 1;
         items.push(subagentReportItem(wake, order));

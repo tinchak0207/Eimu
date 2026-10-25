@@ -255,6 +255,23 @@ test("子代理唤醒骨架漂移（label 带引号）→ 兜底解析，仍不�
 // 生产真路径：gateway 历史读面（sessions-http.ts / session-read.ts）已把唤醒
 // 讯息的 role 改写成 "system"。系统角色分支必须还原产出卡，且普通 system 讯息
 // 绝不冒充用户气泡。
+test("进度回报和回报队列不画成用户气泡", () => {
+  const { items, droppedByType } = normalizeOpenCodeMessages([
+    {
+      info: { role: "user" },
+      parts: [{
+        type: "text",
+        text: "【子代理回报队列·系统事实】父会话上次被唤醒以来，以下子代理回报已在队列中排队（共 1 条，按到达顺序）：\n【子代理进度回报·系统自动唤醒】「无主黎明视觉三图」这一路在跑",
+      }],
+    },
+    { info: { role: "user" }, parts: [{ type: "text", text: "继续" }] },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "user");
+  assert.equal((items[0] as { text: string }).text, "继续");
+  assert.equal(droppedByType["system-bus"], 1);
+});
+
 test("role=system 的子代理唤醒 → subagent_result；普通 system 讯息整条丢弃计数", () => {
   const { items, droppedParts, droppedByType } = normalizeOpenCodeMessages([
     { info: { role: "system" }, parts: [{ type: "text", text: wakeOkMsg.parts![0].text as string }] },

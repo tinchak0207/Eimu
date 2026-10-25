@@ -78,6 +78,10 @@ pixai-pool/
 .tools/
 .env*
 !deploy/vps/control-plane.env.example
+!/.env.example
+
+# 小程序打包产物（含 node_modules 与嵌套 .git，129MB，禁止入库）
+/miniapp.zip
 
 # 本地工具 HOME / 快取 / 快照（曾整包入库 160MB+，禁止再入）
 /.tmp-home/

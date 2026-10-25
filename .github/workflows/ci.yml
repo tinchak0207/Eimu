@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: npm
+          # self-hosted runner：setup-node 的 npm 缓存上传会卡死后置步骤，禁用缓存。
       # package-lock.json 是本 repo 的安装契约（vercel.json installCommand = npm install，
       # 且 package-lock.json 为现行 lockfile；pnpm-lock.yaml 是 8 月的残留，勿用 pnpm）。
       - run: npm ci
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: npm
+          # self-hosted runner：setup-node 的 npm 缓存上传会卡死后置步骤，禁用缓存。
       - run: npm ci
       # gateway 自带 package.json（nanoid + bun-types），没有入库的 lockfile；
       # --no-package-lock 明确不生成 lock，node_modules 也不入库（.gitignore 已覆盖）。
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: npm
+          # self-hosted runner：setup-node 的 npm 缓存上传会卡死后置步骤，禁用缓存。
       - run: npm ci
       - name: Unit tests (explicit exclusions, no silent pass)
         run: |

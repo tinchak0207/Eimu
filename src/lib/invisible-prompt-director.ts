@@ -376,9 +376,26 @@ export function extractSixSlots(prompt: string, mediaType: "image" | "video"): S
  * 优化一段影片 prompt。纯函数、无副作用、同步执行——零成本零延迟。
  * 输入已 trim 过。
  */
+/**
+ * 官方 H3 Content IR 已经是模型要的正文。
+ * 再套六槽、空话替换和同形词替换会拆掉字段名、参考标签和 `<d>` 里的原文。
+ * 三栏与六栏都认：行首字段名齐了才放行，口语里偶然出现某个词不够。
+ */
+export function isOfficialH3ContentIr(prompt: string): boolean {
+  const text = prompt.trim();
+  const base = /^integrated_multimodal_description\s*:/m.test(text)
+    && /^overall_soundscape\s*:/m.test(text)
+    && /^non_diegetic_music\s*:/m.test(text);
+  const ref = /^subject_definitions\s*:/m.test(text)
+    && /^detailed_description\s*:/m.test(text)
+    && /^overall_soundscape\s*:/m.test(text);
+  return base || ref;
+}
+
 export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = {}): string {
   const user = rawPrompt.trim();
   if (!user) return user;
+  if (isOfficialH3ContentIr(user)) return user;
 
   const cameraPresent = SLOT_PATTERNS.camera.test(user);
   const actionPresent = SLOT_PATTERNS.action.test(user);

@@ -34,7 +34,8 @@
  *   ① slotted action：action.fcurves 已死 → channelbags 路径（verify_keyframe.py 同构）。
  *   ② file_format="FFMPEG" enum 已死 → turntable 不再走桥内 muxer（in-process
  *      muxer 必崩出 48 字节 stub），改分块 ≤10 帧 PNG + 工具层系统 ffmpeg 合成 H264。
- *   ③ Eevee previz 存活预设 samples=1 + RT off（负载越大桥内越易 native 崩；cycles 不受限）。
+ *   ③ Eevee 画质分档：单帧 still 尊重场景 samples/RT（可 quality="final" 提档），turntable/
+ *      多帧动画仍走 1spp + RT off 存活预设（负载越大桥内越易 native 崩；cycles 不受限）。
  *
  * export 注记（2026-09-06 片AA）：buildChunkRenderScript 供 generation-core 的
  * blender_bridge 适配层（supplier-adapter.ts generateWithBlenderNode）直接 import
@@ -57,6 +58,21 @@ const CLIENT_ABORT_GRACE_MS = 10_000
 const MAX_FRAME_SPAN = 2000
 /** 存活配方：桥内每请求渲染帧数上限（实锤：动画 >10 帧必死，samples=1 全过）。 */
 const RENDER_CHUNK_FRAMES = 10
+/**
+ * still 崩溃降级链（2026-10-22 画质修复）：首次渲染按场景/参数画质，原生崩溃或超时后
+ * 逐级降采样重试。只在 still 生效；turntable/多帧动画仍直接走 1spp + RT off 存活预设。
+ */
+const EEVEE_DEGRADE_SAMPLES_LADDER = [64, 32, 16, 4, 1] as const
+/** 排障开关：=1 时恢复旧行为（所有 Eevee 渲染强压 1spp + RT off），缺省关闭。 */
+const FORCE_EEVEE_SURVIVAL_PRESET = process.env.BLENDER_EEVEE_SURVIVAL_PRESET === "1"
+/** still 降级可重试的桥错误码（native 崩溃/超时/桥重启）；参数或业务错误不降级。 */
+const DEGRADABLE_BRIDGE_CODES = new Set([
+  "blender_script_error",
+  "bridge_unavailable",
+  "bridge_http_error",
+  "bridge_bad_response",
+  "bridge_timeout",
+])
 /** turntable PNG 序列合成系统 ffmpeg 路径（可 env 覆盖）。 */
 const FFMPEG_BIN = process.env.BLENDER_FFMPEG_BIN || "ffmpeg"
 
@@ -64,6 +80,16 @@ export const BLENDER_BRIDGE_URL_DEFAULT = "http://127.0.0.1:8765"
 
 export function bridgeUrl(): string {
   return process.env.BLENDER_BRIDGE_URL || BLENDER_BRIDGE_URL_DEFAULT
+}
+
+/**
+ * 桥鉴权头：桥的 /v1/execute 与 /v1/cancel 要求 Bearer 必须等于桥进程的
+ * BLENDER_BRIDGE_TOKEN；桥未设 token 时一律 401（永不当匿名）。本端与桥必须
+ * 成对配置：env 有 token 才发头，没有就不发（供无鉴权的本地开发桥）。
+ */
+export function bridgeAuthHeaders(): Record<string, string> {
+  const token = process.env.BLENDER_BRIDGE_TOKEN
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 /**
@@ -175,7 +201,7 @@ async function bridgeExecute(
   try {
     response = await fetch(`${bridgeUrl()}/v1/execute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...bridgeAuthHeaders() },
       body: JSON.stringify({ script, timeout_ms: timeoutMs }),
       signal,
     })
@@ -359,6 +385,70 @@ function pyBool(b: boolean): string {
   return b ? "True" : "False"
 }
 
+/** 从桥 stdout_tail 抽最后一条 `RENDER_QUALITY:{json}`（sidecar 丢失时的回执后备）。 */
+function parseRenderQualityLine(stdout: string): Record<string, unknown> | null {
+  const marker = "RENDER_QUALITY:"
+  const idx = stdout.lastIndexOf(marker)
+  if (idx < 0) return null
+  const lineEnd = stdout.indexOf("\n", idx)
+  const raw = stdout.slice(idx + marker.length, lineEnd < 0 ? undefined : lineEnd).trim()
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * still 渲染前的场景画质探针：读 .blend 现有 Eevee samples/RT/分辨率。
+ * 用途：① 定降级链起点（场景本就 <64spp 时不许反向升采样）；② 回执写场景真值。
+ * 探针失败不阻断渲染（返回 null，降级链退回绝对梯子）。
+ */
+async function probeSceneQuality(
+  sceneBlendPath: string | undefined,
+  context?: BlenderToolContext,
+): Promise<{
+  samples: number | null
+  raytracing: boolean | null
+  shadows: boolean | null
+  resolution: [number, number] | null
+} | null> {
+  const script = `import bpy, json
+SCENE_PATH = ${sceneBlendPath ? pyStr(sceneBlendPath) : "None"}
+if SCENE_PATH:
+    bpy.ops.wm.open_mainfile(filepath=SCENE_PATH)
+scene = bpy.context.scene
+eevee = getattr(scene, "eevee", None)
+print("SCENE_QUALITY:" + json.dumps({
+    "samples": getattr(eevee, "taa_render_samples", None),
+    "raytracing": getattr(eevee, "use_raytracing", None),
+    "shadows": getattr(eevee, "use_shadows", None),
+    "resolution": [scene.render.resolution_x, scene.render.resolution_y],
+}))
+`
+  try {
+    const data = await bridgeExecute(script, EXEC_DEFAULT_TIMEOUT_MS, context)
+    const marker = "SCENE_QUALITY:"
+    const idx = data.stdout_tail.lastIndexOf(marker)
+    if (idx < 0) return null
+    const lineEnd = data.stdout_tail.indexOf("\n", idx)
+    const parsed = JSON.parse(
+      data.stdout_tail.slice(idx + marker.length, lineEnd < 0 ? undefined : lineEnd).trim(),
+    ) as { samples?: unknown; raytracing?: unknown; shadows?: unknown; resolution?: unknown }
+    return {
+      samples: Number.isFinite(Number(parsed.samples)) ? Math.round(Number(parsed.samples)) : null,
+      raytracing: typeof parsed.raytracing === "boolean" ? parsed.raytracing : null,
+      shadows: typeof parsed.shadows === "boolean" ? parsed.shadows : null,
+      resolution:
+        Array.isArray(parsed.resolution) && parsed.resolution.length === 2
+          ? (parsed.resolution as [number, number])
+          : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 // ── bpy 脚本模板（render / export 走同一 POST /v1/execute 通道） ─────────────
 
 /**
@@ -366,7 +456,10 @@ function pyBool(b: boolean): string {
  *
  * 存活配方（smoke P0-5 实锤，2026-09-06-blender-bridge-render-crash-survival-recipe）：
  *   - 桥内 Eevee 渲染负载越大越易 native 无声崩（动画>10 帧必死、samples=16 全崩）；
- *     samples=1 + RT off 全过 → 每请求只渲 ≤10 帧 PNG + previz 存活预设（cycles 档不受此限）。
+ *     samples=1 + RT off 全过 → 每请求只渲 ≤10 帧 PNG（cycles 档不受此限）。
+ *   - 画质分档（2026-10-22）：turntable/多帧动画照旧 1spp + RT off 存活预设；单帧 still
+ *     尊重 .blend 里的 taa_render_samples/use_raytracing，可用 quality="final" 或 samples
+ *     显式提档。旧行为可用 env BLENDER_EEVEE_SURVIVAL_PRESET=1 恢复（排障用）。
  *   - 桥契约一次 execute 一个脚本 → 分块由工具层循环多次 execute；mp4 合成在工具层
  *     系统 ffmpeg 完成（桥内 in-process mp4 muxer 必崩出 48 字节 stub）。
  *   - 进程死=场景丢 → 每块都重新 open_mainfile；turntable 的 pivot/关键帧按 FULL 区间
@@ -385,12 +478,29 @@ export function buildChunkRenderScript(p: {
   fullStart: number
   fullEnd: number
   outputDirName: string
+  /** 单帧 still（chunkStart=null 或单帧块且非 turntable）→ 尊重场景画质，缺省自动判定。 */
+  still?: boolean
+  /** Eevee 采样数显式覆盖（优先级最高，仍受存活预设压制）；null/缺省=用场景值。 */
+  samples?: number | null
+  /** "final"：RT on + 阴影开 + samples=max(场景值,32)（samples 显式给出时不再套 32 下限）。 */
+  quality?: "preview" | "final" | null
+  /** RT 显式覆盖（still 降级链降到 samples<=4 时置 false）；null/缺省=按 quality/场景。 */
+  raytracing?: boolean | null
 }): string {
+  // still 判定：非 turntable 且只有一帧。降级链/排障 env 之外的 still 不压画质。
+  const still = p.still ?? (!p.turntable && (p.chunkStart === null || p.chunkStart === p.chunkEnd))
+  const survivalPreset = !still || FORCE_EEVEE_SURVIVAL_PRESET
+  const pyTri = (b: boolean | null | undefined) => (b === undefined || b === null ? "None" : pyBool(b))
   return `import bpy, math, mathutils, os, json
 
 SCENE_PATH = ${p.sceneBlendPath ? pyStr(p.sceneBlendPath) : "None"}
 ENGINE_NAME = ${pyStr(p.engine)}
 TURNTABLE = ${pyBool(p.turntable)}
+STILL = ${pyBool(still)}
+SURVIVAL_PRESET = ${pyBool(survivalPreset)}
+SAMPLES_OVERRIDE = ${pyInt(p.samples ?? null)}
+QUALITY = ${p.quality ? pyStr(p.quality) : "None"}
+RAYTRACING_OVERRIDE = ${pyTri(p.raytracing)}
 CHUNK_START = ${pyInt(p.chunkStart)}
 CHUNK_END = ${pyInt(p.chunkEnd)}
 FULL_START = ${pyInt(p.fullStart)}
@@ -418,24 +528,76 @@ def action_fcurves(act):
             for bag in strip.channelbags:
                 yield from bag.fcurves
 
-def apply_previz_survival_preset(scene):
-    # 存活预设：samples=1 + RT off（Eevee 负载越大桥内越易 native 崩，实锤矩阵见注释头）。
-    try:
-        scene.eevee.taa_render_samples = 1
-    except (TypeError, AttributeError):
-        pass
-    try:
-        scene.eevee.use_raytracing = False
-    except (AttributeError, TypeError):
-        pass
+def apply_render_quality(scene):
+    # 画质分档（2026-10-22）：SURVIVAL_PRESET（turntable/多帧动画/env 排障开关）→
+    # 强压 1spp + RT off（实锤：负载越高桥内越易 native 崩）。still → 尊重场景
+    # taa_render_samples/use_raytracing，显式 samples 或 quality="final" 才提档。
+    info = {
+        "still": bool(STILL),
+        "survival_preset": bool(SURVIVAL_PRESET),
+        "samples_requested": SAMPLES_OVERRIDE,
+        "quality": QUALITY,
+        "raytracing_override": RAYTRACING_OVERRIDE,
+    }
+    eevee = getattr(scene, "eevee", None)
+    if eevee is None:
+        info["note"] = "non-eevee engine"
+        print("RENDER_QUALITY:" + json.dumps(info))
+        return info
+    if SURVIVAL_PRESET:
+        try:
+            eevee.taa_render_samples = 1
+        except (TypeError, AttributeError):
+            pass
+        try:
+            eevee.use_raytracing = False
+        except (AttributeError, TypeError):
+            pass
+    else:
+        if SAMPLES_OVERRIDE is not None:
+            try:
+                eevee.taa_render_samples = SAMPLES_OVERRIDE
+            except (TypeError, AttributeError, ValueError):
+                pass
+        elif QUALITY == "final":
+            try:
+                eevee.taa_render_samples = max(int(eevee.taa_render_samples or 0), 32)
+            except (TypeError, AttributeError, ValueError):
+                pass
+        if RAYTRACING_OVERRIDE is not None:
+            try:
+                eevee.use_raytracing = bool(RAYTRACING_OVERRIDE)
+            except (AttributeError, TypeError):
+                pass
+        elif QUALITY == "final":
+            try:
+                eevee.use_raytracing = True
+            except (AttributeError, TypeError):
+                pass
+            try:
+                eevee.use_shadows = True
+            except (AttributeError, TypeError):
+                pass
+    # 回执写实际生效值（降级后也不许藏画质）。
+    info["samples_actual"] = getattr(eevee, "taa_render_samples", None)
+    info["raytracing_actual"] = getattr(eevee, "use_raytracing", None)
+    info["shadows_actual"] = getattr(eevee, "use_shadows", None)
+    info["resolution"] = [
+        scene.render.resolution_x,
+        scene.render.resolution_y,
+        scene.render.resolution_percentage,
+    ]
+    print("RENDER_QUALITY:" + json.dumps(info))
+    return info
 
 if SCENE_PATH:
     bpy.ops.wm.open_mainfile(filepath=SCENE_PATH)
 scene = bpy.context.scene
 used_engine = set_engine(scene, ENGINE_NAME)
 print("ENGINE_USED:" + used_engine)
+quality_info = None
 if used_engine.startswith("BLENDER_EEVEE"):
-    apply_previz_survival_preset(scene)
+    quality_info = apply_render_quality(scene)
 scene.render.image_settings.file_format = "PNG"
 
 def ensure_camera(scene):
@@ -495,6 +657,10 @@ if TURNTABLE:
 
 out_dir = os.path.join(os.getcwd(), "out", OUTPUT_DIR_NAME)
 os.makedirs(out_dir, exist_ok=True)
+# 画质回执 sidecar：降级重试每次都覆盖，工具层读它写进成功回执（stdout 可能被日志挤掉）。
+if quality_info is not None:
+    with open(os.path.join(out_dir, "render_quality.json"), "w") as fh:
+        json.dump(quality_info, fh, ensure_ascii=False)
 # fps 走 sidecar 落盘（stdout_tail 会被 blender.log 占满挤掉 print，artifact 才硬）。
 meta_path = os.path.join(out_dir, "meta.json")
 if not os.path.exists(meta_path):
@@ -650,6 +816,19 @@ export const blenderRenderTool: BlenderToolDef = {
       required: false,
       description: "产物文件名（不含扩展名），默认 turntable / render。",
     },
+    samples: {
+      type: "number",
+      required: false,
+      description:
+        "Eevee 采样数显式覆盖（1-4096 的整数）；缺省尊重 .blend 里已有的 taa_render_samples。仅单帧 still 生效（turntable/多帧动画一律走 1spp 存活预设）。",
+    },
+    quality: {
+      type: "string",
+      required: false,
+      enum: ["preview", "final"],
+      description:
+        "画质档：final=强制 RT on + 阴影开 + 采样数至少 32（显式 samples 优先）；preview=只用场景值。仅单帧 still 生效（turntable/多帧动画一律走 1spp + RT off 存活预设）。",
+    },
   },
   async execute(rawArgs, context) {
     try {
@@ -668,6 +847,31 @@ export const blenderRenderTool: BlenderToolDef = {
       const outputBase = sanitizeOutputName(rawArgs.output_name, turntable ? "turntable" : "render")
       const sceneBlendPath = asString(rawArgs.scene_blend_path)
 
+      // 画质参数（2026-10-22）：只对 Eevee 单帧 still 生效；turntable/多帧动画仍走
+      // 1spp + RT off 存活预设（传了也不生效，回执 survival_preset 写明）。
+      let samplesOverride: number | null = null
+      const rawSamples = rawArgs.samples
+      if (rawSamples !== undefined && rawSamples !== null && rawSamples !== "") {
+        const n = Number(rawSamples)
+        if (!Number.isInteger(n) || n < 1 || n > 4096) {
+          return fail("invalid_args", `samples 必须是 1-4096 的整数，收到 "${String(rawSamples)}"。`)
+        }
+        samplesOverride = n
+      }
+      const rawQuality = rawArgs.quality
+      if (
+        rawQuality !== undefined &&
+        rawQuality !== null &&
+        rawQuality !== "" &&
+        rawQuality !== "preview" &&
+        rawQuality !== "final"
+      ) {
+        return fail("invalid_args", `quality 只接受 "preview" 或 "final"，收到 "${String(rawQuality)}"。`)
+      }
+      const quality: "preview" | "final" | null =
+        rawQuality === "preview" || rawQuality === "final" ? rawQuality : null
+      const engine = engineRaw ?? "eevee"
+
       // 桥 spawn Blender 时 CWD=workdir，脚本产物写 out/<dir>/，桥 artifacts 路径相对 out/。
       const health = await bridgeHealth(context)
       const outDir = nodePath.join(health.workdir, "out")
@@ -683,15 +887,33 @@ export const blenderRenderTool: BlenderToolDef = {
       let chunkCount = 0
       let sceneFps = 0
 
-      const renderChunk = async (chunkStart: number, chunkEnd: number) => {        const script = buildChunkRenderScript({
+      // 单帧 still = 非 turntable 且（无帧范围或只有一帧）。只有它尊重场景画质；
+      // 其余（turntable/多帧动画）与 env 排障开关一律走旧存活预设。
+      const stillRender = !turntable && (span === null || span.start === span.end)
+      const survivalPreset = !stillRender || FORCE_EEVEE_SURVIVAL_PRESET
+      const degradeEnabled = stillRender && engine === "eevee" && !FORCE_EEVEE_SURVIVAL_PRESET
+
+      // still 先探场景画质（降级链起点 + 回执真值）；探针失败不阻断渲染。
+      const sceneQuality = degradeEnabled ? await probeSceneQuality(sceneBlendPath, context) : null
+      const sceneSamples = sceneQuality?.samples ?? null
+
+      type QualityAttempt = { samples: number | null; raytracing: boolean | null }
+      let appliedQuality: Record<string, unknown> | null = null
+
+      const renderChunk = async (chunkStart: number, chunkEnd: number, attempt: QualityAttempt) => {
+        const script = buildChunkRenderScript({
           sceneBlendPath,
-          engine: engineRaw ?? "eevee",
+          engine,
           turntable,
           chunkStart: span ? chunkStart : null,
           chunkEnd,
           fullStart: span ? span.start : chunkStart,
           fullEnd: span ? span.end : chunkEnd,
           outputDirName,
+          still: stillRender,
+          samples: attempt.samples,
+          quality,
+          raytracing: attempt.raytracing,
         })
         const data = await bridgeExecute(script, RENDER_DEFAULT_TIMEOUT_MS, context)
         chunkCount += 1
@@ -699,6 +921,12 @@ export const blenderRenderTool: BlenderToolDef = {
         sceneSummary = data.scene_summary
         stdoutTail = data.stdout_tail
         durationMs += data.duration_ms
+        // 画质回执：sidecar 优先（stdout 可能被日志挤掉），再退回 stdout 的 RENDER_QUALITY 行。
+        appliedQuality =
+          (await fsp
+            .readFile(nodePath.join(outDir, outputDirName, "render_quality.json"), "utf8")
+            .then((t) => JSON.parse(t) as Record<string, unknown>)
+            .catch(() => null)) ?? parseRenderQualityLine(data.stdout_tail)
         if (sceneFps === 0) {
           // fps 从首块 sidecar meta.json 读（stdout_tail 被 blender.log 占满时 print 会被挤掉，artifact 才硬）。
           const meta = await fsp
@@ -717,7 +945,7 @@ export const blenderRenderTool: BlenderToolDef = {
         let lastErr: unknown
         for (let attempt = 0; attempt <= 2; attempt++) {
           try {
-            await renderChunk(chunkStart, chunkEnd)
+            await renderChunk(chunkStart, chunkEnd, { samples: null, raytracing: null })
             return
           } catch (e) {
             lastErr = e
@@ -734,12 +962,61 @@ export const blenderRenderTool: BlenderToolDef = {
         throw lastErr
       }
 
-      if (span) {
+      let degraded = false
+      const degradeLog: Array<QualityAttempt & { error: string }> = []
+
+      if (stillRender) {
+        // 单帧 still：首次按场景/参数画质，原生崩溃或超时后按 64→32→16→4→1 逐级降采样，
+        // 每级只试一次；最后一级仍败则结构化失败并列出全部尝试（不静默藏最终画质）。
+        const attempts: QualityAttempt[] = [{ samples: samplesOverride, raytracing: null }]
+        if (degradeEnabled) {
+          const startFrom = samplesOverride ?? sceneSamples
+          for (const level of EEVEE_DEGRADE_SAMPLES_LADDER) {
+            if (startFrom !== null && level >= startFrom) continue
+            if (attempts[attempts.length - 1].samples === level) continue
+            // 降到 <=4spp 同时关 RT：1spp + RT off 是唯一全过的存活组合。
+            attempts.push({ samples: level, raytracing: level <= 4 ? false : null })
+          }
+        }
+        const attemptLabel = (a: QualityAttempt) =>
+          `samples=${a.samples ?? "场景值"} rt=${a.raytracing === null ? "场景/quality" : String(a.raytracing)}`
+        const chunkStart = span ? span.start : 0
+        const chunkEnd = span ? span.end : 0
+        for (let i = 0; i < attempts.length; i++) {
+          try {
+            await renderChunk(chunkStart, chunkEnd, attempts[i])
+            degraded = i > 0
+            break
+          } catch (e) {
+            const code = e instanceof BridgeError ? e.code : ""
+            const msg = (e as Error)?.message ?? String(e)
+            degradeLog.push({ ...attempts[i], error: `${code || "unknown"}: ${msg}`.slice(0, 400) })
+            if (!DEGRADABLE_BRIDGE_CODES.has(code) || i === attempts.length - 1) {
+              throw new BridgeError(
+                code || "blender_tool_error",
+                `${msg}\nstill 画质降级链失败（尝试 ${degradeLog.map(attemptLabel).join(" → ")}）：\n` +
+                  degradeLog.map((d, idx) => `  ${idx + 1}. ${attemptLabel(d)} → ${d.error}`).join("\n"),
+              )
+            }
+          }
+        }
+      } else if (span) {
+        // 多帧动画 / turntable：保持旧行为（每块 ≤10 帧 + 1spp/RT off 存活预设）。
         for (let c = span.start; c <= span.end; c += RENDER_CHUNK_FRAMES) {
           await renderChunkWithRetry(c, Math.min(c + RENDER_CHUNK_FRAMES - 1, span.end))
         }
-      } else {
-        await renderChunkWithRetry(0, 0)
+      }
+
+      // 回执画质块：requested / scene / 是否降级 / 实际生效值一次讲清。
+      const qualityReceipt = {
+        engine,
+        quality: quality ?? null,
+        requested_samples: samplesOverride,
+        scene_samples: sceneSamples,
+        survival_preset: survivalPreset,
+        degraded,
+        ...(degradeLog.length > 0 ? { degrade_attempts: degradeLog } : {}),
+        effective: appliedQuality,
       }
 
       let mp4Artifact: BlenderArtifact | null = null
@@ -773,6 +1050,7 @@ export const blenderRenderTool: BlenderToolDef = {
           frames,
           turntable,
           output_base: outputBase,
+          render_quality: qualityReceipt,
         }
         if (!mux.ok) {
           return fail(
@@ -818,6 +1096,7 @@ export const blenderRenderTool: BlenderToolDef = {
         frames: frames ?? null,
         turntable,
         output_base: outputBase,
+        render_quality: qualityReceipt,
         ...(mp4Artifact ? { mp4: mp4Artifact.path, fps: sceneFps || 24, chunk_count: chunkCount } : { chunk_count: chunkCount }),
       })
     } catch (e) {

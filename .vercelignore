@@ -36,6 +36,8 @@
 /.gateway-work/
 /.github/
 /.gitignore
+# 微信小程序子工程（独立 Taro 应用，与站点建置无关）
+/miniapp/
 /.next/
 /.next-start-pricing-3002.err.log
 /.next-start-pricing-3002.log

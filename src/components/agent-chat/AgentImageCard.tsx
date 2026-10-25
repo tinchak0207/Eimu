@@ -581,7 +581,9 @@ function AgentImageCardComponent({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={retryKey}
-            src={item.url}
+            src={/^https:\/\/store\.tinchak0207\.xyz\/image-data\/files\//.test(item.url)
+              ? `/_next/image?url=${encodeURIComponent(item.url)}&w=640&q=75`
+              : item.url}
             alt="智能体生成的图片"
             loading="lazy"
             decoding="async"

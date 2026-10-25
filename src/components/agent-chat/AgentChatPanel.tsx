@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowDown, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentAssistantTextItem, AgentChatState, AgentToolAuthScope } from "@/lib/agent-chat-types";
+import type { AgentAssistantTextItem, AgentChatState, AgentSubagentItem, AgentToolAuthScope } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
 import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
@@ -14,6 +14,7 @@ import { AgentConfirmCard } from "./AgentConfirmCard";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentSubagentBar } from "./AgentSubagentBar";
+import { AgentSubagentView } from "./AgentSubagentView";
 import { AgentAnchorCard } from "./AgentAnchorCard";
 import { NEAR_BOTTOM_PX } from "./scroll-threshold";
 import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
@@ -324,6 +325,18 @@ function AgentChatPanelComponent({
     return out;
   }, [items]);
 
+  // 正在整屏查看的子代理（点 AgentSubagentBar 的行进入；Esc／返回退出）。
+  // 存快照而不是只存 id：远端列表刷新后该 run 可能已从栏里消失，返回主对话前
+  // 仍要能继续看它的转录。
+  const [viewingSubagent, setViewingSubagent] = useState<AgentSubagentItem | null>(null);
+  /**
+   * 实时覆盖：栏内部的 remoteRuns 轮询拿到的新状态面板拿不到，
+   * 所以只要帧内条目里还有同一 subagentId 就用它（状态更新更及时），否则用快照。
+   */
+  const viewingLive = viewingSubagent
+    ? subagentItems.find((i) => i.subagentId === viewingSubagent.subagentId) ?? viewingSubagent
+    : null;
+
   // D-25：解读上下文 = 该轮已收到的 message.delta 文本（最新一条 assistant 条目的累计文本）。
   // 只取 transcript 里已有的东西，不造契约没有的字段；没有助手文本时确认卡退回纯花费确认。
   const lastAssistantText = (() => {
@@ -413,13 +426,16 @@ function AgentChatPanelComponent({
    * 不再锁输入框。旧契约（R9-3 死线 4）用 disabled + 「等待卡片选择…」表达
    * 优先级；新设计改为 composer 上缘一条 2px ios-blue 细提示条＋提示性
    * placeholder——用户在决策卡在场时发送的文字照常走 onSend（gateway 侧本
-   * 就支持排队）。输入框只剩「面板禁用 / 会话关闭」两个真正的禁用理由。
+   * 就支持排队）。输入框的禁用理由有三个：面板禁用 / 会话关闭 / 正在看子代理
+   * 整屏视图（只读，返回主对话后才能继续发消息）。
    */
-  const composerDisabled = disabled || closed;
+  const composerDisabled = disabled || closed || viewingLive !== null;
   const decisionPending = pendingQuestions.length > 0 || pendingConfirms.length > 0;
-  const composerPlaceholder = decisionPending
-    ? "先选上方方案，或直接补充要求…"
-    : undefined;
+  const composerPlaceholder = viewingLive
+    ? "返回主对话后再发消息（子代理视图暂只读）"
+    : decisionPending
+      ? "先选上方方案，或直接补充要求…"
+      : undefined;
 
   /*
    * 输入区本体（含决策卡在场时上缘的 2px 蓝色细提示条）。空态与对话态两处
@@ -428,7 +444,7 @@ function AgentChatPanelComponent({
    */
   const composerNode = (
     <div ref={composerAnchorRef} className="agent-composer-anchor max-sm:px-1">
-      {decisionPending ? (
+      {decisionPending && !viewingLive ? (
         <div className="mx-3 mb-2 h-[2px] rounded-full bg-ios-blue/70" aria-hidden="true" />
       ) : null}
       <AgentComposer
@@ -505,14 +521,24 @@ function AgentChatPanelComponent({
       {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。
           窄屏 gutter（2026-10-03）：父层卡片只给 12px，这里补 4px 凑成 16px
           设计 gutter；桌面一字不动（max-sm 只在 ≤639.98px 生效）。 */}
-      <div className="pb-1 max-sm:px-1">
-        <AgentBatchProgress items={items} onStop={onStopGeneration} stopPending={stopPending} />
-      </div>
+      {/* 子代理整屏视图占满转录槽位时，批量进度与子代理栏让位（栏保持 mount：
+          remoteRuns 轮询不中断，返回主对话时不闪空）。隐藏而非卸载的条件写在这里，
+          不牵动任何 hook。 */}
+      {!viewingLive && (
+        <div className="pb-1 max-sm:px-1">
+          <AgentBatchProgress items={items} onStop={onStopGeneration} stopPending={stopPending} />
+        </div>
+      )}
 
       {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。
           窄屏 gutter 同上：12px（父卡）+4px＝16px。 */}
-      <div className="pb-1 max-sm:px-1">
-        <AgentSubagentBar items={subagentItems} sessionId={sessionId} />
+      <div className={cn("pb-1 max-sm:px-1", viewingLive && "hidden")}>
+        <AgentSubagentBar
+          items={subagentItems}
+          sessionId={sessionId}
+          viewingRunId={viewingLive?.subagentId ?? null}
+          onOpenRun={setViewingSubagent}
+        />
       </div>
 
       {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。
@@ -524,16 +550,30 @@ function AgentChatPanelComponent({
       {/* 刀 3：relative 锚点层——「回到底部」钮挂在卷动容器旁（absolute 不跟
           内容卷）；flex-1 + flex-col 与原单层结构几何等价，桌面像素零变化。 */}
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* 子代理整屏视图：替换主转录区（全宽）。主转录保持 mount 并 hidden——
+          返回时内容与滚动位置不重建、不闪空。 */}
+      {viewingLive && (
+        <AgentSubagentView
+          key={viewingLive.subagentId}
+          item={viewingLive}
+          sessionId={sessionId}
+          onBack={() => setViewingSubagent(null)}
+        />
+      )}
       <div
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0 max-sm:px-1"
+        className={cn(
+          "agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0 max-sm:px-1",
+          viewingLive && "hidden",
+        )}
       >
         {/* 第二轮就绪优化刀A：空态（欢迎语）不再等 SSE open —— idle/connecting/open
             都显示（「没内容且没坏」）。建号+ticket+SSE 握手在背后接，error 态仍由
-            connection meta 条目单独呈现，此处只排除 reconnecting/closed。 */}
-        {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
+            connection meta 条目单独呈现，此处只排除 reconnecting/closed。
+            子代理整屏视图存在时绝不显示空态欢迎语（条件显式写死）。 */}
+        {items.length === 0 && !viewingLive && connection !== "reconnecting" && connection !== "closed" ? (
           /* 空态单一 DOM（09-20 零位移定案，取代 09-18 忙碌分流＋09-20 同构容器版）：
              前两版都在忙碌态换了一套布局——第一版裸 composer＋忙碌行，第二版同构容器
              但置中群体不同（欢迎态置中「标题+输入框+推荐语」整组，忙碌态只置中输入框）
@@ -635,7 +675,7 @@ function AgentChatPanelComponent({
 
       {/* 刀 3：回到底部浮动钮（仅窄屏可见，元件内 sm:hidden）。空态没有
           历史可翻，不挂。 */}
-      {items.length > 0 ? (
+      {items.length > 0 && !viewingLive ? (
         <AgentBackToBottomButton scrolledUp={scrolledUp} onClick={handleBackToBottom} />
       ) : null}
       </div>
@@ -670,7 +710,7 @@ function AgentChatPanelComponent({
           页面崩了」），62dvh 常见卡完整可见、极端长卡仍走内部滚动。
           罪状 5/6：同批同模型合并成一张卡（model ×N 共 N 币），一键裁决逐笔
           resolve；确认卡容器限高 + 内部滚动，禁止整页溢出。 */}
-      {confirmGroups.length > 0 && (
+      {!viewingLive && confirmGroups.length > 0 && (
         // 溢出防护层 + 细滚动条（可见性）：overflow-x-hidden 让超宽卡片永远
         // 撑不出横向滚动条；agent-scroll-thin 是 agent-chat.css 抽出的共用配方
         // （与转录区同一份），让「这里可以滚」看得出来。
@@ -702,7 +742,7 @@ function AgentChatPanelComponent({
         </div>
       )}
 
-      {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
+      {!viewingLive && pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
         // 问答卡容器：与确认卡容器同一套溢出防护 + 细滚动条配方（见上）。
         <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5 max-sm:px-1">
           {/* 问题卡串行：一次只出一张，答完（reducer 移除该 requestId）再浮出下一张，
@@ -725,7 +765,7 @@ function AgentChatPanelComponent({
           时回落底部 sticky；两处共用同一份 JSX，行为契约零重复。
           决策卡在场不锁输入（行为变更）：用 composer 上缘 2px 蓝色细提示条＋
           placeholder 表达「先选上方方案，或直接补充要求…」，发送照常走 onSend。 */}
-      {items.length === 0 && connection !== "reconnecting" && connection !== "closed"
+      {items.length === 0 && !viewingLive && connection !== "reconnecting" && connection !== "closed"
         ? null
         : composerNode}
     </section>

@@ -376,6 +376,13 @@ else
   done
 fi
 
+# 派生闸：git archive 落地的 opencode.json 不是视觉能力真源。registry 的 vision 才是。
+# 不起派生就重启，空模型物件会把图静默丢掉，服务却仍显示 active。
+if [ ! -x /opt/agent-harness/bin/derive-opencode-runtime.sh ]; then
+  echo "DERIVE_MISSING — 拒绝在未派生视觉能力的情况下重启 opencode"
+  exit 1
+fi
+sudo /opt/agent-harness/bin/derive-opencode-runtime.sh
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
@@ -453,6 +460,11 @@ else
     sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
   done
 fi
+if [ ! -x /opt/agent-harness/bin/derive-opencode-runtime.sh ]; then
+  echo "DERIVE_MISSING — 拒绝在未派生视觉能力的情况下重启 opencode"
+  exit 1
+fi
+sudo /opt/agent-harness/bin/derive-opencode-runtime.sh
 sudo systemctl restart "$SERVICE"; sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"

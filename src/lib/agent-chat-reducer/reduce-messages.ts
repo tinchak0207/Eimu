@@ -438,6 +438,19 @@ export function reduceQuestionReplied(state: AgentChatState, event: AgentSseEven
   return { ...state, pendingQuestions, items: [...state.items, notice] };
 }
 
+/** question.rejected 的机器可读 reason 码 → 简体中文文案（未知英文码不透出原文）。 */
+const QUESTION_REJECT_REASON_TEXT: Record<string, string> = {
+  expired_without_consent: "长时间未确认，已按未同意处理",
+  question_expired: "该问题已失效",
+};
+
+function questionRejectReasonText(reason: unknown): string {
+  const raw = typeof reason === "string" ? reason.trim() : "";
+  if (!raw) return "该问题已取消。";
+  if (/^[a-z_]+$/.test(raw)) return QUESTION_REJECT_REASON_TEXT[raw] ?? "该问题已取消。";
+  return raw;
+}
+
 export function reduceQuestionRejected(state: AgentChatState, event: AgentSseEvent & { name: "question.rejected" }): AgentChatState {
   const { request_id, reason } = event.data;
   const pendingQuestions = state.pendingQuestions.filter((q) => q.requestId !== request_id);
@@ -446,7 +459,7 @@ export function reduceQuestionRejected(state: AgentChatState, event: AgentSseEve
     id: eventItemId("notice", event.event_id),
     seq: event.event_id,
     tone: "info",
-    text: reason || "该问题已取消。",
+    text: questionRejectReasonText(reason),
   };
   return { ...state, pendingQuestions, items: [...state.items, notice] };
 }

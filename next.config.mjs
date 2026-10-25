@@ -22,6 +22,7 @@ const nextConfig = {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 31536000,
     remotePatterns: [
+      { protocol: "https", hostname: "store.tinchak0207.xyz", pathname: "/image-data/files/**" },
       {
         protocol: "https",
         hostname: "raw.githubusercontent.com",
