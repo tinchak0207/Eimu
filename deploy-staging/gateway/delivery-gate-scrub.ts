@@ -298,6 +298,18 @@ const PROSE_REWRITE_RULES: Array<[RegExp, string]> = [
   [/\bduration[\s\-_.]*source\b/gi, "时长来源"],
   [/\bprompt[\s\-_.]*used\b/gi, "提示词"],
   [/\bqc\b/gi, "质检"],
+  // 架构/调度方言：模型把自己的席位、工具表、派工机制当成话讲出来时，换成不暴露内部的说法。
+  // 只兜底，不是主修——真正的修法在提示词侧（见 opencode-runtime/AGENTS.md 的说话纪律）。
+  [/能力断路[·・]?物理事实/gi, ""],
+  [/能力断路/g, "能力范围"],
+  [/唯一通路/g, "只能这样走"],
+  [/物理移除|物理关闭/g, "不可用"],
+  [/\borchestrator\b/gi, "协调"],
+  [/\bsubagent_dispatch\b/gi, "派工"],
+  [/\bcanvas_apply_ops\b/gi, "画布操作"],
+  [/\bworkflow_write\b/gi, "画布写入"],
+  [/\bnew_production_line\b\s*[:：]\s*(?:false|true)/gi, ""],
+  [/\bwf_[a-z0-9_]+\b/gi, "画布流程"],
 ]
 
 /** 单块（非代码栅栏）正文的定向清洗：删纯内部栏位行/标题行/裸栏名行，再逐条改写。
