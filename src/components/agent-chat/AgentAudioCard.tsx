@@ -219,7 +219,7 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
               src={item.url}
               aria-label="智能体生成的音频（次要试听）"
               controls
-              preload="metadata"
+              preload="none"
               onError={() => setFailed(true)}
               className="w-full opacity-90"
             />

@@ -62,6 +62,8 @@ const INDEX_CACHE_TTL_MS = 3_000;
 
 const memoryStore = new Map<number, ServerHistoryEntry[]>();
 const indexCache = new Map<number, { entries: ServerHistoryEntry[]; expiresAt: number }>();
+// 历史页、统计和最近任务可能同时加载；同一用户只读取一次远端索引。
+const indexReads = new Map<number, Promise<ServerHistoryEntry[]>>();
 
 /**
  * 单用户写入串行队列。
@@ -180,9 +182,25 @@ async function readEntries(userId: number): Promise<ServerHistoryEntry[]> {
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.entries];
 
-  const entries = await fetchEntries(userId);
-  indexCache.set(userId, { entries, expiresAt: Date.now() + INDEX_CACHE_TTL_MS });
-  return [...entries];
+  const pending = indexReads.get(userId);
+  if (pending) {
+    const entries = await pending;
+    const refreshed = indexCache.get(userId);
+    return [...(refreshed && refreshed !== cached ? refreshed.entries : entries)];
+  }
+
+  const read = fetchEntries(userId);
+  indexReads.set(userId, read);
+  try {
+    const entries = await read;
+    // 写入可能在读取期间刷新缓存；旧读取不得覆盖刚保存的新记录。
+    if (indexCache.get(userId) === cached) {
+      indexCache.set(userId, { entries, expiresAt: Date.now() + INDEX_CACHE_TTL_MS });
+    }
+    return [...(indexCache.get(userId)?.entries ?? entries)];
+  } finally {
+    if (indexReads.get(userId) === read) indexReads.delete(userId);
+  }
 }
 
 // ─────────────────────────────────────────────────────────── 写入

@@ -154,6 +154,7 @@ export function ImageDisplay({
           <>
             <video
               src={videoUrl}
+              preload="none"
               controls
               playsInline
               className="h-full w-full bg-black object-contain"

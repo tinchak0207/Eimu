@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Check, Coins, Download, Library, Loader2, RotateCw, SlidersHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, Coins, Download, Library, Loader2, Play, RotateCw, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentVideoItem } from "@/lib/agent-chat-types";
 import { AgentRerunMenu } from "./AgentRerunMenu";
@@ -278,7 +278,9 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
         }}
       >
         {!failed && !loaded && (
-          <div className="skeleton absolute inset-0" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" aria-hidden="true">
+            <Play className="h-10 w-10 text-white/70" fill="currentColor" />
+          </div>
         )}
         {failed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
@@ -306,12 +308,12 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
             aria-label="智能体生成的影片"
             controls
             playsInline
-            preload="metadata"
+            preload="none"
             onLoadedMetadata={() => setLoaded(true)}
             onError={() => setFailed(true)}
             className={cn(
               "absolute inset-0 h-full w-full bg-black object-contain transition-opacity duration-300 motion-reduce:transition-none",
-              loaded ? "opacity-100" : "opacity-0",
+              "opacity-100",
             )}
           />
         )}

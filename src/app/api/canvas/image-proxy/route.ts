@@ -91,30 +91,29 @@ export async function GET(req: NextRequest) {
 
   // 边读边计数：上游没报 Content-Length（chunked）时，实读超限即中断。
   if (!upstream.body) return fail(502, "上游未返回内容", "upstream_failed");
-  const reader = upstream.body.getReader();
-  const chunks: Uint8Array[] = [];
   let received = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.byteLength;
+  // 立即交付第一块数据，避免弱网下必须等整张原图下载完才开始显示。
+  // TransformStream 保留背压；超限会取消上游，不在函数内保留整图副本。
+  const body = upstream.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      received += chunk.byteLength;
       if (received > MAX_BYTES) {
-        await reader.cancel();
-        return fail(413, "图片超过 25MB", "too_large");
+        controller.error(new Error("图片超过 25MB"));
+        return;
       }
-      chunks.push(value);
-    }
-  } catch {
-    return fail(502, "上游读取中断", "upstream_failed");
-  }
+      controller.enqueue(chunk);
+    },
+  }));
 
-  return new NextResponse(new Blob(chunks as BlobPart[], { type: contentType }), {
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type": contentType,
       "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",
+      ...((!upstream.headers.get("content-encoding") || upstream.headers.get("content-encoding") === "identity")
+        && upstream.headers.has("content-length") && Number.isFinite(declared) && declared >= 0
+        ? { "Content-Length": String(declared) } : {}),
     },
   });
 }

@@ -144,13 +144,13 @@ function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: 
           src={span.src}
           controls
           playsInline
-          preload="metadata"
+          preload="none"
           aria-label={`影片：${span.src}`}
           className="my-1 block max-h-72 w-full max-w-md rounded-ios-lg bg-black"
         />
       );
     case "audio":
-      return <audio src={span.src} controls preload="metadata" aria-label={`音频：${span.src}`} className="my-1 block w-full max-w-md" />;
+      return <audio src={span.src} controls preload="none" aria-label={`音频：${span.src}`} className="my-1 block w-full max-w-md" />;
     case "br":
       return <br />;
   }

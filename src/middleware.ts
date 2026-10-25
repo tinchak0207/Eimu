@@ -50,9 +50,10 @@ import {
 // 修法（杜绝接缝）：matcher 只留**一个全覆盖模式**，真正的判准单一真源在 middleware 内用
 // `CONTROL_PLANE_PROXY_SOURCES`（同一份清单）编译的正则——它带 `i` 旗标，且被本档直接持有，
 // 不存在「matcher 编译丢失旗标」的接缝。未命中清单的请求立刻 `next()`，无 fetch、无缓冲。
-// 只排除 Next 内部静态资源前缀（它们永远不可能出现在 CP 清单里）：减少无谓的 middleware 调用。
+// 只排除 Next 内部资源与明确的 public 静态目录；这些目录不会出现在 CP 清单里。
+// 首页的图片、视频与字体直接走静态 CDN，避免每个资源都唤醒 middleware。
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|(?:showcase|promo|fonts|mascot|brands|provider-icons|email)/).*)"],
 };
 
 /**

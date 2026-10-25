@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AudioLines, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { AudioLines, Play, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/history-media";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -222,6 +223,9 @@ export function HistoryLightbox({
   if (!mounted || !isOpen || !entry) return null;
 
   const src = entrySrc(entry);
+  const videoSrc = !workflowDagThumbnailUrl(entry)
+    ? entry.results.find((result) => result.videoUrl)?.videoUrl
+    : null;
   /** 纯音频记录：src 为 null 时才取 audioUrl，有图/视频记录不受影响。 */
   const audioSrc = src ? null : entryAudioSrc(entry);
   const isAudioEntry = Boolean(audioSrc);
@@ -342,7 +346,17 @@ export function HistoryLightbox({
             </button>
           )}
 
-          {src ? (
+          {videoSrc ? (
+            <video
+              key={entry.id}
+              src={videoSrc}
+              controls
+              autoPlay
+              playsInline
+              preload="none"
+              className="hist-lightbox-figure max-h-full max-w-full rounded-ios-2xl object-contain shadow-[0_30px_80px_rgba(0,0,0,0.32)]"
+            />
+          ) : src ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               key={entry.id}
@@ -467,7 +481,8 @@ export function HistoryLightbox({
           className="hist-filmstrip flex shrink-0 gap-2 overflow-x-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
         >
           {entries.map((item, itemIndex) => {
-            const thumb = entrySrc(item);
+            const itemIsVideo = !workflowDagThumbnailUrl(item) && item.results.some((result) => result.videoUrl);
+            const thumb = itemIsVideo ? null : entrySrc(item);
             const itemIsAudio = !thumb && Boolean(entryAudioSrc(item));
             const isCurrent = itemIndex === index;
             return (
@@ -488,12 +503,20 @@ export function HistoryLightbox({
                 {thumb ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
-                    src={thumb}
+                    {...historyThumbnailProps(thumb, true)}
+                    width={56}
+                    height={56}
+                    fetchPriority="low"
+                    onError={(event) => { retryOriginalHistoryImage(event.currentTarget, thumb); }}
                     alt=""
                     loading="lazy"
                     decoding="async"
                     className="h-full w-full object-cover"
                   />
+                ) : itemIsVideo ? (
+                  <span className="flex h-full w-full items-center justify-center bg-white/10 text-white/70">
+                    <Play className="h-4 w-4" fill="currentColor" />
+                  </span>
                 ) : itemIsAudio ? (
                   /* 音频条目的胶片位没有可当缩略图的图，用音频图标代替「无图」，
                      否则一条真有产物的记录在胶片条上会被读成空记录。 */

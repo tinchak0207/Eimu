@@ -36,6 +36,17 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    // 仅 public 静态媒体；账户、页面和 API 不进入共享缓存。
+    // 文件名可被替换，故不标 immutable；后台更新允许过期 CDN 副本先返回。
+    return ["showcase", "promo", "fonts", "mascot", "brands", "provider-icons", "email"].map((directory) => ({
+      source: `/${directory}/:path*`,
+      headers: [{
+        key: "Cache-Control",
+        value: "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400",
+      }],
+    }));
+  },
   // 2026-09-27 SEO 重构：旧 URL 全部 301 到承接页，不留 404。
   //  - 102 个 `<行业>-<n>` 模板门页并入 17 个行业枢纽页 /use-cases/<行业>
   //    （清单与 src/lib/use-case-categories/index.ts 的 17 个 slug 一致）。

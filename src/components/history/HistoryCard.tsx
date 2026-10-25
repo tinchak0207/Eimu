@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { AlertTriangle, AudioLines, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
+import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/history-media";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ShareDialog } from "@/components/history/ShareDialog";
@@ -15,6 +16,7 @@ import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
   entry: HistoryEntry;
+  priority?: boolean;
   /** 多选模式下显示勾选框，点击卡片变为选中而非打开灯箱。 */
   selectionMode: boolean;
   selected: boolean;
@@ -89,6 +91,7 @@ function CardAction({
 
 function HistoryCardComponent({
   entry,
+  priority = false,
   selectionMode,
   selected,
   onOpen,
@@ -224,7 +227,7 @@ function HistoryCardComponent({
               <audio
                 src={result.audioUrl}
                 controls
-                preload="metadata"
+                preload="none"
                 aria-label="播放音频"
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
@@ -232,18 +235,27 @@ function HistoryCardComponent({
               />
             )}
           </div>
+        ) : isVideo ? (
+          <div className="hist-card-media flex aspect-[4/3] items-center justify-center">
+            <Play className="h-8 w-8 text-[rgba(0,0,0,0.55)]" fill="currentColor" aria-hidden="true" />
+          </div>
         ) : src && !imageFailed ? (
           <div className="hist-card-media">
             {!imageLoaded && <div className="hist-skeleton absolute inset-0" aria-hidden="true" />}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={src}
+              {...historyThumbnailProps(src)}
+              width={640}
+              height={480}
               alt={promptText ? `生成结果：${promptText.slice(0, 40)}` : "生成结果"}
-              loading="lazy"
+              loading={priority ? "eager" : "lazy"}
+              fetchPriority={priority ? "high" : "low"}
               decoding="async"
               className={cn(imageLoaded && "is-loaded")}
               onLoad={() => setImageLoaded(true)}
-              onError={() => setImageFailed(true)}
+              onError={(event) => {
+                if (!retryOriginalHistoryImage(event.currentTarget, src)) setImageFailed(true);
+              }}
             />
             {/*
               视频记录的缩略图是静态首帧，没有任何东西告诉用户「这能播」。

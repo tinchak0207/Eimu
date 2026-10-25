@@ -31,6 +31,8 @@ let activeSyncCount = 0;
 let pollingTimer: number | null = null;
 let listenersAttached = false;
 let controller: AbortController | null = null;
+let pendingSync: Promise<void> | null = null;
+let lastSuccessfulSync = 0;
 
 function writeCache(payload: PricingSyncPayload): void {
   const cached: CachedPricing = { ...payload, savedAt: Date.now() };
@@ -89,19 +91,28 @@ function hydrateFromCache(): void {
   }
 }
 
-async function syncNow(): Promise<void> {
-  if (!controller || controller.signal.aborted) return;
-  try {
-    const res = await fetch("/api/model-pricing", { cache: "no-store", signal: controller.signal });
-    if (!res.ok) throw new Error(`pricing sync http ${res.status}`);
-    const payload = (await res.json()) as PricingSyncPayload;
-    applyModelPricingOverrides(payload.overrides);
-    writeCache(payload);
-  } catch (error) {
-    // 卸载时 abort 造成的 rejection 不是错误；其余失败一律静默降级，绝不影响页面。
-    if (controller?.signal.aborted) return;
-    console.warn("定价覆写同步失败", error);
-  }
+async function syncNow(force = false): Promise<void> {
+  if (!controller || controller.signal.aborted || document.visibilityState === "hidden") return;
+  if (pendingSync) return pendingSync;
+  if (!force && Date.now() - lastSuccessfulSync < POLL_INTERVAL_MS) return;
+  const currentController = controller;
+  const request = (async () => {
+    try {
+      const res = await fetch("/api/model-pricing", { cache: "no-store", signal: currentController.signal });
+      if (!res.ok) throw new Error(`pricing sync http ${res.status}`);
+      const payload = (await res.json()) as PricingSyncPayload;
+      if (currentController.signal.aborted || controller !== currentController) return;
+      applyModelPricingOverrides(payload.overrides);
+      writeCache(payload);
+      lastSuccessfulSync = Date.now();
+    } catch (error) {
+      if (currentController.signal.aborted) return;
+      console.warn("定价覆写同步失败", error);
+    }
+  })();
+  pendingSync = request;
+  try { await request; }
+  finally { if (pendingSync === request) pendingSync = null; }
 }
 
 function onVisibilityChange(): void {
@@ -124,7 +135,7 @@ export default function PricingSync() {
       controller = new AbortController();
       hydrateFromCache();
       void syncNow();
-      pollingTimer = window.setInterval(() => void syncNow(), POLL_INTERVAL_MS);
+      pollingTimer = window.setInterval(() => void syncNow(true), POLL_INTERVAL_MS);
       if (!listenersAttached) {
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("focus", onWindowFocus);
@@ -148,6 +159,7 @@ export default function PricingSync() {
         }
         controller?.abort();
         controller = null;
+        pendingSync = null;
       }
     };
   }, []);

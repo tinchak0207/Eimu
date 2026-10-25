@@ -37,9 +37,9 @@ function BareMedia({ item }: { item: AgentMediaItem }) {
     return <img src={item.url} alt="候选" className="w-full rounded-ios-md object-cover" loading="lazy" />;
   }
   if (item.kind === "video") {
-    return <video src={item.url} controls playsInline preload="metadata" className="w-full rounded-ios-md bg-black" />;
+    return <video src={item.url} controls playsInline preload="none" className="w-full rounded-ios-md bg-black" />;
   }
-  return <audio src={item.url} controls preload="metadata" className="w-full" />;
+  return <audio src={item.url} controls preload="none" className="w-full" />;
 }
 
 /** 前后滑块：两张图叠放，拖动分界线对比（只读查看控件，不收集任何参数）。 */
