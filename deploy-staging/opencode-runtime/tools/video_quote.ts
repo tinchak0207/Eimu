@@ -124,7 +124,9 @@ export default tool({
         evidence_warning,
         currency: "coins",
         pricing_note:
-          "报价以billing_contract的完整分辨率/时长/音轨金额为准；per_video固定次价不按秒放大，未知档位不得编价。当前提交API只支持模型默认分辨率，非默认显式要求先明确unsupported，不静默降档。available表示状态，proven_models表示近期交付证据，均不证明本次成品。提交前核prompt_char_limit、duration_slots与参考图能力。",
+          "报价以billing_contract的完整分辨率/时长/音轨金额为准；per_video固定次价不按秒放大，未知档位不得编价。resolutions是该模型真实可取的分辨率档，提交时把目标档填进resolution即可，不静默降档；resolutions里没有的档位不承诺。available表示状态，proven_models表示近期交付证据，均不证明本次成品。提交前核prompt_char_limit、duration_slots与参考图能力。",
+        resolution_note:
+          "用户要1080p/2K/4K时按resolutions选档、一次填对resolution提交。minimax-h3的高清档由平台自动完成（H3出768P→auto-hd超分），网关跑完两段只回一个成片URL：不要拆成先出720p再自行超分，视频没有独立超分工具（image_upscale只吃图片）。低清档只用于提示词/构图试拍，定稿后按目标档重新生成，不把试拍片当终稿，也不把低清冒充高清交付。resolutions里没有该档的模型（如只有480p/720p的免费兜底档）如实说该模型到不了该档。",
       })
     } catch (e: any) {
       const err = await classifyError(null, e)

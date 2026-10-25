@@ -23,7 +23,7 @@ description: 按叙事目的选择镜头动作、时序和模型输入，制作�
 2. 分开主体动作、环境变化和摄影机动作。一镜选一条主路径，默认以 camera.trajectory 一句话说明从有依据的起点到有依据的终点如何物理移动，再写 camera.movement 与必要的 timing，以及沿途新信息。不要把同一机位路线重复写成起止描述和分时位置表。以场景固定参照描述机位；只写确实可判断的视差、遮挡揭示或透视变化用于审阅，不保证上游必然实现。
 3. I2V 图片提供起始外观与构图，prompt 写动作如何开始、发展、落点；不要只重述静态图。首尾图描述状态差，补可见中间动作，不用两张图冒充运动路径。参考图存在不等于首尾硬锁。
 4. 多镜按动作触发切点、屏幕方向、轴线和情绪安排快慢与停留；上一镜终态与下一镜开场逐项交接。最后一两秒按叙事需要留可剪空间，不要求每镜冻结。
-5. 根据真实目录模型、能力、输入限制和完整档位报价选路；不能把原生位姿张量控制当 prompt 保证。模型失败先识别主体/场景/机位哪层冲突，缩短动作或换合适路径，不堆同义运镜词。付费视频渠道（MiniMax H3／Seedance／miaowu）全断时，目录里的免费兜底档 `agnes-video-2.5-flash`（agnes 免费额度，480p/720p、5/10 秒、无参考图，队列限速）仍可出片——只在付费档不可用时用它，不因免费默认选它；细则见 [references/models.md](references/models.md)。
+5. 根据真实目录模型、能力、输入限制和完整档位报价选路；交付规格要 1080p／2K／4K 时按 [references/models.md](references/models.md) 的「分辨率档位与高清交付」节选档——一次填对 `resolution` 提交，不许拆成低清出片再自行超分；不能把原生位姿张量控制当 prompt 保证。模型失败先识别主体/场景/机位哪层冲突，缩短动作或换合适路径，不堆同义运镜词。付费视频渠道（MiniMax H3／Seedance／miaowu）全断时，目录里的免费兜底档 `agnes-video-2.5-flash`（agnes 免费额度，480p/720p、5/10 秒、无参考图，队列限速）仍可出片——只在付费档不可用时用它，不因免费默认选它；细则见 [references/models.md](references/models.md)。
 6. shot.camera 交既有编译器与 chain。自然语言视频默认只填 movement、单一权威 trajectory 与必要 timing；start/end/parallax/keyframes 仍是平台支持的可选字段，保留用户显式字段与硬约束，不默认填满。keyframes 仅在任务确实要求分时控制时，从同一条已确定的路径推导；time_seconds 严格递增且位于镜头 duration 内，position 不得与轨迹方向或位置顺序冲突。无可靠空间依据或无法保持一致时，明确不能作该硬精确承诺，改用简洁运动方案，不编造位置。先 dry_run 核最终 submit_body，再在真实授权下制作。制作后由独立 critic 实际看时间序列，含开头相邻原帧及中尾覆盖；单帧、probe、首帧骤跳都不能证明连续运镜，缺感知标 PARTIAL，不伪签 PASS。
 
 按需读取（相对本目录）：动态优先与 beat 时间线先读 [references/motion-first.md](references/motion-first.md)，运动选型再读 [references/motion.md](references/motion.md)；模型提示与输入边界用 [references/models.md](references/models.md)。不把整库每轮注入。

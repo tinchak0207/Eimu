@@ -56,23 +56,32 @@ const CHANNEL_NOT_VERIFIED =
 /** 参考图上限（与站点 /api/canvas/generate 的 5 张同尺，上游自尾部截断）。 */
 const MAX_REFERENCE_IMAGES = 5
 
-/** 视频确认金额直接取站点计费函数导出的完整档位，未知时不提交。 */
+/**
+ * 视频确认金额直接取站点计费函数导出的完整档位，未知时不提交。
+ * 给了 targetResolution 就按该档计价（模型 resolutions 里没有该档则回 null ⇒ 不提交，
+ * 绝不静默降到默认档扣一笔别的钱）；没给才落到模型默认档。
+ */
 async function videoCostFromCatalog(
-  model: string, secs: number, generateAudio: boolean | undefined, sessionID: string, signal?: AbortSignal,
-): Promise<{ coins: number; billing_unit: string; resolution: string } | null> {
+  model: string, secs: number, generateAudio: boolean | undefined, sessionID: string,
+  targetResolution?: string, signal?: AbortSignal,
+): Promise<{ coins: number; billing_unit: string; resolution: string; resolutions: string[] } | null> {
   try {
     const res = await platformFetch("/models", { method: "GET" }, sessionID, signal)
     if (!res.ok) return null
     const body = (await res.json()) as { data?: Array<Record<string, any>> }
     const m = (body.data ?? []).find((x) => x?.id === model)
     const billing = m?.x_billing
-    const resolution = m?.x_capabilities?.defaultResolution
+    const supported: string[] = Array.isArray(m?.x_capabilities?.resolutions)
+      ? m.x_capabilities.resolutions.filter((r: unknown): r is string => typeof r === "string")
+      : []
+    const resolution = targetResolution ?? m?.x_capabilities?.defaultResolution
+    if (targetResolution && !supported.includes(targetResolution)) return null
     const audio = generateAudio ?? m?.x_capabilities?.defaultAudio === true
     if (audio && m?.x_capabilities?.audio !== true) return null
     const table = audio ? billing?.prices_with_audio ?? billing?.prices : billing?.prices
     const coins = typeof resolution === "string" ? table?.[resolution]?.[String(secs)] : undefined
     if (billing?.currency !== "coins" || !["per_second", "per_video"].includes(billing.unit) || typeof coins !== "number" || !Number.isFinite(coins) || coins < 0) return null
-    return { coins, billing_unit: billing.unit, resolution }
+    return { coins, billing_unit: billing.unit, resolution, resolutions: supported }
   } catch { return null }
 }
 
@@ -300,6 +309,12 @@ export default tool({
       .describe(
         "视频时长（秒），minimax-h3 支持 5–15 秒，默认推荐 15 秒；其他模型以 video_quote 为准。",
       ),
+    resolution: tool.schema
+      .enum(["480p", "540p", "720p", "1080p", "2k", "4k"])
+      .optional()
+      .describe(
+        "仅 video 用：成片分辨率档。用户要高清/2K/4K/电影级时填对应档，一次填对直接出成片——minimax-h3 的高清档由平台自动完成（768P 出片后 auto-hd 超分），不要自己分两步超分，视频也没有独立超分工具。可选档以 video_quote 的 resolutions 为准；模型到不了该档会在提交前被拒，不静默降档。省略则用模型默认档。",
+      ),
     generate_audio: tool.schema.boolean().optional().describe("是否生成音讯，仅 video 用"),
     reference_images: tool.schema
       .array(tool.schema.string())
@@ -341,7 +356,7 @@ export default tool({
         return ok({ task_id:args.retry_task_id, request_id, status:body.status ?? "unknown", resumed:true, new_generation:false, artifacts:body.data ?? [], registration, note:"只恢复原job；未创建新付费请求。终态失败需按原job与明确返工授权交中控恢复。" })
       } catch { return fail("result_unknown", "原job状态暂不可确认；保留原task_id，不能创建无关联替代任务。", {task_id:args.retry_task_id,request_id,recoverable:true}) }
     }
-    const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
+    const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",resolution:args.resolution,duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
     let prior:any
     try {prior=getSubmission(scope,request_id)} catch {return fail("submission_journal_unavailable","当前席位不能写耐久提交/预算收据；未生成，请交具备制作能力的席位。",{request_id,recoverable:true,new_generation:false})}
     const priorIdentity = prior ? JSON.parse(prior.metadata_json) : null
@@ -390,10 +405,15 @@ export default tool({
     // 影片：目录秒价 × 时长（与实扣同源，R9-A2）；目录查不到才粗估并在确认卡标「粗估待确认」。
     const video_price =
       kind === "video"
-        ? await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, context.abort)
+        ? await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, args.resolution, context.abort)
         : null
+    if (kind === "video" && args.resolution && !video_price) {
+      // 目录里没有该档位（或该档没价）：这是「模型到不了」，不是价格查不到。不当成通用缺价报。
+      const supported = await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, undefined, context.abort)
+      const list = supported?.resolutions?.join("/") || "未知"
+      return fail("unsupported_resolution", `${model} 没有 ${args.resolution} 档（可取档位：${list}）；未提交，也没有降档扣费。要这个规格请换原生支持的模型。`)
+    }
     if (kind === "video" && !video_price) return fail("video_price_unknown", "目录没有本次完整提交档位的币值报价；尚未提交生成，不以未知价格开跑。")
-    if (kind === "video" && args.quality === "hd" && video_price?.resolution !== "1080p") return fail("unsupported_resolution", "当前视频API不接受显式1080p品质；模型默认档不同，未提交且未降规格。")
     let cost_coins =
       kind === "video"
         ? video_price!.coins
@@ -473,8 +493,8 @@ export default tool({
       // 在平台上会被 H3 当成静态画面＋运镜；这里补一条物理变化合同再提交。
       if (kind === "video" && !hasMotionContract(final_prompt)) final_prompt = `${final_prompt} ${VIDEO_MOTION_FALLBACK}`
       const payload: any =
-        kind === "video"
-          ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(reference_images.length > 0 ? { reference_images } : {}) }
+      kind === "video"
+        ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(video_price?.resolution ? { resolution: video_price.resolution } : {}), ...(reference_images.length > 0 ? { reference_images } : {}) }
           : {
               prompt: final_prompt,
               model,

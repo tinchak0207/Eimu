@@ -45,6 +45,7 @@
 ## 3. 深度工作按需加载（硬规则）
 
 - **跑 workflow 模板、生影片、多镜/长片、小说成片、higgsfield 深度精修之前，必读 `_prompt-routing/RECIPE.md` §影片（及 `skill video-director`）**——模板优先、点名模板不换菜、视频模型动态选型、先预检后承诺、稳定渠道、长文本分章等以现存配方为准。简单生图不读，§2 直接写。禁止引用不存在的 `attach/` 路径。
+- **用户提到 1080p／2K／4K／高清／电影级交付时**：档位就在 `image_generate` 的 `resolution` 参数上一次填对（可选档看 `video_quote` 的 `resolutions`）。minimax-h3 的高清档由平台自动超分完成，不要拆成「先出 720p 再自己超分」——视频没有独立超分工具，分两步只会白花钱或做不出来。低清只用于试拍，定稿按目标档重跑，不拿试拍片当终稿。细则见 `_prompt-routing/RECIPE.md` §影片「高清档位纪律」。
 - **收到附件或处理长文之前，必读 `_prompt-routing/attachments.md`**——附件路径、读图、大文本入场与安全线全在里面。
 
 ## 3.5 question 工具提问格式（硬规则）

@@ -29,6 +29,14 @@
 | 生影片（多镜/长片） | `workflow_*` 工具（`workflow_start`／`workflow_update_node`／`workflow_status` 已断路，经 `subagent_dispatch` 派对应域 Expert 执行；其余 workflow_* 直调）→ **先读本档 §影片（及 `skill video-director`）；禁止引用不存在的 `attach/`** | — |
 | 关键帧驱动影片／图生视频／起止关键帧 | `image_generate` 影片模型传 `reference_images:[起帧URL,止帧URL]`；`last_frame_video_chain` 每镜 shots 传 `first_frame_url`／`last_frame_url`；工作流视频节点 metadata 传首尾同名字段或 `reference_images`，也可连接对应图片节点。minimax-h3 最多 9 张有序图参考；28 张／14 镜按每镜 2 张注入。上游 image_urls 是图片驱动参考，不承诺像素级首尾硬锁；禁止声称本站影片端不接受图片而改成纯文生视频。 | — |
 | 影片拆解（链接或上传影片：讲了什么/分镜/台词/反推提示词/翻拍/去字幕/下载） | 链接先 `video_fetch`（首次 action=prepare）落本地 → `video_analyze`（场景切点+代表帧+词级台词；提示词反推回 vlm_unavailable 时对代表帧跑 read-image 补）；只要台词稿 `video_transcribe`；去字幕 `video_desubtitle`；翻拍/换角重做 `video_remake_plan`；抽帧/切段/探针 `video_evidence`；台词折算秒数写进分镜 `video_measure` | ffmpeg 抽帧 + read-image |
+| **高清成片（1080p／2K／4K 电影级交付）** | **一次 `image_generate` 直接填 `resolution`，不要自己分两步。** minimax-h3 的 1080p/2k/4k 档在平台侧就是「H3 出 768P → auto-hd 超分」两段链路，网关自动跑完只回一个成片 URL；你填 `resolution:"2k"` 即完成，**禁止先出 720p 再手工找超分工具拼第二个请求**（拼不出来，视频没有独立超分工具）。档位价以 `video_quote` 的 `coins_per_second` 分档为准（2K 约 10 币/秒） | 换原生该档位的模型（seedance-2.0 std 原生 4K）；都没有就如实说这个模型到不了该档 |
+
+**高清档位纪律**：
+
+- 用户说「2K／4K／高清／电影级」＝直接选该 `resolution` 提交，不需要征求「要不要先生成低清试水」。低清只用在**提示词迭代**（480p/720p 试拍验证构图动作），定了再按目标档重跑一次；不要把试拍片拿去做超分。
+- **不许把低清成片冒充高清交付**。`resolution` 填了什么、回执里成片真实尺寸是什么，交付时对得上；平台在超分未完成时按失败退款，不会回低清。
+- 视频**没有**独立的超分工具（`image_upscale` 只吃图片 URL）。要高清只能在生成时选对档位，或换原生支持该档位的模型。
+- 参考图驱动的镜头同样适用：参考图分辨率不影响成片档位，成片档位只看 `resolution`。
 
 ## §剪辑
 
