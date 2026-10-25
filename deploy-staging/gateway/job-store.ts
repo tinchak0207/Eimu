@@ -25,14 +25,17 @@ function db(): Database {
     CREATE INDEX IF NOT EXISTS generation_receipts_parent ON generation_receipts(parent_gw);
     CREATE INDEX IF NOT EXISTS generation_receipts_pending ON generation_receipts(status,observed_at);`)
   if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "consumer_agent")) next.exec("ALTER TABLE generation_consumers ADD COLUMN consumer_agent TEXT")
+  // intent_version：当前无业务读者（generationProducerVersion 已删），保留列不保留读者——既有库兼容。
+  if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "intent_version")) next.exec("ALTER TABLE generation_consumers ADD COLUMN intent_version INTEGER NOT NULL DEFAULT 0")
   if (!(next.query("PRAGMA table_info(generation_receipts)").all() as any[]).some((c) => c.name === "notify_count")) next.exec("ALTER TABLE generation_receipts ADD COLUMN notify_count INTEGER NOT NULL DEFAULT 0")
   connection = next
   return next
 }
 
 export function bindGenerationConsumer(child: string, parentGw: string, parentOc: string, agent?: string): void {
-  db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent) VALUES (?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")
-    .run(child, parentGw, parentOc, Date.now(), agent || null)
+  // intent_version：当前无业务读者，保留列不保留读者（既有库兼容）。
+  db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent,intent_version) VALUES (?,?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")
+    .run(child, parentGw, parentOc, Date.now(), agent || null, generationWorkControl(parentGw).version)
   const binding = generationParent(child)
   if (binding?.parent_gw !== parentGw || binding.parent_oc !== parentOc) throw new Error("consumer ownership is immutable")
   if (agent) db().query("UPDATE generation_consumers SET consumer_agent=COALESCE(consumer_agent,?) WHERE child_oc=?").run(agent, child)
@@ -47,6 +50,56 @@ export function queueLegacyGenerationWake(session: string, content: string, pare
 }
 export function generationParent(child: string): { parent_gw: string; parent_oc: string; consumer_agent?: string } | undefined {
   return db().query("SELECT parent_gw,parent_oc,consumer_agent FROM generation_consumers WHERE child_oc=?").get(child) as any ?? undefined
+}
+
+// 工作控制与既有生成回执共用一个耐久数据库。停止模型不等于撤销外部副作用。
+export function generationWorkControl(parentGw: string): { version: number; cancelled: boolean; reason?: string } {
+  const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(`intent:${parentGw}`) as { value: string } | null
+  return row ? JSON.parse(row.value) : { version: 0, cancelled: false }
+}
+export function setGenerationWorkCancelled(parentGw: string, cancelled: boolean, reason: string): void {
+  db().transaction(() => {
+    const current = generationWorkControl(parentGw)
+    if (current.cancelled === cancelled) return
+    db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value")
+      .run(`intent:${parentGw}`, JSON.stringify({ version: current.version + 1, cancelled, reason, changed_at: Date.now() }))
+  }).immediate()
+}
+export function cancelGenerationProducer(producer: string): void {
+  db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO NOTHING")
+    .run(`producer-cancel:${producer}`, String(Date.now()))
+}
+/** 续跑同一 producer（沿用同一 opencodeSessionId）＝新工作代：删掉 hard stop 留下的封条，
+ *  否则该子会话恢复后所有新提交都会被 assertGenerationWorkActive 永久挡成 409。 */
+export function clearGenerationProducerCancel(producer: string): void {
+  db().query("DELETE FROM generation_runtime_control WHERE name=?").run(`producer-cancel:${producer}`)
+}
+/** 封条 TTL：封条只封停止当时那批工作，不封会话终身。 */
+export const PRODUCER_CANCEL_TTL_MS = 6 * 3600 * 1000
+/**
+ * 提交新生成前的工作控制闸：只判「用户已撤销当前工作」这一件事。
+ * 不比较 version——用户取消再恢复后 version 永久前移，比较 version 会把合法生成永久封死。
+ * 已提交的任务不走这里，仍按真实回执处理。
+ * producer-cancel 封条带 TTL：6 小时前的停止不拦后续新工作（过期顺手 DELETE）；
+ * 值不可解析时按存在处理（fail-closed），值可信缺失时宁可多拦一次。
+ */
+export function assertGenerationWorkActive(parentGw: string, producer: string): void {
+  const cancelled = generationWorkControl(parentGw).cancelled === true
+  let producerCancelled = false
+  const seal = db().query("SELECT value FROM generation_runtime_control WHERE name=?")
+    .get(`producer-cancel:${producer}`) as { value: string } | null
+  if (seal) {
+    const raw = String(seal.value).trim()
+    const sealedAt = /^\d+$/.test(raw) ? Number(raw) : NaN
+    if (Number.isFinite(sealedAt) && Date.now() - sealedAt > PRODUCER_CANCEL_TTL_MS) {
+      clearGenerationProducerCancel(producer)
+    } else {
+      producerCancelled = true
+    }
+  }
+  if (cancelled || producerCancelled) {
+    throw new Error("generation_work_cancelled: 原工作已撤销，未提交新生成；已提交任务仍按真实回执处理")
+  }
 }
 export type GenerationReceipt = {
   task_id: string; parent_gw: string; producer_oc: string; consumer_oc: string; kind: string;

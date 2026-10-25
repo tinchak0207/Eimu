@@ -10,7 +10,7 @@
 //  - 区内无 markDirty 实际呼叫（仅 7432–7433 注释提及；呼叫点 3745/5464 等在区外），故未做 markDirty 注入。
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { resolveSession, markDirty } from "./sessions-core.ts"
+import { resolveSession, markDirty, persistSessionNow } from "./sessions-core.ts"
 import { subagentParentState } from "./subagent.ts"
 import { emitToSession } from "./sse-core.ts"
 
@@ -56,14 +56,43 @@ function canvasKeyFor(sessionId: string): string {
 function sweepCanvasStates(): void {
   const now = Date.now()
   for (const [k, v] of canvasStates) {
-    if (now - v.updatedAt > CANVAS_STATE_TTL_MS) canvasStates.delete(k)
+    if (now - v.updatedAt > CANVAS_STATE_TTL_MS) {
+      canvasStates.delete(k)
+    }
   }
 }
 
-// 服务端单调版本号：每个画布 key 一份，第一次接受写入为 1，之后只增不减。
-// 与快照分开存放：applyCanvasNode* 等既有写穿路径整份替换快照时不携带版本，
-// 不能因此把版本打回原点。
-const canvasStateRevs = new Map<string, number>()
+// 版本随快照一起持久化（state.rev），重启后随快照回灌恢复。
+// 无快照的新 key 当前 rev = 0，首个带 0/缺省的写入得到 rev = 1（基准从 1 起）。
+// lastCanvasRev 只做进程内的单调保护（TTL 清理/清画布后同一 key 不回退），
+// 不引入时间戳：rev 必须是小整数，不能把读盘变成改写快照的理由。
+let lastCanvasRev = 0
+function nextCanvasRev(current: number): number {
+  lastCanvasRev = Math.max(lastCanvasRev + 1, current + 1)
+  return lastCanvasRev
+}
+
+// 该 key 当前的服务器版本：只扫描内存快照（含从持久层回灌的值）。
+// 有快照但没有版本（旧镜像）按 0 对待，调用方必须带 rev=0 才能整份替换。
+function currentCanvasRev(key: string): number {
+  const snap = canvasStates.get(key)
+  if (!snap || !snap.state || typeof snap.state !== "object") return 0
+  return incomingCanvasRev(snap.state) ?? 0
+}
+
+function hasCanvasSnapshot(key: string): boolean {
+  const snap = canvasStates.get(key)
+  return !!snap && !!snap.state && typeof snap.state === "object"
+}
+
+export function clearCanvasState(sessionId: string): void {
+  const key = canvasKeyFor(sessionId)
+  canvasStates.delete(key)
+}
+
+// 2026-10-21：显式画布消费租约（canvasConsumers/recordCanvasConsumer）零调用、
+// 消费表恒空（SSEClient 只有 controller、没有 client id），已删除；画布在线判定
+// 只看 SSE 在线客户端数（state.clients.size），见 dispatchCanvasOps。
 
 // 形状校验：拒绝脏快照（数组/null/基本类型、非数组 steps、非对象/数组的
 // nodes/connections、__proto__ 键）。只校验确实出现的栏位——前端真实上行形状
@@ -88,12 +117,13 @@ function canvasStateShapeError(state: unknown): string | null {
   return null
 }
 
-// 上行版本：优先 rev，其次 version；两者都不是有限数字时回 null（按旧行为接受）。
+// 上行版本：优先 rev，其次 version；只接受非负安全整数。
 function incomingCanvasRev(state: unknown): number | null {
+  if (!state || typeof state !== "object") return null
   const obj = state as Record<string, unknown>
   for (const field of ["rev", "version"] as const) {
     const value = obj[field]
-    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value
   }
   return null
 }
@@ -115,23 +145,29 @@ export function storeCanvasState(
   if (bytes > CANVAS_STATE_MAX_BYTES) {
     return { ok: false, status: 413, message: `state exceeds ${CANVAS_STATE_MAX_BYTES} bytes` }
   }
-  const key = canvasKeyFor(sessionId)
-  const currentRev = canvasStateRevs.get(key) ?? 0
-  const incomingRev = incomingCanvasRev(stateValue)
-  // 乐观并发：带版本且落后于服务端当前版本 = 旧标签页的迟到保存，整份拒绝，
-  // 已存快照（含 agent 刚写入的节点/连线）一律不动。
-  if (incomingRev !== null && incomingRev < currentRev) {
-    return { ok: false, status: 409, message: `stale snapshot (rev=${incomingRev} < current=${currentRev})` }
-  }
-  const nextRev = Math.max(currentRev + 1, incomingRev !== null ? incomingRev + 1 : 0)
   sweepCanvasStates()
+  const key = canvasKeyFor(sessionId)
+  const currentRev = currentCanvasRev(key)
+  const incomingRev = incomingCanvasRev(stateValue)
+  // CAS：有快照时缺版本、旧版本、未来版本一律拒绝（不回退到「缺版本=接受」）。
+  // 只有读到当前版本的调用方才能整份替换；无快照的新 key 只接受 0/缺省。
+  if (hasCanvasSnapshot(key) && incomingRev === null) {
+    return { ok: false, status: 409, message: `snapshot conflict (rev=missing, current=${currentRev})` }
+  }
+  if ((incomingRev ?? 0) !== currentRev) {
+    return { ok: false, status: 409, message: `snapshot conflict (rev=${incomingRev ?? "missing"}, current=${currentRev})` }
+  }
+  const nextRev = nextCanvasRev(currentRev)
   const updatedAt = Date.now()
-  canvasStates.set(key, { state: stateValue, updatedAt })
-  canvasStateRevs.set(key, nextRev)
+  canvasStates.set(key, { state: { ...(stateValue as Record<string, unknown>), rev: nextRev }, updatedAt })
+  const session = resolveSession(key) ?? subagentParentState(sessionId)
+  if (session && !persistSessionNow(session)) {
+    return { ok: false, status: 503, message: "canvas snapshot persistence failed" }
+  }
   return { ok: true, bytes, updatedAt, rev: nextRev }
 }
 
-// 工具/内部读取最新快照；无快照回 null。
+// 工具/内部读取最新快照；无快照回 null。只读：不得在此改写快照（如补 rev）。
 export function getCanvasState(sessionId: string): CanvasSnapshotEntry | null {
   sweepCanvasStates()
   return canvasStates.get(canvasKeyFor(sessionId)) ?? null
@@ -164,6 +200,7 @@ export interface PersistableCanvasState {
 // 读（无则建）该 session 的可变快照形状；尽量沿用前端上行 state 的既有栏位
 // （如 nodes/connections 阵列），缺什么补什么，不覆盖前端已有资料。
 function mutableCanvasStateOf(sessionId: string): PersistableCanvasState {
+  sweepCanvasStates()
   const key = canvasKeyFor(sessionId)
   const snap = canvasStates.get(key)
   if (snap && snap.state && typeof snap.state === "object") {
@@ -185,7 +222,10 @@ function connectionsArray(cs: PersistableCanvasState): Record<string, unknown>[]
 }
 
 function touchCanvasSnapshot(sessionId: string, cs: PersistableCanvasState): void {
-  canvasStates.set(canvasKeyFor(sessionId), { state: cs, updatedAt: Date.now() })
+  const key = canvasKeyFor(sessionId)
+  const currentRev = currentCanvasRev(key)
+  cs.rev = nextCanvasRev(currentRev)
+  canvasStates.set(key, { state: cs, updatedAt: Date.now() })
 }
 
 // canvas.node.created → 节点 upsert（以 node.id 为键，重放安全）。
@@ -278,6 +318,10 @@ export function applyCanvasNodeDisconnected(sessionId: string, payload: unknown)
 
 export interface CanvasOpsResult {
   ok: boolean
+  /** 后端工程镜像确实写盘；与客户端已渲染分开。 */
+  committed?: boolean
+  rev?: number
+  render_pending?: boolean
   error?: string
   created_node_ids?: string[]
   /** F1：前端未回执／无 SSE 客户端时，结构 ops 已写穿 canvasStates，可稍后 hydrate。 */
@@ -736,8 +780,14 @@ export function dispatchCanvasOps(
 ): Promise<{ request_id: string; result: CanvasOpsResult }> {
   const request_id = `cop_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   const offline = applyCanvasOpsToSnapshot(state.sessionId, ops)
+  if (!persistSessionNow(state)) {
+    return Promise.resolve({ request_id, result: { ok: false, committed: false, error: "canvas snapshot persistence failed" } })
+  }
   const queuedResult: CanvasOpsResult = {
     ok: true,
+    committed: true,
+    rev: currentCanvasRev(state.sessionId),
+    render_pending: true,
     queued: true,
     ...(offline.created_node_ids.length > 0 ? { created_node_ids: offline.created_node_ids } : {}),
   }
@@ -761,6 +811,9 @@ export function dispatchCanvasOps(
         // 前端真回执优先；若缺 created_node_ids 则用写穿侧的补上。
         const merged: CanvasOpsResult = {
           ...result,
+          committed: true,
+          rev: queuedResult.rev,
+          render_pending: result.ok !== true,
           created_node_ids: result.created_node_ids?.length
             ? result.created_node_ids
             : offline.created_node_ids.length > 0
@@ -804,6 +857,9 @@ export async function handleCanvasStateWrite(req: Request): Promise<Response> {
   if (typeof body.session_id !== "string" || !body.session_id) {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
+  if (!resolveSession(body.session_id) && !subagentParentState(body.session_id)) {
+    return jsonError(404, "session not found", "not_found", "not_found")
+  }
   if (body.state === null || body.state === undefined || typeof body.state !== "object") {
     return jsonError(400, "state (object) is required", "bad_request", "bad_request")
   }
@@ -820,11 +876,15 @@ export async function handleCanvasSnapshotRead(req: Request): Promise<Response> 
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
   if (!sessionId) return jsonError(400, "session_id is required", "bad_request", "bad_request")
+  if (!resolveSession(sessionId) && !subagentParentState(sessionId)) {
+    return jsonError(404, "session not found", "not_found", "not_found")
+  }
   const snap = getCanvasState(sessionId)
   return Response.json({
     ok: true,
     has_state: snap !== null,
     state: snap?.state ?? null,
     updated_at: snap?.updatedAt ?? null,
+    rev: snap?.state && typeof snap.state === "object" ? (snap.state as Record<string, unknown>).rev ?? 0 : 0,
   })
 }

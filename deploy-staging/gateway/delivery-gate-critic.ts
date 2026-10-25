@@ -247,16 +247,127 @@ export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknow
 const CRITIC_REJECT_WORDS = ["partial", "fail", "未验", "退回", "驳回", "驳回", "不通过", "不通过", "未通过", "未通过", "reject", "rejected"]
 const CRITIC_PASS_WORDS = ["通过", "通过", "pass", "approve", "accept", "approved"]
 
+/** 冲突判决的拒收码（唯一真源；呼叫点据此留日志/回执）。 */
+export const CRITIC_VERDICT_CONFLICT_CODE = "critic_verdict_conflict"
+
+export interface VerdictConflict {
+  conflict: true
+  pass: string
+  other: string
+}
+
+/** 找第一个「非否定式」的 PASS 词：未通过／不通过／没有通过／无法通过 不算 PASS。 */
+function findPassVerdictTokenAt(src: string): { token: string; index: number } | null {
+  // 正则一律本地新建（不复用带 g 的物件，避免 lastIndex 跨呼叫污染）。
+  const cjk = /通过/g
+  for (let m = cjk.exec(src); m; m = cjk.exec(src)) {
+    const before = src.slice(Math.max(0, m.index - 3), m.index)
+    if (/(?:未|不|没|无法|没有)\s*$/.test(before)) continue
+    return { token: m[0], index: m.index }
+  }
+  const en = /\b(?:PASS|PASSED|APPROVED)\b/gi
+  const e = en.exec(src)
+  if (e) {
+    const before = src.slice(Math.max(0, e.index - 8), e.index).toLowerCase()
+    if (!/(?:\bnot|\bno|未|不)\s*$/.test(before)) return { token: e[0], index: e.index }
+  }
+  return null
+}
+
+function findPassVerdictToken(src: string): string {
+  const hit = findPassVerdictTokenAt(src)
+  return hit ? hit.token : ""
+}
+
+/** 找第一个非 PASS 判决词：PARTIAL/部分/FAIL/退回/不通过/未通过（含英文同义）。 */
+function findNonPassVerdictToken(src: string): string {
+  const cjk = /部分|退回|驳回|不通过|未通过/g
+  const c = cjk.exec(src)
+  if (c) return c[0]
+  const en = /\b(?:PARTIAL|FAIL|FAILED|FAILURE|REJECT|REJECTED)\b/gi
+  const e = en.exec(src)
+  return e ? e[0] : ""
+}
+
+/** 结构化判定行：`verdict/结论/判定/评审结论` **带冒号**，或关键字后**紧跟判定词**（无冒号形态）。
+ *  2026-10-21 修正：裸 `结论` 让 issues 行 `结论无重大问题；部分素材待补` 被当成第二判定行 →
+ *  PASS 误拒；判定行必须显式 `结论：` 才算判定。
+ *  2026-10-21 二次修正：实测 `verdict: PASS\n结论 部分通过` 无冒号 → 漏判、PARTIAL 被当 PASS 放行；
+ *  补「关键字 + 判定词」形态。判定词后仍须紧跟判定词作为锚点：`结论无重大问题` 后没有判定词 → 不匹配，
+ *  不重新引入 issues 散文误判。 */
+const VERDICT_LINE_RE =
+  /(?:verdict|结论|判定|评审结论)\s*(?:[:：]\s*([^\n]{0,160})|((?:PASS|PARTIAL|FAIL|FAILED|FAILURE|REJECT|REJECTED|通过|部分通过|不通过|未通过|驳回|退回)[^\n]{0,160}))/gi
+/** 独立判定 token 行：整行只有 PASS/PARTIAL/FAIL/REJECT（大小写不敏感）。 */
+const STANDALONE_VERDICT_RE = /^\s*(PASS|PARTIAL|FAIL|REJECT)\s*$/gim
+
+/** PASS 判决后的说明性尾注分隔符（破折号/冒号）：尾注是备注，不是第二个判决。 */
+const VERDICT_TAIL_DELIM_RE = /^\s*(?:——|—|-|：|:)/
+/** 尾注里出现这些词仍视为真冲突（不只是备注）。 */
+const VERDICT_TAIL_CONFLICT_RE = /驳回|退回|不通过|未通过|\b(?:PARTIAL|FAIL|FAILED|FAILURE|REJECT|REJECTED)\b/i
+
+/**
+ * 纯函数（C2，2026-10-21）：**只认结构化判定**，不认散文。
+ * 先抓「verdict/结论/判定」判定行与独立 token 行，再逐行找 PASS/非 PASS：
+ *  - 同一行或不同判定行同时出现 PASS 与非 PASS → 判决自相矛盾，返回首个命中词对；
+ *  - 只有一侧、或整份 payload 没有结构化判定 → null（保持「找不到 pass 就不拒」既有语义）。
+ *
+ * 病灶（2026-10-21 实测）：旧版全篇扫 `部分|退回|驳回|不通过|未通过`，普通散文
+ * 「这部分素材…」与 PASS 同现即误判 critic_verdict_conflict 拒收正当评审。
+ * 另：pack-0014、pack-0122 等实测「同一份评审里 PASS 与 PARTIAL/FAIL 并存」，
+ * 既有 criticVerdictRejected 只看 `verdict` 栏后 80 字 → 冲突 payload 被判 PASS，矛盾结论照样放行。
+ * 2026-10-21 二次 Hack：`结论：通过 — 部分镜头偏暗` 的破折号尾注是备注，不是 PARTIAL 判决；
+ * PASS 后紧跟 `—|——|-|：|:` 时只扫尾注之前判非 PASS（尾注含 驳回/退回/不通过/未通过/FAIL/REJECT
+ * 仍算冲突）。`结论：部分通过` 的「部分」在 PASS 之前，照旧冲突。
+ */
+export function conflictingVerdicts(text: string): VerdictConflict | null {
+  const src = typeof text === "string" ? text : ""
+  if (!src.trim()) return null
+  let pass = ""
+  let other = ""
+  const noteLine = (line: string): void => {
+    // 2026-10-21 Hack：先剥掉括号备注再扫判决。「结论：通过（部分镜头偏暗）」里的
+    // 「部分」是评审备注不是判决，旧版与 PASS 同现即误判 critic_verdict_conflict。
+    const stripped = line.replace(/（[^）]*）|\([^)]*\)/g, "")
+    let otherSource = stripped
+    const hit = findPassVerdictTokenAt(stripped)
+    if (hit) {
+      const afterPass = stripped.slice(hit.index + hit.token.length)
+      const delim = VERDICT_TAIL_DELIM_RE.exec(afterPass)
+      if (delim) {
+        const tail = afterPass.slice(delim[0].length)
+        const tailConflict = VERDICT_TAIL_CONFLICT_RE.exec(tail)
+        if (tailConflict) {
+          if (!pass) pass = hit.token
+          if (!other) other = tailConflict[0]
+          return
+        }
+        // 说明性尾注不含冲突词：只扫 PASS 之前的部分判非 PASS。
+        otherSource = stripped.slice(0, hit.index)
+      }
+    }
+    if (!pass) pass = findPassVerdictToken(stripped)
+    if (!other) other = findNonPassVerdictToken(otherSource)
+  }
+  for (const m of src.matchAll(VERDICT_LINE_RE)) noteLine(m[1] ?? m[2] ?? "")
+  for (const m of src.matchAll(STANDALONE_VERDICT_RE)) noteLine(m[1] ?? "")
+  if (!pass || !other) return null
+  return { conflict: true, pass, other }
+}
+
 /**
  * 纯函数：critic 交付正文的 verdict 判读。
  * 取 `verdict` 栏后紧跟片段（无则取开头 400 字）找驳回/通过词。
  * **保守方向**：无正文或判不出 → 视为退回（宁可多一次唤醒，不吞掉问题）。
+ * C2：整份 payload 自相矛盾（PASS 与 PARTIAL/FAIL 并存）→ 一律退回；干净 payload 行为不变。
  */
 export function criticVerdictRejected(text: string): boolean {
   const src = typeof text === "string" ? text : ""
   if (!src.trim()) return true
+  if (conflictingVerdicts(src) !== null) return true
   const m = /verdict[\s:：>*-]*([^\n]{0,80})/i.exec(src)
-  const head = (m ? m[1] : src.slice(0, 400)).toLowerCase()
+  const rawHead = m ? m[1] : src.slice(0, 400)
+  // 2026-10-21 Hack：`VERDICT: PASS (PARTIAL)` 的括号内是备注，旧版不剥括号 → 判 PARTIAL 拒收。
+  const head = rawHead.replace(/（[^）]*）|\([^)]*\)/g, "").toLowerCase()
   if (CRITIC_REJECT_WORDS.some((w) => head.includes(w.toLowerCase()))) return true
   return !CRITIC_PASS_WORDS.some((w) => head.includes(w.toLowerCase()))
 }

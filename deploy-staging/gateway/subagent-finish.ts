@@ -1,7 +1,7 @@
 import { notify } from "./internal-waiters.ts"
 import { parseToolOutput, collectToolOutputMediaUrls } from "./events-translate.ts"
 import { saveDurableSubagentRun, durableSubagentRun } from "./job-store"
-import { checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
+import { checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, conflictingVerdicts, CRITIC_VERDICT_CONFLICT_CODE, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
 import { listArtifacts, artifactLocalEvidenceMatches } from "./artifact-store.ts"
 import { saveReworkRecord, deleteReworkRecord, saveCriticVerdict, saveExpertLesson, saveDelivery } from "./persistence"
 import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, MeasuredMediaResult } from "./media-quality.ts"
@@ -141,8 +141,24 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && artifactEvidenceVerdict.ok && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
-    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined })
-    if (arr.length > 20) arr.shift()
+    // at/turnGen 供 dispatch 端判「本专辑范围内」的交付（bug B），不新建持久化结构。
+    arr.push({
+      agent: run.agent,
+      label: run.label,
+      relPath: persist.relPath ?? "",
+      contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined,
+      at: Date.now(),
+      turnGen: parentStateOf(run)?.turnGen,
+    })
+    // 2026-10-24 修 bug C：淘汰不再无差别 shift()。两条闸（先词后曲／专辑工序）与歌词注入
+    // 都靠本簿判「本专辑已有词/曲」，把最早的 lyricist/music 记录整笔丢掉，等于让后来派的
+    // 谱曲任务看不到已经交付的词、让评审以为专辑还没有实体。所以超出上限时优先淘汰
+    // **非 lyricist/music 的旧记录**（研究、排版、剪辑等）；全是关键记录时才退回 shift()。
+    if (arr.length > 20) {
+      const victim = arr.findIndex((d) => d.agent !== "lyricist" && d.agent !== "music")
+      if (victim >= 0) arr.splice(victim, 1)
+      else arr.shift()
+    }
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
   }
@@ -289,6 +305,14 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       { value: measured?.score ?? null, source: measured ? "measured" : null },
       scoreEnforced,
     )
+    // C2（2026-10-21）：同一 payload 内 PASS 与 PARTIAL/FAIL 并存 = 判决自相矛盾 → 一律拒收。
+    // criticVerdictRejected 已内置同判据；这里额外留一行带拒收码的日志，供事后对帐定位。
+    const verdictConflict = conflictingVerdicts(typeof fullText === "string" ? fullText : "")
+    if (verdictConflict) {
+      console.warn(
+        `[gateway] ${CRITIC_VERDICT_CONFLICT_CODE}: critic_run=${run.id} label="${run.label}" pass="${verdictConflict.pass}" other="${verdictConflict.other}" → 判决冲突，按退回处理`,
+      )
+    }
     run.machineCriticRejected = reviewPartial || criticVerdictRejected(fullText) || forcedByScore
     if (forcedByScore) {
       console.warn(

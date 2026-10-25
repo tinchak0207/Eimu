@@ -680,7 +680,11 @@ export type ForkContext =
  * wakeParent 时 async 请求按同步处理，不裸奔）。
  */
 export type ResearchPredecessor = { runId: string; agent: string; label: string; relPath: string }
-export const RESEARCH_PRECEDED_EXPERTS = ["screenwriter", "video-director", "director3d", "motion-director", "web3d-director"]
+// 2026-10-24：新增 lyricist / music。此前缺口正是「写词/谱曲从不受研究先行约束」——
+// 概念专辑研究一路派出、写词的人读不到研究结论，研究价值清零。名单本身只用于
+// researchPredecessors 的补充取证（旧 run 没有交付行时把它们的产物也算作前置证据）；
+// 是否拦、是否注入研究正文一律由 Jev 的 guard_consumes_research 判决，不靠本名单。
+export const RESEARCH_PRECEDED_EXPERTS = ["screenwriter", "video-director", "director3d", "motion-director", "web3d-director", "lyricist", "music"]
 
 /**
  * G2（2026-10-14 协作总线修复）：安全读 JSON body。

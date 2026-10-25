@@ -1,6 +1,6 @@
 import { TaskStatus } from "./types-gateway.ts"
 import { notify } from "./internal-waiters.ts"
-import { bindGenerationConsumer, generationParent, saveDurableSubagentRun } from "./job-store"
+import { bindGenerationConsumer, generationParent, saveDurableSubagentRun, cancelGenerationProducer } from "./job-store"
 import { CriticPassTarget } from "./delivery-gate"
 import { deleteReworkRecord } from "./persistence"
 import { runHooksWithBudget } from "./hooks-http.ts"
@@ -93,7 +93,9 @@ export const pendingCriticTargets = new Map<string, CriticPassTarget[]>()
 export const criticDispatchedByParent = new Map<string, number>()
 // M2/M3（2026-10-02）：每父会话交付簿——music-first 前置断言（music 交付事件）＋
 // 返工内容锁（上一份交付物落盘路径）。有界 Map，每父会话 ≤20 笔。
-export const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string; contractOk?: boolean }>>()
+// 2026-10-24：记录加 at/turnGen——专辑工序闸要判「本专辑范围内（本轮或近窗）的交付」，
+// 交付簿本身跨轮累积、不另建持久化结构（bug B）。
+export const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string; contractOk?: boolean; at?: number; turnGen?: number }>>()
 // 本会话是否已用掉 machine critic pass（内存镜像；权威在 persistence.critic_passes）。
 export const criticPassUsed = new Set<string>()
 const DURABLE_TERMINAL_RETRY_CAP = 64
@@ -262,6 +264,11 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   }
   if (run.stopped || run.status === "stopped" || run.status === "ok" || run.status === "error") return false
   if (run.status !== "running" && run.status !== "interrupted" && run.status !== "suspended") return false
+  // 子代理停止撤销其未来提交，已生成/已扣费的耐久回执继续由收件箱回收。
+  // 2026-10-21 修复：必须放在所有终态/soft 守卫之后——对已终态 run 调 stop、soft stop
+  // 都还没真正停掉任何工作，写封条=永久封死；只有这里（真正会 hard stop）才写。
+  // resume 沿用同一 opencodeSessionId 时由 clearGenerationProducerCancel 删除该行。
+  if (isOpenCodeSessionId(run.opencodeSessionId)) cancelGenerationProducer(run.opencodeSessionId)
   // G4(b)：硬停软停收尾中的 run——先撤优雅期计时器与软停态，否则计时器到点还会动这条 run。
   if (run.softStopping) {
     if (run.softStopping.timer) clearTimeout(run.softStopping.timer)
@@ -497,4 +504,3 @@ export function removeFromRegistries(run: SubagentRun): void {
     run.suspension.timer = undefined
   }
 }
-

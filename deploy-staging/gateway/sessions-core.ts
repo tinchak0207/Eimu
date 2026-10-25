@@ -8,7 +8,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { OPENCODE_URL, UPLOADS_DIR, RESTORED_TURN_NOTICE_MS, RESTORED_TURN_REAP_MS } from "./constants-gateway.ts"
 import { lastOcActivityAt, liveChildCount } from "./session-activity.ts"
 import { jsonError } from "./gw-lib.ts"
-import { canvasStates } from "./canvas-cascade-state.ts"
+import { canvasStates, clearCanvasState } from "./canvas-cascade-state.ts"
 import { emitToSession, stripStaleTurnTextFromReplay, closeSessionStreams } from "./sse-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
 import { sseTickets, SSE_TICKET_TTL_MS, pruneExpiringMap } from "./auth-gw.ts"
@@ -68,6 +68,30 @@ export function flushDirtySessions(): void {
     // 现在只有 saveSession 明确回传成功才清 dirty；失败保留，下一轮（3s 后）自然重试。
     if (saveSession(st)) dirtySessions.delete(id)
   }
+}
+
+// 画布写穿路径会在一次工具调用内多次同步落盘：同会话 150ms 内只真写一次，
+// 其余只登记 dirty 交给 3s 的防抖 flush。返回 true = 已落盘或已排队。
+const PERSIST_NOW_MIN_INTERVAL_MS = 150
+const lastPersistNowAt = new Map<string, number>()
+
+export function persistSessionNow(state: SessionState): boolean {
+  markDirty(state)
+  const now = Date.now()
+  if (now - (lastPersistNowAt.get(state.sessionId) ?? 0) < PERSIST_NOW_MIN_INTERVAL_MS) return true
+  if (!saveSession(state)) return false // 失败保留 dirty，下一轮 flush 重试
+  lastPersistNowAt.set(state.sessionId, now)
+  dirtySessions.delete(state.sessionId)
+  return true
+}
+
+// teardown 等对象即将从内存消失的路径：不受节流限制，立即落盘。
+function flushPersistNow(state: SessionState): boolean {
+  markDirty(state)
+  if (!saveSession(state)) return false
+  lastPersistNowAt.set(state.sessionId, Date.now())
+  dirtySessions.delete(state.sessionId)
+  return true
 }
 
 setInterval(flushDirtySessions, PERSIST_FLUSH_INTERVAL_MS)
@@ -477,6 +501,18 @@ export async function deleteOpencodeSession(opencodeSessionId: string): Promise<
 // Drop a session from the map, resolve anything still waiting on it, and close
 // its streams. Shared teardown for DELETE and the reaper.
 export function teardownSession(id: string, state: SessionState, reason: string, keepRow = false): void {
+  // idle reap（keepRow=true）只是内存回收：先强制落盘（画布快照随 session 镜像保留），
+  // 不得清画布——revive 后仍要恢复。只有真删除才清内存画布桶。
+  if (keepRow) {
+    // 2026-10-21 Hack：落盘失败时旧码照样 dirtySessions.delete 并拆掉内存对象 = 状态永久丢失。
+    // 失败就保留 session 与 dirty 标记（最后一次重试机会：下一轮 flushDirtySessions 会再写）；
+    // 成功路径行为不变（keepRow=true 不删行、不清画布）。
+    if (!flushPersistNow(state)) {
+      console.warn(`[gateway] teardown flush failed — keeping session and dirty flag for retry: session=${id} reason=${reason}`)
+      return
+    }
+  } else clearCanvasState(id)
+  lastPersistNowAt.delete(state.sessionId)
   sessions.delete(id)
   dirtySessions.delete(id)
   releaseWorkflowSession(id)

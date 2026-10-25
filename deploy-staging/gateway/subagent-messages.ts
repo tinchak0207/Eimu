@@ -1,4 +1,4 @@
-import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns } from "./job-store"
+import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, clearGenerationProducerCancel } from "./job-store"
 import { currentKernelFingerprint, decideKernelResume } from "./agent-kernel.ts"
 import type { SubagentRun, ResumeOutcome } from "./subagent-types.ts"
 import { MAX_ACTIVE_PER_PARENT, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_BUSY_MESSAGE, subagentResumeTtlMs, SUBAGENT_CHILD_QUEUE_MAX, SUBAGENT_BUS_MAX_CHARS, partialBodyOf, isOpenCodeSessionId, readJsonObject, childFacingFrame } from "./subagent-types.ts"
@@ -238,6 +238,10 @@ async function resumeTerminalRun(
     submissionSeq: 0,
     artifacts: [...(old.artifacts ?? [])],
   }
+  // 续跑沿用同一 opencodeSessionId＝新工作代：删掉此前 hard stop 留下的 producer-cancel
+  // 封条（该行只应封「停止当时的未来提交」）。放在投递之前，避免续跑的首个提交撞竞态；
+  // 投递失败时子会话已失效，清掉也无害。
+  clearGenerationProducerCancel(run.opencodeSessionId)
   byChildOc.set(run.opencodeSessionId, run)
   list.push(run)
   byParent.set(run.parentGatewaySessionId, list)

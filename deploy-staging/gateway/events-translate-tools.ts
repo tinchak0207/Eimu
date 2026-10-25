@@ -9,6 +9,9 @@ import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
 import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
+// 2026-10-21：工具生命周期终态（running 永不终结只标「未确认」）与完成主张证据收集。
+import { noteToolRunning, noteToolTerminal, toolCallSignature, TOOL_RUNNING_CAP } from "./tool-lifecycle.ts"
+import { recordDeliveryEvidence } from "./claim-gate.ts"
 import { markDirty } from "./sessions-core.ts"
 import { canvasResultNodeId } from "./canvas-cascade-state.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
@@ -183,6 +186,12 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   const status = typeof st.status === "string" ? st.status : ""
   if (!callId || !status) return
 
+  // 2026-10-21 Hack：生命周期登记（幂等）必须先于 status 去重早退。
+  // 同一 callID 的第二次 running 才带 input 时，旧顺序在登记前就早退 → 工具签名永远补不上；
+  // terminal 同理，被去重吞掉会让调用永久留在在跑表（只在 completed/error 收尾）。
+  const runningReg = status === "pending" || status === "running" ? noteToolRunning(state, callId, toolName, st.input, Date.now()) : undefined
+  if (status === "completed" || status === "error") noteToolTerminal(state, callId)
+
   // Dedup by callID + status so a repeated identical status does not re-emit.
   const dedupKey = `${callId}:${status}`
   if (state.toolStatusSeen.has(dedupKey)) return
@@ -196,6 +205,24 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   }
 
 if (status === "pending" || status === "running") {
+    // 2026-10-21 工具生命周期：登记已在去重早退前完成；这里只处理重复签名播报，不阻断调用。
+    const dup = runningReg ?? {}
+    if (dup.duplicateOf) {
+      // 2026-10-21：同签名重复调用只播报一次（实测同一签名 46 次调用会刷 46 条 tool.duplicate）。
+      // 去重集合与 toolRunningCalls 同生命周期：volatile、不随 turn 清空（"不清空也行"），
+      // 上限复用 TOOL_RUNNING_CAP，超出丢最旧。
+      const signature = toolCallSignature(toolName, st.input)
+      const announced = state.toolDuplicateAnnounced ?? (state.toolDuplicateAnnounced = new Set<string>())
+      if (signature && !announced.has(signature)) {
+        announced.add(signature)
+        boundSet(announced, TOOL_RUNNING_CAP)
+        emitToSession(state, "tool.duplicate", {
+          tool: toolName,
+          call_id: callId,
+          duplicate_of: dup.duplicateOf,
+        })
+      }
+    }
     // question is not a generic running tool. The agent is blocked on a
     // que_* request; emit question.request so the frontend can reply.
     if (toolName === "question") {
@@ -220,6 +247,7 @@ if (status === "pending" || status === "running") {
       void autoCreateCanvasUnit(state, toolName, st.input, callId)
     }
   } else if (status === "completed") {
+    noteToolTerminal(state, callId)
     // 若 running 阶段因 input 缺失没发过 invoke，这里补发一次（completed 的
     // input 一定完整），确保前端工具卡必定有说明、不黑盒。
     if (!state.toolInvokeSeen.has(callId) && st.input != null) {
@@ -259,6 +287,9 @@ if (status === "pending" || status === "running") {
     const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
     const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
     const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
+    // 2026-10-21 完成主张闸：只有**成功**的 completed 回执才算交付证据
+    //（URL / task_id / 落盘路径），供 session.idle 判定「有主张无回执」。
+    if (ok) recordDeliveryEvidence(state, toolName, parsed ?? st.output)
     // 2026-10-11 修画布：记账真写穿（非 dry_run），供 session.idle 收盘硬闸。
     if (toolName === "workflow_write" && isSuccessfulWorkflowWrite(parsed, ok)) {
       state.workflowWriteSucceeded = true
@@ -440,6 +471,7 @@ if (status === "pending" || status === "running") {
       }
     }
   } else if (status === "error") {
+    noteToolTerminal(state, callId)
     const err = st.error
     let message =
       typeof err === "string"

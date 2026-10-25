@@ -1,4 +1,5 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
+  assertGenerationWorkActive,
   completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
@@ -84,6 +85,18 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const consumer = input.consumer_session_id || producer
       if (consumer !== producer && consumer !== parent.opencodeSessionId && generationParent(consumer)?.parent_gw !== parent.sessionId)
         return Response.json({ ok: false, error: "consumer owner mismatch" }, { status: 403 })
+      // 2026-10-21：用户取消后不得再登记新生成。已提交任务的责任链不得因取消而断——
+      // task_id 已有 receipt 时跳过工作控制闸，直接走 registerGenerationReceipt 的幂等返回；
+      // 只有真正的新 task 才 assert。取消错误回 409，其他异常照旧交给外层 503（不吞成成功）。
+      if (!generationReceipt(input.task_id)) {
+        try {
+          assertGenerationWorkActive(parent.sessionId, producer)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (message.startsWith("generation_work_cancelled")) return Response.json({ ok: false, error: message }, { status: 409 })
+          throw error
+        }
+      }
       const receipt = registerGenerationReceipt({ task_id: input.task_id, parent_gw: parent.sessionId,
         producer_oc: producer, consumer_oc: consumer, kind: input.kind,
         model: input.model, cost_coins: input.cost_coins, frame: input.frame, project: input.project, request_id: input.request_id,

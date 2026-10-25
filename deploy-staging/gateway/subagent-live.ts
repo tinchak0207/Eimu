@@ -263,11 +263,27 @@ export function renderSubagentNoteQueueBlock(
   const list = Array.isArray(notes) ? notes.filter((n) => n && typeof n === "object") : []
   if (list.length === 0) return ""
   const sorted = [...list].sort((a, b) => (Number(a?.at ?? 0) || 0) - (Number(b?.at ?? 0) || 0))
+  // 同一路进度只留最新一条。早先的「还在排队」整段留在上下文里会把压缩打成空转。
+  const latestProgress = new Map<string, (typeof sorted)[number]>()
+  const actionable: typeof sorted = []
+  for (const n of sorted) {
+    const kind = n?.kind === "blocked" || n?.kind === "question" ? n.kind : "progress"
+    if (kind === "progress") {
+      const key = String(n?.run_id ?? n?.id ?? "") || `p${latestProgress.size}`
+      latestProgress.set(key, n)
+    } else actionable.push(n)
+  }
+  const renderList = [...latestProgress.values(), ...actionable].sort(
+    (a, b) => (Number(a?.at ?? 0) || 0) - (Number(b?.at ?? 0) || 0),
+  )
+  const folded = sorted.length - renderList.length
   const lines: string[] = []
   let used = 0
-  for (const n of sorted) {
+  for (const n of renderList) {
     const rawBody = String(n?.text ?? "").split(SUBAGENT_UNTRUSTED_PREFIX).join("").trim()
-    const cleaned = scrubSubagentPayload(rawBody) || "（本路回报无可读正文。）"
+    let cleaned = scrubSubagentPayload(rawBody) || "（本路回报无可读正文。）"
+    const isProgress = n?.kind !== "blocked" && n?.kind !== "question"
+    if (isProgress && cleaned.length > 160) cleaned = `${cleaned.slice(0, 160)}…`
     const runId = String(n?.run_id ?? "").slice(0, 8)
     const kindText = n?.kind === "blocked" ? "报告阻塞" : n?.kind === "question" ? "提问" : "进度回报"
     const line = `- [子代理${runId ? ` ${runId}` : ""}·${kindText}] ${cleaned}`
@@ -275,11 +291,21 @@ export function renderSubagentNoteQueueBlock(
     lines.push(line)
     used += line.length + 1
   }
-  const dropped = sorted.length - lines.length
+  const dropped = renderList.length - lines.length
   const truncNote = dropped > 0 ? `\n（已截断 ${dropped} 条）` : ""
+  const foldedNote = folded > 0 ? `\n（进度已折叠为每路最新一条，略去 ${folded} 条较早进度）` : ""
   return (
-    `【子代理回报队列·系统事实】父会话上次被唤醒以来，以下子代理回报已在队列中排队（共 ${sorted.length} 条，按到达顺序）：\n` +
-    `${SUBAGENT_UNTRUSTED_PREFIX}\n${lines.join("\n")}${truncNote}`
+    `【子代理回报队列·系统事实】父会话上次被唤醒以来，以下子代理回报已在队列中排队（共 ${renderList.length} 条，按到达顺序）：\n` +
+    `${SUBAGENT_UNTRUSTED_PREFIX}\n${lines.join("\n")}${truncNote}${foldedNote}`
+  )
+}
+
+/** 回报唤醒在队列非空时不再把同一篇正文贴第二遍。完成/失败唤醒仍走 composeSubagentWakeInjection。 */
+export function composeNoteWakeInjection(queueBlock: string, triggerContent: string): string {
+  if (!queueBlock) return triggerContent
+  return (
+    `${queueBlock}\n\n` +
+    "以上是尚未送达的子代理回报，不是用户发言，不要复述到用户屏幕。阻塞和提问要处理；纯进度不要为此另开工具回合，也不要向用户播报内部编号。最终成品未交付前，禁止宣称已全部完成。"
   )
 }
 

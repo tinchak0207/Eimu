@@ -15,7 +15,7 @@ import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
-import { isSystemWakeText, isInternalMechanismText, stripSystemReminders } from "./system-wake.ts"
+import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
@@ -189,25 +189,21 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
         if (typeof infoSrc.role === "string") info.role = infoSrc.role
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
-      // H14 补完：user 讯息首个 text part 为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
-      if (info.role === "user" && partsSrc.some((p) => {
+      const headText = partsSrc.map((p) => {
         const q = p as Record<string, unknown> | null
-        return !!q && q.type === "text" && isSystemWakeText(q.text)
-      })) info.role = "system"
+        return !!q && q.type === "text" && typeof q.text === "string" ? q.text : ""
+      }).find((t) => t.trim().length > 0)
+      // 进度 / 回报队列 / 阻塞 / 提问：不进客户端历史。模型上下文仍在 opencode，不经这里。
+      if ((info.role === "user" || info.role === "system") && isHiddenSubagentBusText(headText)) continue
+      // H14 补完：user 讯息为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
+      if (info.role === "user" && isSystemWakeText(headText)) info.role = "system"
       // 2026-10-23：客户端历史只暴露产品可见角色。developer / 非唤醒 system / 耐久收件箱等机制文一律不回传。
-      // 子代理唤醒（已改写成 system + isSystemWakeText）保留，供前端还原 subagent_result。
+      // 子代理完成/失败唤醒（已改写成 system）保留，供前端还原 subagent_result。
       if (info.role === "developer") continue
       if (info.role === "system") {
-        const wake = partsSrc.some((p) => {
-          const q = p as Record<string, unknown> | null
-          return !!q && q.type === "text" && isSystemWakeText(q.text)
-        })
-        if (!wake) continue
+        if (!isSystemWakeText(headText)) continue
       }
-      if (info.role === "user" && partsSrc.some((p) => {
-        const q = p as Record<string, unknown> | null
-        return !!q && q.type === "text" && isInternalMechanismText(q.text)
-      })) continue
+      if (info.role === "user" && isInternalMechanismText(headText)) continue
       const parts: unknown[] = []
       for (const rawPart of partsSrc) {
         try {
@@ -225,6 +221,7 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 刷新/重进会话时模型正文会从简体变回繁体）。仅对非 user 讯息转换，
               // 用户自己输入的文字逐字保留；转换在剥离之后进行。
               let text = stripSystemReminders(stripTailInjectedPayload(part.text))
+              if (info.role === "system") text = clientVisibleWakeText(text)
               // 2026-10-11 缺口C：顺序＝先剥离尾端注入块、再抹除会话凭证 ⟦gw:<nonce>⟧、
               // 最后才 T2S。真注入块与模型复述会把会话级凭证/内部提示原文写进存储文本，
               // 而历史端点是用户可见通道（SSE 干净、只有此处漏）。凭证一律抹为空串

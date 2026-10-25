@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { bindGenerationConsumer, saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns } from "./job-store"
+import { bindGenerationConsumer, clearGenerationProducerCancel, saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns } from "./job-store"
 import { loadReworkRecords, ReworkRecord } from "./persistence"
 import type { SubagentRun, ChildProbe } from "./subagent-types.ts"
 import { SUBAGENT_OUTPUT_REL, SUBAGENT_OUTPUT_DIR, isOpenCodeSessionId, textBlocksOfMessage } from "./subagent-types.ts"
@@ -226,6 +226,10 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
       run.recoveredWatcher = true
       seedTakenOverCursor(run, messages)
       ensureTranscript(run)
+      // 恢复出的 run 沿用同一 opencodeSessionId＝新工作代：清掉 hard stop 留下的
+      // producer-cancel 封条，否则恢复后所有新提交都会被永久挡成 409（与
+      // subagent-messages 的 resume 同位置：投递之前）。
+      clearGenerationProducerCancel(run.opencodeSessionId)
       bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
       saveDurableSubagentRun(run)
       } catch (error) { console.warn("[gateway] individual legacy takeover deferred:", record.runId, error instanceof Error ? error.message : "unavailable") }
@@ -237,6 +241,8 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
   for (const record of loadReworkRecords()) if (!durableSubagentRun(record.runId)) {
     const run = runFromReworkRecord(record)
     ensureTranscript(run)
+    // 同上：恢复沿用同一子会话＝新工作代，先清 hard stop 封条再接线投递。
+    clearGenerationProducerCancel(run.opencodeSessionId)
     bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
     saveDurableSubagentRun(run)
   }
@@ -253,6 +259,8 @@ export async function recoverReworkRunsOnStartup(): Promise<void> {
     if (!list.some((existing) => existing.id === run.id)) list.push(run)
     byParent.set(run.parentGatewaySessionId, list)
     ensureTranscript(run)
+    // 同上：恢复出的 run 投递前清掉 hard stop 的 producer-cancel 封条，避免永久 409。
+    clearGenerationProducerCancel(run.opencodeSessionId)
     bindGenerationConsumer(run.opencodeSessionId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
   }
   await reconcileTakenOverRuns()

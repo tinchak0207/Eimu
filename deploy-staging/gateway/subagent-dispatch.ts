@@ -1,6 +1,6 @@
-import { readFileSync, readdirSync, existsSync } from "node:fs"
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, JevDispatchGuards } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, albumPhaseBlockReason, albumReviewBlockReason, isMusicWorkVerdict, isLyricistWorkVerdict, isReviewWorkVerdict, lyricsUpstreamBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, consumesResearchVerdict, renderResearchInjection, type ResearchInjectItem, JevDispatchGuards } from "./jev-gate"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw"
 import { templatePlaceholderContent } from "./workflow-templates"
 import { notify } from "./internal-waiters.ts"
@@ -16,6 +16,9 @@ import { persistRunOutput } from "./subagent-liveness.ts"
 import { dispatchAttempt } from "./subagent-attempt.ts"
 import { subagentChildSlug, buildSiblingRosterFact, ensureTranscript } from "./subagent-live.ts"
 import { parentOwnsRunId } from "./subagent-messages.ts"
+// C1（2026-10-21）：席位能力预检——任务书点名了该席位未启用的工具时，派工当刻就把
+// 提示写回 orchestrator（原先 editor 无 image_generate 仍先派工、跑 10 分钟才 BLOCKED）。
+import { checkSeatTools, formatSeatPreflightNotice, loadSeatToolTable, type SeatToolCheck } from "./seat-preflight.ts"
 
 function readCompletedPredecessor(record: ResearchPredecessor): string | null {
   if (!record.relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return null
@@ -27,6 +30,118 @@ function readCompletedPredecessor(record: ResearchPredecessor): string | null {
     const body = stored.split("- 内容: 子代理最后一条 assistant 文本全文\n")[1]?.split(`\n\n---\n\n${PERSIST_TAIL}`)[0] ?? ""
     return body.trim() ? body : null
   } catch { return null }
+}
+
+/**
+ * 2026-10-24（二审重写）：守卫判定的短路缓存。
+ *
+ * 为什么不再用词表预筛：上一版 MEDIA_CREATIVE_RE 对真实任务书 12/12 漏判（「做十首关于
+ * 夏天的东西」「按周杰伦早期的风格出十首」「做一个完整的双面作品」全部 MISS），而词表本身
+ * 又决定不了拦截语义——它只会让该问的问题没问出去。判定权因此整段交回 Jev：域判定题
+ * （isLyricistWork/isMusicWork/isReviewWork）与工序题同批一次 POST，阈值与 fail-open
+ * 语义都在 jev-gate 里，本档不再持有任何写着词/谱曲/媒体域的词表。
+ *
+ * 为什么每次派遣都付得起这次呼叫：
+ * - 单次调用只发一次 POST，七题同批，加题不加延迟；
+ * - `JEV_TIMEOUT_MS=2000`（jev-gate.ts:26），最坏 2 秒；
+ * - `JEV_ENABLED !== "true"` 或无 key → jevUpstream 直接 return null，零网络延迟；
+ * - 并发上限 MAX_ACTIVE_PER_PARENT=3，最多 3 路各一次呼叫。
+ *
+ * 缓存：同父会话 + 同 label + 整份任务书，TTL 60 秒。orchestrator 被 409 挡下后的重派、
+ * 同一份任务书重试，都不必再付一次钱；过期即失效，避免把旧判定套到改过的任务书上。
+ * 缓存放呼叫点，jev-gate 的判定函数保持纯函数性。
+ *
+ * 2026-10-24 修碰撞：旧键只哈希 prompt 前 4000 字——模板化任务书（同一张 spec 模板 +
+ * 不同的「第 N 首/角色 A」）前 4000 字逐字相同，两张不同任务书共用一次判定，第 N 首
+ * 会拿到第 1 首的「是否写词/是否谱曲」。现在哈希整份 prompt（≤20000 字全量；超长取
+ * 首 10000 + 尾 10000 + 长度），并把 label 一并入键。
+ */
+const GUARD_CACHE_TTL_MS = 60_000
+const GUARD_CACHE_MAX_ENTRIES = 2000
+const guardCache = new Map<string, { at: number; guards: JevDispatchGuards }>()
+
+function guardCacheKey(parentSessionId: string, label: string, prompt: string): string {
+  // FNV-1a 32 位：只求短且稳定，不追求抗碰撞（碰撞最坏＝复用一次同父 60 秒内的判定，
+  // 且键里已带父会话 id 与 label）。任务书超长时首尾各取 10000 字，避免只改中间却撞键。
+  const full = prompt ?? ""
+  const text = full.length <= 20000 ? full : `${full.slice(0, 10000)}\u0000${full.slice(-10000)}`
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  let labelHash = 0x811c9dc5
+  for (let i = 0; i < (label ?? "").length; i++) {
+    labelHash ^= (label ?? "").charCodeAt(i)
+    labelHash = Math.imul(labelHash, 0x01000193) >>> 0
+  }
+  return `${parentSessionId}:${labelHash.toString(16)}:${full.length}:${hash.toString(16)}`
+}
+
+async function classifyDispatchGuardsCached(parentSessionId: string, label: string, prompt: string): Promise<JevDispatchGuards> {
+  const key = guardCacheKey(parentSessionId, label, prompt)
+  const hit = guardCache.get(key)
+  const now = Date.now()
+  if (hit && now - hit.at <= GUARD_CACHE_TTL_MS) return hit.guards
+  const guards = await classifyDispatchGuards(prompt)
+  // 顺手清过期项，并给上限兜底（父会话多、任务书各不相同也不让本 Map 无界增长）。
+  for (const [k, v] of guardCache) if (now - v.at > GUARD_CACHE_TTL_MS) guardCache.delete(k)
+  while (guardCache.size >= GUARD_CACHE_MAX_ENTRIES) {
+    const oldest = guardCache.keys().next()
+    if (oldest.done) break
+    guardCache.delete(oldest.value)
+  }
+  guardCache.set(key, { at: now, guards })
+  return guards
+}
+
+/** 专辑范围判据的近窗回退（见调用点 inAlbum）。10 分钟≈一次专辑策划到作词的正常跨度。 */
+const ALBUM_DELIVERY_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * 交付簿快照（2026-10-24 二审修 P2「重启即丢」）。
+ *
+ * 为什么要在调用点合并两源：进程内 `deliveredByParent` 是内存 Map，重启即丢；而
+ * subagent-finish 早已把每一笔 ok 交付同步写进 SQLite `deliveries` 表。只读内存时，
+ * 一次发布重启就能让「专辑已有词/曲」归零——随后要么误拦谱曲/评审，要么让评审对空簿
+ * 静默放行。两源合并、按 relPath 去重，内存记录优先（它带 turnGen/at，判据更准）。
+ * 回灌记录没有 turnGen：inAlbum 自然退到近窗判据，这是已知的精度边界，写在这里而不是藏起来。
+ */
+type DeliveryRow = { agent: string; label: string; relPath: string; contractOk?: boolean; at?: number; turnGen?: number }
+
+function deliveryBook(parentSessionId: string): DeliveryRow[] {
+  const mem = deliveredByParent.get(parentSessionId) ?? []
+  let persisted: DeliveryRow[] = []
+  try {
+    const hydrated = loadSessionDeliveries(parentSessionId)
+    // 本次进程起来之后的持久记录已在内存里（带 turnGen），只回灌更早的；at 留空＝走近窗判据。
+    const seen = new Set(mem.map((d) => d.relPath).filter(Boolean))
+    persisted = hydrated
+      .filter((r) => r.relPath && !seen.has(r.relPath))
+      .map((r) => ({ agent: r.agent, label: r.label, relPath: r.relPath }))
+  } catch {
+    persisted = []
+  }
+  return [...persisted, ...mem]
+}
+
+/**
+ * 跨专辑候选歌词的正文开头（前 80 字，供 music 自己认领）。
+ * 路径一律走与 readCompletedPredecessor 相同的白名单：必须是子代理产物目录下的
+ * `{runId}-*.md`，防止交付簿里的任意路径被当成本机文件读进任务书。
+ */
+function deliveryHead(relPath: string): string {
+  if (!relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return ""
+  const file = relPath.slice(SUBAGENT_OUTPUT_REL.length + 1)
+  if (file.includes("/") || file.includes("\\")) return ""
+  try {
+    const stored = readFileSync(join(SUBAGENT_OUTPUT_DIR, file), "utf8")
+    const body = stored.split("- 内容: 子代理最后一条 assistant 文本全文\n")[1]?.split(`\n\n---\n\n${PERSIST_TAIL}`)[0] ?? stored
+    const flat = body.replace(/\s+/g, " ").trim()
+    return flat ? flat.slice(0, 80) : ""
+  } catch {
+    return ""
+  }
 }
 
 async function researchPredecessors(parent: any): Promise<{ records: ResearchPredecessor[]; available: boolean }> {
@@ -54,7 +169,7 @@ async function researchPredecessors(parent: any): Promise<{ records: ResearchPre
         if (!input || typeof input.prompt !== "string") continue
         const record = { runId, agent: typeof input.expert === "string" ? input.expert : "", label: String(out.label ?? input.label ?? ""), relPath: `${SUBAGENT_OUTPUT_REL}/${file}` }
         if (readCompletedPredecessor(record) === null) continue
-        if (!record.agent && (await classifyDispatchGuards(input.prompt)).research === true) record.agent = "research"
+        if (!record.agent && (await classifyDispatchGuardsCached(parent.sessionId, String(input.label ?? ""), input.prompt)).research === true) record.agent = "research"
         if (record.agent !== "research" && !RESEARCH_PRECEDED_EXPERTS.includes(record.agent)) continue
         records.push(record)
         saveDelivery({ sessionId: parent.sessionId, ...record })
@@ -62,6 +177,72 @@ async function researchPredecessors(parent: any): Promise<{ records: ResearchPre
     }
     return { records, available: true }
   } catch { return { records, available: false } }
+}
+
+/**
+ * 2026-10-24：收集本会话**已交付研究正文**，准备注入下游任务书。
+ *
+ * 为什么不能只给路径：`subagent-live.ts` 的兄弟名册只列 path/label/status，子代理
+ * 不知道「哪一份是它该读的研究」，也不知道读了要不要照办。过去三轮都在加「拦谁」，
+ * 而用户诉求是「下游要拿到上游结论」——拦是手段，交付才是目的。
+ *
+ * 证据口径与 research_first 完全一致：只认 `agent === "research"` 且
+ * `readCompletedPredecessor` 读到正文的记录（目录白名单、runId 前缀、状态 ok 三关）。
+ * 只有链接堆（每行都是 URL）的「研究」不算研究，不注入。
+ *
+ * 探测失败（available=false）时**不阻断**：注入是增值，不是闸门；这里只留一行 log，
+ * 由 research_first 那条闸（若被触发）自己决定是否 503。
+ * 返回 null ＝ 没有任何可用研究正文（调用点据此零注入，输出与注入前逐字等价）。
+ */
+async function buildResearchInjection(parent: any, label: string): Promise<ResearchInjectItem[] | null> {
+  let prior: { records: ResearchPredecessor[]; available: boolean }
+  try {
+    prior = await researchPredecessors(parent)
+  } catch (e) {
+    console.log(`[gateway] research injection skipped (predecessor lookup failed): label="${label}" ${e instanceof Error ? e.message : String(e)}`)
+    return null
+  }
+  const rows = prior.records.filter((r) => r.agent === "research")
+  if (!rows.length) {
+    if (!prior.available) console.log(`[gateway] research injection: none (evidence unavailable) label="${label}"`)
+    return null
+  }
+  const items: ResearchInjectItem[] = []
+  for (const r of rows) {
+    const body = readCompletedPredecessor(r)
+    if (!body) continue
+    // 只有 URL 堆的「研究」不注入（与 research_first 的有效研究判据同口径）。
+    const hasProse = body.split("\n").some((line) => line.trim() && !/^\s*(?:[-*]\s*)?(?:https?:\/\/\S+|\[[^\]]*\]\(https?:\/\/[^)]+\))\s*$/.test(line))
+    if (!hasProse) continue
+    // 研究正文可能含网页摘录＝间接注入通道：逐份过既有 quarantineSpec 拿机器判定。
+    let quarantineHits: string[] = []
+    try {
+      const q = await quarantineSpec(`research:${r.runId}`, body)
+      if (q) quarantineHits = [q.slice(0, 80)]
+    } catch {
+      quarantineHits = []
+    }
+    items.push({ label: r.label, path: r.relPath, body, at: deliveryAt(parent.sessionId, r.relPath), quarantineHits })
+  }
+  return items.length ? items : null
+}
+
+/**
+ * 该交付的完成时刻（「最近完成优先」排序用）。
+ * 交付簿两源：内存记录带 at（判据最准）；SQLite 回灌只有 relPath，此时退回产物档
+ * 修改时间——两者都拿不到就排最旧（不猜时间）。
+ */
+function deliveryAt(parentSessionId: string, relPath: string): number | undefined {
+  const mem = (deliveredByParent.get(parentSessionId) ?? []).find((d) => d.relPath === relPath)
+  if (typeof mem?.at === "number") return mem.at
+  if (!relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return undefined
+  const file = relPath.slice(SUBAGENT_OUTPUT_REL.length + 1)
+  if (file.includes("/") || file.includes("\\")) return undefined
+  try {
+    return statSync(join(SUBAGENT_OUTPUT_DIR, file)).mtimeMs
+  } catch {
+    return undefined
+  }
 }
 
 export async function handleSubagentDispatch(req: Request): Promise<Response> {
@@ -86,6 +267,10 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const isFork = body.fork === true || body.subagent_type === "fork"
   // P2b 刀1：prompt 需可被自动补行改写。
   let prompt = typeof body.prompt === "string" ? body.prompt : ""
+  // C1（2026-10-21）席位能力预检的输入＝**原始任务书**。后面对 prompt 的机器注入
+  // （死线行/隔离声明/军团模板/名册）不是 orchestrator 的要求，不能算「任务书点名工具」，
+  // 故先在改写前留一份原样，预检只读它。
+  const taskText = prompt
   if (!body.sessionId || !label || !prompt) {
     // D2（2026-10-02）：空字串错误码是反模式（历史 717 次）——失败一律带 code 与缺哪栏。
     const missing = [!body.sessionId ? "sessionId" : "", !label ? "label" : "", !prompt ? "prompt" : ""].filter(Boolean)
@@ -192,11 +377,62 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   //   ③ Jev 挂 → fail-open 用点名值（行为＝部署前）。
   // 白名单校验照旧（Jev 建议也过 expert-ids.json；域外/未知 → 拒绝 400）。
   let expertId = ""
-  // 2026-10-05：派遣守卫的语义判定（研究与否／是否返工／是否依赖 music）一次批次问 Jev；
-  // 非 beast 派遣不花这次呼叫（保持 OFF 零变化），此时各守卫走既有正则降级路径。
-  let dispatchGuards: JevDispatchGuards = { research: null, rework: null, musicDependency: null }
+  // 2026-10-05 / 2026-10-24（二审重写）：派遣守卫的语义判定（研究与否／是否返工／
+  // 依赖 music 与否／专辑工序／写词与谱曲域／评审域）一次批次问 Jev。
+  // 调用条件＝`!isFork`：不再看 beast_mode，也不再用词表预筛。理由是词表那一层本身
+  // 在制造漏判（12/12 MISS），而这次呼叫的实际成本已经核算过（见 classifyDispatchGuardsCached
+  // 上方注释：单次 POST 七题同批、2s 超时、未启用零延迟、并发 ≤3、60 秒缓存）。
+  // **零回归保证**：Jev 未启用/挂掉 ⇒ dispatchGuards 全 null ⇒ 各闸要求 === true 才拦，
+  // null 恒放行，行为与改动前逐字等价。
+  let dispatchGuards: JevDispatchGuards = {
+    research: null,
+    rework: null,
+    musicDependency: null,
+    lyricsDependency: null,
+    albumDependency: null,
+    lyricsUpstream: null,
+    isLyricistWork: null,
+    isMusicWork: null,
+    isReviewWork: null,
+  }
   const beastOn = deps.beastMode(parent)
+  // 2026-10-24 修 P0（expertId 求值晚于使用）：原始点名值必须**在任何 verdict 之前**算出。
+  // 旧实现里三个 *Verdict 在 expertId 仍是 "" 时求值，点名覆盖分支只有在野兽模式路由
+  // 分支跑过之后（几十行以后）才有值 ⇒ OFF 下恒等于「没点名」，覆盖语义是死码。
+  // 点名值以 body 原样为准，路由后的 expertId 只用于席位/工具面，不参与「这是不是写词」。
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
+  if (!isFork) {
+    dispatchGuards = await classifyDispatchGuardsCached(parent.sessionId, label, prompt)
+  }
+  // 域判定（Jev 题 + 点名覆盖，见 jev-gate 的 isMusicWorkVerdict 等纯函数）。
+  // P0 修复（2026-10-24 二审）：这里曾经把「写词在途」与「music 在途」两个值混用，
+  // 导致专辑闸把「music 已经在跑」当成「词作者在跑」，合法并行谱曲被误拦。
+  // 现在三个旗标各取自各自语义，下面每道门只读自己那一份。
+  const isMusicWork = isMusicWorkVerdict(rawExpert, dispatchGuards.isMusicWork)
+  const isLyricistWork = isLyricistWorkVerdict(rawExpert, dispatchGuards.isLyricistWork)
+  const isReviewWork = isReviewWorkVerdict(rawExpert, dispatchGuards.isReviewWork)
+  // 2026-10-24：本任务的素材是否必须建立在先前研究成果之上（决定是否注入研究正文、
+  // 是否在本会话有研究在途时拦下）。点名为准 + Jev 判，零词表。
+  const consumesResearch = !isFork && consumesResearchVerdict(rawExpert, dispatchGuards.consumesResearch)
+  // B（2026-10-24）：本专辑范围内的交付判据。交付簿跨轮累积，「上一轮的歌还在簿里」
+  // 会让新专辑还没出曲就放行评审。收窄口径＝**本 turnGen**（同一轮内完成的研究/作词/
+  // 谱曲才算本专辑的实体）；turnGen 取不到或子代理跨轮完成（异步 run 落在下一轮）时，
+  // 回退「近 N 分钟」。产物形如：{agent,label,relPath,contractOk,at,turnGen}。
+  const deliveryRows = deliveryBook(parent.sessionId)
+  const inAlbum = (d: DeliveryRow) => {
+    const gen = parent.turnGen
+    if (typeof gen === "number" && typeof d.turnGen === "number") return d.turnGen === gen
+    return typeof d.at === "number" && Date.now() - d.at <= ALBUM_DELIVERY_WINDOW_MS
+  }
+  // 上一行是按内存交付簿算的；本条补上**持久簿回灌**（见上方「重启即丢」注释）：
+  // 只有 relPath 的持久记录没有 at，上面的近窗判据恒 false ⇒ 重启后「本专辑已有词」
+  // 又归零，谱曲/评审被误拦。回灌记录一律算作本专辑（它就是本会话的真实历史）。
+  const inAlbumOrBackfilled = (d: DeliveryRow) =>
+    inAlbum(d) || (typeof d.at !== "number" && typeof d.turnGen !== "number")
+  // 本会话全部过契约歌词（先词后曲与歌词注入共用；跨轮累积＝「本会话已有词」语义）。
+  const lyricDeliveries = deliveryRows.filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath)
+  // 在途写词（先词后曲、专辑工序、歌词注入共用；同步内存查询，无额外成本）。
+  const lyricsInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "lyricist" && r.status === "running")
   if (!isFork && (beastOn || rawExpert === "lyricist" || rawExpert === "music")) {
     let allowed: unknown
     try {
@@ -228,8 +464,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     } else {
       expertId = routed.expertId
     }
-    // 2026-10-05：三题一呼（Jev 范式：加题不加延迟）；Jev 挂 → 各守卫回退既有正则。
-    dispatchGuards = await classifyDispatchGuards(prompt)
+    // （守卫判定已上移到本分支之前，见上方注释；此处不再重复呼叫。）
     // H9（2026-10-02）：内容 vs expert 域一致性守卫。
     // 在 critic 登记之前执行——被降级的研究任务不得顶掉机器 critic pass 的触发判据。
     {
@@ -258,19 +493,132 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       }
     }
     // 先词后曲复用真实交付簿：未过歌词契约不可作为前置成果。
-    const lyrics = (deliveredByParent.get(parent.sessionId) ?? []).filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath && prompt.includes(d.relPath));
-    const lyricsInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "lyricist" && r.status === "running");
-    const lyricsReason = lyricsFirstBlockReason(expertId, { lyricsDelivered: lyrics.length > 0, lyricsInFlight }, dispatchGuards.lyricsDependency);
+    // 2026-10-24 修 bug：旧条件多一个 `prompt.includes(d.relPath)`——orchestrator 没在任务书里
+    // 提到歌词路径时检查恒 false，已交付的歌词被当成没交付。是否提及路径与「歌词是否已交付」
+    // 无关，去掉；注入路径的那行提示（下方）照旧用已交付歌词清单。
+    const lyricsReason = lyricsFirstBlockReason(expertId, { lyricsDelivered: lyricDeliveries.length > 0, lyricsInFlight }, dispatchGuards.lyricsDependency);
     if (lyricsReason) return Response.json({ ok: false, code: "lyrics_first", error: lyricsReason, blocked: "lyrics_first" }, { status: 409 });
-    if (expertId === "music" && lyrics.length && dispatchGuards.lyricsDependency !== false) {
-      prompt += `\n\n【已交付歌词来源】${lyrics.at(-1)!.relPath}。先 read 完整文件，原样用于谱曲，不从摘要改写。正文问题回交 lyricist。字数与 Z% 只引用回执，不心算。`;
-    }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本轮已有 critic 审核动作，
     // 机器 pass 的触发判据据此豁免（不重复派遣）。登记有界 Map。
     if (expertId === "critic") {
       criticDispatchedByParent.set(parent.sessionId, parent.turnGen ?? 0)
       boundMap(criticDispatchedByParent, 500)
     }
+  }
+
+  // 2026-10-24：专辑工序闸与「依赖上游歌词的下游」闸在 expert 路由分支之外——
+  // beast_mode OFF 且不点名 expert 时 expertId 恒为 ""，放在分支内这些门对默认用户
+  // 永远不参与计算。是不是谱曲/写词/评审，一律由上方 Jev 题 + 点名覆盖判（无词表）。
+  // B（2026-10-24）：交付簿跨轮累积，「已交付」收窄到本专辑范围（本 turnGen 或近窗）。
+  // P0 修复（2026-10-24 二审）：本对象字面量曾把 `lyricistInFlight` 写两次、后者值取自
+  // music 在途，专辑闸于是读到错的旗标。现在两个键一次各写一遍：写词在途、music 在途。
+  if (!isFork) {
+    const musicInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "music" && r.status === "running")
+    const albumReason = albumPhaseBlockReason(isMusicWork, {
+      isLyricistWork,
+      lyricistInFlight: lyricsInFlight,
+      lyricsInFlight: musicInFlight,
+      lyricsDeliveredInAlbum: deliveryRows.filter((d) => d.agent === "lyricist" && inAlbumOrBackfilled(d)).length,
+      albumDependency: dispatchGuards.albumDependency,
+    })
+    if (albumReason) {
+      console.log(`[gateway] jev_gate: ALBUM_PHASE_BLOCKED label="${label}" expert=${expertId || "-"} lyricistInFlight=${lyricsInFlight} musicInFlight=${musicInFlight}`)
+      return Response.json({ ok: false, code: "album_phase", error: albumReason, blocked: "album_phase" }, { status: 409 })
+    }
+    // P2 修复（2026-10-24 二审）：旧条件 `expertId === "critic"` 在 OFF 下恒假，评审闸不参与。
+    // 现在求值条件＝Jev 判定的专辑工程 + 本次派遣是评审类；评审域本身由 Jev 题 + 点名覆盖判。
+    if (dispatchGuards.albumDependency === true && isReviewWork) {
+      const reviewReason = albumReviewBlockReason({
+        musicDeliveredInAlbum: deliveryRows.filter((d) => d.agent === "music" && inAlbumOrBackfilled(d)).length,
+        lyricsDeliveredInAlbum: deliveryRows.filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath && inAlbumOrBackfilled(d)).length,
+        albumDependency: dispatchGuards.albumDependency,
+      })
+      if (reviewReason) {
+        console.log(`[gateway] jev_gate: ALBUM_REVIEW_BLOCKED label="${label}" expert=${expertId || "-"} rows=${deliveryRows.length}`)
+        // 已知边界（2026-10-24）：交付簿两源（内存 + SQLite deliveries）都可能为空——
+        // 内存重启即丢，SQLite 若本次部署前未开写也读不到。空簿时给出可操作文案，
+        // 不做静默放行：orchestrator 应当先补派创作，而不是让评审对空气打分。
+        const error =
+          deliveryRows.length === 0
+            ? "【机器闸·album-phase】专辑工程尚无 music 或歌词交付，评审没有可审的实体；且本会话交付簿为空（可能刚重启或本专辑确实还没开工）。先派 lyricist/music 并等其交付事件落盘，再派评审；不要对空簿评审。"
+            : reviewReason
+        return Response.json({ ok: false, code: "album_phase", error, blocked: "album_phase", delivery_rows: deliveryRows.length }, { status: 409 })
+      }
+    }
+    // 写词任务自己开不了工＝最荒谬的一种拦法。豁免由 Jev 的 isLyricistWork + 点名覆盖判
+    // （OFF 下 expertId 为 ""，旧写法在这里判 expertId 等于不判）。
+    if (!isLyricistWork) {
+      const upstreamReason = lyricsUpstreamBlockReason(
+        { lyricsDelivered: lyricDeliveries.length > 0, lyricistInFlight: lyricsInFlight },
+        dispatchGuards.lyricsUpstream,
+      )
+      if (upstreamReason) {
+        console.log(`[gateway] jev_gate: LYRICS_UPSTREAM_BLOCKED label="${label}" expert=${expertId || "-"} lyricistInFlight=${lyricsInFlight} lyricsDelivered=${lyricDeliveries.length > 0}`)
+        return Response.json({ ok: false, code: "lyrics_upstream", error: upstreamReason, blocked: "lyrics_upstream" }, { status: 409 })
+      }
+    }
+    // 2026-10-24：研究在途拦截（只拦在途，不拦零研究）。
+    // 病情＝主脑并发派「概念专辑方法研究」与「无主黎明歌词」，写词的人读不到尚未落盘的
+    // 研究结论，前一路研究价值清零。判据＝Jev 判本任务消费研究成果（consumesResearch），
+    // 且**本会话确有研究在跑**——此时派它出去只能拿旧结论或凭空编。
+    // 刻意**不在零研究时硬拦**：用户可能就要一首歌，强制先派三路研究是过度；那条由
+    // playbook 提示词层引导。三类豁免照旧复用既有判据：返工（Jev rework/词表回退）、
+    // 用户已给完整原词（lyrics_upstream 判否）、纯器乐（Jev 判否）。
+    if (consumesResearch) {
+      const runningResearch = (byParent.get(parent.sessionId) ?? []).filter((r) => r.researchTask && r.status === "running" && !r.stopped)
+      const userSuppliedLyrics = dispatchGuards.lyricsUpstream === false || dispatchGuards.lyricsDependency === false
+      const rework = isReworkSpec(prompt, dispatchGuards.rework)
+      if (runningResearch.length > 0 && !rework && !userSuppliedLyrics) {
+        console.log(
+          `[gateway] jev_gate: RESEARCH_INFLIGHT_BLOCKED label="${label}" expert=${expertId || "-"} running=${runningResearch.map((r) => r.label).join("|")}`,
+        )
+        return Response.json({
+          ok: false,
+          code: "research_inflight",
+          blocked: "research_inflight",
+          error: "【机器闸·research-inflight】研究尚在交付中，等它落盘再派，届时研究会自动注入你的任务书（无需你在任务书里贴正文）。",
+          running_research: runningResearch.map((r) => ({ id: r.id, label: r.label })),
+        }, { status: 409 })
+      }
+    }
+  }
+  // C（2026-10-24，二审修 P1/P2）：music 任务的歌词注入。
+  // - 触发条件从 `expertId === "music"` 改为 isMusicWork（Jev 题 + 点名覆盖）：OFF 下
+  //   expertId 恒为 ""，旧条件让注入永不存在，「十首关于夏天的东西」的谱曲者拿不到词。
+  // - 注入集合必须过 inAlbum：交付簿跨轮跨专辑，命中媒体词时会把上一张专辑的全部词
+  //   列给本轮谱曲者，照着谱错歌。
+  // - 本专辑内无词但 Jev 判依赖歌词时：注入全部歌词，按完成时间倒序，带 label 与正文
+  //   前 80 字摘要。为什么宁可多给元数据也不让机器猜专辑边界：口令式的「本专辑」在
+  //   交付簿里没有可靠锚点（重启回灌无 turnGen、async 跨轮完成），机器猜错一次就是
+  //   谱错歌；而 music 读到 label + 摘要就能自己认出哪几份是这张专辑的。
+  if (!isFork && isMusicWork && dispatchGuards.lyricsDependency !== false) {
+    const inAlbumLyrics = lyricDeliveries.filter((d) => inAlbum(d))
+    if (inAlbumLyrics.length) {
+      const list = inAlbumLyrics.map((d, i) => `${i + 1}. ${d.relPath}${d.label ? `（${d.label}）` : ""}`).join("\n")
+      prompt += `\n\n【已交付歌词来源】本专辑共有 ${inAlbumLyrics.length} 份已过契约的歌词，逐首 read 完整文件、原样用于谱曲，不从摘要改写：\n${list}\n正文问题回交 lyricist。字数与 Z% 只引用回执，不心算。`
+    } else if (lyricDeliveries.length && dispatchGuards.lyricsDependency === true) {
+      const sorted = [...lyricDeliveries].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+      const list = sorted
+        .map((d, i) => {
+          const head = deliveryHead(d.relPath)
+          return `${i + 1}. ${d.relPath}${d.label ? `（${d.label}）` : ""}${head ? ` — 开头：${head}` : ""}`
+        })
+        .join("\n")
+      prompt +=
+        `\n\n【已交付歌词来源·跨专辑候选】本会话共有 ${sorted.length} 份已过契约歌词，均不在本专辑判定范围内（可能属于更早的专辑或更早一轮）。请按 label 与开头自行判断哪几份属于本次任务；确认属于本专辑的，逐首 read 完整文件、原样谱曲；不属于的不要用。清单按完成时间倒序（最新在前）：\n${list}\n若无法确认归属，回交 orchestrator 要求明确歌词路径，不要自行猜测混用。`
+    }
+  }
+
+  // C1（2026-10-21）席位能力预检：专家席位成立时，拿原始任务书点名的工具对该席位
+  // expert/opencode-agents.json 的 tools 布尔表。**命中不阻断派工**（换席位是
+  // orchestrator 的判断），只把一行可见提示追加到派工结果 + console.warn。
+  let seatCheck: SeatToolCheck = { ok: true, missing: [] }
+  if (expertId) seatCheck = checkSeatTools(expertId, taskText, loadSeatToolTable())
+  const seatNotice = seatCheck.missing.length > 0 ? formatSeatPreflightNotice(expertId, seatCheck.missing) : ""
+  if (seatNotice) {
+    console.warn(
+      `[gateway] seat-preflight: expert=${expertId} label="${label}" missing=${seatCheck.missing.map((m) => m.tool).join(",")} → 仍派工（提示 orchestrator 换席位或改派）`,
+    )
   }
 
   // 刀 2B（2026-09-19）：派遣 spec 消毒（权威）。研究结论/网页内容嵌 spec 是活的
@@ -299,16 +647,21 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       researchTask = researchTask || meta.specKey === "research"
       // 研究先行是创作前置，不能只靠模型读到规则后自觉执行。复用真实run及落盘，
       // 不把派遣成功、URL列表或提示词的“已完成研究”当成前置成果。
-      if (beastOn && meta.specKey === "creation" && meta.template && RESEARCH_PRECEDED_EXPERTS.includes(expertId) && !researchTask) {
+      // 2026-10-24：判据从 `RESEARCH_PRECEDED_EXPERTS.includes(expertId)` 换成 Jev 的
+      // consumesResearch——旧名单没有 lyricist/music，写词谱曲从来不受约束；而旧条件还要求
+      // beastOn && specKey==="creation" && meta.template，BEAST OFF（默认）恒不触发。
+      // 现在只要「本任务消费研究成果」就参与判定，零研究且无研究在途时放行（放行权交
+      // playbook 提示词层，避免用户就要一首歌时被强制先派三路研究）。
+      if (consumesResearch && !researchTask) {
         const runningResearch = (byParent.get(parent.sessionId) ?? []).filter((r) => r.researchTask && r.status === "running" && !r.stopped)
         const prior = await researchPredecessors(parent)
         if (!prior.available) return Response.json({ ok: false, code: "research_evidence_unavailable", error: "已有研究/创作的同会话持久证据暂时读不到；请保留现有产物，待证据恢复后继续，不要重做研究。" }, { status: 503 })
         const research = prior.records.filter((r) => r.agent === "research" && (readCompletedPredecessor(r) ?? "").split("\n").some((line) => line.trim() && !/^\s*(?:[-*]\s*)?(?:https?:\/\/\S+|\[[^\]]*\]\(https?:\/\/[^)]+\))\s*$/.test(line)))
         const continuing = isReworkSpec(prompt, dispatchGuards.rework) && prior.records.some((r) => r.agent === expertId && readCompletedPredecessor(r) !== null)
-        if (!continuing && (research.length < MAX_ACTIVE_PER_PARENT || runningResearch.length > 0)) {
+        if (!continuing && runningResearch.length > 0 && !prior.records.some((r) => r.agent === "research" && readCompletedPredecessor(r) !== null)) {
           return Response.json({
             ok: false, code: "research_first", blocked: "research_first",
-            error: "研究是创作必经阶段。请先并发派遣至少三路窄领域研究，钻研前人作品并交付可读正文；当前研究尚未收齐，不能先派创作。已有真实研究不要重跑；完成后读取完整正文再编写创作规格。",
+            error: "研究是创作必经阶段。当前研究尚未交付完毕，而本任务需要建立在其结论之上：等研究落盘后再派，届时研究会自动注入你的任务书（无需你在任务书里贴正文）。",
             completed_research: research.map((r) => ({ id: r.runId, label: r.label, path: r.relPath })),
             running_research: runningResearch.map((r) => ({ id: r.id, label: r.label })),
           }, { status: 409 })
@@ -452,6 +805,28 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       error: SUBAGENT_BUSY_MESSAGE,
       running: runningList.map((r) => ({ id: r.id, label: r.label, elapsed_ms: Date.now() - r.startedAt })),
     }, { status: 409 })
+  }
+
+  // 2026-10-24：研究正文注入（核心）。判定＝Jev 的 guard_consumes_research（点名非创作域
+  // 可否决），内容＝本会话已交付研究的正文，不再是「只给路径让你自己去找」。
+  // - 无研究正文 ⇒ 零注入，任务书与注入前逐字等价；
+  // - 放在兄弟名册之前，让下游先看到「结论」再看「还有谁在跑」；
+  // - 正文块的隔离声明与逐份 quarantine 见 jev-gate renderResearchInjection。
+  if (!isFork && consumesResearch) {
+    const items = await buildResearchInjection(parent, label)
+    if (items) {
+      const inj = renderResearchInjection(items)
+      if (inj.text) {
+        prompt = `${inj.text}\n\n${prompt}`
+        console.log(
+          `[gateway] jev_gate: RESEARCH_INJECTED label="${label}" expert=${expertId || "-"} docs=${inj.injected.length} chars=${inj.chars} truncated=${inj.truncated} omitted=${inj.omitted.length}`,
+        )
+        for (const d of inj.injected) {
+          console.log(`[gateway] jev_gate: RESEARCH_INJECTED doc="${d.label}" path=${d.path} chars=${d.chars} truncated=${d.truncated}`)
+        }
+        if (inj.omitted.length) console.log(`[gateway] jev_gate: RESEARCH_INJECTED omitted=${inj.omitted.join(",")}`)
+      }
+    }
   }
 
   // Y4（2026-10-14）兄弟名册：把「本父会话当前存在哪些子代理」作为任务书头部事实块注入。
@@ -694,6 +1069,9 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   }
   if (asyncMode) {
     // R6 异步：投递成功立即返回，主会话 turn 可正常结束；完成后 wakeParent 唤醒。
+    const asyncNote = syncDowngraded
+      ? "你要求同步等待，但这一路不是快速事实查询，已按后台执行：现在返回的是已派出，不是结果。用户问起时要照实说「后台运行」。完成后会自动唤醒主会话汇总。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。"
+      : run.isFork ? FORK_STARTED_NOTICE : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。"
     return Response.json({
       ok: true,
       subagent_id: run.id,
@@ -703,9 +1081,8 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       status: "running",
       async: true,
       ...(syncDowngraded ? { sync_downgraded: true } : {}),
-      note: syncDowngraded
-        ? "你要求同步等待，但这一路不是快速事实查询，已按后台执行：现在返回的是已派出，不是结果。用户问起时要照实说「后台运行」。完成后会自动唤醒主会话汇总。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。"
-        : run.isFork ? FORK_STARTED_NOTICE : "后台运行中，完成后自动唤醒主会话汇总。结束本轮，不要轮询等待。注意 subagent_id 是网关派工 run id，**不是 opencode session id**——不要把它当 task_id 传给内置 task 工具（必被拒：Expected a string starting with \"ses\"）；要取回完整交付物就 read 唤醒摘要里的落盘文件路径，或用 subagent_status 工具。",
+      // C1：席位能力预检命中时把提示行接在既有 note 之后（未命中 → 与接线前逐字相同）。
+      note: seatNotice ? `${asyncNote} ${seatNotice}` : asyncNote,
       ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
       // D2：显式 effort 时如实回报 variant 是否真的带上（不支持＝false，非安慰剂）。
       ...(run.effort ? { effort: run.effort, variant_applied: run.variantApplied === true } : {}),
@@ -717,6 +1094,8 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     ...(run.name ? { name: run.name } : {}),
     ...(run.isFork ? { fork: true, model: "inherit" } : {}),
     ...(run.effort ? { effort: run.effort, variant_applied: run.variantApplied === true } : {}),
+    // C1：同步派工没有既有 note；只在预检命中时新增（干净 payload 形状不变）。
+    ...(seatNotice ? { note: seatNotice } : {}),
     ...(inheritedCp ? { from_checkpoint: { run_id: inheritedCp.run_id, checkpoint_id: inheritedCp.id, stage: inheritedCp.stage } } : {}),
   })
 }

@@ -234,6 +234,22 @@ export interface SessionState {
   workflowWriteGateNudgeSent?: boolean
   /** 开场骨架建好后待注入的「模型改 DSL」指令（注入后清空）。 */
   pendingAvCanvasDirective?: string
+  // ── 工具生命周期终态（2026-10-21；volatile，不进持久化）──
+  /** 在跑工具调用（callId → 工具/签名/起点）。pending/running 登记，completed/error 移除，
+   *  session.idle 扫超时（>10 分钟）未终态者。只标「未确认」，禁止改写成成功。上限 256。 */
+  toolRunningCalls?: Map<string, { tool: string; signature: string; startedAt: number }>
+  /** 已向会话播报过 tool.stale 的 callId（每 callId 只播一次）。上限 256。 */
+  toolStaleAnnounced?: Set<string>
+  /** 已向会话播报过 tool.duplicate 的调用签名（同签名只播一次；实测同签名 46 次会刷 46 条）。
+   *  上限复用 TOOL_RUNNING_CAP＝256；与 toolRunningCalls 同生命周期（volatile，不随 turn 清空）。 */
+  toolDuplicateAnnounced?: Set<string>
+  // ── 无回执完成主张闸（2026-10-21；volatile，不进持久化）──
+  /** 本轮模型正文尾部（判定「已完成/已交付」类主张）；gen 变化即自动重置。上限 4000 字。 */
+  turnAssistantTail?: { gen: number; text: string }
+  /** 本轮**已完成**工具带回的交付证据（URL/task_id/绝对路径）；gen 变化即清空。上限 128。 */
+  claimEvidence?: { gen: number; items: string[] }
+  /** 已因「有完成主张但零证据」拦截过一次的 turnGen（每 turnGen 只拦一次，防死循环）。 */
+  claimGateNudgeSentGen?: number
   /** 2026-10-02：自上次动作以来的 reasoning 累计（无工具长推理断路器，见 reasoning-cap.ts）。 */
   reasonSinceActionChars?: number
   reasonSinceActionAt?: number

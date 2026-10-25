@@ -27,9 +27,26 @@ export const MULTI_STEP_AV_TEMPLATES = new Set<string>([
 const MUSIC_INTENT_RE =
   /(?:\bMV\b|\bOP\b|主题曲|片头曲|片尾曲|角色歌|作词|作曲|编曲|歌词|BGM|配乐|歌曲|音乐|专辑|单曲|FlowMusic|flowmusic|lyria)/i
 
-/** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。 */
+/** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。
+ *  2026-10-21：补「只要词/只写词」——真实委托常写「帮我写一首歌词，只要词」，旧表零命中。
+ *  2026-10-21 二次修正：删掉裸 `不要生成|不要报价`（「不要生成图片，做视频」「不要报价，直接生成
+ *  一张海报」被误判 textOnly=true，画布闸与完成主张闸同时豁免）；否定只认带明确对象的形态。 */
 const TEXT_ONLY_RE =
-  /(?:只要文字|只要歌词|只写歌词|只写文字|仅要文字|只要方案|文字稿即可|不要生成|不生成音频|不要音频|不要调用\s*music_gen|不要报价)/i
+  /(?:只要文字|只要歌词|只写歌词|只写文字|仅要文字|只要方案|只要词|只写词|文字稿即可|只要(?:文案|稿件|文稿|脚本|文字|歌词|词|方案|大纲|提纲|清单)|只写(?:文案|脚本|文字|歌词|词|方案)|不要音频|不要生成(?:音频|音乐|语音|图片|图像|视频|媒体|MV)|不需要(?:生成)?(?:音频|图片|视频)|不调用\s*music_gen)/i
+
+/** 带明确对象的否定媒体短语。剥掉它之后若仍有正向媒体请求，就不算纯文字委托。 */
+const NEGATED_MEDIA_RE =
+  /(?:不要|不需要|不用|无需|别)\s*(?:生成|做|制作|要|需要|出|调用)?\s*(?:音频|音乐|语音|图片|图像|视频|媒体|MV|music_gen)/gi
+
+/** 正向媒体成品请求：剥掉否定短语后命中（做视频／生成一张海报…）→ 不是纯文字委托。 */
+const MEDIA_REQUEST_RE =
+  /(?:做|生成|制作|出|画|来|要|需要)\s*(?:一张|一个|一段|一条|几|些|多)?\s*(?:图片|图像|海报|封面|照片|视频|影片|短片|宣传片|广告片|成片|动画|音乐|歌曲|主题曲|配乐|音频|配音|语音|MV|模型)/i
+
+/** 倒装媒体请求：媒体名词在前、请求动词在后（「视频也要」「海报得做」）。
+ *  2026-10-21 实测：「不要生成图片，视频也要」剥掉否定短语后 MEDIA_REQUEST_RE 只认「动词+媒体」语序，
+ *  漏判成纯文字委托 → 画布闸与完成主张闸同时豁免。 */
+const MEDIA_OBJECT_FIRST_RE =
+  /(?:图片|图像|海报|封面|照片|视频|影片|短片|宣传片|广告片|成片|动画|音乐|歌曲|主题曲|配乐|音频|配音|语音|MV|模型)(?:也|还|都|同样)?\s*(?:要|需要|得|做|来)/i
 
 /** 多镜／成片制作意图关键词（模板漏判兜底）。 */
 const MULTI_SHOT_AV_RE =
@@ -44,11 +61,26 @@ export interface AvIntentInput {
   musicExpertSeen?: boolean
 }
 
+/**
+ * 用户是否明确只要纯文字成品（歌词/文案/方案）。
+ * 判据与 isMultiStepAvProductionIntent 的早退逐字一致：复用同一组 TEXT_ONLY_RE / MULTI_SHOT_AV_RE
+ *（出现多镜／成片字样即不算纯文字），供完成主张闸豁免「正文即交付」的委托。
+ */
+export function isTextOnlyRequest(text: string): boolean {
+  const p = typeof text === "string" ? text : ""
+  if (!p.trim()) return false
+  if (!TEXT_ONLY_RE.test(p) || MULTI_SHOT_AV_RE.test(p)) return false
+  // 「不要生成图片，做视频」「不要报价，直接生成一张海报」：否定短语之外仍有媒体请求 → 不是纯文字。
+  // 2026-10-21 补倒装语序（「视频也要」）：正向媒体请求含「动词+媒体」与「媒体+动词」两种。
+  const stripped = p.replace(NEGATED_MEDIA_RE, " ")
+  return !MEDIA_REQUEST_RE.test(stripped) && !MEDIA_OBJECT_FIRST_RE.test(stripped)
+}
+
 /** 是否命中「多步影音制作」意图（硬闸覆盖面；首期＝music + 多镜视频）。 */
 export function isMultiStepAvProductionIntent(input: AvIntentInput): boolean {
   const p = typeof input.prompt === "string" ? input.prompt : ""
   // 纯文字委托不是媒体生产：不拦收盘、不逼写画布（2026-10-21 实测：歌词正文被闸门挤成「见上一条」）。
-  if (p.trim() && TEXT_ONLY_RE.test(p) && !MULTI_SHOT_AV_RE.test(p)) return false
+  if (isTextOnlyRequest(p)) return false
   const tid = typeof input.templateId === "string" ? input.templateId.trim() : ""
   if (tid && MULTI_STEP_AV_TEMPLATES.has(tid)) return true
   if (input.musicExpertSeen === true) return true

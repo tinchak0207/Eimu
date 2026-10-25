@@ -29,9 +29,19 @@ import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan } from "./plan-promise
 import {
   shouldBlockCompletionForWorkflowWrite,
   buildWorkflowWriteGateNudge,
+  isTextOnlyRequest,
   WORKFLOW_WRITE_GATE_MARK,
 } from "./canvas-write-gate.ts"
-import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce, maybeCompactSession } from "./messages-gw.ts"
+// 2026-10-21：工具生命周期终态（running 永不终结只标「未确认」）＋无回执完成主张闸。
+import { sweepStaleTools, TOOL_RUNNING_CAP } from "./tool-lifecycle.ts"
+import {
+  findCompletionClaim,
+  shouldBlockCompletionForUnbackedClaim,
+  buildClaimGateNudge,
+  noteAssistantText,
+  CLAIM_GATE_MARK,
+} from "./claim-gate.ts"
+import { TAIL_PAYLOAD_MARKER, TAIL_DATA_MARKER, ensureGatewayNonce, maybeCompactSession } from "./messages-gw.ts"
 // CC 2.1.302 Stop hook：收盘路径 fire-and-forget，绝不阻塞 turn.done。
 import { runHooksWithBudget } from "./hooks-http.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
@@ -41,7 +51,7 @@ import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
 import { buildFailoverInjection, buildContinuationDirective, type OrphanToolUse } from "./error-classify.ts"
 // REQ-D2（2026-09-22）：回合收尾投递待投的 steer（空队列＝零动作，无 steer 的回合逐位等价）。
 // 方向与既有 maybeCompactSession 同款（本档 → messages-gw 家族），不新增环。
-import { flushPendingSteers } from "./steer-gw.ts"
+import { flushPendingSteers, takePendingSteersForRetry, settleSteerRetryInjection } from "./steer-gw.ts"
 // 2026-10-19 记忆触发（能力建设）：收盘时确定性侦测「该写记忆」信号 → 入队＋审计。
 // 只入队；不在这里呼叫 LLM，也不自动跑批次（批次仍由 MEMORY_BATCH_ENABLED/人工决定）。
 import { detectMemorySignals } from "./memory-trigger.ts"
@@ -53,7 +63,7 @@ import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } fro
 // user-role message（身份由 opencode 存储决定）；网关侧能做的是把它从「用户发言」语义摘出——
 // messageRole 改记 "system"（isAssistantMessage 仅认 "assistant"，回声抑制语义不变），
 // 并以 turn.status 暂态单行告知前端（不落 transcript，参照 turn-status-transient-row 修法）。
-import { isSystemWakeText } from "./system-wake.ts"
+import { isSystemWakeText, terminalSubagentWakeIndex } from "./system-wake.ts"
 export { isSystemWakeText }
 /** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
 export const stopHookTurnGen = new WeakMap<object, number>()
@@ -61,15 +71,53 @@ export const stopHookTurnGen = new WeakMap<object, number>()
 /** 记忆信号 loop guard：同一 turnGen 只判一次，重复 idle 不重复入队。 */
 export const memorySignalTurnGen = new WeakMap<object, number>()
 
+/**
+ * 取 lastPromptBody 里的**用户原始**正文（文字 parts 拼接；file part 无 text 则跳过）。
+ * 网关注入块不是用户发言，必须排除——2026-10-21 Hack：每轮注入的授权文案正文含
+ * 「先不要生成」，另有 appendSystemPayloadToTurnTail／appendDataPayloadToTurnTail
+ * 的尾端块；它们被拼进来后 isTextOnlyRequest 对完全访问/自动模式（常态）恒为 true，
+ * 完成主张闸整轮被豁免。判定依据：tagTailPart 的元数据只写模块私有 WeakMap，
+ * 跨模块读不到，因此以注入块文本特征识别：TAIL_PAYLOAD_MARKER／TAIL_DATA_MARKER
+ * 前缀，或带本会话凭证 ⟦gw: 的块。
+ */
+function isGatewayInjectedText(text: string): boolean {
+  // 2026-10-21 Hack：旧版用 includes("⟦gw:")，用户文本只要提到该串就整段被剔除，
+  // 纯文字委托的豁免随之丢失。注入块必以标记开头，故只用 trimStart().startsWith。
+  const head = text.trimStart()
+  return (
+    head.startsWith(TAIL_PAYLOAD_MARKER.trimStart()) ||
+    head.startsWith(TAIL_DATA_MARKER.trimStart()) ||
+    head.startsWith("⟦gw:")
+  )
+}
+
+export function lastPromptText(state: SessionState): string {
+  return (state.lastPromptBody?.parts ?? [])
+    .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
+    .filter((text) => text.length > 0 && !isGatewayInjectedText(text))
+    .join("\n")
+}
+
+/**
+ * 系统核验播报：单行、以「（系统核验）」开头、≤120 字，且不写「已完成/已交付/成功」等结论词
+ * ——这些提示只说明核验状态，不得抢成品位，也不得冒充交付结论。
+ */
+function systemVerifyLine(body: string): string {
+  const text = `（系统核验）${body}`.replace(/\s*\n\s*/g, " ")
+  return text.length > 120 ? `${text.slice(0, 119)}…` : text
+}
+
 
 export function markSystemWakeMessage(state: SessionState, messageID: unknown, text: unknown): boolean {
   if (typeof messageID !== "string" || !isSystemWakeText(text)) return false
   if (state.messageRole.get(messageID) !== "user") return false // 已标过/非 user 讯息 → 不重发
   state.messageRole.set(messageID, "system")
-  // 2026-10-04 W：此文案一律简体（原繁体硬编 + 书写体镜像已拆，均保留简体本体）。
-  emitToSession(state, "turn.status", {
-    text: "子代理已完成，系统自动唤醒主代理汇总中…",
-  })
+  // 只有完成/失败才向用户报一行状态。进度和回报队列不播报，避免 idle 回来看见系统事实。
+  if (typeof text === "string" && terminalSubagentWakeIndex(text) >= 0) {
+    emitToSession(state, "turn.status", {
+      text: "子代理已完成，系统自动唤醒主代理汇总中…",
+    })
+  }
   return true
 }
 export function handleOpencodeEvent(event: any): void {
@@ -193,6 +241,8 @@ export function handleOpencodeEvent(event: any): void {
           // turnTextChars 仍按原文计——剥到零输出代表模型确实说过话，不触发抖动重试。
           emitSanitizedDelta(state, p.partID, p.delta)
           state.turnTextChars = (state.turnTextChars ?? 0) + p.delta.length
+          // 2026-10-21 完成主张闸：累积本轮模型正文尾部（收盘判定「有主张无回执」）。
+          noteAssistantText(state, p.delta, state.turnGen ?? 0)
           // §7 召回辅助：留本轮正文头部（buildRecallQuery 只需前 200 字元）。
           noteAssistantHeadForRecall(state, p.delta)
           // P2b 刀2：非空正文 delta = 本 step 不空。
@@ -237,6 +287,8 @@ export function handleOpencodeEvent(event: any): void {
               // S2b：part.updated 补发的后缀同样过剥离器（与 delta 路径共用逐 part 状态）。
               emitSanitizedDelta(state, id, full.slice(rec.emittedLen))
               state.turnTextChars = (state.turnTextChars ?? 0) + (full.length - rec.emittedLen)
+              // 2026-10-21 完成主张闸：无 delta 的单帧 part 也要进正文尾部。
+              noteAssistantText(state, full.slice(rec.emittedLen), state.turnGen ?? 0)
               // §7 召回辅助：补发后缀同样入正文头部（无 delta 的单帧 part 靠这条）。
               noteAssistantHeadForRecall(state, full.slice(rec.emittedLen))
               rec.emittedLen = full.length
@@ -495,6 +547,7 @@ export function handleOpencodeEvent(event: any): void {
               markDirty(cur)
               return
             }
+            let retrySteers: ReturnType<typeof takePendingSteersForRetry> = null
             try {
               // 刀1：死账户取「降权过滤后链首」＝下一个活 provider（attempt=1 → pool[0]，
               // 刚被打死的一家已不在 pool）；一般错误（含修复4死模型——不降权，链未变）
@@ -505,15 +558,31 @@ export function handleOpencodeEvent(event: any): void {
               retryBody.model = attemptModel
               // 修复1：重投后实际 dispatch 的模型同步记档（降权判定用，见 failover 块上方）。
               cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
+              // REQ-D2 补口（2026-10-22）：本腿在 session.idle 里 break，到不了文件底部的
+              // flushPendingSteers；而 flush 会开新回合（driveTurn）与重投并发。重投语义是
+              // 「同一回合的下一跳」，所以把排队指引**并入同一条 body**（追加 text part，
+              // 不改原 parts 顺序、不改 retryInjection 文案）。取用放在发车点：前面任何
+              // 让位（turnGen 变／用户叫停／模型已开正文）都不会吞掉队列。
+              retrySteers = takePendingSteersForRetry(cur)
+              const dispatchBody = retrySteers
+                ? { ...retryBody, parts: [...retryBody.parts, { type: "text", text: retrySteers.text }] }
+                : retryBody
+              if (retrySteers) {
+                console.log(
+                  `[gateway] steer retry-injection: appended ${retrySteers.steers.length} steer(s) to failover retry body — session=${cur.sessionId}`,
+                )
+              }
               // 2026-10-01 去重：上一条 user（原 prompt 或上一条续写提示）其后零产出 → 先撤再投，不叠两条。
               await revertDeadTail(cur.opencodeSessionId)
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
-                body: JSON.stringify(retryBody),
+                body: JSON.stringify(dispatchBody),
                 signal: AbortSignal.timeout(10000),
               })
               if (!res.ok) throw new Error(`status ${res.status}`)
+              // 上游已接受重投 → 并入的指引与本回合同生共死，落 applied 终态。
+              if (retrySteers) settleSteerRetryInjection(cur, retrySteers.steers, true)
               cur.turnRetries = attempt
               cur.retryQueued = false
               console.log(
@@ -527,6 +596,8 @@ export function handleOpencodeEvent(event: any): void {
               armWatchdogTimer(cur)
             } catch (e) {
               console.error(`[gateway] turn failover #${attempt} failed:`, e)
+              // 重投发不出去 ⇒ 并入的指引也没送到，诚实落 failed（delivery_failed），不假装已生效。
+              if (retrySteers) settleSteerRetryInjection(cur, retrySteers.steers, false)
               cur.retryQueued = false
               emitTurnDone(cur) // 重试发不出去：放弃，别留前端挂着
             }
@@ -560,6 +631,7 @@ export function handleOpencodeEvent(event: any): void {
             // 只看 turnTextChars（语义保留见上方注释）：重投窗口内模型开口说正文才让位
             //（那是回合仍活著的证据，打点照旧不清）。
             if ((cur.turnTextChars ?? 0) > 0) return
+            let retrySteers: ReturnType<typeof takePendingSteersForRetry> = null
             try {
               // 跨渠道 failover（2026-08-29）：重投前按 attempt 从链
               // [persona 主模型, ...registry.bindings.fallbacks[persona]] 取模换模型，
@@ -580,13 +652,29 @@ export function handleOpencodeEvent(event: any): void {
               cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
               // 2026-10-01 去重：零正文重投原 prompt 前撤掉上一条零产出的同一 user 讯息，历史只留一条。
               await revertDeadTail(cur.opencodeSessionId)
+              // REQ-D2 补口（2026-10-22）：零正文重投腿在 idle 里 break，到不了 flushPendingSteers
+              //（flush 会开新回合，与重投并发）。排队指引并入同一条重投 body：追加一个 text part，
+              // 原 parts 顺序与文案不变。body 是 state.lastPromptBody 的引用——必须建新对象，
+              // 否则指引会被写回原任务书，下一次重投重复携带。
+              // 取用点放在发车前的最后一个让位闸之后：真正不投的超时不吞队列。
+              retrySteers = takePendingSteersForRetry(cur)
+              const dispatchBody = retrySteers
+                ? { ...body, parts: [...body.parts, { type: "text", text: retrySteers.text }] }
+                : body
+              if (retrySteers) {
+                console.log(
+                  `[gateway] steer retry-injection: appended ${retrySteers.steers.length} steer(s) to jitter retry body — session=${cur.sessionId}`,
+                )
+              }
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
-                body: JSON.stringify(body),
+                body: JSON.stringify(dispatchBody),
                 signal: AbortSignal.timeout(10000),
               })
               if (!res.ok) throw new Error(`status ${res.status}`)
+              // 上游已接受重投 → 并入的指引与本回合同生共死，落 applied 终态。
+              if (retrySteers) settleSteerRetryInjection(cur, retrySteers.steers, true)
               cur.turnRetries = attempt
               cur.retryQueued = false
               console.log(`[gateway] turn retry #${attempt} dispatched for ${cur.sessionId}`)
@@ -600,6 +688,8 @@ export function handleOpencodeEvent(event: any): void {
               armWatchdogTimer(cur)
             } catch (e) {
               console.error(`[gateway] turn retry #${attempt} failed:`, e)
+              // 重投发不出去 ⇒ 并入的指引也没送到，诚实落 failed（delivery_failed），不假装已生效。
+              if (retrySteers) settleSteerRetryInjection(cur, retrySteers.steers, false)
               cur.retryQueued = false
               emitTurnDone(cur) // 重试发不出去：放弃，别让前端挂著
             }
@@ -735,6 +825,111 @@ export function handleOpencodeEvent(event: any): void {
               }
             }, TURN_RETRY_DELAY_MS)
             break // 不发 turn.done：等补写轮结束
+          }
+        }
+        // 2026-10-21 工具生命周期终态：扫超时未终态的调用，只播「未确认」，禁止改写成功。
+        // 位置＝canvas 闸之后、turn.done 之前；每 callId 只播一次。
+        {
+          const stale = sweepStaleTools(state, Date.now())
+          if (stale.length > 0) {
+            const announced = state.toolStaleAnnounced ?? (state.toolStaleAnnounced = new Set<string>())
+            const fresh = stale.filter((c) => !announced.has(c.callId))
+            for (const c of fresh) {
+              announced.add(c.callId)
+              emitToSession(state, "tool.stale", {
+                tool: c.tool,
+                call_id: c.callId,
+                started_at: c.startedAt,
+                message: "工具调用未收到终态回执，未确认成功",
+              })
+            }
+            boundSet(announced, TOOL_RUNNING_CAP)
+            if (fresh.length > 0) {
+              const list = fresh.map((c) => `${c.tool || "未知工具"}（call ${c.callId}）`).join("、")
+              console.warn(
+                `[gateway] tool-lifecycle: x${fresh.length} stale running calls at idle — session=${state.sessionId}`,
+              )
+              emitToSession(state, "message.delta", {
+                text: systemVerifyLine(`部分工具未收到终态回执：${list}；状态未确认，暂不作为交付凭据。`),
+              })
+            }
+          }
+        }
+        // 2026-10-21 无回执完成主张闸：本轮正文有「已完成/已交付」类主张但零证据 → 拦一次。
+        // canvas 闸已 block 时走不到这里（上方 break）；每 turnGen 只拦一次；turnAborted 不拦。
+        {
+          const gen = state.turnGen ?? 0
+          const tail = state.turnAssistantTail && state.turnAssistantTail.gen === gen ? state.turnAssistantTail.text : ""
+          const claim = findCompletionClaim(tail)
+          const evidenceCount =
+            state.claimEvidence && state.claimEvidence.gen === gen ? state.claimEvidence.items.length : 0
+          if (
+            shouldBlockCompletionForUnbackedClaim({
+              claim,
+              evidenceCount,
+              textOnlyRequest: isTextOnlyRequest(lastPromptText(state)),
+              promptText: lastPromptText(state),
+              nudgeSent: state.claimGateNudgeSentGen === gen,
+              turnAborted: state.turnAborted === true,
+              hasLastPromptBody: Boolean(state.lastPromptBody),
+            })
+          ) {
+            const body = state.lastPromptBody
+            if (body) {
+              state.claimGateNudgeSentGen = gen
+              const nudge = buildClaimGateNudge()
+              emitToSession(state, "message.delta", {
+                text: systemVerifyLine(`本轮交付凭据尚缺，正在核对补齐。`),
+              })
+              const tailBlock = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ `
+              const parts = body.parts.map((pt) => ({ ...pt }))
+              const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+              if (last && "text" in last && last.type === "text" && typeof last.text === "string") {
+                last.text = `${last.text}${tailBlock}${nudge}`
+              } else {
+                parts.push({ type: "text", text: `${tailBlock}${nudge}` })
+              }
+              const nudgeBody = { ...body, parts }
+              state.retryQueued = true
+              console.warn(
+                `[gateway] claim-gate: ${CLAIM_GATE_MARK} block completion (claim="${claim}" evidence=0) — session=${state.sessionId} gen=${gen}`,
+              )
+              setTimeout(async () => {
+                const cur = sessions.get(state.sessionId)
+                if (!cur) return
+                if ((cur.turnGen ?? 0) !== gen) {
+                  // 新回合仍在途时不关新回合；旧回合已经空闲则补 turn.done，避免前端挂死。
+                  if ((cur.lastTurnActiveAt ?? 0) > 0) return
+                  closeTurnAndFlushWakes(cur)
+                  return
+                }
+                if (cur.turnAborted) {
+                  cur.retryQueued = false
+                  markDirty(cur)
+                  closeTurnAndFlushWakes(cur)
+                  return
+                }
+                try {
+                  // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
+                  const reverted = await revertDeadTail(cur.opencodeSessionId)
+                  const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
+                  const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
+                    method: "POST",
+                    body: JSON.stringify(toSend),
+                    timeoutMs: 10000,
+                  })
+                  if (!res.ok) throw new Error(`status ${res.status}`)
+                  cur.retryQueued = false
+                  cur.turnToolStarted = false
+                  console.log(`[gateway] claim-gate: nudge dispatched — session=${cur.sessionId}`)
+                } catch (e) {
+                  console.error(`[gateway] claim-gate nudge failed:`, e)
+                  cur.retryQueued = false
+                  closeTurnAndFlushWakes(cur)
+                }
+              }, TURN_RETRY_DELAY_MS)
+              break // 不发 turn.done：等补写轮结束
+            }
           }
         }
         // 2026-10-19 记忆触发（能力建设）：收盘前用确定性规则侦测「该写记忆」信号。

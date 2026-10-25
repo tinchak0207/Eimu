@@ -527,6 +527,29 @@ function compileDefault(shot: ShotJson, timeline: string): string {
   return [timeline, duration !== undefined ? `${duration}s` : ""].filter(Boolean).join("\n")
 }
 
+/** 对白写进 H3 时间线：说话人编号 + `<d>` 原文。不翻译。 */
+function minimaxDialogue(shot: ShotJson): string {
+  const rows = Array.isArray(shot.audio?.dialogue) ? shot.audio.dialogue : []
+  const seen = new Map<string, string>()
+  const parts: string[] = []
+  for (const row of rows) {
+    const character = nonEmpty(row?.character)
+    const line = nonEmpty(row?.line)
+    if (!character || !line) continue
+    let id = seen.get(character)
+    if (!id) {
+      id = `S${seen.size + 1}`
+      seen.set(character, id)
+    }
+    const lang = /[\u3400-\u9fff]/.test(line) ? "Chinese" : "English"
+    const offscreen = /off-?screen|画外|旁白/i.test(`${row?.tone ?? ""} ${character}`)
+    const verb = offscreen ? "says in an off-screen voiceover" : "says"
+    const lip = offscreen ? " while their lips remain completely closed" : ""
+    parts.push(`${character} (${id}) ${verb}: <d>[${lang}] ${line}</d>${lip}.`)
+  }
+  return parts.join(" ")
+}
+
 /**
  * minimax/h3 官方三栏：首行参考图对齐指令（0 张不写）+ integrated_multimodal_description
  * + overall_soundscape + non_diegetic_music。
@@ -542,7 +565,8 @@ function compileMinimax(shot: ShotJson, timeline: string, referenceImages: numbe
     lines.push("For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.")
     lines.push("")
   }
-  lines.push(`integrated_multimodal_description: [Shot 1] ${timeline}`)
+  const spoken = minimaxDialogue(shot)
+  lines.push(`integrated_multimodal_description: [Shot 1] ${spoken ? `${timeline} ${spoken}` : timeline}`)
   const soundscape = nonEmpty(shot.audio?.soundscape)
     ?? [nonEmpty(shot.audio?.ambience), ...cleanList(shot.audio?.sfx)].filter(Boolean).join(" ")
   lines.push(`overall_soundscape: ${soundscape || "Natural ambience and physical action sounds consistent with the scene."}`)

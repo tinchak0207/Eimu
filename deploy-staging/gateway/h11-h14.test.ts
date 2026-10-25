@@ -28,6 +28,8 @@ test("H11 session-tasks：缺 session_id 仍 400", async () => {
 test("H14 唤醒文本识别", () => {
   assert.equal(isSystemWakeText("【子代理完成·系统自动唤醒】subagent abc"), true)
   assert.equal(isSystemWakeText("【子代理失败·系统自动唤醒】x"), true)
+  assert.equal(isSystemWakeText("【子代理进度回报·系统自动唤醒】还在排队"), true)
+  assert.equal(isSystemWakeText("【子代理回报队列·系统事实】共 1 条"), true)
   assert.equal(isSystemWakeText("帮我画一只猫"), false)
 })
 

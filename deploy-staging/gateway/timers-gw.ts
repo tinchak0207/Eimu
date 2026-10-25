@@ -17,7 +17,6 @@ import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
-import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 // 2026-10-04 W：看门狗/心跳等守卫家族固定文案的书写体镜像已整体拆除——一律简体。
 // TODO(整合 Wave3)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build
 // 对未 export 的 named import 报错，已实测 2026-09-19）。依第一阶段占位符法（记忆
@@ -208,20 +207,15 @@ export function clearQuestionHeartbeat(state: SessionState): void {
   clearQuestionAssumeTimer(state)
 }
 
-// ── 片AJ（2026-09-07）：question 卡 3 分钟超时自动应答 ──
+// ── 片AJ（2026-09-07）：question 卡 3 分钟超时自动 reject ──
 // 背景（片AB 评测 T4 实锤）：无人值守跑批时 question 卡在确认门前无限挂死。
-// 语义（2026-10-06 缺陷 A2 修正）：超时自动应答**不得**充当「照第一项执行」的
-// 授权。旧实现取各题第一选项拼成「已代答第一项继续：〈label〉」，读起来就是
-// 「照第一项做」——而 agent 自建的「开工确认」卡首项恰恰是付费开工（实测首项
-// ＝「按计划开跑（推荐）」，代答后子代理真跑了付费 music_gen，未经用户同意）。
-// 旧注释「confirm（花钱决策）不在此列」只覆盖 platform 侧 kind:"confirm" 的卡，
-// agent 自建确认卡走 question 通道照旧走到这里，该假设不成立——限权必须落在本
-// 函数内。现在超时投递一段**限权指令**：如实声明用户未回复并标 assumed，禁止在
-// 无用户同意下启动任何付费生成／上传／下单，只允许继续不花钱的步骤；选项仅作
-// 参考并列且不构成授权。仍要 settle（不能挂住 turn，这正是本机制存在的理由），
-// 转发核心复用 settleQuestion（双 URL 兜底 + ok 后记账 + question.replied 前端
-// 变已决）。best-effort：上游失败照 settleQuestion 既有形态收尾，不重试不抛出
-//（reconcile/新消息路径接管）。
+// 语义（2026-10-06 缺陷 A2）：超时**不得**充当「照第一项执行」的授权；旧实现取各题
+// 第一选项拼成「已代答第一项继续：〈label〉」（实测首项＝付费开工，子代理真跑了付费
+// music_gen）。现在只 reject 不代答：settleQuestion 固定发
+// reason="expired_without_consent"，前端映射为「超时未回复」，不投递任何可被当成
+// 用户选择的文案。仍要 settle（不能挂住 turn，这正是本机制存在的理由），转发核心复用
+// settleQuestion（双 URL 兜底 + ok 后记账）。best-effort：上游失败照 settleQuestion
+// 既有形态收尾，不重试不抛出（reconcile/新消息路径接管）。
 export function clearQuestionAssumeTimer(state: SessionState): void {
   if (state.questionAssumeTimer) {
     clearTimeout(state.questionAssumeTimer)
@@ -241,45 +235,24 @@ export function armQuestionAssumeTimer(state: SessionState): void {
 
 export async function autoAssumeQuestions(state: SessionState): Promise<void> {
   if (state.pendingQuestions.size === 0) return
-  // 只取首项是为了拼「照第一项做」的旧语义；现在只作参考列出，故如实收全部
-  // 选项，避免只列首项＝变相把首项打成「唯一/推荐项」。
-  const labels: string[] = []
-  for (const pending of state.pendingQuestions.values()) {
-    for (const q of pending.questions) {
-      for (const opt of q.options ?? []) {
-        if (opt.label) labels.push(opt.label)
-      }
-    }
-  }
-  // 2026-10-06 缺陷 A2 根因：旧话术「已代答第一项继续：〈label〉」把首项 label
-  // 拼成「照第一项做」的授权，而首项完全可能是付费开工（实测首项＝「按计划开跑
-  //（推荐）」）——代答一出，子代理真去跑了付费 music_gen。话术必须是一段限权
-  // 指令：声明用户未回复、标 assumed、禁止未获同意就启动付费动作，只许继续不花
-  // 钱的事；选项只作参考列出并明示「未选择任何一项」，不再构成授权。
-  const optionsNote = labels.length
-    ? `原卡提供的选项（仅列出供你了解用户可选的方向，本次没有选择其中任何一项、不构成授权）：${labels.join("；")}。`
-    : "原卡没有提供可选项。"
-  const autonomousAuthorized = await billingAutoApprovalEnabled(state)
-  const answerText = autonomousAuthorized
-    ? "（用户 3 分钟未回复，本条为超时自动续接，不是用户选择某个选项的答复，assumed。）网关核实完全访问或自动模式的持续授权仍有效：当前任务内扣费、必要返工、换模及可合理判断的制作选择直接继续，不再问开工或扣费；本条没有新增授权，也没有改变用户明确的预算、禁止生成、取消或方案须确认要求。若原问题缺少无法合理推断的关键输入，或用户明确要求亲自选定方案，则保持该决策待用户答复；其它已有授权的步骤继续。" + optionsNote
-    :
-    "（用户 3 分钟未回复，本条为超时自动代答，不是用户同意的答复，assumed。）限权指令：" +
-    "① 在用户明确同意之前，不得启动任何付费生成、付费上传、下单或其他会产生费用的动作；" +
-    "② 可以继续不花钱的步骤（读资料、整理方案、给出分析或草稿结论）；" +
-    "③ 若继续推进必须依赖付费动作，请停下，把当前结论与待办列清楚，等用户回来决定。" +
-    optionsNote
+  // 2026-10-21：超时只做 reject（settleQuestion），不再拼一段线上永不投递的 answerText——
+  // settleQuestion 只把 override 当布尔用（决定 reason），文案从不送达模型/前端；
+  // 前端已把 reason="expired_without_consent" 映射为「超时未回复」。限权语义由
+  // 该 reason＋既有提示词承载，不再每轮 await 计费授权查询。
   const count = state.pendingQuestions.size
+  let assumed = 0
   for (const requestId of [...state.pendingQuestions.keys()]) {
     try {
-      await settleQuestion(state, requestId, answerText)
+      await settleQuestion(state, requestId, "expired_without_consent")
+      assumed += 1
     } catch (err) {
       console.error(`[gateway] auto-assume question failed: ${requestId} — session=${state.sessionId}:`, err)
-      state.pendingQuestions.delete(requestId)
     }
   }
-  state.pendingQuestions.clear()
-  clearQuestionHeartbeat(state)
-  console.log(`[session] auto-assumed ${count} pending question(s) after ${QUESTION_ASSUME_MS}ms — session=${state.sessionId}`)
+  if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
+  // 2026-10-21：按实际 reject 成功数打印（行为不变）；失败数另记，不再把「尝试过」谎报成「已代答」。
+  const failed = count - assumed
+  console.log(`[session] auto-assumed ${assumed}/${count} pending question(s) after ${QUESTION_ASSUME_MS}ms — session=${state.sessionId}${failed ? ` failed=${failed}` : ""}`)
 }
 
 export function armQuestionHeartbeat(state: SessionState): void {

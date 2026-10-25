@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { generationUserAdmissions } from "./job-store"
+import { generationUserAdmissions, generationWorkControl, setGenerationWorkCancelled } from "./job-store"
 import { loadUserSettings, listSessionRows } from "./persistence"
 import { gateUserInput } from "./jev-gate"
 import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
@@ -41,19 +41,103 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     else generationUserAdmissions.delete(consumer)
   }
 }
+
+type WorkControl = "cancel" | "resume"
+// B1：工作控制不从整段原文猜。cancel 只认句首 12 字内的停止动词＋同句工作对象，
+// 或整句就是「不要生成/不用生成了/别生成了」；「不要生成歌曲，只要歌词」不算取消。
+const WORK_HALT = /(?:取消|停止|停下|中止)/
+const WORK_RESUME_START = /^(?:请继续|再继续|麻烦继续|接续|接着|继续|恢复)/
+const WORK_CANCEL_OBJECT = /(?:任务|生成|制作|这个|当前|刚才)/
+const WORK_RESUME_OBJECT = /(?:生成|制作|任务)/
+// 句首 resume 但紧跟非工作动词（继续观察／继续等／继续看／继续想）且同句没有工作对象
+// → 不是恢复工作（避免把「继续观察」当成 resume 而清掉取消标记）。
+const WORK_RESUME_NON_WORK = /(?:观察|等|看|想)/
+const WORK_RESUME_LOOKAHEAD_CHARS = 12
+// 整句裸停止词也生效（短命令在前端有按钮，但文本「停止」「取消」「停下吧」同样该停）。
+// 保留既有「不要生成／不用生成了／别生成了」整句形态；2026-10-21 验收要求「停下吧」
+// 也判 cancel，故在动词后允许一个口语「吧」。
+const WHOLE_CANCEL = /^(?:不要(?:再)?生成|不用生成了|别生成了|停止|停下|中止|取消|别做了|不做了)(?:吧)?[。！!？?~～]*$/
+const WORK_CONTROL_HEAD_CHARS = 12
+
+/**
+ * 取消词是否被否定：回看 halt 动词前最多 12 字，遇到小句分隔符即截断；
+ * 窗口内出现 别／不要／不用／勿／甭／不想／不打算／不需要／不必 → 不是取消。
+ * 误判来源（2026-10-21 Hack 实锤）：「别急着停止生成」「我不想停止生成」被当成用户叫停，
+ * 旧版只回看 3 字且要求否定词紧邻 halt，隔着「急着」就漏掉否定。
+ * 「别做视频了，停止生成」的否定在另一小句，不跨小句生效 → 仍判 cancel。
+ */
+export function isNegatedHalt(sentence: string, index: number): boolean {
+  const before = sentence.slice(Math.max(0, index - 12), index)
+  const clauses = before.split(/[，。；！？,.;!?\n]/)
+  const clause = clauses[clauses.length - 1] ?? ""
+  return /(?:别|不要|不用|勿|甭|不想|不打算|不需要|不必)/.test(clause)
+}
+
+export function detectTextWorkControl(text: string): WorkControl | null {
+  // 只看第一句：控制词必须与工作对象同句，避免被后续叙述带偏。
+  const sentence = (text.trim().split(/[。！!？?\n]/, 1)[0] ?? "").trim()
+  if (!sentence) return null
+  if (WHOLE_CANCEL.test(sentence)) return "cancel"
+  const head = sentence.slice(0, WORK_CONTROL_HEAD_CHARS)
+  const halt = WORK_HALT.exec(head)
+  // 否定式 halt（「别停止生成」「不要停止」）不是取消；WORK_HALT 无 g 旗标，exec 不污染 lastIndex。
+  if (halt && !isNegatedHalt(head, halt.index) && WORK_CANCEL_OBJECT.test(sentence)) return "cancel"
+  // resume 口语扩容（2026-10-21 Hack）：句首「继续/恢复/接着/接续…」出现即视为恢复，
+  // 对象词（生成/制作/任务）可省略——「继续」「恢复吧」「接着做」都应解除取消。
+  // 唯一反例：句首 resume 后 12 字内是观察/等/看/想且同句无工作对象 → 不算 resume。
+  const resume = WORK_RESUME_START.exec(sentence)
+  if (resume) {
+    const after = sentence.slice(resume[0].length, resume[0].length + WORK_RESUME_LOOKAHEAD_CHARS)
+    if (!WORK_RESUME_OBJECT.test(sentence) && WORK_RESUME_NON_WORK.test(after)) return null
+    return "resume"
+  }
+  return null
+}
+
+/**
+ * 取消是「当前工作代」而非会话终身：停止只作用于当时那批工作；用户发新指令即新工作代。
+ * 只在已取消时写库（普通消息零写入），返回 true＝本次确实清掉了标记。
+ */
+export function clearCancelledForNewPrompt(parentGw: string): boolean {
+  if (generationWorkControl(parentGw).cancelled !== true) return false
+  setGenerationWorkCancelled(parentGw, false, "new_user_prompt")
+  return true
+}
+
 async function handleAdmittedUserMessage(key: string, id: string, req: Request): Promise<Response> {
   // Phase 0 观测：t_accept 起点（函数进入时刻；计时档在 turnGen 递增处建立）。
   const tAcceptAt = Date.now()
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  let body: { content?: string; canvas_state?: unknown; session_directive?: string; client_environment?: unknown }
+  let body: { content?: string; canvas_state?: unknown; session_directive?: string; client_environment?: unknown; work_control?: unknown }
   try {
-    body = (await req.json()) as { content?: string; canvas_state?: unknown }
+    body = (await req.json()) as { content?: string; canvas_state?: unknown; work_control?: unknown }
   } catch {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
   const rawContent = typeof body.content === "string" ? body.content : ""
   if (!rawContent.trim()) return jsonError(400, "content is required", "bad_request", "bad_request")
+  // 用户停止必须先于问题关闭、模型排队和其它 await。控制状态跨 run/进程保留。
+  // 显式 work_control 优先；文本只在句首出现明确控制词时生效；未知一律不改状态。
+  const instruction = rawContent.trim()
+  const explicitControl: WorkControl | null =
+    body.work_control === "cancel" || body.work_control === "resume" ? body.work_control : null
+  const textControl = explicitControl ? null : detectTextWorkControl(instruction)
+  const workControl = explicitControl ?? textControl
+  const workControlSource = explicitControl ? "explicit" : textControl ? "text" : null
+  try {
+    if (workControl === "cancel") setGenerationWorkCancelled(state.sessionId, true, "用户消息明确停止当前工作")
+    else if (workControl === "resume") setGenerationWorkCancelled(state.sessionId, false, "用户明确恢复或开始新工作")
+    else if (clearCancelledForNewPrompt(state.sessionId)) {
+      // 取消是「当前工作代」而非会话终身：停止只作用于当时那批工作；用户发新指令
+      // （无停止/恢复控制词）即新工作代，清掉标记后本次派发才能继续。只读一次 DB。
+    }
+  } catch {
+    return jsonError(503, "工作控制暂不可持久化，未接受新的执行指令。", "backend_error", "generation_control_unavailable")
+  }
+  if (workControl) {
+    console.log(`[gateway] work_control: session=${state.sessionId} source=${workControlSource} control=${workControl}`)
+  }
   // 2026-09-29 审计修复：入口就把冒充系统/网关权威的标题缴械（见 sanitizeUserContent）。
   // 2026-10-18 CC 移植：附件/文件提及单轮总字符上限（只裁 [ATTACHMENTS_BLOCK] 内部，
   // 其余用户正文一字不动），超限标注「已截断」。
@@ -93,7 +177,9 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
         console.error(`[gateway] auto-settle question failed: ${requestId} — session=${state.sessionId}:`, err)
       }
     }
-    state.pendingQuestions.clear()
+    if (state.pendingQuestions.size > 0) {
+      return jsonError(503, "原问题未能确认关闭，请保留问题卡并重试；未将跳过当作同意。", "backend_error", "question_reject_unconfirmed")
+    }
     clearQuestionHeartbeat(state)
     console.log(`[session] auto-skipped ${skipCount} pending question(s) on new user message`)
   }

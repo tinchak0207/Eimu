@@ -255,6 +255,7 @@ export async function handleCanvasStatePublicGet(key: string, id: string): Promi
     has_state: snap !== null,
     state: snap?.state ?? null,
     updated_at: snap?.updatedAt ?? null,
+    rev: snap?.state && typeof snap.state === "object" ? (snap.state as Record<string, unknown>).rev ?? 0 : 0,
   })
 }
 

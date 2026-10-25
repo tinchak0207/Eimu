@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import path from "node:path"
 import { loadUserSettings, sweepStaleRows } from "./persistence"
-import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection } from "./subagent"
+import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection, composeNoteWakeInjection } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { setSteerTurnDeliverer } from "./steer-gw.ts"
 import { handleSendMessage } from "./messages-gw.ts"
@@ -244,7 +244,7 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
   // 旧版此处直接 `${note.text}` 未过 scrub＝红线 4 的旁路，已堵）。
   // FIX-G4（U1）：唤醒时把「未送达回报队列」一并送达（此前该队列只写不读＝黑洞）。队列块空则
   // 逐字＝既有文案（零回归）；送达成功即清空队列，失败（非 2xx）不清空以便下次重试。
-  const content = composeSubagentWakeInjection(
+  const content = composeNoteWakeInjection(
     renderSubagentNoteQueueBlock(parentState.subagentNotes),
     renderSubagentNoteWakeContent(note),
   )
