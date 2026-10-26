@@ -27,6 +27,9 @@ async function childIsIdle(run: SubagentRun): Promise<boolean> {
     if (!response.ok) return false
     const states = await response.json()
     if (!states || typeof states !== "object" || Array.isArray(states)) return false
+    if (!Object.entries(states).every(([id, state]) => isOpenCodeSessionId(id) &&
+      state !== null && typeof state === "object" && !Array.isArray(state) &&
+      ["idle", "busy", "retry"].includes((state as { type?: string }).type ?? ""))) return false
     // OpenCode 在 idle 时从活动映射移除会话。
     return !Object.hasOwn(states, run.opencodeSessionId) || states[run.opencodeSessionId]?.type === "idle"
   } catch { return false }
