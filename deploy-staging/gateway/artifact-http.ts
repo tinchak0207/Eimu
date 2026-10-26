@@ -111,7 +111,7 @@ async function readBody(req: Request): Promise<Body> {
   return parsed as Body
 }
 
-export async function handleArtifact(req: Request, pathname: string): Promise<Response> {
+export async function handleArtifact(req: Request, pathname: string, deliverySession?: (sessionId: string) => string | undefined): Promise<Response> {
   try {
     assertInternalToken(req)
     const body = await readBody(req)
@@ -130,6 +130,7 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       }
       const result = publishArtifact({
         sessionId,
+        deliverySessionId: deliverySession?.(sessionId),
         name,
         path: filePath,
         url: text(body, "url"),

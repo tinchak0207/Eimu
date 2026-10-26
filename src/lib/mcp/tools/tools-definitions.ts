@@ -551,7 +551,7 @@ function defineTools(): ToolDefinition[] {
       name: "run_agent",
       title: "运行 agent 任务",
       description: bilingual(
-        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
+        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。本地源文件/参考素材先用POST /api/agent/biz/sessions/{session_id}/attachments上传multipart的file字段（自有API key，≤4MiB），把回执的path放进同一会话prompt，勿把大文件正文塞prompt；完整文件往返契约见/v1/openapi.json。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
         "Hand a task to Eimu's agent orchestrator and return its final reply plus artifact URLs. This really consumes account credits because the orchestrator may call billed generation tools itself; do not use it for plain text Q&A.",
       ),
       inputSchema: {

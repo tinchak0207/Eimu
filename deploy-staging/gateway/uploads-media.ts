@@ -1,6 +1,7 @@
 // uploads-media.ts — 附件上传与档名/类型/zip 安检（自 index.ts 105-242 区逐行抽取，2026-09-19 Wave1）
 import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, UPLOADS_DIR } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
@@ -61,6 +62,9 @@ export function contentTypeForExt(ext: string): string {
     ".json": "application/json",
     ".csv": "text/csv",
     ".zip": "application/zip",
+    // Source attachments are read as text, never executed as an uploaded web page.
+    ".html": "text/plain; charset=utf-8",
+    ".htm": "text/plain; charset=utf-8",
   }
   return map[ext] ?? "application/octet-stream"
 }
@@ -97,10 +101,12 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     const form = await req.formData()
     const files = form.getAll("file") as File[]
     if (files.length === 0) return jsonError(400, "no file field", "bad_request", "bad_request")
+    if (files.some((file) => !(file instanceof File))) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
     const uploadDir = path.join(UPLOADS_DIR, state.sessionId)
     await mkdir(uploadDir, { recursive: true })
-    const results: { name: string; path: string; size: number }[] = []
+    const results: { name: string; path: string; size: number; sha256: string; upload_id: string; content_type: string }[] = []
     for (const file of files) {
+      if (!(file instanceof File)) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
       if (file.size > UPLOAD_MAX_BYTES) {
         return jsonError(413, "file exceeds 4MB limit", "payload_too_large", "payload_too_large")
       }
@@ -114,7 +120,8 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       if (!path.resolve(dest).startsWith(path.resolve(UPLOADS_DIR))) {
         return jsonError(400, "invalid path", "bad_request", "bad_request")
       }
-      await Bun.write(dest, await file.arrayBuffer())
+      const bytes = Buffer.from(await file.arrayBuffer())
+      await Bun.write(dest, bytes)
       if (finalName.toLowerCase().endsWith(".zip")) {
         const probe = zipProbe(dest)
         if (probe !== null) {
@@ -122,7 +129,9 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
           return jsonError(400, `zip rejected: ${probe}`, "bad_request", "bad_request")
         }
       }
-      results.push({ name: finalName, path: `uploads/${state.sessionId}/${finalName}`, size: file.size })
+      const sha256 = createHash("sha256").update(bytes).digest("hex")
+      const uploadId = createHash("sha256").update(`${state.sessionId}\0${sha256}`).digest("hex")
+      results.push({ name: finalName, path: `uploads/${state.sessionId}/${finalName}`, size: bytes.length, sha256, upload_id: uploadId, content_type: contentTypeForExt(path.extname(finalName).toLowerCase()) })
     }
     return Response.json({ attachments: results })
   } catch (e) {

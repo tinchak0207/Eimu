@@ -30,6 +30,39 @@ function authErrorResponses() {
 }
 
 export const PATHS = {
+    "/api/agent/biz/sessions/{session_id}/attachments": {
+      post: {
+        servers: [{ url: "/" }],
+        operationId: "uploadAgentSessionAttachment",
+        summary: "向自己的 Eimu 会话上传本地源文件或参考素材",
+        description: "multipart/form-data 的 file 字段传真实文件字节，单文件≤4MiB，请求总量≤4MiB+64KiB。HTML/HTM按只读源码处理，另支持既有文档/图片/音视频/ZIP附件白名单。成功回 attachments[{name,path,size,sha256,upload_id,content_type}]；path是该账号会话的真实workspace相对路径，将它交给同一session_id的run_agent读取，不要把大文件正文塞进prompt。upload_id以账号会话和内容hash派生，同字节稳定。跨账号会话404，不接受服务器本地路径或外部URL。",
+        security: [bearerAuth],
+        parameters: [{ name: "session_id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "multipart/form-data": { schema: { type: "object", required: ["file"], properties: { file: { type: "string", format: "binary" } } } } } },
+        responses: {
+          200: { description: "附件已持久落盘，返回相对路径、字节数、SHA-256与稳定upload_id", content: { "application/json": { schema: { type: "object", properties: { attachments: { type: "array", items: { type: "object", required: ["path", "size", "sha256", "upload_id"], properties: { name: { type: "string" }, path: { type: "string" }, size: { type: "integer" }, sha256: { type: "string" }, upload_id: { type: "string" }, content_type: { type: "string" } } } } } } } } },
+          400: { description: "附件格式不合法或不在允许类型内" },
+          404: { description: "会话不存在或不属于当前账号" },
+          413: { description: "文件或请求超出大小限制" },
+          ...authErrorResponses(),
+        },
+      },
+    },
+    "/api/agent/biz/sessions/{session_id}/artifacts/{artifact_id}/versions/{version}/download": {
+      get: {
+        servers: [{ url: "/" }],
+        operationId: "downloadAgentArtifactVersion",
+        summary: "下载自己会话发布的工程文件版本",
+        description: "使用自己的API key鉴权。仅按已绑定账号会话、artifact ID和版本读取私有不可变快照，不接收path参数。支持PNG/GLB/Blend/ZIP等已发布文件，最大200MiB；响应保留版本MIME、字节数和X-Artifact-SHA256。",
+        security: [bearerAuth],
+        parameters: [
+          { name: "session_id", in: "path", required: true, schema: { type: "string" } },
+          { name: "artifact_id", in: "path", required: true, schema: { type: "integer", minimum: 1 } },
+          { name: "version", in: "path", required: true, schema: { type: "integer", minimum: 1 } },
+        ],
+        responses: { 200: { description: "真实文件流；Content-Disposition=attachment，X-Artifact-SHA256可校验", content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }, 404: { description: "会话或产物不存在、快照不可用或不属于当前账号" }, ...authErrorResponses() },
+      },
+    },
     "/models": {
       get: {
         operationId: "listModels",

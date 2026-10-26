@@ -264,7 +264,7 @@ export const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（浏�
 export const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])
 export const ALLOWED_UPLOAD_EXTS = new Set([
   ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".json",
-  ".csv", ".xml", ".yaml", ".yml", ".png", ".jpg", ".jpeg",
+  ".csv", ".xml", ".yaml", ".yml", ".html", ".htm", ".png", ".jpg", ".jpeg",
   ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".zip",
   // 音频附件（本地参考素材：翻唱 source_audio 等）。与 two-phase-upload.ts 的
   // ALLOWED_UPLOAD_CONTENT_TYPES（audio/mpeg|wav|mp4|aac）对齐，另补 flac/ogg
