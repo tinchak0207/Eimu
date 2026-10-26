@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync, readdirSync } from "node:fs"
 import { classifyDispatchMeta, classifyBeastStages, isPlanOnlyNoGenerationIntent } from "./jev-gate"
-import { isMultiStepAvProductionIntent, buildAvCanvasSkeletonDirective } from "./canvas-write-gate.ts"
+import { isMultiStepAvProductionIntent, buildAvCanvasSkeletonDirective, MULTI_STEP_AV_TEMPLATES } from "./canvas-write-gate.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { templatePlaceholderContent } from "./workflow-templates"
 import { resolvePromptHookTimeoutMs } from "./harness-hooks.ts"
@@ -545,6 +545,17 @@ export async function buildTemplateSkeletonForPrompt(state: SessionState, conten
     }
     // R2-G1：禁生成／只要方案 → lean 骨架（无 image／video／audio／film 空壳）。
     const planOnlyLean = isPlanOnlyNoGenerationIntent(content)
+    // 2026-10-27：Jev 把纯歌曲判成影片模板时不起骨架——用户要的是一首歌，不是多镜成片产线；
+    // 起错模板会让写穿闸把问答回合拖成反复 canvas_get_state／workflow_write。
+    if (
+      MULTI_STEP_AV_TEMPLATES.has(meta.template.templateId) &&
+      !isMultiStepAvProductionIntent({ templateId: meta.template.templateId, prompt: content })
+    ) {
+      console.log(
+        `[gateway] prompt skeleton skip (non-AV prompt): template=${meta.template.templateId} session=${state.sessionId}`,
+      )
+      return
+    }
     const r = workflowService.startFast(
       meta.template.templateId,
       templatePlaceholderContent(meta.template.templateId) as never,

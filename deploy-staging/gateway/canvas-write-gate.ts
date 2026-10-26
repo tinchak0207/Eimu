@@ -27,6 +27,12 @@ export const MULTI_STEP_AV_TEMPLATES = new Set<string>([
 const MUSIC_INTENT_RE =
   /(?:\bMV\b|\bOP\b|主题曲|片头曲|片尾曲|角色歌|作词|作曲|编曲|歌词|BGM|配乐|歌曲|音乐|专辑|单曲|FlowMusic|flowmusic|lyria)/i
 
+/** 影像／成片词：只有出现这些词，音乐请求才算多步影音；纯歌曲不起影片骨架、不逼影片 DSL。
+ *  2026-10-27 实测：一首 3 分钟歌（无影像需求）被 Jev 判成 feature_film（0.86），画布起整条影片产线，
+ *  写穿闸又把「先不要生成、只问字数放不放得下」的回合拖到 15 分钟未收尾。 */
+const AV_VISUAL_RE =
+  /(?:\bMV\b|\bmv\b|视频|影片|短片|微电影|成片|分镜|预告|片头|片尾|画面|剪辑|镜头|电影|动画|实拍|多镜)/i
+
 /** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。
  *  2026-10-21：补「只要词/只写词」——真实委托常写「帮我写一首歌词，只要词」，旧表零命中。
  *  2026-10-21 二次修正：删掉裸 `不要生成|不要报价`（「不要生成图片，做视频」「不要报价，直接生成
@@ -81,6 +87,8 @@ export function isMultiStepAvProductionIntent(input: AvIntentInput): boolean {
   const p = typeof input.prompt === "string" ? input.prompt : ""
   // 纯文字委托不是媒体生产：不拦收盘、不逼写画布（2026-10-21 实测：歌词正文被闸门挤成「见上一条」）。
   if (isTextOnlyRequest(p)) return false
+  // 纯歌曲（无 MV／视频／成片等影像词）＝单步音乐制作：Jev 即使判成影片模板，也不起影片骨架、不逼写影片 DSL。
+  if (MUSIC_INTENT_RE.test(p) && !AV_VISUAL_RE.test(p)) return false
   const tid = typeof input.templateId === "string" ? input.templateId.trim() : ""
   if (tid && MULTI_STEP_AV_TEMPLATES.has(tid)) return true
   if (input.musicExpertSeen === true) return true
