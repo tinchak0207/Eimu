@@ -61,7 +61,7 @@ const MEDIA_OBJECT_FIRST_RE =
 
 /** 多镜／成片制作意图关键词（模板漏判兜底）。 */
 const MULTI_SHOT_AV_RE =
-  /(?:多镜|分镜|成片|长片|短剧|预告片|纪录片|广告片|宣传片|剧集|番剧|短片|storyboard|shot\s*list|镜头表)/i
+  /(?:多镜|分镜|成片|长片|短剧|预告片|纪录片|广告片|宣传片|剧集|番剧|短片|storyboard|shot\s*list|镜头表|(?:做|生成|制作|拍|剪|出|来)\s*.{0,4}(?:视频|影片))/i
 
 export const WORKFLOW_WRITE_GATE_MARK = "【画布写穿闸·未达标】"
 
@@ -93,7 +93,8 @@ export function isMultiStepAvProductionIntent(input: AvIntentInput): boolean {
   // 纯文字委托不是媒体生产：不拦收盘、不逼写画布（2026-10-21 实测：歌词正文被闸门挤成「见上一条」）。
   if (isTextOnlyRequest(p)) return false
   // 纯歌曲（无 MV／视频／成片等影像词）＝单步音乐制作：Jev 即使判成影片模板，也不起影片骨架、不逼写影片 DSL。
-  if (MUSIC_INTENT_RE.test(p) && !AV_VISUAL_RE.test(p)) return false
+  // 2026-10-27 Hack 实测：「做首歌，不要视频」被未剥否定的原文判成影音（「视频」命中），先剥否定再看影像词。
+  if (MUSIC_INTENT_RE.test(p) && !AV_VISUAL_RE.test(p.replace(NEGATED_MEDIA_RE, " "))) return false
   const tid = typeof input.templateId === "string" ? input.templateId.trim() : ""
   if (tid && MULTI_STEP_AV_TEMPLATES.has(tid)) return true
   if (input.musicExpertSeen === true) return true
