@@ -98,7 +98,7 @@ function artifactKind(url: string): "image" | "video" | "file" {
  * `![alt](url)`（作者已宣告是图）。非媒体的普通连结不列入。保持出现顺序、同 URL 去重，
  * kind 以「更明确者优先」（image/video 不被 file 覆盖）。
  */
-function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image" | "video" | "file" }> {
+export function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image" | "video" | "file" }> {
   const found = new Map<string, "image" | "video" | "file">();
   const consider = (raw: string, viaMarkdownImage: boolean) => {
     const url = raw.replace(/[.,;:!?]+$/, "");
