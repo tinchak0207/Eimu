@@ -51,10 +51,13 @@ export async function reclaimExpiredIdleRun(run: SubagentRun): Promise<void> {
   livenessChecks.add(run)
   const child = run.opencodeSessionId
   const until = run.resumeUntil
+  const activity = run.lastActivityAt
+  const status = run.status
   try {
     if (!await childIsIdle(run)) return
     const holder = byChildOc.get(child)
-    if (!deps || resumable.get(run.id) !== run || run.opencodeSessionId !== child ||
+    if (!deps || run.stopped || run.status !== status || run.lastActivityAt !== activity ||
+      resumable.get(run.id) !== run || run.opencodeSessionId !== child ||
       run.resumeUntil !== until || (until ?? 0) > Date.now() ||
       resumeInFlight.has(run.id) || (holder && holder !== run)) return
     // 与 resumeTerminalRun 复用同步认领闸：任何 await 前阻止并发续跑。
