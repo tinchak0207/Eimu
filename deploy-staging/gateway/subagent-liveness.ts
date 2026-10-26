@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { computeSubagentUsage, runMessageWindow, SubagentUsageMessage } from "./subagent-policy.ts"
 import type { SubagentUsage, SubagentRun, PersistOutcome } from "./subagent-types.ts"
 import { subagentToolMaxMs, subagentShellSilentMs, isShellTool, subagentStaleMs, subagentLivenessPollMs, SUBAGENT_STALE_MESSAGE, SUBAGENT_OUTPUT_REL, SUBAGENT_OUTPUT_DIR, PERSIST_TAIL, evaluateRunLiveness, safeLabelForFile, userFacingSubagentLabel, partialBodyOf, unrefTimer, isOpenCodeSessionId, lastAssistantTextWithFallback } from "./subagent-types.ts"
-import { deps, byParent, byChildOc, resumable, parentStateOf } from "./subagent-runs.ts"
+import { deps, byParent, byChildOc, resumable, resumeInFlight, parentStateOf } from "./subagent-runs.ts"
 import { finishRun } from "./subagent-finish.ts"
 import { retryWithNextModel } from "./subagent-attempt.ts"
 import { pushParentNote } from "./subagent-live.ts"
@@ -15,6 +15,67 @@ import { pushParentNote } from "./subagent-live.ts"
 // 命中 stale 的处置：走既有 finishRun(error) → subagent.done + wakeParent（唤醒文案过
 // 用户可见白名单 scrubSubagentPayload），父会话据此收束/重派。
 let livenessTimer: ReturnType<typeof setInterval> | undefined
+const livenessChecks = new Set<SubagentRun>()
+
+/** 无事件不能证明执行已停；只有有效活动映射的 idle 才允许收尾/回收。 */
+async function childIsIdle(run: SubagentRun): Promise<boolean> {
+  if (!deps || !isOpenCodeSessionId(run.opencodeSessionId)) return false
+  try {
+    const response = await fetch(`${deps.openCodeUrl}/session/status`, {
+      headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok) return false
+    const states = await response.json()
+    if (!states || typeof states !== "object" || Array.isArray(states)) return false
+    // OpenCode 在 idle 时从活动映射移除会话。
+    return !Object.hasOwn(states, run.opencodeSessionId) || states[run.opencodeSessionId]?.type === "idle"
+  } catch { return false }
+}
+
+export async function confirmSilentRunIdle(run: SubagentRun, message: string): Promise<void> {
+  if (livenessChecks.has(run)) return
+  livenessChecks.add(run)
+  const child = run.opencodeSessionId
+  const activity = run.lastActivityAt
+  try {
+    if (!await childIsIdle(run)) return
+    if (run.status !== "running" || run.stopped || run.opencodeSessionId !== child ||
+      run.lastActivityAt !== activity || byChildOc.get(child) !== run || resumeInFlight.has(run.id)) return
+    run.partialPersist = true
+    await finishRun(run, "error", partialBodyOf(run), message)
+  } finally { livenessChecks.delete(run) }
+}
+
+export async function reclaimExpiredIdleRun(run: SubagentRun): Promise<void> {
+  if (livenessChecks.has(run) || resumeInFlight.has(run.id)) return
+  livenessChecks.add(run)
+  const child = run.opencodeSessionId
+  const until = run.resumeUntil
+  try {
+    if (!await childIsIdle(run)) return
+    const holder = byChildOc.get(child)
+    if (!deps || resumable.get(run.id) !== run || run.opencodeSessionId !== child ||
+      run.resumeUntil !== until || (until ?? 0) > Date.now() ||
+      resumeInFlight.has(run.id) || (holder && holder !== run)) return
+    // 与 resumeTerminalRun 复用同步认领闸：任何 await 前阻止并发续跑。
+    resumeInFlight.add(run.id)
+    resumable.delete(run.id)
+    run.resumeUntil = undefined
+    try {
+      const response = await fetch(`${deps.openCodeUrl}/session/${child}`, {
+        method: "DELETE", headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(5000),
+      })
+      if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`)
+      console.log(`[gateway] subagent resume window expired (idle confirmed): id=${run.id} label="${run.label}"`)
+    } catch {
+      // 未确认删除保留接续记录，不把网络失败伪装成回收完成。
+      if (!run.stopped && !resumable.has(run.id)) {
+        run.resumeUntil = until
+        resumable.set(run.id, run)
+      }
+    } finally { resumeInFlight.delete(run.id) }
+  } finally { livenessChecks.delete(run) }
+}
 
 export function startLivenessWatch(): void {
   if (livenessTimer) return
@@ -66,8 +127,7 @@ function livenessTick(): void {
         console.warn(
           `[gateway] subagent tool hung ${Math.round((shellHung ? hungTool.silentMs : hungTool.ageMs) / 1000)}s: id=${run.id} label="${run.label}" tool=${hungTool.name || run.lastToolName || "-"} call=${hungTool.callId.slice(0, 16)}`,
         )
-        run.partialPersist = true
-        void finishRun(run, "error", partialBodyOf(run), `${why}，已强制结束；已产出的部分已保留。`)
+        void confirmSilentRunIdle(run, `${why}；已确认执行端空闲，已产出的部分已保留。`)
         continue
       }
     }
@@ -88,8 +148,7 @@ function livenessTick(): void {
       `[gateway] subagent stale detected (no child activity ${silentS}s, no in-flight tool): id=${run.id} label="${run.label}" child=${run.opencodeSessionId}`,
     )
     // 逾时先落盘已累积的 partial（同一行为与硬顶路径一致），再 error 收尾。
-    run.partialPersist = true
-    void finishRun(run, "error", partialBodyOf(run), SUBAGENT_STALE_MESSAGE)
+    void confirmSilentRunIdle(run, SUBAGENT_STALE_MESSAGE)
   }
   // ── 2026-10-14 协作总线：接续窗口（X7）与阻塞式提问（X5）的到期回收 ──────────────
   // 顺手做在同一个 tick 上（单一定时器，unref）：不新增计时器生命周期，不与既有
@@ -106,18 +165,7 @@ function livenessTick(): void {
       console.log(`[gateway] subagent resume window expired (session held by live run, kept): id=${run.id} label="${run.label}"`)
       continue
     }
-    resumable.delete(id)
-    run.resumeUntil = undefined
-    // 窗口到期：子会话立即 DELETE（防堆积），与 hard stop 同款清理；已完成记录留给
-    // status 查询（completed 有自身 TTL），不再可续（诚实：过窗即不可续，不假称可续）。
-    if (deps && isOpenCodeSessionId(run.opencodeSessionId)) {
-      void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}`, {
-        method: "DELETE",
-        headers: deps.openCodeHeaders(),
-        signal: AbortSignal.timeout(5000),
-      }).catch(() => {})
-    }
-    console.log(`[gateway] subagent resume window expired: id=${run.id} label="${run.label}" — 子会话已回收`)
+    void reclaimExpiredIdleRun(run)
   }
   // G9(c)（2026-10-14 修复）：提问到期消解同时覆盖**已终态但在接续窗口内的** resumable run
   // （旧版只遍历 byParent 的在途 run → 落在终态 run 上的提问永不消解）。按 run id 去重。
@@ -281,4 +329,3 @@ export async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 
   }
   finishRun(run, "error", "", "子代理运行结束但没有产出文本")
 }
-
