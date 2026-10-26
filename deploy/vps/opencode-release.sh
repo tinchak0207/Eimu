@@ -46,6 +46,8 @@ RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-opencode-recon.sh"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 WORKSPACE_DIR="${OC_WORKSPACE_DIR:-$(dirname "$VPS_DIR")}"
+HARNESS_ROOT="${OC_HARNESS_ROOT:-$(dirname "$WORKSPACE_DIR")}"
+ACTIVATION_LOCK="${HARNESS_ACTIVATION_LOCK:-$HARNESS_ROOT/.harness-activation.lock}"
 # workspace 根的手维护设定档：repo 内放在镜像根，但**部署目标是 workspace/ 而非 .opencode/**，
 # 故必须从主 tar 排除、单独安装，否则会被放到 .opencode/AGENTS.md（错的位置）。
 ROOT_FILES=(AGENTS.md)
@@ -68,11 +70,142 @@ remote_stdin() {
     log "DRY-RUN ssh(stdin): $*"
     local t; t="$(mktemp -t oc-dry.XXXXXX)"; cat > "$t"; sed 's/^/  | /' "$t" >&2; rm -f "$t"; return 0
   fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  local command
+  if [ "$#" -gt 1 ]; then printf -v command '%q ' "$@"; else command="$1"; fi
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$command"
 }
 remote_binary() {
   if [ "$DRY_RUN" -eq 1 ]; then local n; n="$(wc -c)"; log "DRY-RUN ssh(binary): $* (stdin $n bytes)"; return 0; fi
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+}
+
+runtime_identity() {
+  python3 - "$VPS_DIR" "$WORKSPACE_DIR" <<'IDENTITY'
+import hashlib, os, stat, sys
+from pathlib import Path
+root, ws = map(Path, sys.argv[1:])
+h=hashlib.sha256()
+def record(p, label):
+    st=p.lstat(); h.update(label.encode()+b'\0'+str(stat.S_IMODE(st.st_mode)).encode()+b'\0')
+    if p.is_symlink(): h.update(b'L'+os.readlink(p).encode())
+    elif p.is_file():
+        h.update(b'F')
+        with p.open('rb') as f:
+            for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
+    elif p.is_dir(): h.update(b'D')
+    else: raise RuntimeError('unsupported managed entry')
+    h.update(b'\0')
+for name in ('tools','lib','skills','plugin','opencode.json','package.json','bun.lock','package-lock.json'):
+    p=root/name
+    if not p.exists() and not p.is_symlink(): h.update(('missing:'+name+'\0').encode()); continue
+    record(p,name)
+    if p.is_dir() and not p.is_symlink():
+        for current, dirs, files in os.walk(p,followlinks=False):
+            dirs[:]=sorted(d for d in dirs if d!='__pycache__')
+            for child in sorted(dirs+files):
+                q=Path(current)/child; record(q,str(q.relative_to(root)))
+p=ws/'AGENTS.md'
+if p.exists() or p.is_symlink(): record(p,'ROOT:AGENTS.md')
+else: h.update(b'missing:ROOT:AGENTS.md')
+print(h.hexdigest())
+IDENTITY
+}
+
+capture_runtime_identity() {
+  if [ "$DRY_RUN" -eq 1 ]; then echo dry-run; return; fi
+  { declare -f runtime_identity; printf 'VPS_DIR="$1"; WORKSPACE_DIR="$2"; runtime_identity\n'; } \
+    | remote_stdin sudo bash -s -- "$VPS_DIR" "$WORKSPACE_DIR"
+}
+
+oc_validate_backup() {
+  local archive="$1" listing item
+  listing="$(tar -tzf "$archive")" || { echo "BACKUP_INVALID $archive" >&2; return 1; }
+  for item in tools lib skills plugin; do
+    printf '%s\n' "$listing" | sed 's|^\./||' | grep -Fx -- "$item/" >/dev/null \
+      || { echo "BACKUP_INVALID missing_scope=$item" >&2; return 1; }
+  done
+  [ -f "${archive%.tgz}-AGENTS.md" ] || [ -f "${archive%.tgz}-AGENTS.absent" ] \
+    || { echo "BACKUP_AGENTS_UNKNOWN $archive" >&2; return 1; }
+}
+
+oc_create_backup() {
+  local archive="$1" item
+  local -a items=()
+  for item in tools lib skills plugin opencode.json package.json bun.lock package-lock.json; do
+    if [ -e "$VPS_DIR/$item" ] || [ -L "$VPS_DIR/$item" ]; then items+=("$item"); fi
+  done
+  [ "${#items[@]}" -gt 0 ] || return 1
+  sudo tar -czf "$archive" -C "$VPS_DIR" "${items[@]}" || return 1
+  if [ -f "$WORKSPACE_DIR/AGENTS.md" ]; then
+    cp -a "$WORKSPACE_DIR/AGENTS.md" "${archive%.tgz}-AGENTS.md" || return 1
+  else
+    : > "${archive%.tgz}-AGENTS.absent" || return 1
+  fi
+  oc_validate_backup "$archive" || return 1
+  echo "BACKUP $archive"
+}
+
+oc_restore_backup() {
+  local archive="$1" item
+  oc_validate_backup "$archive" || return 1
+  for item in tools lib skills plugin opencode.json package.json bun.lock package-lock.json; do
+    rm -rf "$VPS_DIR/$item" || return 1
+  done
+  tar -xzf "$archive" -C "$VPS_DIR" || return 1
+  if [ -f "${archive%.tgz}-AGENTS.md" ]; then
+    cp -a "${archive%.tgz}-AGENTS.md" "$WORKSPACE_DIR/AGENTS.md" || return 1
+  else
+    rm -f "$WORKSPACE_DIR/AGENTS.md" || return 1
+  fi
+}
+
+oc_start_and_verify() {
+  [ -x /opt/agent-harness/bin/derive-opencode-runtime.sh ] || { echo DERIVE_MISSING >&2; return 1; }
+  sudo /opt/agent-harness/bin/derive-opencode-runtime.sh || return 1
+  sudo systemctl restart "$SERVICE" || return 1
+  local code state attempt
+  for attempt in 1 2 3 4 5 6; do
+    state="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+    if [ "$state" = active ]; then case "$code" in 200|401) echo "VERIFY_OK service=active http=$code"; return 0;; esac; fi
+    sleep 2
+  done
+  echo "HEALTH_UNEXPECTED service=$state http=$code" >&2
+  return 1
+}
+
+oc_recover() {
+  local rc="$1"
+  trap - EXIT
+  if [ "$rc" -ne 0 ] && [ "${OC_CHANGED:-0}" -eq 1 ]; then
+    set +e
+    if oc_restore_backup "$OC_UNDO" && oc_start_and_verify; then
+      echo "RECOVERY_OK opencode original_exit=$rc" >&2
+    else
+      echo "RECOVERY_FAILED opencode original_exit=$rc — 服务恢复未证实" >&2
+    fi
+  fi
+  if ! maintenance_end; then
+    echo "MAINTENANCE_RESTORE_FAILED — 原维护状态未恢复，下次同锁激活可接续" >&2
+    [ "$rc" -ne 0 ] || rc=1
+  fi
+  if [ -n "${OC_TMP_STAGE:-}" ]; then rm -rf "$OC_TMP_STAGE"; fi
+  if [ -n "${OC_TMP_UPLOAD:-}" ]; then rm -f "$OC_TMP_UPLOAD"; fi
+  exit "$rc"
+}
+
+oc_prepare() {
+  [ "$(runtime_identity)" = "$1" ] || { echo ACTIVATION_CONFLICT >&2; exit 76; }
+  trap 'oc_recover $?' EXIT
+  trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  maintenance_begin "$2"
+}
+
+run_oc_activation() {
+  { printf 'ACTIVATION_LOCK=%q\n' "$ACTIVATION_LOCK";
+    bash "$SCRIPT_DIR/gateway-release.sh" __emit-drain; \
+    declare -f runtime_identity oc_validate_backup oc_create_backup oc_restore_backup oc_start_and_verify oc_recover oc_prepare; cat; } \
+    | remote_stdin sudo flock -n -E 75 "$ACTIVATION_LOCK" bash -s -- "$@"
 }
 
 usage() {
@@ -136,8 +269,8 @@ stage_from_commit() {
   ) | sort > "$exp"
 }
 
-# --prompts-only（2026-10-19）：只装 AGENTS.md 与 skills/_prompt-routing，不打包 22MB、
-# 不备份、不删档、不重启。opencode 按需读取这些档，提示词改动无需重启；目标 <5s。
+# --prompts-only：只热装 AGENTS.md 与 skills/_prompt-routing，正常完成不重启。
+# 激活前保存可验证备份；热装失败才恢复旧内容并重启验证。
 release_prompts_only() {
   assert_tree_clean
   local sha sha12 ts tmp r_tar
@@ -151,22 +284,31 @@ release_prompts_only() {
   r_tar="/tmp/oc-prompts-$sha12-$ts.tar"
   log "== 提示词快发 @ $sha12 → $ts（只装 AGENTS.md + skills/_prompt-routing，不重启）=="
   remote_binary "cat > $r_tar" < "$tmp/prompts.tar"
-  remote_stdin bash -s -- "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" <<'REMOTE'
+  run_oc_activation "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" "$OC_EXPECTED" "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" "$BACKUP_DIR" "$OWNER" "$SERVICE" "$HEALTH_URL" <<'REMOTE'
 set -euo pipefail
 export LC_ALL=C
 WORKSPACE_DIR="$1"; VPS_DIR="$2"; r_tar="$3"; SRC_SUBDIR="$4"
+OWNER="$8"; SERVICE="$9"; HEALTH_URL="${10}"
+oc_prepare "$5" "$6"
+OC_UNDO="$7/prompts-recovery-$(date -u +%Y%m%dT%H%M%SZ)-$$.tgz"
+oc_create_backup "$OC_UNDO"
+OC_CHANGED=1
 stage="$(mktemp -d /tmp/oc-prompts-stage.XXXXXX)"
-trap 'rm -rf "$stage" "$r_tar"' EXIT
+OC_TMP_STAGE="$stage"; OC_TMP_UPLOAD="$r_tar"
 tar -xf "$r_tar" -C "$stage"
 src="$stage/$SRC_SUBDIR"
 [ -f "$src/AGENTS.md" ] || { echo "PROMPTS_ONLY_MISSING AGENTS.md"; exit 1; }
-sudo install -D -o ubuntu -g ubuntu -m 644 "$src/AGENTS.md" "$WORKSPACE_DIR/AGENTS.md"
+sudo install -D -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$src/AGENTS.md" "$WORKSPACE_DIR/AGENTS.md"
 n=0
 while IFS= read -r -d '' f; do
   rel="${f#"$src"/}"
-  sudo install -D -o ubuntu -g ubuntu -m 644 "$f" "$VPS_DIR/$rel"
+  sudo install -D -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$f" "$VPS_DIR/$rel"
   n=$((n+1))
 done < <(find "$src/skills/_prompt-routing" -type f -print0)
+rm -rf "$stage" "$r_tar"
+maintenance_end
+OC_CHANGED=0
+trap - EXIT
 echo "PROMPTS_ONLY_OK files=$((n+1)) agents_sha=$(sha256sum "$WORKSPACE_DIR/AGENTS.md" | cut -d' ' -f1 | cut -c1-12)"
 REMOTE
 }
@@ -230,10 +372,13 @@ cmd_plan() {
 
 cmd_release() {
   preflight_local
+  local OC_EXPECTED
+  OC_EXPECTED="$(capture_runtime_identity)" || die "无法读取当前 runtime 内容身份"
   if [ "$PROMPTS_ONLY" -eq 1 ]; then release_prompts_only; return; fi
   assert_tree_clean
   local sha sha12 ts stage exp tar_file
   sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"
+  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   stage="$(mktemp -d /tmp/oc-stage.XXXXXX)"; exp="$(mktemp /tmp/oc-exp.XXXXXX)"; tar_file="$(mktemp /tmp/oc-stage.XXXXXX.tar)"
@@ -255,44 +400,40 @@ cmd_release() {
   local bytes; bytes="$(wc -c < "$tar_file")"
   log "  封装 $bytes bytes（AGENTS.md 另行处理，不进 .opencode）"
 
-  local r_tar="/tmp/oc-release-$sha12-$ts.tar" r_exp="/tmp/oc-exp-$sha12-$ts.txt" tag="opencode-$sha12-$ts"
+  local r_tar="/tmp/oc-release-$sha12-$ts-$$.tar" r_exp="/tmp/oc-exp-$sha12-$ts-$$.txt" tag="opencode-$sha12-$ts-$$"
   local r_agents=""
   remote_binary "cat > $r_tar" < "$tar_file"
   remote_stdin "cat > $r_exp" < "$exp"
   if [ -f "$stage/AGENTS.md" ]; then
-    r_agents="/tmp/oc-agents-$sha12-$ts.md"
+    r_agents="/tmp/oc-agents-$sha12-$ts-$$.md"
     remote_binary "cat > $r_agents" < "$stage/AGENTS.md"
     log "  另传 AGENTS.md → $WORKSPACE_DIR/AGENTS.md"
   fi
 
-  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" "$FORCE" <<'REMOTE'
+  # 同一远端目标的 drain→同步→重启→验证必须排他，锁随该 SSH 批次结束释放。
+  # BACKUP_DIR 已存在是受管发布的前提；缺失时 flock 拒绝，不提前改线上。
+  run_oc_activation "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" "$FORCE" "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "$OC_EXPECTED" <<'REMOTE'
 set -euo pipefail
 export LC_ALL=C
 VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"; WORKSPACE_DIR="${11}"; r_agents="${12:-}"; DRAIN_FORCE="${13:-0}"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 
+oc_prepare "${19}" "${17}"
+drain_gate "${13}" "${14}" "${15}" "${16}" "${17}" "${18}"
+
+# drain 成功后才开始可见变更；超时只留下临时上传文件，不覆盖运行中的工具/提示词。
 sudo mkdir -p "$BACKUP_DIR" "$(dirname "$HISTORY_LOG")"
-
-# 1) 发布前备份手维护子集（vendored 与状态不需备份，它们不在同步范围、也不会被动到）
-sudo tar -czf "$BACKUP_DIR/$tag-pre.tgz" -C "$VPS_DIR" "${SCOPE[@]}" "${CONFIGS[@]}" 2>/dev/null || true
-echo "BACKUP $BACKUP_DIR/$tag-pre.tgz"
-if [ -n "$r_agents" ] && sudo test -f "$WORKSPACE_DIR/AGENTS.md"; then
-  sudo cp -a "$WORKSPACE_DIR/AGENTS.md" "$BACKUP_DIR/$tag-pre-AGENTS.md"
-  echo "BACKUP $BACKUP_DIR/$tag-pre-AGENTS.md"
-fi
-
-# 2) 落地（只覆盖／新增；不删——删除语义下一步用清单补）
+OC_UNDO="$BACKUP_DIR/$tag-pre.tgz"
+oc_create_backup "$OC_UNDO"
+OC_CHANGED=1
+trap 'oc_recover $?' EXIT
 sudo tar -C "$VPS_DIR" -xf "$r_tar"
-# 2b) 目录不变式：不信任压缩档带来的模式。.opencode 与同步范围内的目录一律 2755（可 traverse），
-#     否则服务帐号读不到工具链（2026-10-02 事故：被打成 0700 → 整条工具链 fail-closed 而服务显示 active）。
 sudo chmod 2755 "$VPS_DIR"
 for d in "${SCOPE[@]}"; do
   sudo find "$VPS_DIR/$d" -type d -exec chmod 2755 {} + 2>/dev/null || true
 done
-
-# 3) 删除生产多出、而 commit 没有的档（含旧的 node_modules 之外的残档）；
-#    vendored(node_modules/services) 与 opencode.db 不在 walk 范围，永不误删。
+# 删除语义仍限于手维护子集；vendored 与运行状态不在清单范围。
 sudo find "${SCOPE[@]/#/$VPS_DIR/}" -type f ! -path '*/__pycache__/*' 2>/dev/null \
   | sed "s|^$VPS_DIR/||" | sort > /tmp/oc-actual.txt
 for c in "${CONFIGS[@]}"; do sudo test -f "$VPS_DIR/$c" && echo "$c" >> /tmp/oc-actual.txt; done
@@ -304,23 +445,14 @@ fi
 n=0
 while IFS= read -r f; do [ -n "$f" ] && { sudo rm -f "$VPS_DIR/$f"; n=$((n+1)); }; done < /tmp/oc-extras.txt
 echo "REMOVED $n 个生产多出档"
-
-# 4) 权限与服务
 sudo chown -R "$OWNER" $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done) 2>/dev/null || true
 for c in "${CONFIGS[@]}"; do sudo chown "$OWNER" "$VPS_DIR/$c" 2>/dev/null || true; done
-# workspace 根设定档（位置在 .opencode 之外，单独安装＋逐 byte 验证）
 if [ -n "$r_agents" ]; then
   sudo install -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$r_agents" "$WORKSPACE_DIR/AGENTS.md"
-  if cmp -s "$r_agents" "$WORKSPACE_DIR/AGENTS.md"; then
-    echo "AGENTS_OK $WORKSPACE_DIR/AGENTS.md"
-  else
-    echo "AGENTS_MISMATCH"; exit 1
-  fi
+  cmp -s "$r_agents" "$WORKSPACE_DIR/AGENTS.md" || { echo "AGENTS_MISMATCH"; exit 1; }
+  echo "AGENTS_OK $WORKSPACE_DIR/AGENTS.md"
   rm -f "$r_agents"
 fi
-
-# 4b) 断言：服务帐号必须读得到工具链。读不到＝重启后整条工具链 fail-closed（沙箱 ro-bind 失败、
-#     plugin/tool 载入失败），而 systemd 仍会显示 active（假绿灯）——所以这里 fail-closed 挡下发布。
 SVC_USER="$(systemctl show -p User --value "$SERVICE" 2>/dev/null || true)"
 [ -n "$SVC_USER" ] || SVC_USER="agentsvc"
 for probe in "$VPS_DIR" "$VPS_DIR/lib" "$VPS_DIR/plugin" "$VPS_DIR/tools" "$VPS_DIR/skills"; do
@@ -330,147 +462,44 @@ for probe in "$VPS_DIR" "$VPS_DIR/lib" "$VPS_DIR/plugin" "$VPS_DIR/tools" "$VPS_
 done
 echo "PERM_OK $SVC_USER 可读 .opencode 工具链"
 
-# ── F8（2026-10-04）断面 A：重启前 drain——不得杀在途会话 ─────────────────────
-# 根因（F7 取证）：裸 restart 会把正在流式生成中的子代理会话原地杀死并孤儿化。
-# 只读判据（三路信号，命中任一即视为「有在途」）：
-#   ① gateway sessions.db：主会话在途 turn——lastTurnActiveAt 非零且在窗口内
-#      （与 gateway N1 重投判据同源：turn 开始打点、正常结束清零，sessions-core.ts:74-83）。
-#   ② gateway sessions.db：在途 rework 子代理（subagent_reworks 表非空）。
-#   ③ opencode.db：流式中的 assistant 讯息（time.completed 为空且 time_updated 在窗口内）
-#      —— 覆盖 ①② 抓不到的普通在途子代理会话（F7 病灶即此类）。
-# 命中 → 轮询等到清空，上界 DRAIN_MAX_SECS（默认 180s）；到上界仍未清空 → DRAIN_TIMEOUT
-# 退出码 3（中止部署，不静默强杀）。--force ⇒ DRAIN_FORCE=1 跳过。
-# 探测本身只读；路径/窗口可用 env 覆写（OC_DRAIN_*，验证探针亦复用）。
-DRAIN_MAX_SECS="${OC_DRAIN_MAX_SECS:-180}"
-DRAIN_POLL_SECS="${OC_DRAIN_POLL_SECS:-5}"
-DRAIN_WINDOW_MS="${OC_DRAIN_WINDOW_MS:-180000}"
-DRAIN_SESSIONS_DB="${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}"
-DRAIN_OPENCODE_DB="${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
-drain_inflight_count() {
-  local now a b c v
-  now=$(( $(date +%s) * 1000 ))
-  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
-    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
-  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
-    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
-  echo $(( a + b + c ))
-}
-if [ "$DRAIN_FORCE" = "1" ]; then
-  echo "DRAIN_SKIPPED (--force)"
-else
-  drain_waited=0
-  while :; do
-    drain_n="$(drain_inflight_count)"
-    if [ "$drain_n" = "ERR" ]; then
-      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
-    fi
-    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
-    if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
-      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；确需立即重启请加 --force"
-      exit 3
-    fi
-    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
-    sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
-  done
-fi
-
-# 派生闸：git archive 落地的 opencode.json 不是视觉能力真源。registry 的 vision 才是。
-# 不起派生就重启，空模型物件会把图静默丢掉，服务却仍显示 active。
-if [ ! -x /opt/agent-harness/bin/derive-opencode-runtime.sh ]; then
-  echo "DERIVE_MISSING — 拒绝在未派生视觉能力的情况下重启 opencode"
-  exit 1
-fi
-sudo /opt/agent-harness/bin/derive-opencode-runtime.sh
-sudo systemctl restart "$SERVICE"
-sleep 2
-state="$(systemctl is-active "$SERVICE" || true)"
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
-[ -n "$code" ] || code=000
-# 2026-10-19：重启后 opencode 可能仍在起监听，000 不等于失败；最多再等 12s。
-for _ in 1 2 3 4 5 6; do
-  [ "$code" = "000" ] || break
-  sleep 2
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
-  [ -n "$code" ] || code=000
-done
-echo "$tag $sha $(date -u +%s) release files=$(wc -l < "$r_exp") service=$state http=$code" | sudo tee -a "$HISTORY_LOG" >/dev/null
-if [ "$state" != "active" ]; then echo "SERVICE_NOT_ACTIVE state=$state"; sudo journalctl -u "$SERVICE" -n 20 --no-pager >&2; exit 1; fi
-case "$code" in 200|401) echo "VERIFY_OK service=active http=$code files=$(wc -l < "$r_exp")";; *) echo "HEALTH_UNEXPECTED http=$code"; exit 1;; esac
+oc_start_and_verify
 rm -f "$r_tar" "$r_exp" /tmp/oc-actual.txt /tmp/oc-extras.txt
+maintenance_end
+printf '%s %s %s release service=active\n' "$tag" "$sha" "$(date -u +%s)" >> "$HISTORY_LOG"
+OC_CHANGED=0
+trap - EXIT
+
 REMOTE
   log "release 完成：$tag"
 }
 
 cmd_rollback() {
   preflight_local
-  log "== rollback：回复最新一份 opencode-*-pre.tgz =="
-  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$FORCE" <<'REMOTE'
+  local OC_EXPECTED
+  OC_EXPECTED="$(capture_runtime_identity)" || die "无法读取当前 runtime 内容身份"
+  run_oc_activation "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$FORCE" \
+    "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
+    "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
+    "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "$OC_EXPECTED" <<'REMOTE'
 set -euo pipefail
-VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; DRAIN_FORCE="${7:-0}"
-SCOPE=(tools lib skills plugin)
-CONFIGS=(opencode.json package.json bun.lock package-lock.json)
+VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"
+WORKSPACE_DIR="$(dirname "$VPS_DIR")"
+oc_prepare "${13}" "${11}"
 latest="$(sudo ls -1t "$BACKUP_DIR"/opencode-*-pre.tgz 2>/dev/null | head -1 || true)"
-[ -n "$latest" ] || { echo "NO_BACKUP"; exit 1; }
-echo "ROLLBACK_FROM $latest"
-# 先清手维护子集，再还原（清掉现有 extras，回滚才是真的回到备份状态）
-sudo rm -rf $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done)
-sudo tar -xzf "$latest" -C "$VPS_DIR"
-sudo chown -R "$OWNER" $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done) 2>/dev/null || true
-for c in "${CONFIGS[@]}"; do sudo chown "$OWNER" "$VPS_DIR/$c" 2>/dev/null || true; done
-# workspace 根设定档随同一版备份还原
-agents_bak="${latest%-pre.tgz}-pre-AGENTS.md"
-if sudo test -f "$agents_bak"; then
-  sudo install -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$agents_bak" "$(dirname "$VPS_DIR")/AGENTS.md"
-  echo "AGENTS_RESTORED $(dirname "$VPS_DIR")/AGENTS.md"
-fi
-# F8（2026-10-04）断面 A：回滚重启同样先 drain（同 release 的只读判据与上界；--force 跳过）。
-DRAIN_MAX_SECS="${OC_DRAIN_MAX_SECS:-180}"
-DRAIN_POLL_SECS="${OC_DRAIN_POLL_SECS:-5}"
-DRAIN_WINDOW_MS="${OC_DRAIN_WINDOW_MS:-180000}"
-DRAIN_SESSIONS_DB="${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}"
-DRAIN_OPENCODE_DB="${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
-drain_inflight_count() {
-  local now a b c v
-  now=$(( $(date +%s) * 1000 ))
-  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
-    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
-  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
-    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
-  echo $(( a + b + c ))
-}
-if [ "$DRAIN_FORCE" = "1" ]; then
-  echo "DRAIN_SKIPPED (--force)"
-else
-  drain_waited=0
-  while :; do
-    drain_n="$(drain_inflight_count)"
-    if [ "$drain_n" = "ERR" ]; then
-      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
-    fi
-    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
-    if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
-      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止回滚；确需立即重启请加 --force"
-      exit 3
-    fi
-    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
-    sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
-  done
-fi
-if [ ! -x /opt/agent-harness/bin/derive-opencode-runtime.sh ]; then
-  echo "DERIVE_MISSING — 拒绝在未派生视觉能力的情况下重启 opencode"
-  exit 1
-fi
-sudo /opt/agent-harness/bin/derive-opencode-runtime.sh
-sudo systemctl restart "$SERVICE"; sleep 2
-state="$(systemctl is-active "$SERVICE" || true)"
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"
-echo "rollback $latest $(date -u +%s) service=$state http=$code" | sudo tee -a "$HISTORY_LOG" >/dev/null
-[ "$state" = active ] || { echo "SERVICE_NOT_ACTIVE"; exit 1; }
-echo "ROLLBACK_OK from=$latest service=active http=$code"
+[ -n "$latest" ] || { echo NO_BACKUP; exit 1; }
+oc_validate_backup "$latest"
+drain_gate "${7}" "${8}" "${9}" "${10}" "${11}" "${12}"
+OC_UNDO="$BACKUP_DIR/recovery-opencode-$(date -u +%Y%m%dT%H%M%SZ)-$$.tgz"
+oc_create_backup "$OC_UNDO"
+OC_CHANGED=1
+trap 'oc_recover $?' EXIT
+oc_restore_backup "$latest"
+oc_start_and_verify
+maintenance_end
+printf 'rollback %s %s service=active\n' "$latest" "$(date -u +%s)" >> "$HISTORY_LOG"
+OC_CHANGED=0
+trap - EXIT
+echo "ROLLBACK_OK from=$latest"
 REMOTE
 }
 
