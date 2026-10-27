@@ -1,7 +1,7 @@
 import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, clearGenerationProducerCancel } from "./job-store"
 import { currentKernelFingerprint, decideKernelResume } from "./agent-kernel.ts"
 import type { SubagentRun, ResumeOutcome } from "./subagent-types.ts"
-import { MAX_ACTIVE_PER_PARENT, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_BUSY_MESSAGE, subagentResumeTtlMs, SUBAGENT_CHILD_QUEUE_MAX, SUBAGENT_BUS_MAX_CHARS, partialBodyOf, isOpenCodeSessionId, readJsonObject, childFacingFrame } from "./subagent-types.ts"
+import { maxActivePerParent, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_BUSY_MESSAGE, subagentResumeTtlMs, SUBAGENT_CHILD_QUEUE_MAX, SUBAGENT_BUS_MAX_CHARS, partialBodyOf, isOpenCodeSessionId, readJsonObject, childFacingFrame } from "./subagent-types.ts"
 import { deps, byParent, byChildOc, completed, resumable, resumeInFlight, parentStateOf, resolveParentSession, unknownSessionResponse, callerCanControlRun, siblingForbiddenResponse, findLiveRun, pruneCompleted, rememberChildParent, removeFromRegistries } from "./subagent-runs.ts"
 import { finishRun, armHeartbeat } from "./subagent-finish.ts"
 import { summarizeChild } from "./subagent-liveness.ts"
@@ -172,8 +172,11 @@ async function resumeTerminalRun(
   // checkPendingResumeQueue / handleSubagentResume / critic 两处）**同一口径**——只数
   // status === "running" 的（suspended/interrupted 已交出并发槽）。此前用 list.length 把
   // suspended 也算满，会把对终态 run 的合法续跑误回并发满。
-  if (list.filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) {
-    return { ok: false, code: "concurrency_limit", error: SUBAGENT_BUSY_MESSAGE, status: 409 }
+  {
+    const cap = maxActivePerParent()
+    if (cap > 0 && list.filter((r) => r.status === "running").length >= cap) {
+      return { ok: false, code: "concurrency_limit", error: SUBAGENT_BUSY_MESSAGE, status: 409 }
+    }
   }
   // G3（2026-10-14 竞态修复）：认领必须在**任何 await 之前且同步完成**——否则投递 await 窗内
   // 并发第二条 start_or_steer 会各自复活出两个孤儿 run（同一条旧 run 被双重复活、重复投递、

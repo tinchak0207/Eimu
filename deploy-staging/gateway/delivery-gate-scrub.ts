@@ -312,6 +312,46 @@ const PROSE_REWRITE_RULES: Array<[RegExp, string]> = [
   [/\bwf_[a-z0-9_]+\b/gi, "画布流程"],
 ]
 
+/** 2026-10-27：内部运行时/闸门错误句——可继续给模型当工具回执，禁止进用户可见帧。 */
+const PRODUCT_RUNTIME_SOFT = "这一步暂时没做成，我换条路继续。"
+const RUNTIME_GATE_ERROR_LINE_RE =
+  /计划模式状态查询(?:超时\/不可达|失败)|计划模式状态不可解析|已按\s*fail-closed|权限求值失败|权限求值响应不可解析|已有\s*\d*\s*个子代理在跑|当前在跑的子代理已达上限|subagent_id\s*不存在|工具「[^」]*」需要人工确认|需要人工确认[（(]/i
+
+/** 剥掉或改写内部闸门/运行时错误句；整段只剩此类错误时换成产品句。 */
+function scrubRuntimeGateErrors(s: string): string {
+  if (!s) return s
+  const hasGate = (t: string) => RUNTIME_GATE_ERROR_LINE_RE.test(t)
+  // 无命中快路径（test 会推进 lastIndex；无 g 旗标时通常无妨，仍重置）
+  if (!hasGate(s)) return s
+  RUNTIME_GATE_ERROR_LINE_RE.lastIndex = 0
+  const kept: string[] = []
+  let hit = false
+  for (const line of s.split("\n")) {
+    if (hasGate(line)) {
+      hit = true
+      RUNTIME_GATE_ERROR_LINE_RE.lastIndex = 0
+      continue
+    }
+    kept.push(line)
+  }
+  let joined = kept.join("\n")
+  const before = joined
+  joined = joined
+    .replace(/计划模式状态查询超时\/不可达：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/计划模式状态不可解析：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/权限求值失败（HTTP \d+），已按 fail-closed 拒绝工具调用。/g, "")
+    .replace(/权限求值响应不可解析：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/已有\s*\d+\s*个子代理在跑，等一个完成再派/g, "")
+    .replace(/当前在跑的子代理已达上限，等一路完成后再派/g, "")
+    .replace(/subagent_id 不存在或已过期[^\n]*/g, "")
+    .replace(/工具「[^」]*」需要人工确认[^\n]*/g, "")
+    .replace(/计划模式状态查询失败（HTTP \d+），已拒绝工具调用。/g, "")
+  if (joined !== before) hit = true
+  const trimmed = joined.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  if (!hit) return s
+  return trimmed.length === 0 ? PRODUCT_RUNTIME_SOFT : trimmed
+}
+
 /** 单块（非代码栅栏）正文的定向清洗：删纯内部栏位行/标题行/裸栏名行，再逐条改写。
  *  无任何命中时**原样返回**（零误伤正常正文）。 */
 function scrubProseChunk(chunk: string): string {
@@ -333,8 +373,9 @@ function scrubProseChunk(chunk: string): string {
     r = r.replace(BARE_LOOPBACK_RE, "本机地址")
     return r
   })
-  if (!changed && rewritten === chunk) return chunk
-  return rewritten.trim().length === 0 ? "" : rewritten
+  const gated = scrubRuntimeGateErrors(rewritten)
+  if (!changed && gated === chunk) return chunk
+  return gated.trim().length === 0 ? "" : gated
 }
 
 /**
@@ -346,7 +387,9 @@ export function scrubVisibleProse(raw: unknown): string {
   if (raw.length === 0) return raw
   // 代码栅栏整段不碰（split 后奇数索引即栅栏段）。
   const parts = raw.split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))/)
-  return parts.map((p, i) => (i % 2 === 1 ? p : scrubProseChunk(p))).join("")
+  const out = parts.map((p, i) => (i % 2 === 1 ? p : scrubProseChunk(p))).join("")
+  // 整段仅剩闸门错误（或空）时，scrubProseChunk 已换成产品句；再兜一层短语级剥离。
+  return scrubRuntimeGateErrors(out)
 }
 
 /**
@@ -404,6 +447,12 @@ function isUserVisibleTextFrame(name: string): boolean {
  *  ② 模型自述**正文/状态/通知**帧 → 同源判定 + 逐句定向改写（scrubVisibleProse）；
  *  其余帧（tool payload、canvas、结构化字段等）一律不碰 → 零误伤。
  */
+function scrubUserFacingErrorText(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length === 0) return typeof raw === "string" ? raw : ""
+  const cleaned = scrubRuntimeGateErrors(raw)
+  return cleaned === raw ? scrubVisibleProse(raw) : cleaned
+}
+
 export function scrubVisibleFrame(name: string, data: unknown): unknown {
   if (data === null || typeof data !== "object" || Array.isArray(data)) return data
   const d = data as Record<string, unknown>
@@ -421,6 +470,36 @@ export function scrubVisibleFrame(name: string, data: unknown): unknown {
     if (typeof d.text !== "string") return data
     const cleaned = scrubVisibleProse(d.text)
     return cleaned === d.text ? data : { ...d, text: cleaned }
+  }
+  // 2026-10-27：session.error / tool.result 红卡不得把闸门/运行时原文甩给用户。
+  if (name === "session.error") {
+    const msg = typeof d.message === "string" ? d.message : ""
+    const human = typeof d.human_message === "string" ? d.human_message : ""
+    const cleanedMsg = scrubUserFacingErrorText(msg)
+    const cleanedHuman = human ? scrubUserFacingErrorText(human) : human
+    if (cleanedMsg === msg && cleanedHuman === human) return data
+    return {
+      ...d,
+      ...(msg ? { message: cleanedMsg } : {}),
+      ...(human ? { human_message: cleanedHuman } : {}),
+    }
+  }
+  if (name === "tool.result" && d.ok === false && d.error && typeof d.error === "object" && !Array.isArray(d.error)) {
+    const err = d.error as Record<string, unknown>
+    const msg = typeof err.message === "string" ? err.message : ""
+    const human = typeof err.human_message === "string" ? err.human_message : ""
+    // 用户卡优先看 human_message；闸门类错误把可见文案换成产品句，message 同步剥以免回落原文。
+    const cleanedMsg = msg ? scrubUserFacingErrorText(msg) : msg
+    const cleanedHuman = human ? scrubUserFacingErrorText(human) : (msg && cleanedMsg !== msg ? cleanedMsg : human)
+    if (cleanedMsg === msg && cleanedHuman === human) return data
+    return {
+      ...d,
+      error: {
+        ...err,
+        ...(msg ? { message: cleanedMsg } : {}),
+        ...(cleanedHuman ? { human_message: cleanedHuman } : {}),
+      },
+    }
   }
   return data
 }

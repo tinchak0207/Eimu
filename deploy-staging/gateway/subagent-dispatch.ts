@@ -9,7 +9,7 @@ import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
 import { saveDelivery, loadSessionDeliveries } from "./persistence"
 import { FORK_STARTED_NOTICE, validateSubagentName, forkNameFromLabel, normalizeEffort, subagentMaxDepth, agentNestingDepth, depthLimitMessage, parseSubagentModel } from "./subagent-policy.ts"
 import type { SubagentModelRef, SubagentCheckpoint, SubagentRun, ResearchPredecessor } from "./subagent-types.ts"
-import { SPEC_DEADLINE_LINE, MAX_ACTIVE_PER_PARENT, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_OUTPUT_REL, SUBAGENT_OUTPUT_DIR, SUBAGENT_CHECKPOINTS_DIR, safeCheckpointToken, resolveCheckpointFile, PERSIST_TAIL, SUBAGENT_BUSY_MESSAGE, parseSyncDeadlineMs, partialBodyOf, RESEARCH_PRECEDED_EXPERTS, readJsonObject } from "./subagent-types.ts"
+import { SPEC_DEADLINE_LINE, maxActivePerParent, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_OUTPUT_REL, SUBAGENT_OUTPUT_DIR, SUBAGENT_CHECKPOINTS_DIR, safeCheckpointToken, resolveCheckpointFile, PERSIST_TAIL, SUBAGENT_BUSY_MESSAGE, parseSyncDeadlineMs, partialBodyOf, RESEARCH_PRECEDED_EXPERTS, readJsonObject } from "./subagent-types.ts"
 import { fireSubagentHook, deps, byParent, byChildOc, completed, criticDispatchedByParent, deliveredByParent, resolveParentSession, unknownSessionResponse, boundMap } from "./subagent-runs.ts"
 import { finishRun, armHeartbeat } from "./subagent-finish.ts"
 import { persistRunOutput } from "./subagent-liveness.ts"
@@ -45,7 +45,7 @@ function readCompletedPredecessor(record: ResearchPredecessor): string | null {
  * - 单次调用只发一次 POST，七题同批，加题不加延迟；
  * - `JEV_TIMEOUT_MS=2000`（jev-gate.ts:26），最坏 2 秒；
  * - `JEV_ENABLED !== "true"` 或无 key → jevUpstream 直接 return null，零网络延迟；
- * - 并发上限 MAX_ACTIVE_PER_PARENT=3，最多 3 路各一次呼叫。
+ * - 并发默认不限（maxActivePerParent()；env SUBAGENT_MAX_ACTIVE_PER_PARENT 可收紧）；每路各一次 Jev 呼叫。
  *
  * 缓存：同父会话 + 同 label + 整份任务书，TTL 60 秒。orchestrator 被 409 挡下后的重派、
  * 同一份任务书重试，都不必再付一次钱；过期即失效，避免把旧判定套到改过的任务书上。
@@ -146,7 +146,8 @@ function deliveryHead(relPath: string): string {
 
 async function researchPredecessors(parent: any): Promise<{ records: ResearchPredecessor[]; available: boolean }> {
   const records = loadSessionDeliveries(parent.sessionId).filter((r) => readCompletedPredecessor(r) !== null)
-  if (records.filter((r) => r.agent === "research").length >= MAX_ACTIVE_PER_PARENT || records.some((r) => RESEARCH_PRECEDED_EXPERTS.includes(r.agent))) return { records, available: true }
+  // 「已有足够研究」门槛固定 3，与并发上限无关（2026-10-27 并发默认不限后脱钩）。
+  if (records.filter((r) => r.agent === "research").length >= 3 || records.some((r) => RESEARCH_PRECEDED_EXPERTS.includes(r.agent))) return { records, available: true }
   // 旧通用研究没有D7交付行：仅从同父OpenCode真实dispatch工具返回绑定runId，
   // 再读该run的完整终态产物。用户正文/自称路径/URL/派遣ok均不能提供完成证据。
   try {
@@ -795,10 +796,11 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     prompt = `${cpFact}${prompt}`
   }
 
-  // 并发上限：第 4 个拒绝（已挂起 suspended 的子代理交出并发槽，不计入运行数），文案原样给主代理。
+  // 并发上限：env 收紧时拒绝；0/未设 = 不限。suspended 交出并发槽，不计入运行数。文案给主代理（不上用户桌）。
   const list = byParent.get(parent.sessionId) ?? []
   const runningList = list.filter((r) => r.status === "running")
-  if (runningList.length >= MAX_ACTIVE_PER_PARENT) {
+  const cap = maxActivePerParent()
+  if (cap > 0 && runningList.length >= cap) {
     return Response.json({
       ok: false,
       code: "concurrency_limit",

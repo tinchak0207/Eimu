@@ -9,6 +9,14 @@ import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
 import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
+
+
+/** 2026-10-27：闸门/运行时错误原文可给模型，但用户可见帧改产品句或不发卡。 */
+function isRuntimeGateErrorText(message: string): boolean {
+  return /计划模式状态查询|已按\s*fail-closed|权限求值失败|权限求值响应不可解析|计划模式状态不可解析|已有\s*\d*\s*个子代理在跑|当前在跑的子代理已达上限|subagent_id\s*不存在|需要人工确认/.test(message)
+}
+const RUNTIME_GATE_USER_SOFT = "这一步暂时没做成，我换条路继续。"
+
 // 2026-10-21：工具生命周期终态（running 永不终结只标「未确认」）与完成主张证据收集。
 import { noteToolRunning, noteToolTerminal, toolCallSignature, TOOL_RUNNING_CAP } from "./tool-lifecycle.ts"
 import { recordDeliveryEvidence } from "./claim-gate.ts"
@@ -538,13 +546,16 @@ if (status === "pending" || status === "running") {
       }
     }
     // S2a：error 态的 tool.result 同样补齐三栏位错误合同。
+    // 闸门/运行时错误：模型侧 message 仍保留原文；用户可见 human_message 换成产品句。
+    const gateErr = !isQuestionFreezeAbort && isRuntimeGateErrorText(message)
+    const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : humanMessageFor(message)
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
       error: {
-        code: isQuestionFreezeAbort ? "question_freeze" : "tool_error",
+        code: isQuestionFreezeAbort ? "question_freeze" : gateErr ? "runtime_gate" : "tool_error",
         message,
-        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message),
+        human_message: userFacing,
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
         ...(denyProv ? { deny_provenance: denyProv } : {}),
       },
@@ -553,6 +564,11 @@ if (status === "pending" || status === "running") {
     // 不记上游错（不是渠道故障，别误触 failover 重投）。
     if (isQuestionFreezeAbort) {
       console.log(`[gateway] question freeze abort: callId=${callId} — turn paused pending answer (no error frame)`)
+      return
+    }
+    // 闸门/运行时错误：工具卡已有产品句，不再弹 session.error 红气泡（原文只给模型）。
+    if (gateErr) {
+      console.log(`[gateway] runtime gate tool_error card suppressed: callId=${callId} tool=${toolName}`)
       return
     }
     emitSessionError(state, "tool_error", message)

@@ -5,7 +5,17 @@ import { messagesInWindow, MessageWindow, SubagentUsageMessage, SubagentEffort }
 
 export const SPEC_DEADLINE_LINE = "\n预期 5 分钟（超 2x 杀线）。\n"
 
-export const MAX_ACTIVE_PER_PARENT = 3
+/** 每父会话同时 running 子代理上限。0 或未设 = 不限（2026-10-27 暴君取消原硬顶 3）。env SUBAGENT_MAX_ACTIVE_PER_PARENT 可再收紧。 */
+export function maxActivePerParent(): number {
+  const raw = (process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT ?? "").trim()
+  if (!raw) return 0
+  if (!/^\d+$/.test(raw)) return 0
+  const n = Number(raw)
+  if (!Number.isSafeInteger(n) || n < 0) return 0
+  return Math.min(n, 999)
+}
+/** @deprecated 兼容旧 import：解析后的上限；0 表示不限。优先用 maxActivePerParent()。 */
+export const MAX_ACTIVE_PER_PARENT = maxActivePerParent()
 
 export const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
 // R6（2026-09-10）：async 子代理无工具轮询死线顶著，军团研究/创作任务合法更长，
@@ -89,7 +99,7 @@ export function resolveCheckpointFile(dir: string, runId: string, checkpointId: 
 }
 export const PERSIST_TAIL = "[gateway 落盘: 完整结果未截断]"
 export const COMPLETED_TTL_MS = 10 * 60 * 1000 // status 轮询窗口，过期即弃
-export const SUBAGENT_BUSY_MESSAGE = "已有 3 个子代理在跑，等一个完成再派"
+export const SUBAGENT_BUSY_MESSAGE = "当前在跑的子代理已达上限，等一路完成后再派"
 
 // ── 2026-10-14 子代理协作总线（Subagent Collaboration Bus）─────────────────────
 // 病灶（生产实录）：父／子代理「仿佛不认识」——父只能看到「子代理仍在运行（已 120s）」、

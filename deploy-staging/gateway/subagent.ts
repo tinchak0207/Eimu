@@ -137,7 +137,7 @@ import { setLiveChildCounter } from "./session-activity.ts"
 // min(2*5,4)=4 分钟 = 240s 同步硬死线，主会话不再被无死线子代理长期锁住。
 // 已自带「预期/预期 N」的任务书原样不动（避免双补）。
 export type { RunLivenessInput, RunLivenessVerdict, SubagentUsage, SubagentCheckpoint, SubagentSuspension, TypedArtifact, ScratchpadEntry, PublicSubagentRun } from "./subagent-types.ts"
-export { SUBAGENT_SUMMARY_MAX_CHARS, safeCheckpointToken, resolveCheckpointFile, SUBAGENT_BUSY_MESSAGE, SUBAGENT_UNTRUSTED_PREFIX, evaluateRunLiveness } from "./subagent-types.ts"
+export { SUBAGENT_SUMMARY_MAX_CHARS, safeCheckpointToken, resolveCheckpointFile, SUBAGENT_BUSY_MESSAGE, SUBAGENT_UNTRUSTED_PREFIX, evaluateRunLiveness, maxActivePerParent, MAX_ACTIVE_PER_PARENT } from "./subagent-types.ts"
 export { initSubagent, subagentHandlesSession, subagentMailboxMemberName, subagentParentApiKey, subagentParentState, stopSubagentRun, stopSubagentsForParent, findRunningRun } from "./subagent-runs.ts"
 export { criticScoreEnforcementEnabled, shouldForceCriticRejectByScore, emitRunningSubagentsStatus } from "./subagent-finish.ts"
 export { buildExpertSkillFact } from "./subagent-attempt.ts"

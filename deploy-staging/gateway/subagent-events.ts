@@ -4,7 +4,7 @@ import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
 import type { SubagentModelRef, SubagentRun } from "./subagent-types.ts"
-import { SPEC_DEADLINE_LINE, MAX_ACTIVE_PER_PARENT, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, partialBodyOf, isInternalReviewRun, isOpenCodeSessionId } from "./subagent-types.ts"
+import { SPEC_DEADLINE_LINE, maxActivePerParent, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, partialBodyOf, isInternalReviewRun, isOpenCodeSessionId } from "./subagent-types.ts"
 import { fireSubagentHook, deps, byParent, byChildOc, completed, sessionScratchpads, sessionArtifactRegistries, pendingCriticTargets, criticDispatchedByParent, criticPassUsed, criticRetryQueue, parentStateOf, boundMap, boundSet } from "./subagent-runs.ts"
 import { finishRun, armHeartbeat } from "./subagent-finish.ts"
 import { summarizeChild } from "./subagent-liveness.ts"
@@ -348,11 +348,13 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     // 丢弃（实锤：四次被挤掉；唯一一次跑到时 verdict 亦未回灌）。
     const list = byParent.get(parentId) ?? []
     const runningCount = list.filter((r) => r.status === "running").length
-    if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+    const cap = maxActivePerParent()
+    if (cap > 0 && runningCount >= cap) {
       criticRetryQueue.set(parentId, targets.slice(-CRITIC_PASS_MAX_TARGETS))
       boundMap(criticRetryQueue, 500)
+      const capLabel = cap === 0 ? "不限" : String(cap)
       console.log(
-        `[gateway] machine critic pass queued (parent at concurrency cap ${MAX_ACTIVE_PER_PARENT}, retry on slot release): session=${parentId}`,
+        `[gateway] machine critic pass queued (parent at concurrency cap ${capLabel}, retry on slot release): session=${parentId}`,
       )
       return false
     }
@@ -481,9 +483,13 @@ export function runGoalEvaluator(
     const prompt = typeof spec?.prompt === "string" ? spec.prompt : ""
     if (!prompt.trim() || typeof onTerminal !== "function") return false
     const parentId = String(parentState.sessionId)
-    if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) {
-      console.log(`[gateway] goal evaluator skipped (parent at concurrency cap ${MAX_ACTIVE_PER_PARENT}): session=${parentId}`)
-      return false
+    {
+      const cap = maxActivePerParent()
+      if (cap > 0 && (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= cap) {
+        const capLabel = cap === 0 ? "不限" : String(cap)
+        console.log(`[gateway] goal evaluator skipped (parent at concurrency cap ${capLabel}): session=${parentId}`)
+        return false
+      }
     }
     let chain: SubagentModelRef[] = []
     try {
@@ -560,7 +566,10 @@ export function runGoalEvaluator(
 export function maybeDrainCriticQueue(parentId: string): void {
   const queued = criticRetryQueue.get(parentId)
   if (!queued || queued.length === 0 || !deps) return
-  if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) return
+  {
+    const cap = maxActivePerParent()
+    if (cap > 0 && (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= cap) return
+  }
   const parentState = deps.resolveSession(parentId)
   if (!parentState?.sessionId) return
   criticRetryQueue.delete(parentId)
