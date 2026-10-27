@@ -207,7 +207,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true, q
                 ) : canCheckin ? (
                   <Gift className="h-4 w-4 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
                 ) : (
-                  <CheckCircle2 className="h-4 w-4 text-[#248A3D]" aria-hidden="true" />
+                  <CheckCircle2 className="h-4 w-4 text-ios-green" aria-hidden="true" />
                 )}
                 {checkinLoading
                   ? "签到中…"

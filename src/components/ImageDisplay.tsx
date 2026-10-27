@@ -221,11 +221,7 @@ export function ImageDisplay({
             </div>
           </>
         ) : isRendering ? (
-          <ParticleSeaWaiting
-            visible={isRendering}
-            startedAt={timing?.startTime}
-            durationMs={timing?.durationMs}
-          />
+          <ParticleSeaWaiting visible={isRendering} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center p-8">
             <div className="flex max-w-[20rem] flex-col items-center text-center">

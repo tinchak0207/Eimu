@@ -4,7 +4,6 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { ArrowLeft, Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentSubagentItem } from "@/lib/agent-chat-types";
-import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 import {
   STICK_BOTTOM_PX,
   STATUS_DOT,
@@ -83,7 +82,7 @@ export function AgentSubagentView({
         </span>
         <span
           className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
-          aria-label={AGENT_TASK_STATUS_TABLE[item.status].label}
+          aria-label={STATUS_WORD[item.status]}
         />
         <span className="min-w-0 flex-1" />
         {/* 停止只对真正在跑的一路出现；跑完的没有可停的东西，不画死按钮。 */}

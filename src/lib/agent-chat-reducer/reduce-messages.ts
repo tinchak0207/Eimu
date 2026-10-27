@@ -341,6 +341,40 @@ export function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & 
   };
   return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
 }
+export function reduceVideoFailed(state: AgentChatState, event: AgentSseEvent & { name: "video.failed" }): AgentChatState {  // 失败也进对话流（与 video.done 对称）：用户在聊天里直接看到「没排上队，
+  // 费用已退回」，不依赖画布节点才知道发生了什么。
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
+  const text = refunded ? `这条视频没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这条视频生成失败${reason ? `（${reason}）` : ""}。`;
+  const notice: AgentNoticeItem = {
+    kind: "notice",
+    id: eventItemId("notice", event.event_id),
+    seq: event.event_id,
+    tone: "error",
+    text,
+  };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
+}
+export function reduceAudioFailed(state: AgentChatState, event: AgentSseEvent & { name: "audio.failed" }): AgentChatState {  // 失败也进对话流（与 audio.done 对称）：用户在聊天里直接看到「没排上队，
+  // 费用已退回」，不依赖画布节点才知道发生了什么。
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
+  const text = refunded ? `这段音频没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这段音频生成失败${reason ? `（${reason}）` : ""}。`;
+  const notice: AgentNoticeItem = {
+    kind: "notice",
+    id: eventItemId("notice", event.event_id),
+    seq: event.event_id,
+    tone: "error",
+    text,
+  };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
+}
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
 // 2026-09-21 暴君裁定：异步子代理跨回合在跑，回合收尾只转存**已定态**条目，
 // running 卡原样保留（见 retireSubagentItems），wakeParent 后的回合收到

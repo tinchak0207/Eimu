@@ -628,7 +628,7 @@ export function NodeBody({
           >
             {deliverableText ? (
               <>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-ios-green">
                   <Package className="h-3 w-3" aria-hidden="true" />
                   产出
                 </span>
@@ -679,7 +679,7 @@ export function NodeBody({
               onPointerCancel={onScrollAreaPointerEnd}
               className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2.5 overflow-auto p-3"
             >
-              <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-ios-green">
                 <Package className="h-3 w-3" aria-hidden="true" />
                 产出
               </span>
@@ -814,7 +814,7 @@ export function NodeBody({
                 </span>
               )}
               {metadata?.healthOk === true ? (
-                <span className="rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-[#248A3D]">
+                <span className="rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-ios-caption1 font-medium leading-none text-ios-green">
                   分镜健康
                 </span>
               ) : metadata?.healthOk === false ? (

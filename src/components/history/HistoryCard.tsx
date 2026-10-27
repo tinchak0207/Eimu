@@ -208,7 +208,7 @@ function HistoryCardComponent({
           /* 生成中：粒子海进度动画铺满媒体区（ParticleSeaWaiting 是 absolute，
              父层必须 relative + 固定高度）。落地/失败后自动走下面正常分支。 */
           <div className="relative aspect-[4/3] w-full overflow-hidden rounded-none">
-            <ParticleSeaWaiting visible startedAt={entry.generatedAt} />
+            <ParticleSeaWaiting visible />
           </div>
         ) : isAudio ? (
           /* 音频态媒体面：icon + 曲目标题 + 原生播放器。点播放器不冒泡到卡片

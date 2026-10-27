@@ -15,7 +15,6 @@ import {
   readAgentSubagentTranscript,
   stopAgentSubagent,
 } from "@/lib/agent-chat-client";
-import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 import { toolDisplayName } from "./AgentToolCard";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
@@ -31,9 +30,8 @@ import { toolDisplayName } from "./AgentToolCard";
 // 2026-09-10 暴君裁定（子任务卡视觉迭代）：
 //   running 态的末行摘要换跑马灯（marquee）——流式吐字观感＝快。
 
-// 状态标签查 agent-task-status.ts 单一语义表（ok=已完成、error=失败，都是
-// 语义表的权威值，不再本地字面维护）；圆点着色是本行的展示层，留在这里。
-// 色彩纪律（0920）：ios-blue＝运行、深灰＝完成、灰＝停止/等待、红＝失败。
+// 圆点着色是本行的展示层。色彩纪律（0920）：ios-blue＝运行、深灰＝完成、
+// 灰＝停止/等待、红＝失败。停≠失败：stopped 中性灰。
 export const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   running: "bg-ios-blue",
   ok: "bg-foreground/60",
@@ -42,16 +40,10 @@ export const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   stopped: "bg-muted-foreground",
 };
 
-const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
-  running: AGENT_TASK_STATUS_TABLE.running.label,
-  ok: AGENT_TASK_STATUS_TABLE.ok.label,
-  error: AGENT_TASK_STATUS_TABLE.error.label,
-  stopped: AGENT_TASK_STATUS_TABLE.stopped.label,
-};
-
-// 行尾状态词（2026-09-20 对版预览）：与工具行同一套字面——用户看到的
-// 是「运行中…／完成／失败」，不是工单状态「已完成」。
-// 字面以 AgentToolCard 的状态词（STATUS_META）为单一真源；此处仅镜射。
+// 行尾状态词 + 状态点 aria（2026-10-27 收口）：可见字与 aria 同文。
+// 字面以 AgentToolCard STATUS_META 为 UI 真源（「运行中…／完成／失败」）；
+// 此处仅镜射。不读 agent-task-status 工单词「已完成／运行中」。
+// 工单标签双表已删——aria 直接用本表。
 export const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
   running: "运行中…",
   ok: "完成",
@@ -434,7 +426,7 @@ function SubagentCard({ item, isViewing, onOpen }: SubagentCardProps) {
         {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
         <span
           className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
-          aria-label={STATUS_LABEL[item.status]}
+          aria-label={STATUS_WORD[item.status]}
         />
       </button>
       {item.status === "running" && <SubagentToolLines entries={item.tools ?? []} />}

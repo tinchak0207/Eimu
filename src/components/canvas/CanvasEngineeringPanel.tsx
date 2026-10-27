@@ -200,7 +200,7 @@ function statusTone(status: string | undefined): string {
   switch (status) {
     case "succeeded":
     case "success":
-      return "bg-ios-green/10 text-[#248A3D] ring-ios-green/25";
+      return "bg-ios-green/10 text-ios-green ring-ios-green/25";
     case "failed":
     case "error":
     case "refunded":

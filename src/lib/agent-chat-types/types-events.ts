@@ -30,7 +30,9 @@ export const AGENT_EVENT_NAMES = [
   "image.done",
   "image.failed",
   "video.done",
+  "video.failed",
   "audio.done",
+  "audio.failed",
   "director.done",
   "turn.done",
   "turn.status",
@@ -96,7 +98,7 @@ export interface AgentToolResult {
   cost_coins?: number;
   /**
    * gateway（2026-09-18 契约）—— 提交型工具的任务 id。任务已交给上游，
-   * 成品稍后由 image/video/audio.done（或 image.failed）带同一个 id 回来。
+   * 成品稍后由 image/video/audio.done（或 image/video/audio.failed）带同一个 id 回来。
    */
   task_id?: string;
   /**
@@ -232,6 +234,32 @@ export interface AgentDirectorDone {
  * human_message（2026-08-27 G-FE 合同）：后端英文黑话→中文短句，渲染层优先取它。
  */
 export interface AgentImageFailed {
+  task_id?: string;
+  reason?: string;
+  refunded?: boolean;
+  human_message?: string;
+}
+
+/**
+ * gateway（poller 经 /internal/emit）—— 出片失败（refunded / failed / 超时）。
+ * 与 video.done / image.failed 对称：reason 是给人看的一句话，refunded 标记费用是否已退回。
+ * human_message（G-FE 合同）：后端英文黑话→中文短句，渲染层优先取它。
+ * 栏位与 AgentImageFailed 逐行等价，只改媒体种别注释。
+ */
+export interface AgentVideoFailed {
+  task_id?: string;
+  reason?: string;
+  refunded?: boolean;
+  human_message?: string;
+}
+
+/**
+ * gateway（poller 经 /internal/emit）—— 出音频失败（refunded / failed / 超时）。
+ * 与 audio.done / image.failed 对称：reason 是给人看的一句话，refunded 标记费用是否已退回。
+ * human_message（G-FE 合同）：后端英文黑话→中文短句，渲染层优先取它。
+ * 栏位与 AgentImageFailed 逐行等价，只改媒体种别注释。
+ */
+export interface AgentAudioFailed {
   task_id?: string;
   reason?: string;
   refunded?: boolean;
@@ -459,7 +487,9 @@ export type AgentSseEvent = WithEventId &
     | { name: "image.done"; data: AgentImageDone }
     | { name: "image.failed"; data: AgentImageFailed }
     | { name: "video.done"; data: AgentVideoDone }
+    | { name: "video.failed"; data: AgentVideoFailed }
     | { name: "audio.done"; data: AgentAudioDone }
+    | { name: "audio.failed"; data: AgentAudioFailed }
     | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
     | { name: "turn.status"; data: AgentTurnStatus }

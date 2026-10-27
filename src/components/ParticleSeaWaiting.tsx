@@ -1,38 +1,41 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import {
-  NORMAL_PROGRESS_DURATION_MS,
-  calculateGenerationProgress,
-} from "@/components/GenerationProgressBar";
+import { useEffect, useRef } from "react";
+import { resolveWaitingProgress } from "@/lib/waiting-contract";
 
 interface ParticleSeaWaitingProps {
   visible: boolean;
+  /**
+   * 真已完成量；与 total 同时有效才报 %。
+   * 单张生图通常无真分母 → 不定指示，禁止时间假 %。
+   */
+  done?: number;
+  /**
+   * 真目标总量。缺省 / 非正数 → indeterminate（与 AgentBatchProgress 同契约）。
+   */
+  total?: number;
+  /**
+   * @deprecated 不再驱动用户可见 %；保留仅为旧调用方兼容，可省略。
+   */
   startedAt?: number;
+  /**
+   * @deprecated 时间估算不再驱动进度条。
+   */
   durationMs?: number;
 }
 
 /**
- * 生成中继态：Eimu 蓝粉灰粒子海浪（会呼吸的多谐波粒子场）铺满结果卡，
- * 中央大号百分比 + 底部蓝粉进度条。进度真源复用 calculateGenerationProgress
- * （与旧 GenerationProgressBar 同一条 easeOut 曲线，50s 常规 / 80s 兜底），
- * 视觉层按 /tmp/aigc-ref 预览页逐参数移植：粒子网格 16/16.8、波幅 22+8、
- * 三色粒子（亮蓝浪尖 / 蓝灰雾体 / 粉点缀）。
+ * 生成中继态：Eimu 蓝粉灰粒子海浪（会呼吸的多谐波粒子场）铺满结果卡。
+ * 进度契约对齐 AgentBatchProgress / waiting-contract：
+ * 无真分母只做流动指示；有真分母才报 %。禁止时间假 % 与假 progressbar。
+ * 视觉层按粒子海配方：网格 16/16.8、波幅 22+8、三色粒子（亮蓝/蓝灰/粉）。
  */
 export function ParticleSeaWaiting({
   visible,
-  startedAt,
-  durationMs = NORMAL_PROGRESS_DURATION_MS,
+  done,
+  total,
 }: ParticleSeaWaitingProps) {
-  const [now, setNow] = useState(Date.now());
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(timer);
-  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -224,49 +227,70 @@ export function ParticleSeaWaiting({
     };
   }, [visible]);
 
-  if (!visible || !startedAt) return null;
 
-  const progress = calculateGenerationProgress(startedAt, now, durationMs);
+  if (!visible) return null;
+
+  const waiting = resolveWaitingProgress(done, total);
+  const determinate = waiting.kind === "determinate";
+  const pct = determinate ? waiting.pct : 0;
+  const statusLabel = determinate
+    ? `生成进度 ${pct}%（${waiting.done}/${waiting.total}）`
+    : "正在生成，进度未知";
 
   return (
     <div
       className="absolute inset-0 overflow-hidden bg-[#f4f8fc]"
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={progress}
-      aria-label="生成进度"
+      role="status"
+      aria-live="polite"
+      aria-label={statusLabel}
     >
       <div className="sea-waiting-aurora" aria-hidden="true" />
       <div className="sea-waiting-veil" aria-hidden="true" />
       <canvas ref={canvasRef} className="absolute inset-0 z-[3] h-full w-full" aria-hidden="true" />
 
-      <div className="absolute inset-0 z-[6] flex flex-col items-center justify-center">
-        <div className="sea-waiting-value bg-gradient-to-b from-[#223047] to-[#50718c] bg-clip-text text-[52px] font-bold leading-none tracking-[-0.05em] text-transparent">
-          {/* tabular + 固定 2ch：位数变化（9→73→100）时数字组不左右挤动 */}
-          <span className="inline-block min-w-[2ch] text-right tabular-nums">{progress}</span>
-          <span className="ml-[12px] align-[18%] text-[24px] tracking-normal">%</span>
-        </div>
-        <div className="sea-waiting-sub mt-2 text-[13px] font-medium tracking-[0.04em]">
+      <div className="absolute inset-0 z-[6] flex flex-col items-center justify-center" aria-hidden="true">
+        {determinate ? (
+          <div className="sea-waiting-value bg-gradient-to-b from-[#223047] to-[#50718c] bg-clip-text text-[52px] font-bold leading-none tracking-[-0.05em] text-transparent">
+            {/* tabular + 固定 2ch：位数变化时数字组不左右挤动；仅真分母才显示 */}
+            <span className="inline-block min-w-[2ch] text-right tabular-nums">{pct}</span>
+            <span className="ml-[12px] align-[18%] text-[24px] tracking-normal">%</span>
+          </div>
+        ) : null}
+        <div
+          className={`sea-waiting-sub text-[13px] font-medium tracking-[0.04em] ${determinate ? "mt-2" : ""}`}
+        >
           把灵感变成画面
         </div>
       </div>
 
-      <div className="sea-waiting-hint absolute bottom-[52px] left-1/2 z-[6] -translate-x-1/2 text-[11px] tracking-[0.06em] text-[rgba(45,49,66,0.62)]">
+      <div
+        className="sea-waiting-hint absolute bottom-[52px] left-1/2 z-[6] -translate-x-1/2 text-[11px] tracking-[0.06em] text-[rgba(45,49,66,0.62)]"
+        aria-hidden="true"
+      >
         正在雕刻光影与细节
       </div>
 
-      <div
-        className="absolute bottom-[34px] left-1/2 z-[6] h-[5px] w-[calc(100%-76px)] -translate-x-1/2 rounded-full bg-[rgba(45,49,66,0.12)] shadow-[inset_0_1px_2px_rgba(45,49,66,0.08)]"
-        aria-hidden="true"
-      >
+      {/* 进度条装饰：有真分母才按比例；否则流动指示。一律 aria-hidden，不读屏。 */}
+      {determinate ? (
         <div
-          className="relative h-full rounded-full bg-gradient-to-r from-[#77a8ff] to-[#ff9ec2] shadow-[0_0_12px_#6cbfff66] transition-[width] duration-500 ease-out"
-          style={{ width: `${progress}%` }}
+          className="absolute bottom-[34px] left-1/2 z-[6] h-[5px] w-[calc(100%-76px)] -translate-x-1/2 rounded-full bg-[rgba(45,49,66,0.12)] shadow-[inset_0_1px_2px_rgba(45,49,66,0.08)]"
+          role="presentation"
+          aria-hidden="true"
         >
-          <span className="absolute right-[-3px] top-1/2 h-[7px] w-[7px] -translate-y-1/2 rounded-full bg-[#f3fcff] shadow-[0_0_5px_#fff,0_0_15px_#7bd6ff]" />
+          <div
+            className="relative h-full rounded-full bg-gradient-to-r from-[#77a8ff] to-[#ff9ec2] shadow-[0_0_12px_#6cbfff66] transition-[width] duration-500 ease-out"
+            style={{ width: `${pct}%` }}
+          >
+            <span className="absolute right-[-3px] top-1/2 h-[7px] w-[7px] -translate-y-1/2 rounded-full bg-[#f3fcff] shadow-[0_0_5px_#fff,0_0_15px_#7bd6ff]" />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div
+          className="sea-waiting-indeterminate absolute bottom-[34px] left-1/2 z-[6] h-[5px] w-[calc(100%-76px)] -translate-x-1/2"
+          role="presentation"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }

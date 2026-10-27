@@ -475,7 +475,7 @@ export function CanvasEmbedOverlays({
                     onClick={() => canvas.toggleCharacterCard(card.id)}
                     className={
                       active
-                        ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-ios-caption1 font-medium text-[#248A3D] hover:bg-ios-green/20"
+                        ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-ios-caption1 font-medium text-ios-green hover:bg-ios-green/20"
                         : "shrink-0 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10"
                     }
                   >

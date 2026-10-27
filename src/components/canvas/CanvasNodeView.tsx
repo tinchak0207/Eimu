@@ -223,7 +223,7 @@ export function CanvasNodeView({
   const typeBadge = (() => {
     switch (node.type) {
       case CanvasNodeType.Image:
-        return { label: "生成", Icon: ImageIcon, cls: "bg-[rgba(52,199,89,0.12)] text-[#248A3D]", bar: "bg-[#248A3D]" };
+        return { label: "生成", Icon: ImageIcon, cls: "bg-[rgba(52,199,89,0.12)] text-ios-green", bar: "bg-ios-green" };
       case CanvasNodeType.Video:
         return { label: "视频", Icon: VideoIcon, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
       case CanvasNodeType.Audio:
@@ -433,7 +433,7 @@ export function CanvasNodeView({
               className={cn(
                 "shrink-0 rounded-full px-2 py-0.5 text-ios-caption1 font-medium",
                 status === "idle" && "bg-black/5 text-muted-foreground",
-                status === "success" && "bg-ios-green/15 text-[#248A3D]",
+                status === "success" && "bg-ios-green/15 text-ios-green",
                 status === "loading" && "bg-ios-blue/10 text-ios-blue",
                 status === "error" && "bg-destructive/10 text-destructive",
               )}

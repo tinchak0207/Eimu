@@ -417,6 +417,12 @@ export default function Navbar({ className }: NavbarProps) {
                 macOS 仍只 toast 婉拒，行动装置（unknown）因 <xl 断点本来就看不到。
                 壳内由 DesktopDownloadButton 自我隐藏（单一真源，见该档）。 */}
             <DesktopDownloadButton variant="icon" className={FLAT_CHROME} />
+            <Link
+              href="/mcp"
+              className="shrink-0 whitespace-nowrap rounded-full px-2 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] lg-transition hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              API / MCP
+            </Link>
           </div>
 
           {/* Right side */}

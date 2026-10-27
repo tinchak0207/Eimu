@@ -536,9 +536,12 @@ export function useCanvasChat(
           settleCandidateNode(event.data);
           return;
         }
-        case "image.failed": {
-          // 图失败讯号（refunded/failed/超时）：与 image.done 对称。优先 task_id
+        case "image.failed":
+        case "video.failed":
+        case "audio.failed": {
+          // 媒体失败讯号（refunded/failed/超时）：与 *.done 对称。优先 task_id
           // 配对，没配上的在 turn.done 收敛时按序兜底——绝不能让节点永远转圈。
+          // video/audio.failed 栏位与 image.failed 同构；后端尚未 emit 时前端先备好。
           settleFailedNode(event.data);
           return;
         }

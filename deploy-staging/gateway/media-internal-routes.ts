@@ -1,7 +1,7 @@
 // 从 index.ts 无损抽取（2026-09-19 第一阶段）
 // media-internal-routes.ts — Media 上传/Canvas 内部 HTTP 处理器＋TTS＋confirm＋internal emit
 // 涵盖 index.ts 原行区：7636–7908（canvas/media handlers）、7910–8036（TTS）、
-// 8165–8285（confirm）、8410–8483（emitImageFailed＋handleInternalEmit）。
+// 8165–8285（confirm）、8410–8483（emitImageFailed/emitVideoFailed/emitAudioFailed＋handleInternalEmit）。
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
@@ -629,6 +629,74 @@ export function emitImageFailed(
   })
 }
 
+export function emitVideoFailed(
+  state: SessionState,
+  task_id: string,
+  reason: string,
+  refunded: boolean,
+): void {
+  // 0831：任务终态登记（失败）。task 可能不在登记表（重启丢内存态），不可假设存在。
+  const t = state.sessionTasks.get(task_id)
+  if (t) {
+    t.status = "failed"
+  }
+  // 2026-10-18 止血：失败也是终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
+  // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
+  const human = humanMessageFor(reason)
+  emitToSession(state, "video.failed", { task_id, reason, refunded, human_message: human })
+  const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
+  if (unitId) {
+    const failPatch = { status: "error", errorDetails: reason, human_message: human }
+    emitToSession(state, "canvas.node.updated", {
+      unit_id: unitId,
+      node_id: canvasResultNodeId(state.sessionId, unitId),
+      patch: failPatch,
+    })
+    // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
+  }
+  void appendLedgerFor(state, {
+    kind: "video",
+    event: refunded ? "refunded" : "failed",
+    task_id,
+  })
+}
+
+export function emitAudioFailed(
+  state: SessionState,
+  task_id: string,
+  reason: string,
+  refunded: boolean,
+): void {
+  // 0831：任务终态登记（失败）。task 可能不在登记表（重启丢内存态），不可假设存在。
+  const t = state.sessionTasks.get(task_id)
+  if (t) {
+    t.status = "failed"
+  }
+  // 2026-10-18 止血：失败也是终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
+  // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
+  const human = humanMessageFor(reason)
+  emitToSession(state, "audio.failed", { task_id, reason, refunded, human_message: human })
+  const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
+  if (unitId) {
+    const failPatch = { status: "error", errorDetails: reason, human_message: human }
+    emitToSession(state, "canvas.node.updated", {
+      unit_id: unitId,
+      node_id: canvasResultNodeId(state.sessionId, unitId),
+      patch: failPatch,
+    })
+    // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
+  }
+  void appendLedgerFor(state, {
+    kind: "audio",
+    event: refunded ? "refunded" : "failed",
+    task_id,
+  })
+}
+
 export async function handleInternalEmit(req: Request): Promise<Response> {
   let body: { session_id?: string; event?: string; data?: unknown }
   try {
@@ -667,6 +735,14 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
     if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
+  } else if (event === "video.failed") {
+    // 与 image.failed 同构：白名单已放行，if 链必须有分支，否则静默丢帧假成功。
+    const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
+    if (d.task_id) emitVideoFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
+  } else if (event === "audio.failed") {
+    // 与 image.failed 同构：白名单已放行，if 链必须有分支，否则静默丢帧假成功。
+    const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
+    if (d.task_id) emitAudioFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
   } else if (event === "session.error") {
     const d = (data ?? {}) as { code?: string; message?: string }
     emitSessionError(state, d.code ?? "backend_error", d.message ?? "session error")

@@ -25,6 +25,8 @@ export type {
   AgentAudioDone,
   AgentDirectorDone,
   AgentImageFailed,
+  AgentVideoFailed,
+  AgentAudioFailed,
   AgentTurnDone,
   AgentTurnStatus,
   AgentContextCompacted,

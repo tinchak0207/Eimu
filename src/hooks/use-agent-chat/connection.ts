@@ -158,6 +158,8 @@ export function useAgentChatConnection(P: AgentChatConnectionProps): {
         evt.name.startsWith("canvas.") ||
         evt.name === "image.done" ||
         evt.name === "image.failed" ||
+        evt.name === "video.failed" ||
+        evt.name === "audio.failed" ||
         evt.name === "turn.done" ||
         evt.name === "session.closed" ||
         // 第一次 workflow_start 调用即分流：右侧面板要在工作流真正落地前就切画布。

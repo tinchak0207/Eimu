@@ -30,7 +30,7 @@ export const ACK_DELAY_MS = Number.parseInt(process.env.ACK_DELAY_MS || "15000",
 // 不要用 JSON 契约（会先出 reasoning，首 content 落到 1,865–2,547ms，慢 0.8–1.1s）。
 // 路径取舍：opencode/* 路径多 ~3s 固定开销 → 走直连 provider，不经 opencode。
 // 计费红线：ledger 只在 emitImageDone / emitVideoDone / emitAudioDone /
-// recordWorkflowRefund / emitImageFailed / confirm-approved 六处写入，文字回合
+// recordWorkflowRefund / emitImageFailed|emitVideoFailed|emitAudioFailed / confirm-approved 写入，文字回合
 // 零 ledger 写入 → 本调用不重复扣费。**若未来新增「按 token 对用户计费」，
 // 该机制必须显式排除 turn.plan**（此处是一次不进模型上下文的旁路 LLM 调用）。
 export const TURN_PLAN_ENABLED = process.env.TURN_PLAN_ENABLED !== "0"
@@ -251,7 +251,7 @@ export const CANVAS_EMIT_ALLOWED = new Set([
 // 此前不在白名单＝遗漏（opencode 工具链 emitEvent 端已放行 audio.done，网关这头不放行会让
 // 工具推的事件在路由层被 400 丢弃＝no-op）。非新增攻击面：/internal/emit 只绑 127.0.0.1:8081
 // 内网（VPS ufw 8081/tcp ALLOW 172.16.0.0/12，非公网可达）。
-export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
+export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "video.failed", "audio.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
 
 export const WORKSPACE_DIR = "/opt/agent-harness/workspace"
 export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
@@ -264,7 +264,7 @@ export const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（浏�
 export const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])
 export const ALLOWED_UPLOAD_EXTS = new Set([
   ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".json",
-  ".csv", ".xml", ".yaml", ".yml", ".png", ".jpg", ".jpeg",
+  ".csv", ".xml", ".yaml", ".yml", ".html", ".htm", ".png", ".jpg", ".jpeg",
   ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".zip",
   // 音频附件（本地参考素材：翻唱 source_audio 等）。与 two-phase-upload.ts 的
   // ALLOWED_UPLOAD_CONTENT_TYPES（audio/mpeg|wav|mp4|aac）对齐，另补 flac/ogg

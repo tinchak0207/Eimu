@@ -60,6 +60,10 @@
     --lg-shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.10), 0 4px 16px rgba(0, 0, 0, 0.06);
     --lg-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
     --lg-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ── Finance tokens（DESIGN.md / MASTER.md）── */
+    --coin-gold: #c9a84c;
+    --coin-gold-light: #f5e6c0;
   }
 
   * {
@@ -359,7 +363,7 @@
     font-size: 0.8125rem;
     font-weight: 500;
     letter-spacing: -0.01em;
-    color: #b8860b;
+    color: var(--coin-gold);
     background: rgba(255, 179, 0, 0.12);
     border-top: 1px solid rgba(255, 179, 0, 0.28);
     border-left: 1px solid rgba(255, 179, 0, 0.12);
@@ -938,6 +942,31 @@ body::after {
   animation: sea-hint-breathe 4.8s ease-in-out infinite alternate;
 }
 
+/* 无真分母时的流动指示（蓝→粉，与粒子海条同色；不冒充 %） */
+.sea-waiting-indeterminate {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(45, 49, 66, 0.12);
+  box-shadow: inset 0 1px 2px rgba(45, 49, 66, 0.08);
+}
+.sea-waiting-indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -45%;
+  width: 45%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #77a8ff, #ff9ec2, #77a8ff);
+  box-shadow: 0 0 12px #6cbfff66;
+  animation: sea-waiting-indeterminate 1.3s ease-in-out infinite;
+}
+@keyframes sea-waiting-indeterminate {
+  0% { left: -45%; }
+  100% { left: 100%; }
+}
+
 @keyframes sea-hint-breathe {
   from {
     opacity: 1;
@@ -952,6 +981,12 @@ body::after {
   .sea-waiting-sub,
   .sea-waiting-hint {
     animation: none;
+  }
+  .sea-waiting-indeterminate::after {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.35;
   }
 }
 

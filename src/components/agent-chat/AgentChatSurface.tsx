@@ -412,8 +412,8 @@ export function AgentChatSurface({
               <button
                 type="button"
                 onClick={onExit}
-                aria-label="直接生成"
-                title="直接生成：自己选模型和参数出图"
+                aria-label="精确控制"
+                title="精确控制（二级入口）：自己选模型和参数出图"
                 className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
               >
                 <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />

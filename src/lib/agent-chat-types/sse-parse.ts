@@ -254,8 +254,11 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
         },
       };
     }
-    case "image.failed": {
+    case "image.failed":
+    case "video.failed":
+    case "audio.failed": {
       // task_id 可能缺（防御性）：帧仍要送达，settler 按序兜底配对。
+      // video/audio.failed 与 image.failed 同构（refunded + human_message），共用解析。
       return {
         name,
         event_id: eventId,

@@ -7,7 +7,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { AgentImageDone, AgentImageFailed, AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentAudioFailed, AgentImageDone, AgentImageFailed, AgentSseEvent, AgentVideoFailed } from "@/lib/agent-chat-types";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { CanvasNodeType } from "@/lib/canvas/types";
 import type { CanvasNode } from "@/lib/canvas/types";
@@ -99,12 +99,12 @@ export function useCanvasEventSettler(params: UseCanvasEventSettlerParams) {
   );
 
   /**
-   * image.failed 收敛（与 settleCandidateNode 对称）：task_id 精确配对优先，
+   * image/video/audio.failed 收敛（与 settleCandidateNode 对称）：task_id 精确配对优先，
    * 没配上就按序配对第一个 pending 节点——失败帧绝不能因为配不上就丢掉，
-   * 那正是「永远生成中」黑洞的形状。
+   * 那正是「永远生成中」黑洞的形状。三事件栏位同构。
    */
   const settleFailedNode = useCallback(
-    (failed: AgentImageFailed) => {
+    (failed: AgentImageFailed | AgentVideoFailed | AgentAudioFailed) => {
       const state = canvasRef.current;
       const pending = state.nodes.filter(isPendingSettledNode);
       if (pending.length === 0) return;

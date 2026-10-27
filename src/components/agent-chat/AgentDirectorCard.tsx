@@ -26,7 +26,7 @@ interface HealthMeta {
 }
 
 const HEALTH_META: Record<"ok" | "issues", HealthMeta> = {
-  ok: { label: "分镜健康", Icon: CircleCheck, badge: "", tone: "text-[#248A3D]" },
+  ok: { label: "分镜健康", Icon: CircleCheck, badge: "", tone: "text-ios-green" },
   issues: { label: "待修正", Icon: TriangleAlert, badge: "", tone: "text-[rgba(120,90,20,0.9)]" },
 };
 

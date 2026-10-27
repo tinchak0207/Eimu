@@ -25,7 +25,7 @@ const VISIBILITY_CLASSES: Record<AssetVisibility, string> = {
   owner: "bg-black/5 text-muted-foreground",
   "in-project": "bg-ios-blue/10 text-[#007AFF]",
   "in-team": "bg-ios-indigo/10 text-[#5856D6]",
-  "shared-in": "bg-ios-green/10 text-[#248A3D]",
+  "shared-in": "bg-ios-green/10 text-ios-green",
 };
 
 export interface ProjectAssetsOverviewProps {
