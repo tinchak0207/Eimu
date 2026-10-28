@@ -138,6 +138,39 @@ function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, ste
   return md;
 }
 
+/** locked 节点保留的身份键：DSL 重写只许刷新归属/拓扑序，prompt/参数/标题一律不动。 */
+const LOCKED_IDENTITY_KEYS = ["workflow_id", "workflow_ns", "stepId", "stepIndex"] as const;
+
+/**
+ * 重编译已存在节点的 patch 收口（P0，2026-10-28）：update_node 的 metadata 是浅合并，
+ * 所以「保留」＝不进 patch。
+ *   · status：节点已有 status（done/success、loading、error、人手改过）一律不重置；
+ *     只有存量节点完全没 status 时才补 idle。产物引用（content/storageKey/imageTaskId…）
+ *     本就不在 DSL 输出里，浅合并天然保留。
+ *   · locked===true（人手锁定）：patch 只留身份键，title/prompt/model/size/count/meta 透传全部不覆盖；
+ *     DSL 与锁定内容有差异时回 dropped=true，由调用方记 warning（不静默）。
+ */
+function patchForExisting(
+  existing: CanvasNode,
+  title: string,
+  metadata: WorkflowNodeMetadata,
+): { patch: { title?: string; metadata: WorkflowNodeMetadata }; lockedDropped: boolean } {
+  const prevMd = (existing.metadata ?? {}) as WorkflowNodeMetadata;
+  if (prevMd.locked === true) {
+    const kept: WorkflowNodeMetadata = {};
+    for (const key of LOCKED_IDENTITY_KEYS) if (key in metadata) (kept as Record<string, unknown>)[key] = metadata[key];
+    let lockedDropped = title !== existing.title;
+    for (const [key, value] of Object.entries(metadata)) {
+      if (key === "status" || (LOCKED_IDENTITY_KEYS as readonly string[]).includes(key)) continue;
+      if (JSON.stringify(prevMd[key]) !== JSON.stringify(value)) lockedDropped = true;
+    }
+    return { patch: { metadata: kept }, lockedDropped };
+  }
+  const next: WorkflowNodeMetadata = { ...metadata };
+  if (prevMd.status !== undefined && prevMd.status !== null) delete next.status;
+  return { patch: { title, metadata: next }, lockedDropped: false };
+}
+
 // ─────────────────────────── 编译期校验（schema 之后的跨步骤语义）
 
 /**
@@ -382,7 +415,10 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     const existing = currentById.get(nodeId);
     if (existing) {
       // patch 禁含 position/width/height/moved——人拖位置自动保留（canvas-reducer-adapter update_node 语义）。
-      ops.push({ type: "update_node", id: nodeId, patch: { title: step.title, metadata } });
+      // 已存在节点：status 不重置、locked 节点内容不覆盖（见 patchForExisting）。
+      const { patch, lockedDropped } = patchForExisting(existing, step.title, metadata);
+      if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      ops.push({ type: "update_node", id: nodeId, patch });
       updated++;
       continue;
     }
@@ -436,7 +472,9 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
           ],
         };
       }
-      ops.push({ type: "update_node", id: originNodeId, patch: { title: step.title, metadata } });
+      const { patch, lockedDropped } = patchForExisting(target, step.title, metadata);
+      if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      ops.push({ type: "update_node", id: originNodeId, patch });
       updated++;
       nodeIds.set(step.id, originNodeId);
       continue;
