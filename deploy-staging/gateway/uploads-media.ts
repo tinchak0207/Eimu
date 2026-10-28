@@ -108,7 +108,10 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     if (files.some((file) => file.size === 0)) return jsonError(400, "empty file", "bad_request", "bad_request")
     const uploadDir = path.join(UPLOADS_DIR, state.sessionId)
     await mkdir(uploadDir, { recursive: true })
-    const results: { name: string; path: string; size: number; sha256: string; upload_id: string; content_type: string }[] = []
+    // 整批预校验后落盘：旧码边验边写，一批里后一项不合格（超 4MB／扩展名不允许／路径不合法）
+    // 时前面几项已经写进 uploads，用户拿到 400、服务端留下客户端永远拿不到 path 的孤儿文件，
+    // 重试还会堆 dup-2、dup-3（2026-10-28 Hack 实测 a3.wav + b.exe 同批提交触发）。
+    const planned: { file: File; safeName: string }[] = []
     for (const file of files) {
       if (!(file instanceof File)) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
       if (file.size > UPLOAD_MAX_BYTES) {
@@ -120,6 +123,14 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       if (!safeName) {
         return jsonError(400, `disallowed file type: ${path.extname(rawName)}`, "bad_request", "bad_request")
       }
+      const plannedDest = path.join(uploadDir, safeName)
+      if (!path.resolve(plannedDest).startsWith(path.resolve(UPLOADS_DIR))) {
+        return jsonError(400, "invalid path", "bad_request", "bad_request")
+      }
+      planned.push({ file, safeName })
+    }
+    const results: { name: string; path: string; size: number; sha256: string; upload_id: string; content_type: string }[] = []
+    for (const { file, safeName } of planned) {
       // 同名不覆盖：原子占位改得实际落盘名，清单与磁碟保持一致（P1）。
       const finalName = await reserveUniqueUploadName(uploadDir, safeName)
       const dest = path.join(uploadDir, finalName)
