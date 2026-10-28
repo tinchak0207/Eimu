@@ -66,6 +66,7 @@ import {
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
+import { ReplicateFilmRow } from "@/components/canvas-workstation/ReplicateFilmRow";
 import { ProjectSidebar } from "@/components/projects/ProjectSidebar";
 import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
 import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
@@ -334,6 +335,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
+  const handleReplicateFilm = useCallback((sentence: string) => {
+    const text = sentence.trim();
+    if (!text) return;
+    const inject = () => {
+      setAgentTemplateInjection({ text, nonce: Date.now(), echo: true });
+      setAgentTemplateDismissed(true);
+    };
+    const start = startNewSessionRef.current;
+    if (!start) return inject();
+    void Promise.resolve(start()).then(inject);
+  }, []);
 
   // Bug1b：会话恢复回填。refresh/重进后左聊天续上（本地存档 resume），但右画布
   // 空白 —— 快照此前只有上行没有下行。监听 currentSessionId：每个新拿到的 sid 拉
@@ -876,7 +888,14 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   inCanvasWorkstation={inCanvasWorkstation}
                   isLoading={isLoading}
                   canvasHost={canvasHost}
-                  {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
+                  {...(showAgentTemplateGallery ? { overlayContent: (
+                    <div className="flex h-full w-full min-h-0 flex-col">
+                      <div className="min-h-0 w-full flex-1 overflow-hidden">
+                        <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} />
+                      </div>
+                      <ReplicateFilmRow onReplicate={handleReplicateFilm} />
+                    </div>
+                  ) } : {})}
                   /* 项目侧栏（P0-W2）：点顶栏「项目」钮＝同一槽位换内容（桌面）或推入
                      抽屉（手机）。onPickChat 走既有 switchSessionRef 真切会话；
                      onClose（CanvasChatWorkstation 给的 close）＝切回聊天。 */
