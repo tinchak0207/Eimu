@@ -888,14 +888,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   inCanvasWorkstation={inCanvasWorkstation}
                   isLoading={isLoading}
                   canvasHost={canvasHost}
-                  {...(showAgentTemplateGallery ? { overlayContent: (
-                    <div className="flex h-full w-full min-h-0 flex-col">
-                      <div className="min-h-0 w-full flex-1 overflow-hidden">
-                        <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} />
-                      </div>
-                      <ReplicateFilmRow onReplicate={handleReplicateFilm} />
-                    </div>
-                  ) } : {})}
+                  {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
                   /* 项目侧栏（P0-W2）：点顶栏「项目」钮＝同一槽位换内容（桌面）或推入
                      抽屉（手机）。onPickChat 走既有 switchSessionRef 真切会话；
                      onClose（CanvasChatWorkstation 给的 close）＝切回聊天。 */
@@ -910,11 +903,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   )}
                 >
                   {(chatHeaderExtra) => (
-                    <>
+                    <div className="flex h-full min-h-0 flex-col">
                   {/* 罪状 7（暴君人肉评测）：聊天框顶栏的「AI 助理改了 N 项设置 /
                       模型 / 恢复我的设定」撤销条整块删除（非隐藏）——控件上已是现值，
                       再画一遍被动过什么只是噪音；D-12 的参数回流本身（模型/比例/
                       解析度真正被改掉）仍然生效，撤的只是这条提示栏。 */}
+                  <div className="min-h-0 flex-1">
                   <PromptInput
                     onSubmit={handlePromptSubmit}
                     isLoading={isLoading}
@@ -964,7 +958,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onUserMessage={() => setAgentTemplateDismissed(true)}
                     onSendBlockedByAuth={handleSendBlockedByAuth}
                   />
-                    </>
+                  </div>
+                  {showAgentTemplateGallery ? <ReplicateFilmRow onReplicate={handleReplicateFilm} /> : null}
+                    </div>
                   )}
                 </CanvasChatWorkstation>
                 </div>

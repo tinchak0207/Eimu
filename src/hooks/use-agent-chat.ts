@@ -376,7 +376,14 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     const owner = ownerIdRef.current;
     const accountEpoch = accountEpochRef.current;
     const epoch = sessionEpochRef.current;
-    if (owner === null) return false;
+    if (owner === null) {
+      // 未登录访客点了复刻卡或发送：建不了会话。按登入失效同一条路把原句留住，
+      // send() 才会走 onSendBlockedByAuth，登录后补送的仍是这一句。
+      closedRef.current = true;
+      closedReasonRef.current = "auth";
+      setConnection("closed");
+      return false;
+    }
     try {
       const session = await createAgentSession();
       if (!mountedRef.current || accountEpochRef.current !== accountEpoch || ownerIdRef.current !== owner || sessionEpochRef.current !== epoch) return false;
