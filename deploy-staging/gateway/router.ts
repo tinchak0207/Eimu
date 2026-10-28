@@ -7,6 +7,7 @@
 // 本档头＋单行 import，其余一字未动；handleRequest 内逻辑一行未动。
 import path from "node:path"
 import { downloadArtifactVersion } from "./artifact-delivery.ts"
+import { handleSessionGeneration } from "./session-generation-http.ts"
 import { ArtifactError } from "./artifact-store-types.ts"
 import { mkdir } from "node:fs/promises"
 import type { MemoryDocLite } from "./types-gateway.ts"
@@ -750,6 +751,11 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
 
     if (req.method === "POST" && pathname === "/agent/v1/extract-lessons") {
       return handleExtractLessons(key, req)
+    }
+
+    const sessionGeneration = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/generations\/([a-f0-9-]{36})$/i)
+    if (req.method === "GET" && sessionGeneration) {
+      return handleSessionGeneration(key, sessionGeneration[1], sessionGeneration[2])
     }
 
     const artifactDownload = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/artifacts\/([1-9]\d*)\/versions\/([1-9]\d*)\/download$/)
