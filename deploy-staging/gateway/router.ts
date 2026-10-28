@@ -6,6 +6,8 @@
 // memory-trace/memory-recall）全部路由分派。逐行机械抽取（python），仅加 export 前缀＋
 // 本档头＋单行 import，其余一字未动；handleRequest 内逻辑一行未动。
 import path from "node:path"
+import { downloadArtifactVersion } from "./artifact-delivery.ts"
+import { ArtifactError } from "./artifact-store-types.ts"
 import { mkdir } from "node:fs/promises"
 import type { MemoryDocLite } from "./types-gateway.ts"
 import { WORKSPACE_DIR, TTS_AUDIO_DIR, UPLOADS_DIR, VIDEO_UPLOAD_MAX_BYTES, VIDEO_UPLOAD_EXTS } from "./constants-gateway.ts"
@@ -329,7 +331,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
         return handlePermission(req, pathname)
       }
       if (req.method === "POST" && pathname.startsWith("/internal/artifact/")) {
-        return handleArtifact(req, pathname)
+        return handleArtifact(req, pathname, (id) => (resolveSession(id) ?? subagentParentState(id))?.sessionId)
       }
       if (req.method === "POST" && pathname.startsWith("/internal/cron/")) {
         return handleCron(req, pathname)
@@ -748,6 +750,21 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
 
     if (req.method === "POST" && pathname === "/agent/v1/extract-lessons") {
       return handleExtractLessons(key, req)
+    }
+
+    const artifactDownload = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/artifacts\/([1-9]\d*)\/versions\/([1-9]\d*)\/download$/)
+    if (req.method === "GET" && artifactDownload) {
+      const state = getOwnedSession(key, artifactDownload[1])
+      if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+      const artifactId = Number(artifactDownload[2])
+      const version = Number(artifactDownload[3])
+      if (!Number.isSafeInteger(artifactId) || !Number.isSafeInteger(version)) return jsonError(404, "artifact not found", "not_found", "not_found")
+      try {
+        return downloadArtifactVersion(state.sessionId, artifactId, version)
+      } catch (error) {
+        if (error instanceof ArtifactError) return jsonError(error.status, error.message, error.code, error.code)
+        return jsonError(503, "artifact unavailable", "artifact_unavailable", "artifact_unavailable")
+      }
     }
 
     const tm = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/transcript$/)

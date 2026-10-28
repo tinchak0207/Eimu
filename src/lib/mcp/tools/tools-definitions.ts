@@ -10,6 +10,7 @@ import { canvasStatePath, runForward, runForwardProjected, snapshotState } from 
 import { asRecord, bilingual, compact, pickString } from "./helpers";
 import type { McpToolContext, McpToolDescriptor, ToolDefinition, ToolInputSchema } from "./types";
 import { isPlainObject, validateToolArguments } from "./validation";
+import { projectAgentSession } from "./session-projection";
 
 // 生图/改图的模型 id（`generate_image` 的 `model` 上游是必填，schema 同步宣告为必填）。
 const SKILL_FAMILIES = Object.keys(AGENT_SKILL_FAMILY_LABELS) as string[];
@@ -509,13 +510,15 @@ function defineTools(): ToolDefinition[] {
       name: "get_agent_session",
       title: "读取 agent 会话",
       description: bilingual(
-        "读取一个 Eimu agent 会话的内容：view=summary（默认，会话摘要与消息计数）、view=transcript（角色/部件级对话）、view=raw（网关原始消息，体积大）。assistant 的最终文字里含成品图片/影片 URL（用 run_agent 也可直接拿到结构化 artifacts）。会话属于本密钥账号，跨账号一律找不到。",
-        "Read one Eimu agent session: view=summary (default) | transcript | raw. The assistant's final text carries finished image/video URLs.",
+        "读取一个 Eimu agent 会话：view=summary（默认）| transcript | raw。长内容返回合法 JSON、最新 assistant 文字与 artifacts，以及原始 JSON 的尾页 source_json_fragment；用 pagination.next_cursor 继续读较早页，按 start 升序拼接可恢复完整 JSON。会话变化会返回 session_cursor_stale，需重读。会话属于本密钥账号，跨账号一律找不到。",
+        "Read one Eimu agent session: summary (default) | transcript | raw. Long results are valid JSON with latest assistant text, artifacts, and a source_json_fragment tail page. Follow pagination.next_cursor for older pages; sort by start and concatenate fragments to recover the full JSON. A changed snapshot returns session_cursor_stale; restart without a cursor.",
       ),
       inputSchema: {
         type: "object",
         properties: {
           session_id: { type: "string", description: "agent 会话 id（来自 list_agent_sessions）。" },
+          cursor: { type: "string", description: "上页 pagination.next_cursor；绑定会话内容快照，省略时读取最新尾页。" },
+          limit: { type: "integer", minimum: 1, maximum: 12000, description: "每页原始 JSON 字符数上限，默认8000；输出转义后仍受总长度限制。" },
           view: {
             type: "string",
             enum: ["summary", "transcript", "raw"],
@@ -533,7 +536,7 @@ function defineTools(): ToolDefinition[] {
           if (view === "raw") return `${AGENT_SESSIONS_PATH}/${id}/messages`;
           return `${AGENT_SESSIONS_PATH}/${id}`;
         };
-        return runForward({ method: "GET", path }, "get_agent_session", args, ctx);
+        return runForwardProjected({ method: "GET", path }, "get_agent_session", args, ctx, (payload) => projectAgentSession(payload, args));
       },
     },
     {
@@ -551,7 +554,7 @@ function defineTools(): ToolDefinition[] {
       name: "run_agent",
       title: "运行 agent 任务",
       description: bilingual(
-        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
+        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。本地源文件/参考素材先用POST /api/agent/biz/sessions/{session_id}/attachments上传multipart的file字段（自有API key，≤4MiB），把回执的path放进同一会话prompt，勿把大文件正文塞prompt；完整文件往返契约见/v1/openapi.json。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
         "Hand a task to Eimu's agent orchestrator and return its final reply plus artifact URLs. This really consumes account credits because the orchestrator may call billed generation tools itself; do not use it for plain text Q&A.",
       ),
       inputSchema: {

@@ -325,6 +325,27 @@ async function ensureFfmpegAvailable(): Promise<void> {
   }
 }
 
+/** Frames live on the bridge host. Run muxing there, never against its paths on the VPS. */
+async function runBridgeMux(bin: string, args: string[], timeoutMs: number, context: BlenderToolContext) {
+  try {
+    const data = await bridgeExecute(
+      `import subprocess\n_r = subprocess.run(${JSON.stringify([bin, ...args])}, capture_output=True, text=True, timeout=${Math.floor(timeoutMs / 1000)})\nif _r.returncode != 0:\n    raise RuntimeError("ffmpeg failed: " + _r.stderr[-1500:])\n`,
+      timeoutMs + 10_000, context,
+    )
+    return { ok: true, artifacts: data.artifacts, error: "", stderr: "" }
+  } catch (error) {
+    return { ok: false, artifacts: [] as BlenderArtifact[], error: error instanceof Error ? error.message : String(error), stderr: "" }
+  }
+}
+
+async function readBridgeJson(path: string, context: BlenderToolContext): Promise<any> {
+  const response = await fetch(`${artifactBaseUrl()}?path=${encodeURIComponent(path)}`, {
+    headers: bridgeAuthHeaders(), signal: context.abort ?? AbortSignal.timeout(20_000),
+  })
+  if (!response.ok) throw new Error(`读取桥产物 HTTP ${response.status}`)
+  return response.json()
+}
+
 // ── 参数整理助手（同构 director-common.ts num/bool 口径） ────────────────────
 
 function asString(v: unknown): string | undefined {
@@ -923,15 +944,11 @@ export const blenderRenderTool: BlenderToolDef = {
         durationMs += data.duration_ms
         // 画质回执：sidecar 优先（stdout 可能被日志挤掉），再退回 stdout 的 RENDER_QUALITY 行。
         appliedQuality =
-          (await fsp
-            .readFile(nodePath.join(outDir, outputDirName, "render_quality.json"), "utf8")
-            .then((t) => JSON.parse(t) as Record<string, unknown>)
+          (await readBridgeJson(`${outputDirName}/render_quality.json`, context)
             .catch(() => null)) ?? parseRenderQualityLine(data.stdout_tail)
         if (sceneFps === 0) {
           // fps 从首块 sidecar meta.json 读（stdout_tail 被 blender.log 占满时 print 会被挤掉，artifact 才硬）。
-          const meta = await fsp
-            .readFile(nodePath.join(outDir, outputDirName, "meta.json"), "utf8")
-            .then((t) => JSON.parse(t) as { fps?: number })
+          const meta = await readBridgeJson(`${outputDirName}/meta.json`, context)
             .catch(() => null)
           if (meta && Number.isFinite(Number(meta.fps)) && Number(meta.fps) > 0) {
             sceneFps = Math.max(1, Math.round(Number(meta.fps)))
@@ -1022,10 +1039,9 @@ export const blenderRenderTool: BlenderToolDef = {
       let mp4Artifact: BlenderArtifact | null = null
       if (turntable && span) {
         // 桥内 in-process mp4 muxer 必崩（2/2 出 48 字节 stub）→ 工具层系统 ffmpeg 合成 H264。
-        await ensureFfmpegAvailable()
         const fps = sceneFps || 24
         const mp4Abs = nodePath.join(outDir, `${outputBase}.mp4`)
-        const mux = await runCommand(
+        const mux = await runBridgeMux(
           FFMPEG_BIN,
           [
             "-y",
@@ -1044,6 +1060,7 @@ export const blenderRenderTool: BlenderToolDef = {
             mp4Abs,
           ],
           600_000,
+          context,
         )
         const basePayload = {
           engine: engineRaw ?? "eevee",
@@ -1069,7 +1086,8 @@ export const blenderRenderTool: BlenderToolDef = {
             },
           )
         }
-        const stat = await fsp.stat(mp4Abs).catch(() => null)
+        const emitted = mux.artifacts.find((a) => a.path === `${outputBase}.mp4`)
+        const stat = emitted ? { size: emitted.bytes } : null
         if (!stat || stat.size < 1024) {
           return fail(
             "ffmpeg_failed",
@@ -1079,7 +1097,7 @@ export const blenderRenderTool: BlenderToolDef = {
           )
         }
         // 成功：清理中间 PNG 目录，artifacts 收敛为 mp4（与旧 turntable 返回形状一致）。
-        await fsp.rm(nodePath.join(outDir, outputDirName), { recursive: true, force: true }).catch(() => {})
+        // Keep bridge frames for recovery; the VPS does not own this filesystem.
         mp4Artifact = { path: `${outputBase}.mp4`, bytes: stat.size, kind: "mp4" }
         artifacts = [mp4Artifact]
       }

@@ -1,4 +1,6 @@
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
+// Published engineering deliverables preserve the Blender adapter's 200MiB contract.
+export const ARTIFACT_DELIVERY_MAX_BYTES = 200 * 1024 * 1024
 // 入库字节上限仍是 16MiB；verify 只读取远端字节做流式哈希，影音成品可远超 16MiB。
 const DEFAULT_VERIFY_MAX_BYTES = 256 * 1024 * 1024
 export function artifactVerifyMaxBytes(): number {
@@ -79,6 +81,8 @@ export interface ArtifactVersionView {
 
 export interface PublishArtifactInput {
   sessionId: string
+  /** Internal only: resolved gateway session identity used for authenticated delivery. */
+  deliverySessionId?: string
   /** 已废弃：owner 一律由 sessionId 推导，忽略调用方传入值（P1 身份修复）。 */
   ownerKey?: string
   name: string
