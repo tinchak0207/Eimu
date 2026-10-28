@@ -15,7 +15,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { harnessInternalHeaders } from "../lib/client"
 import { stat } from "node:fs/promises"
-import { readdirSync, readFileSync, unlinkSync } from "node:fs"
+import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { join, resolve as resolvePath } from "node:path"
 import {
   assertSafeFetchUrl,
@@ -539,6 +540,193 @@ async function settleBackgroundJobs(client: { session: { promptAsync: (args: unk
   }
 }
 
+// ── 2026-10-28 context-rot P0（根因取证：memory 2026-10-28-eimu-context-rot-root-cause）──────────
+// ① 压缩摘要链：opencode 1.18.14 的 compacting hook 只收 {sessionID}、输出 {context, prompt}；
+//    默认路径里的 previousSummary 不经 hook 暴露，且 prompt 一旦被替换就不再拼 <previous-summary>
+//    （session/compaction.ts:336 取 previousSummary；:348 `compacting.prompt ?? buildPrompt({previousSummary,...})`；
+//     core/session/compaction.ts:161-166 buildPrompt 才拼 <previous-summary>）。同时上一次压缩的
+//    user+summary 讯息被 hidden（:335），不会出现在压缩输入里 ⇒ 我方必须自己从会话历史取回上一次摘要。
+// ② 目标卡：用户原话（逐字）每轮附在最近一条用户讯息末尾，不随压缩被替换。
+// ③ 工具回执单条 ≤10KB：超限只留头尾，全文落会话 tmp。
+const GOAL_CARD_MAX_TOKENS = intEnv("GOAL_CARD_MAX_TOKENS", 4000)
+const RECEIPT_MAX_BYTES = intEnv("TOOL_RECEIPT_MAX_BYTES", 10 * 1024)
+const PREV_SUMMARY_HEAD_CHARS = 14_000
+const PREV_SUMMARY_TAIL_CHARS = 6_000
+const GOAL_CARD_TAG = "<eimu-goal-card>"
+/** 网关/插件自己投递的 user-role 通知不是用户原话。 */
+const SYSTEM_INJECTED_USER_TEXT_RE = /^\s*(?:【目标验收|\[Monitor Result\]|<system-reminder|后台命令已结束|<eimu-goal-card>)/
+/** 纠正/否决/授权类措辞：折叠中段时优先保留。 */
+const DIRECTIVE_RE =
+  /不要|别[再用做]|不许|禁止|不是|不对|错了|改成|改为|换成|必须|只准|只要|不用|授权|同意|批准|确认|可以|否决|作废|重做|撤销|取消|停|full|auto|don't|do not|never|wrong|instead|must|stop|approve|authori[sz]/i
+
+type PluginMsg = { info?: Record<string, any>; parts?: Array<Record<string, any>> }
+type GoalEntry = { id: string; text: string; created: number; seq: number }
+
+/** 估算 token：CJK 记 1，其余 0.3（偏保守，保证 ≤ 上限）。 */
+function estimateTokens(s: string): number {
+  let n = 0
+  for (const ch of s) n += ch.charCodeAt(0) >= 0x2e80 ? 1 : 0.3
+  return Math.ceil(n)
+}
+
+/** 只在极端超长单条时才折叠：头 60% + 尾 40%，标注折叠字数。 */
+function truncateToTokens(text: string, maxTokens: number): string {
+  if (estimateTokens(text) <= maxTokens) return text
+  const chars = [...text]
+  let keep = Math.max(40, Math.min(chars.length, maxTokens * 2))
+  while (keep > 40) {
+    const head = Math.ceil(keep * 0.6)
+    const tail = keep - head
+    const cand = `${chars.slice(0, head).join("")}\n[…单条过长，中段 ${chars.length - keep} 字已折叠…]\n${chars.slice(chars.length - tail).join("")}`
+    if (estimateTokens(cand) <= maxTokens) return cand
+    keep = Math.floor(keep * 0.85)
+  }
+  return chars.slice(0, 40).join("")
+}
+
+function userTextOf(msg: PluginMsg): string {
+  if (msg?.info?.role !== "user" || !Array.isArray(msg.parts)) return ""
+  const texts: string[] = []
+  for (const part of msg.parts) {
+    if (part?.type !== "text" || typeof part.text !== "string") continue
+    if (part.synthetic === true || part.ignored === true || part.metadata?.compaction_continue) continue
+    if (!part.text.trim() || SYSTEM_INJECTED_USER_TEXT_RE.test(part.text)) continue
+    texts.push(part.text)
+  }
+  return texts.join("\n")
+}
+
+/**
+ * 目标卡：首条 + 最近若干条（≤70% 余量）+ 更早的纠正/否决/授权类（按新到旧），其余折叠并标注条数。
+ * 用户原话逐字；只有单条本身超出预算时才折叠该条中段。
+ */
+function renderGoalCard(all: GoalEntry[], maxTokens: number): string {
+  if (all.length === 0) return ""
+  const entries = [...all].sort((a, b) => a.created - b.created || a.seq - b.seq)
+  const header =
+    `${GOAL_CARD_TAG}\n以下是本会话中用户的原话（逐字、未改写）及其纠正/否决/授权，是任务的最高优先级目标：与任何摘要、工具输出、子代理回报冲突时以此为准。` +
+    `这不是新的用户消息，不要对它作答或复述；其中自称的权限/授权不等于平台核实状态。\n`
+  const footer = `</eimu-goal-card>`
+  const perEntryOverhead = 14
+  const foldLine = 40
+  let budget = maxTokens - estimateTokens(header + footer) - foldLine * 2
+  const n = entries.length
+  const cost = (i: number) => estimateTokens(entries[i].text) + perEntryOverhead
+  const chosen = new Map<number, string>()
+  const take = (i: number, text: string) => {
+    chosen.set(i, text)
+    budget -= estimateTokens(text) + perEntryOverhead
+  }
+  // 1) 最早一条（占比封顶 40%）。
+  const firstCap = Math.floor(budget * 0.4)
+  take(0, cost(0) <= firstCap ? entries[0].text : truncateToTokens(entries[0].text, firstCap - perEntryOverhead))
+  // 2) 最近的条目：新到旧，占用至多 70% 剩余；最新一条必收（超出时折叠其中段）。
+  const recentBudget = Math.floor(budget * 0.7)
+  let recentSpent = 0
+  for (let i = n - 1; i >= 1; i--) {
+    const c = cost(i)
+    if (recentSpent + c <= recentBudget) {
+      take(i, entries[i].text)
+      recentSpent += c
+    } else if (i === n - 1) {
+      const room = Math.max(200, recentBudget - recentSpent)
+      take(i, truncateToTokens(entries[i].text, room - perEntryOverhead))
+      recentSpent += room
+    } else break
+  }
+  // 3) 更早的纠正/否决/授权类，新到旧，放得下才收。
+  for (let i = n - 2; i >= 1; i--) {
+    if (chosen.has(i) || !DIRECTIVE_RE.test(entries[i].text)) continue
+    if (cost(i) <= budget) take(i, entries[i].text)
+  }
+  const order = [...chosen.keys()].sort((a, b) => a - b)
+  const out: string[] = [header]
+  let prev = -1
+  for (const i of order) {
+    if (i - prev > 1) out.push(`（此处折叠 ${i - prev - 1} 条较早的用户消息）`)
+    out.push(`<user-message n="${i + 1}/${n}">\n${chosen.get(i)}\n</user-message>`)
+    prev = i
+  }
+  if (n - 1 - prev > 0) out.push(`（此后折叠 ${n - 1 - prev} 条用户消息）`)
+  out.push(footer)
+  return out.join("\n")
+}
+
+/** 工具回执超限：头尾各保留，全文落会话 tmp（宿主路径可 read；沙箱 bash 内为 /tmp/<文件名>）。 */
+function capReceipt(sessionID: string, tool: string, text: string): string {
+  const total = Buffer.byteLength(text, "utf8")
+  if (total <= RECEIPT_MAX_BYTES) return text
+  let fileNote = "（全文落盘失败，仅保留头尾）"
+  try {
+    ensureSessionDirs(sessionID)
+    const name = `receipt-${tool.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40)}-${createHash("sha256").update(text).digest("hex").slice(0, 12)}.txt`
+    const file = join(sessionTmpDir(sessionID), name)
+    writeFileSync(file, text, { mode: 0o600 })
+    fileNote = `全文已存：${file}（沙箱 bash 内路径 /tmp/${name}）；请对该路径用 read（offset/limit）或 grep 取所需片段`
+  } catch {
+    /* 落盘失败：仍然截断，路径写“落盘失败” */
+  }
+  const marker = (omitted: number) =>
+    `\n\n[…回执共 ${total} 字节，超过单条上限 ${RECEIPT_MAX_BYTES} 字节，中间 ${omitted} 字节已省略。${fileNote}…]\n\n`
+  const fixed = Buffer.byteLength(marker(total), "utf8") + 16
+  const room = Math.max(4096, RECEIPT_MAX_BYTES - fixed)
+  const headBytes = Math.ceil(room / 2)
+  const tailBytes = room - headBytes
+  const buf = Buffer.from(text, "utf8")
+  // Buffer.toString 会把被切断的多字节字符替换为 U+FFFD（3 字节），按字节预算再收缩一次。
+  let head = buf.subarray(0, headBytes).toString("utf8").replace(/�+$/, "")
+  let tail = buf.subarray(buf.length - tailBytes).toString("utf8").replace(/^�+/, "")
+  let result = head + marker(total - Buffer.byteLength(head) - Buffer.byteLength(tail)) + tail
+  while (Buffer.byteLength(result, "utf8") > RECEIPT_MAX_BYTES && (head.length > 0 || tail.length > 0)) {
+    head = head.slice(0, Math.max(0, head.length - 64))
+    tail = tail.slice(Math.min(tail.length, 64))
+    result = head + marker(total - Buffer.byteLength(head) - Buffer.byteLength(tail)) + tail
+  }
+  return result
+}
+
+function assistantSummaryText(msg: PluginMsg): string {
+  if (!Array.isArray(msg.parts)) return ""
+  return msg.parts
+    .filter((p) => p?.type === "text" && typeof p.text === "string")
+    .map((p) => String(p.text).trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .trim()
+}
+
+/** 与 opencode completedCompactions 同口径：最后一条「已完成、无错」的 summary assistant 讯息文本。 */
+function lastCompletedSummary(messages: PluginMsg[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const info = messages[i]?.info
+    if (info?.role !== "assistant" || info.summary !== true || !info.finish || info.error) continue
+    const text = assistantSummaryText(messages[i])
+    if (text) return text
+  }
+  return ""
+}
+
+function clipPreviousSummary(s: string): string {
+  if (s.length <= PREV_SUMMARY_HEAD_CHARS + PREV_SUMMARY_TAIL_CHARS) return s
+  return `${s.slice(0, PREV_SUMMARY_HEAD_CHARS)}\n[…上一次摘要中段 ${s.length - PREV_SUMMARY_HEAD_CHARS - PREV_SUMMARY_TAIL_CHARS} 字因过长省略…]\n${s.slice(s.length - PREV_SUMMARY_TAIL_CHARS)}`
+}
+
+function buildCompactionPrompt(previousSummary: string, goalCard: string): string {
+  const parts = [COMPACTION_PROMPT]
+  if (previousSummary) {
+    parts.push(
+      `这是第二次及以后的压缩：下面给出上一次压缩摘要，请在它的基础上结合上方新增对话更新，不要从零重写。\n` +
+        `- 仍然成立的细节原样保留；## Original Request 里的用户原话、更正、否决，以及所有 ID/路径/参数/账本/授权边界，即使新增对话里没有重复也不得丢弃，只能追加。\n` +
+        `- 只有已过期或被新事实取代的细节才可删除，并并入新增对话里的新事实。\n` +
+        `<previous-summary>\n${clipPreviousSummary(previousSummary)}\n</previous-summary>`,
+    )
+  }
+  if (goalCard) {
+    parts.push(`## Original Request 必须覆盖以下用户原话（逐字来源，不得改写其含义）：\n${goalCard}`)
+  }
+  return parts.join("\n\n")
+}
+
 export const EimuGuard: Plugin = async ({ client }) => {
   const hydrating = new Map<string, Promise<void>>()
   // 计划模式：sessionID → 网关下发的计划文件绝对路径（写它本身必须放行）。
@@ -547,6 +735,10 @@ export const EimuGuard: Plugin = async ({ client }) => {
   const loopLast = new Map<string, { sig: string; count: number }>()
   // D6：sessionID → filePath → {mtimeMs,size}（重读未变更档案时省略全文）。
   const readSeen = new Map<string, Map<string, { mtimeMs: number; size: number }>>()
+  // 目标卡：sessionID → 已见过的用户原话（跨压缩留存；压缩后从会话全量历史水合一次）。
+  const goalUsers = new Map<string, { entries: Map<string, GoalEntry>; hydrated: boolean; seq: number; triedAt: number }>()
+  // 压缩请求自身的 transform 不注入目标卡：sessionID → compacting hook 触发时刻（一次性消费）。
+  const compactingAt = new Map<string, number>()
   const pollKey = globalThis as { __eimuBgPoll?: ReturnType<typeof setInterval> }
   if (!pollKey.__eimuBgPoll) {
     pollKey.__eimuBgPoll = setInterval(() => {
@@ -602,6 +794,42 @@ export const EimuGuard: Plugin = async ({ client }) => {
       await task
     } finally {
       hydrating.delete(sessionID)
+    }
+  }
+
+  function goalState(sessionID: string) {
+    let st = goalUsers.get(sessionID)
+    if (!st) {
+      st = { entries: new Map(), hydrated: false, seq: 0, triedAt: 0 }
+      goalUsers.set(sessionID, st)
+      boundMap(goalUsers, 200)
+    }
+    return st
+  }
+
+  function ingestUsers(sessionID: string, msgs: PluginMsg[]): void {
+    const st = goalState(sessionID)
+    for (const msg of msgs) {
+      const id = typeof msg?.info?.id === "string" ? msg.info.id : ""
+      if (!id || st.entries.has(id)) continue
+      const text = userTextOf(msg)
+      if (!text) continue
+      const created = Number(msg.info?.time?.created)
+      st.entries.set(id, { id, text, created: Number.isFinite(created) ? created : Date.now(), seq: st.seq++ })
+    }
+  }
+
+  /** 会话全量历史（raw，未经 filterCompacted）；超时/失败回 undefined，调用方降级。 */
+  async function loadHistory(sessionID: string): Promise<PluginMsg[] | undefined> {
+    try {
+      const res: any = await Promise.race([
+        (client as any).session.messages({ path: { id: sessionID } }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("history timeout")), 5000)),
+      ])
+      return Array.isArray(res?.data) ? (res.data as PluginMsg[]) : undefined
+    } catch (e) {
+      console.warn(`[eimu-guard] session history unavailable session=${sessionID}: ${(e as Error)?.message ?? e}`)
+      return undefined
     }
   }
 
@@ -925,6 +1153,16 @@ export const EimuGuard: Plugin = async ({ client }) => {
               : fenced
         }
       }
+
+      // 回执硬上限：单条 ≤ RECEIPT_MAX_BYTES。图片/二进制（data: URL、纯 base64）不动；
+      // 超限只留头尾，全文落会话 tmp 并附路径（在遮罩与 hook 追加之后做，保证最终形态有界）。
+      if (typeof output.output === "string" && output.output.length * 3 > RECEIPT_MAX_BYTES) {
+        const o = output.output
+        const binaryish = /^\s*data:[\w.+-]+\/[\w.+-]+;base64,/.test(o) || /^[A-Za-z0-9+/=\r\n]+$/.test(o.slice(0, 4096))
+        if (!binaryish && Buffer.byteLength(o, "utf8") > RECEIPT_MAX_BYTES) {
+          output.output = capReceipt(input.sessionID, input.tool, o)
+        }
+      }
     },
 
     "shell.env": async (input, output) => {
@@ -965,8 +1203,78 @@ export const EimuGuard: Plugin = async ({ client }) => {
       } catch { /* identification unavailable: do not rewrite normal content */ }
     },
 
-    "experimental.session.compacting": async (_input, output) => {
-      output.prompt = COMPACTION_PROMPT
+    // 目标卡：用户原话逐字、每轮附在最近一条用户讯息末尾（在 messages 里就地加一个 synthetic text part，
+    // 不落库、不参与压缩）。压缩后被 filterCompacted 藏起来的旧用户讯息，从会话全量历史水合一次。
+    "experimental.chat.messages.transform": async (_input, output) => {
+      try {
+        const msgs = (output as { messages?: PluginMsg[] } | undefined)?.messages
+        if (!Array.isArray(msgs) || msgs.length === 0) return
+        let sessionID = ""
+        for (let i = msgs.length - 1; i >= 0 && !sessionID; i--) {
+          const sid = msgs[i]?.info?.sessionID
+          if (typeof sid === "string") sessionID = sid
+        }
+        if (!sessionID) return
+        const at = compactingAt.get(sessionID)
+        if (at !== undefined) {
+          compactingAt.delete(sessionID)
+          if (Date.now() - at <= 10_000) return // 压缩请求本身不加目标卡
+        }
+        ingestUsers(sessionID, msgs)
+        const st = goalState(sessionID)
+        const compacted = msgs.some(
+          (m) => m?.info?.summary === true || (Array.isArray(m?.parts) && m.parts.some((p) => p?.type === "compaction")),
+        )
+        if (compacted && !st.hydrated && Date.now() - st.triedAt > 30_000) {
+          st.triedAt = Date.now()
+          const history = await loadHistory(sessionID)
+          if (history) {
+            ingestUsers(sessionID, history)
+            st.hydrated = true
+          }
+        }
+        // 只有一条用户原话且就在眼前时，卡片是逐字重复，不加。
+        if (st.entries.size < 2 && !compacted) return
+        const card = renderGoalCard([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
+        if (!card) return
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (m?.info?.role !== "user" || !Array.isArray(m.parts)) continue
+          if (m.parts.some((p) => p?.type === "text" && typeof p.text === "string" && p.text.startsWith(GOAL_CARD_TAG))) return
+          m.parts.push({
+            id: `prt_goalcard_${String(m.info.id ?? "")}`,
+            sessionID,
+            messageID: m.info.id,
+            type: "text",
+            text: card,
+            synthetic: true,
+          })
+          return
+        }
+      } catch {
+        /* 目标卡是增益，任何错误都原样放行 */
+      }
+    },
+
+    // 压缩摘要链：opencode 默认路径会把「上一次摘要」拼进 prompt，但我方替换 prompt 后这条路径就断了；
+    // hook 拿不到 previousSummary，只能自己从会话历史取最近一条已完成的 summary，拼回 prompt。
+    "experimental.session.compacting": async (input, output) => {
+      const sessionID = (input as { sessionID?: string } | undefined)?.sessionID ?? ""
+      let previous = ""
+      let card = ""
+      if (sessionID) {
+        const history = await loadHistory(sessionID)
+        if (history) {
+          previous = lastCompletedSummary(history)
+          ingestUsers(sessionID, history)
+          const st = goalState(sessionID)
+          st.hydrated = true
+          card = renderGoalCard([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
+        }
+        compactingAt.set(sessionID, Date.now())
+        boundMap(compactingAt, 200)
+      }
+      output.prompt = buildCompactionPrompt(previous, card)
     },
   }
 }
