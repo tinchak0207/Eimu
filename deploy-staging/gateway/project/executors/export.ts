@@ -14,6 +14,7 @@ import { EXPORT_PRESETS, NODE_SPECS } from "../specs"
 import { checkExportArtifacts } from "../gates.ts"
 import { isPublishFailure, publishProjectArtifact } from "../publish.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output } from "../types"
+import { appendInterchangeOutputs } from "./interchange"
 import { flattenInputs, isAudio, isJson, isObj, isVideo, mimeOf, projectScratchDir, readJsonOutput } from "./timeline"
 
 async function sha256File(file: string): Promise<{ sha: string; bytes: number }> {
@@ -250,6 +251,23 @@ export const exportExecutor: NodeExecutor = {
     })
     if (isPublishFailure(published)) meta.publishError = String(published.reason).slice(0, 200)
     else outputs[0].url = published.url
+    // 剪映草稿 + FCPXML。失败只记在 mp4 meta，不把已通过的成片打成失败。
+    outputs.push(...await appendInterchangeOutputs(ctx, outputs[0], {
+      clips: clips.map((c, i) => ({
+        id: c.id || `clip_${i}`,
+        path: c.path,
+        durationSec: c.durationSec,
+        inSec: c.inSec,
+        outSec: c.outSec,
+        speed: c.speed,
+      })),
+      audio: audioOutputs.map((e) => ({ id: e.from ?? e.output.artifactId, path: e.output.path, durationSec: e.output.durationSec })),
+      scratch,
+      width: presetMeta.w,
+      height: presetMeta.h,
+      subtitleFiles: entries.filter((e) => e.output.port === "srt" || e.output.port === "ass").map((e) => ({ path: e.output.path, port: e.output.port })),
+      timelineSubtitles: timelineValue?.subtitles,
+    }))
     return { ok: true, costCoins: 0, outputs }
   },
 }

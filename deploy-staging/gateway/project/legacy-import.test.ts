@@ -240,11 +240,36 @@ function bareSession(apiKey: string, id: string): SessionState {
 }
 
 describe("EIMU_PROJECT_MODE 开关与 allowlist（按已鉴权 userId）", () => {
-  test("缺省/乱值 = off；on/allowlist 大小写与空白容错", () => {
-    expect(sessionsCore.projectModeSwitch({})).toBe("off")
+  test("两个都未设置 = on；显式乱值仍 off；on/allowlist 大小写与空白容错", () => {
+    expect(sessionsCore.projectModeSwitch({})).toBe("on")
+    expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "" })).toBe("on")
+    expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "   " })).toBe("on")
     expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "garbage" })).toBe("off")
+    expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "garbage", PROJECT_MODE_DEFAULT: "on" })).toBe("off")
     expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: " ON " })).toBe("on")
     expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "allowlist" })).toBe("allowlist")
+    expect(sessionsCore.projectModeSwitch({ PROJECT_MODE_DEFAULT: "garbage" })).toBe("off")
+    const st = bareSession("sk-seat-default-on", "sess_seat_default_on")
+    sessionsCore.latchSessionSeat(st, {})
+    expect(st.seat).toBe("creator")
+    expect(st.projectMode).toBe(true)
+  })
+
+  test("PROJECT_MODE_DEFAULT=off 且未设 EIMU → off", () => {
+    expect(sessionsCore.projectModeSwitch({ PROJECT_MODE_DEFAULT: "off" })).toBe("off")
+    expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "", PROJECT_MODE_DEFAULT: "off" })).toBe("off")
+  })
+
+  test("EIMU_PROJECT_MODE=off 压过 PROJECT_MODE_DEFAULT=on（回滚）", () => {
+    expect(sessionsCore.projectModeSwitch({ EIMU_PROJECT_MODE: "off", PROJECT_MODE_DEFAULT: "on" })).toBe("off")
+    const st = bareSession("sk-seat-rollback", "sess_seat_rollback")
+    sessionsCore.latchSessionSeat(st, { EIMU_PROJECT_MODE: "off", PROJECT_MODE_DEFAULT: "on" })
+    expect(st.seat).toBe("creator_legacy")
+    expect(st.projectMode).toBe(false)
+  })
+
+  test("PROJECT_MODE_DEFAULT=allowlist 且未设 EIMU → allowlist", () => {
+    expect(sessionsCore.projectModeSwitch({ PROJECT_MODE_DEFAULT: "allowlist" })).toBe("allowlist")
   })
 
   test("off：新会话锁存为 creator_legacy（回滚）", () => {

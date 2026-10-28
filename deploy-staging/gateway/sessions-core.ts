@@ -41,10 +41,15 @@ initPersistence()
 export type ProjectModeSwitch = "on" | "off" | "allowlist"
 export type SessionSeat = "creator" | "creator_legacy"
 
-/** EIMU_PROJECT_MODE=on|off|allowlist；缺省/拼错一律 off（回滚是安全侧）。 */
+/** 新会话缺省 on。EIMU_PROJECT_MODE 显式优先（空串当未设置）；未设置再读 PROJECT_MODE_DEFAULT。
+ *  两者都认 on|off|allowlist，乱值 off。显式 EIMU_PROJECT_MODE=off 压过默认，是回滚。 */
 export function projectModeSwitch(env: Record<string, string | undefined> = process.env): ProjectModeSwitch {
-  const raw = (env.EIMU_PROJECT_MODE ?? "").trim().toLowerCase()
-  return raw === "on" || raw === "allowlist" ? raw : "off"
+  const read = (key: "EIMU_PROJECT_MODE" | "PROJECT_MODE_DEFAULT"): ProjectModeSwitch | null => {
+    const raw = (env[key] ?? "").trim().toLowerCase()
+    if (raw === "") return null
+    return raw === "on" || raw === "allowlist" ? raw : "off"
+  }
+  return read("EIMU_PROJECT_MODE") ?? read("PROJECT_MODE_DEFAULT") ?? "on"
 }
 
 /** allowlist 名单：EIMU_PROJECT_MODE_ALLOWLIST="<userId>,<userId>"（逗号/空白分隔）。 */
