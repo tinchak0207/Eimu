@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { dirname, isAbsolute } from "node:path"
 import { readFile, stat } from "node:fs/promises"
 import { fail, ok } from "../lib/client"
+import { cloudPathRefusal } from "../lib/agent-paths"
 import { blobPath, uploadBlob } from "../lib/img-composite"
 import {
   detectSubtitleBand,
@@ -23,6 +24,7 @@ function msgOf(error: unknown): string {
 
 /** 错误码分类（不改 lib 的讯息文字，只给稳定码）。 */
 function classify(message: string): string {
+  if (message.includes("locus=local")) return "locus_mismatch"
   if (/^Destination .* already exists/u.test(message)) return "destination_exists"
   if (/no video stream$/u.test(message)) return "no_video_stream"
   if (/: no audio or video stream$/u.test(message) || /duration is unavailable$/u.test(message) || /Invalid data found/u.test(message)) return "not_media"
@@ -71,6 +73,8 @@ export default tool({
     const warnings: string[] = []
     try {
       if (typeof args.source !== "string" || !isAbsolute(args.source)) throw new Error("source 必须是绝对路径")
+      const sourceRefusal = cloudPathRefusal(args.source, process.cwd())
+      if (sourceRefusal) throw new Error(sourceRefusal)
       if (!(await isFile(args.source))) throw new Error(`cannot read ${args.source}: 来源档案不存在`)
       const info = await probeMedia(args.source)
       requireVideo(info, args.source)

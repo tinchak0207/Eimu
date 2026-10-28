@@ -56,7 +56,7 @@ const PERMISSION_MODES = Object.freeze(["off", "ask", "auto", "full"]);
  * ——不在白名单的工具在 ask 档一律回 ask（「读取预设允许、写入询问」）。
  * 与云端 deploy-staging/gateway/device-bridge-policy.ts 的 READ_ONLY_BRIDGE_TOOLS 逐项一致。
  */
-const READ_ONLY_TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat"]);
+const READ_ONLY_TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat", "probe_media"]);
 
 /** 决策理由（结构化，非自由字串；正对应 Claude PermissionDecisionReason 的精神）。 */
 const REASONS = Object.freeze({

@@ -1,5 +1,6 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import { ok, fail } from "../lib/client";
+import { LOCAL_AGENT_HANDOFF } from "../lib/agent-paths";
 
 // local_files — 本机档案桥（W6）的**云端侧工具**。
 //
@@ -14,7 +15,7 @@ import { ok, fail } from "../lib/client";
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 
-const DEVICE_OPS = ["list_dir", "read_file", "grep", "stat"] as const;
+const DEVICE_OPS = ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"] as const;
 
 /** 装置端 list_dir 的既有硬上限（desktop bridge-protocol MAX_LIST_ENTRIES＝闸道 max_entries 上界）。 */
 const DEVICE_LIST_MAX_ENTRIES = 2000;
@@ -103,8 +104,14 @@ export default tool({
   description:
     "读取**使用者自己电脑上**的档案（本机档案桥）。这不是云端工作区、也不是站内素材库；" +
     "档案实际躺在使用者的电脑里，只能读取他**明确授权过的资料夹**（在对话中同意授权，或在桌面版授权），" +
-    "范围外一律被拒。四个 op：list_dir＝列出目录内容；read_file＝读取单一档案内容（有大小上限，过长会截断，回传 offset 时可用它分段续读整份）；" +
-    "grep＝在档案内容里搜寻文字；stat＝取得单一档案或目录的资讯（大小、时间、型别）。" +
+    "范围外一律被拒。六个 op：list_dir＝列出目录内容；read_file＝读取文字档（二进制会清空正文并交回本机媒体操作，有大小上限，过长会截断，回传 offset 时可用它分段续读整份文字）；" +
+    "grep＝在档案内容里搜寻文字；stat＝取得单一档案或目录的资讯（大小、时间、型别）；" +
+    "probe_media＝用本机 ffprobe 看时长和流，不把视频字节送进云端；" +
+    "render_media＝在使用者电脑上按 cuts 硬切并写到 output_path（必须在已授权目录内）。" +
+    "【执行面】这条工具就是本机 agent。路径在使用者电脑上时，剪辑、覆盖、探测都在这里做完。" +
+    "禁止改派云端 editor，禁止用 video_evidence / timeline 去读 /home、/Users 或盘符路径，" +
+    "禁止在 render_media 还没回传 path 与 size 时声称已经剪完或已经覆盖。" +
+    LOCAL_AGENT_HANDOFF + " " +
     "当使用者说「看一下我 Downloads 里的东西」「读我电脑上那个档案」「帮我在本机某个资料夹找…」时用本工具。" +
     "若回传显示装置未连线或路径未授权，请把回传里的引导语**照实转达**给使用者（例如请他在对话中同意授权、或在桌面版授权资料夹），" +
     "不要只回「我做不到」。" +
@@ -134,9 +141,9 @@ export default tool({
     "或再带 offset=next_offset 读一次，直到回传内容为空。",
   args: {
     op: tool.schema
-      .enum(["list_dir", "read_file", "grep", "stat"])
+      .enum(["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"])
       .describe(
-        "要执行的本机档案操作：list_dir（列目录）、read_file（读单档内容）、grep（在内容中搜寻）、stat（取单一档案/目录资讯）。",
+        "本机操作：list_dir、read_file、grep、stat、probe_media（本机看媒体）、render_media（本机剪完写回）。",
       ),
     path: tool.schema
       .string()
@@ -166,6 +173,20 @@ export default tool({
       .describe(
         "read_file 的起始位元组位移（非负整数），用于分段续读大档：回传 has_more=true 时，把 offset 设为回传的 next_offset 再读。仅 op=read_file 适用。",
       ),
+    output_path: tool.schema
+      .string()
+      .optional()
+      .describe("仅 op=render_media：输出绝对路径，必须在已授权目录内。可与输入同目录覆盖。"),
+    cuts: tool.schema
+      .array(
+        tool.schema.object({
+          in_sec: tool.schema.number().describe("入点秒"),
+          out_sec: tool.schema.number().describe("出点秒，必须大于入点"),
+          speed: tool.schema.number().optional().describe("变速 0.25..8，省略＝1"),
+        }),
+      )
+      .optional()
+      .describe("仅 op=render_media：按顺序硬切的精华段，1..48 段。"),
     authorization_token: tool.schema
       .string()
       .optional()
@@ -177,7 +198,7 @@ export default tool({
   async execute(args, context) {
     const op = args.op;
     if (!(DEVICE_OPS as readonly string[]).includes(op)) {
-      return fail("bad_request", `不支援的本机档案操作：${String(op)}（仅限 list_dir/read_file/grep/stat）。`);
+      return fail("bad_request", `不支援的本机档案操作：${String(op)}（仅限 list_dir/read_file/grep/stat/probe_media/render_media）。`);
     }
 
     // name_glob 只在云端 runtime 过滤，**不下发**给闸道／装置（冻结契约栏位不得增改）。
@@ -197,6 +218,16 @@ export default tool({
     if (args.limit !== undefined) body.limit = args.limit;
     // offset：分段续读的起点（非负整数）。夹制仍在闸道 sanitizeToolArgs（唯一夹制点）。
     if (args.offset !== undefined) body.offset = args.offset;
+    if (op === "render_media") {
+      if (typeof args.output_path !== "string" || args.output_path.trim().length === 0) {
+        return fail("bad_request", "render_media 需要 output_path（已授权目录内的绝对路径）。");
+      }
+      if (!Array.isArray(args.cuts) || args.cuts.length === 0) {
+        return fail("bad_request", "render_media 需要 cuts（1..48 段，每段 in_sec/out_sec）。");
+      }
+      body.output_path = args.output_path;
+      body.cuts = args.cuts;
+    }
     // 带 name_glob（＝要「列出所有」）时把 list_dir 的 max_entries 拉到装置既有上限 2000，
     // 以免预设 200 笔上限造成静默漏列；不超过装置上限，也不改装置端上限。
     if (useGlob) body.max_entries = DEVICE_LIST_MAX_ENTRIES;
@@ -334,7 +365,11 @@ export default tool({
       } else {
         payload.has_more = null;
       }
-      if (payload.has_more === true) {
+      if (rawResult.binary === true) {
+        payload.note = LOCAL_AGENT_HANDOFF;
+        payload.next_op = "probe_media";
+        payload.has_more = false;
+      } else if (payload.has_more === true) {
         payload.note =
           `本次只读到第 ${startOffset} 位元组起共 ${readBytes ?? "未知"} 位元组` +
           `（档案共 ${size ?? "未知"} 位元组），还有后续内容；**必须**再呼叫 read_file 带 ` +
@@ -343,6 +378,8 @@ export default tool({
     } else if (truncated) {
       payload.note = "内容超过单次读取上限，已截断；如需更多内容请缩小范围或分段读取。";
     }
+    payload.locus = "local";
+    payload.agent = "local";
     return ok(payload);
   },
 });

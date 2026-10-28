@@ -56,17 +56,18 @@ const invokeCalls = () => calls.filter((c) => c.url.includes("/internal/device/i
 
 // ── 工具宣告面 ────────────────────────────────────────────────────────
 describe("local_files：模型唯一的说明与 args 契约", () => {
-  test("description 讲清「使用者自己电脑」、非云端、授权范围、四个 op 与转达引导语", () => {
+  test("description 讲清「使用者自己电脑」、非云端、授权范围、六个 op 与转达引导语", () => {
     const d: string = localFiles.description
     expect(d).toContain("使用者自己电脑上")
     expect(d).toContain("不是云端工作区")
     expect(d).toContain("明确授权过的资料夹")
-    for (const op of ["list_dir", "read_file", "grep", "stat"]) expect(d).toContain(op)
+    for (const op of ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]) expect(d).toContain(op)
     expect(d).toContain("照实转达")
+    expect(d).toContain("locus=local")
   })
 
-  test("args：op 恰好接受四个值并拒第五个；path 必填、pattern/max_bytes/limit 选填", () => {
-    for (const op of ["list_dir", "read_file", "grep", "stat"]) {
+  test("args：op 接受六个本机操作并拒写入/执行；path 必填、pattern/max_bytes/limit 选填", () => {
+    for (const op of ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]) {
       expect(localFiles.args.op.safeParse(op).success).toBe(true)
     }
     expect(localFiles.args.op.safeParse("write_file").success).toBe(false)

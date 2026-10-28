@@ -28,7 +28,8 @@
 // 操作者后备。票绝不落盘、绝不入 log。
 //
 // ── 安全模型 ────────────────────────────────────────────────────────────
-//   1. 工具面收敛成最小集合 list_dir/read_file/grep/stat（无写/删/执行）。
+//   1. 工具面：list_dir/read_file/grep/stat/probe_media，加上 render_media
+//      （固定 argv 的本机 ffmpeg，输出只许落在已授权目录）。无任意 shell、无删除。
 //   2. 伺服器侧 denylist（device-bridge-policy.isSensitivePath）：路径敏感一律拒，
 //      不倚赖本机端自报（纵深防御）。
 //   3. 逐次同意票（consent token）：每次下发一票，单次可用、绑

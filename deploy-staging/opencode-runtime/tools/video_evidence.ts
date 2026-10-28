@@ -4,7 +4,7 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { extname, join, resolve } from "node:path"
 import { fail, ok } from "../lib/client"
-import { explainMissingPath } from "../lib/agent-paths"
+import { cloudPathRefusal, explainMissingPath } from "../lib/agent-paths"
 import { blobPath, uploadBlob } from "../lib/img-composite"
 import {
   TILE_COLUMNS,
@@ -93,6 +93,7 @@ function round(value: number): number {
 
 /** 错误码分类（hypit 没有码；这里把它的错误语义映成稳定码，不改讯息文字）。 */
 function classify(message: string): string {
+  if (message.includes("locus=local")) return "locus_mismatch"
   if (/^Destination .* already exists/u.test(message)) return "destination_exists"
   if (/: no video stream$/u.test(message)) return "no_video_stream"
   if (/: no audio or video stream$/u.test(message)) return "no_media_stream"
@@ -319,6 +320,8 @@ async function loadWords(value: string | undefined, cwd: string): Promise<Transc
 async function materialize(source: string, cwd: string): Promise<{ path: string; temp: boolean }> {
   if (!isVideoUrl(source)) {
     const path = resolve(cwd, source)
+    const refusal = cloudPathRefusal(path, cwd)
+    if (refusal) throw new Error(refusal)
     const isFile = await stat(path).then((item) => item.isFile(), () => false)
     if (!isFile) throw new Error(`cannot read ${path}${explainMissingPath(path) ?? ""}`)
     return { path, temp: false }

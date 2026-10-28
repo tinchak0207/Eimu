@@ -129,8 +129,8 @@ test("isSensitivePath: 缺值／型别错／空字串一律 fail-closed 视为�
 
 // ───────────────────────── 工具白名单 ─────────────────────────
 
-test("isToolAllowed: 最小集合四工具放行、其余全挡", () => {
-  assert.deepEqual([...DEVICE_BRIDGE_TOOLS], ["list_dir", "read_file", "grep", "stat"])
+test("isToolAllowed: 读工具加 probe_media 放行，render_media 在名单里，任意写删执行仍挡", () => {
+  assert.deepEqual([...DEVICE_BRIDGE_TOOLS], ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"])
   for (const t of DEVICE_BRIDGE_TOOLS) assert.equal(isToolAllowed(t), true, t)
   for (const t of ["write_file", "delete_file", "rm", "exec", "bash", "Read", "read_file ", "", null, 1]) {
     assert.equal(isToolAllowed(t), false, String(t))
@@ -958,7 +958,7 @@ test("/internal/device/status: session 解析不到 → session_unknown", async 
 
 test("内部路由不放宽既有 denylist／白名单：op 白名单与 policy 工具集一致", () => {
   // 一对一映射的守门：内部 op 集合必须恰好等于既有 DeviceBridgeTool 白名单。
-  const tools = ["list_dir", "read_file", "grep", "stat"]
+  const tools = ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]
   for (const t of tools) assert.equal(isToolAllowed(t), true, t)
   assert.equal(isToolAllowed("write_file"), false)
   assert.equal(isToolAllowed("delete"), false)

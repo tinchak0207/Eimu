@@ -10,15 +10,19 @@
 //
 // 预设 OFF：本档本身不含开关；开关与否在 device-bridge.ts（EIMU_DEVICE_BRIDGE）。
 
-/** 允许经装置桥执行的工具**最小集合**。刻意不含任何写入／删除／执行命令工具。 */
-export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
+/**
+ * 装置桥工具面。读：list_dir/read_file/grep/stat/probe_media。
+ * 写：render_media（固定 argv 的本机 ffmpeg，输出必须落在已授权目录）。
+ * 没有任意 shell、没有删除。
+ */
+export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"] as const
 export type DeviceBridgeTool = (typeof DEVICE_BRIDGE_TOOLS)[number]
 
 /**
- * 只读工具白名单（模式 ask 下可自动放行的工具）：**新增写入型工具时不得加进来**——
- * 不在白名单的工具在 ask 档一律回 ask（「读取预设允许、写入询问」）。
+ * 只读工具白名单（模式 ask 下可自动放行的工具）。
+ * render_media 是写入，不得加进来：ask 档一律再问一次。
  */
-export const READ_ONLY_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
+export const READ_ONLY_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat", "probe_media"] as const
 
 /** 单次回传内容硬上限。避免把整个档案灌进模型上下文。 */
 export const MAX_READ_BYTES = 256 * 1024
