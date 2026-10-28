@@ -11,8 +11,11 @@
  *   2) 命中意图 → 默认起画布骨架（既有 PROMPT_SKELETON／startFast）+ 注入「模型改 DSL」
  *   3) 近 N 天媒体会话 workflow_write 覆盖率发版门（tools/check-media-workflow-write-coverage.*）
  *
- * 本模组只放纯函数与文案；接线在 messages-gw（意图标记）、events-translate（写穿记账）、
- * opencode-event-handler（session.idle 收盘拦截）。
+ * 2026-10-28 用户裁定删闸：第 1、3 条已停用——opencode-event-handler 不再调用
+ * shouldBlockCompletionForWorkflowWrite／buildWorkflowWriteGateNudge，发版脚本不再跑覆盖率门
+ *（根因见记忆 2026-10-28-eimu-context-rot-root-cause）。这两个函数仅留作纯函数，不接线。
+ *
+ * 本模组只放纯函数与文案；接线在 messages-gw（意图标记）、events-translate（写穿记账）。
  */
 
 /** 首期硬闸覆盖的多步影音模板（Jev／PROMPT_SKELETON 判定 id）。 */
@@ -164,7 +167,6 @@ export function buildAvCanvasSkeletonDirective(templateId: string, opts?: { plan
     `【机器·画布写穿·默认骨架】System One 判定多步影音制作＝\`${templateId}\`${lean ? "（策划瘦身：仅 text／结构）" : ""}。` +
     `网关已按模板自动起画布骨架（PROMPT_SKELETON／DSL 可读）。规则：\n` +
     `1. 不要另起平行产线；读 \`canvas_get_state\` 的 \`dsl\`，改 steps 后用 \`workflow_write\` 整份交回（模型改 DSL，不是手拼 ops）。\n` +
-    `2. 收盘硬闸：本会话未成功 \`workflow_write\`（非 dry_run）不得完成；document 链接不能代替画布写穿。\n` +
-    `3. 新产线确认：工具回 \`confirm_new_line\` 时，确为有意铺线则带 \`confirm_new_line: true\` 重交。`
+    `2. 新产线确认：工具回 \`confirm_new_line\` 时，确为有意铺线则带 \`confirm_new_line: true\` 重交。`
   )
 }

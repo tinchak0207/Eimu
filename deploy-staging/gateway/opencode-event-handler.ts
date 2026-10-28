@@ -26,12 +26,7 @@ import { loadUserSettings } from "./persistence.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { noteReasoningDelta, resetReasoningCap, buildReasoningNudge } from "./reasoning-cap.ts"
 import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan } from "./plan-promise.ts"
-import {
-  shouldBlockCompletionForWorkflowWrite,
-  buildWorkflowWriteGateNudge,
-  isTextOnlyRequest,
-  WORKFLOW_WRITE_GATE_MARK,
-} from "./canvas-write-gate.ts"
+import { isTextOnlyRequest } from "./canvas-write-gate.ts"
 // 2026-10-21：工具生命周期终态（running 永不终结只标「未确认」）＋无回执完成主张闸。
 import { sweepStaleTools, TOOL_RUNNING_CAP } from "./tool-lifecycle.ts"
 import {
@@ -759,74 +754,9 @@ export function handleOpencodeEvent(event: any): void {
           emitUnfulfilledPlanNotice(state, (name, data) => emitToSession(state, name, data))
           state.planExperts = undefined
         }
-        // 2026-10-11 修画布硬闸：多步影音制作未 workflow_write 真写穿 → 不得完成（每会话补写 1 次）。
-        if (
-          shouldBlockCompletionForWorkflowWrite({
-            avProductionIntent: state.avProductionIntent === true,
-            workflowWriteSucceeded: state.workflowWriteSucceeded === true,
-            nudgeSent: state.workflowWriteGateNudgeSent === true,
-            turnAborted: state.turnAborted === true,
-            hasLastPromptBody: Boolean(state.lastPromptBody),
-          })
-        ) {
-          state.workflowWriteGateNudgeSent = true
-          const nudge = buildWorkflowWriteGateNudge(state.avProductionTemplateId)
-          emitToSession(state, "message.delta", {
-            text: `这一轮还差最后一步没落定，正在补上，稍等一下。\n`,
-          })
-          const body = state.lastPromptBody
-          if (body) {
-            const gen = state.turnGen ?? 0
-            const tailBlock = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ `
-            const parts = body.parts.map((pt) => ({ ...pt }))
-            const last = parts.length > 0 ? parts[parts.length - 1] : undefined
-            if (last && "text" in last && last.type === "text" && typeof last.text === "string") {
-              last.text = `${last.text}${tailBlock}${nudge}`
-            } else {
-              parts.push({ type: "text", text: `${tailBlock}${nudge}` })
-            }
-            const nudgeBody = { ...body, parts }
-            state.retryQueued = true
-            console.warn(
-              `[gateway] canvas-write-gate: ${WORKFLOW_WRITE_GATE_MARK} block completion (no workflow_write) — session=${state.sessionId} template=${state.avProductionTemplateId ?? "?"}`,
-            )
-            setTimeout(async () => {
-              const cur = sessions.get(state.sessionId)
-              if (!cur) return
-              if ((cur.turnGen ?? 0) !== gen) {
-                // 新回合仍在途时不关新回合；旧回合已经空闲则补 turn.done，避免前端挂死。
-                if ((cur.lastTurnActiveAt ?? 0) > 0) return
-                closeTurnAndFlushWakes(cur)
-                return
-              }
-              if (cur.turnAborted) {
-                cur.retryQueued = false
-                markDirty(cur)
-                closeTurnAndFlushWakes(cur)
-                return
-              }
-              try {
-                // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
-                const reverted = await revertDeadTail(cur.opencodeSessionId)
-                const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
-                const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
-                  method: "POST",
-                  body: JSON.stringify(toSend),
-                  timeoutMs: 10000,
-                })
-                if (!res.ok) throw new Error(`status ${res.status}`)
-                cur.retryQueued = false
-                cur.turnToolStarted = false
-                console.log(`[gateway] canvas-write-gate: nudge dispatched — session=${cur.sessionId}`)
-              } catch (e) {
-                console.error(`[gateway] canvas-write-gate nudge failed:`, e)
-                cur.retryQueued = false
-                closeTurnAndFlushWakes(cur)
-              }
-            }, TURN_RETRY_DELAY_MS)
-            break // 不发 turn.done：等补写轮结束
-          }
-        }
+        // 2026-10-28 用户裁定删闸：不再因「未 workflow_write」拦截 turn.done 或注入补写 nudge。
+        // 根因见记忆 2026-10-28-eimu-context-rot-root-cause（闸门奖励形式：86% 写穿发生在 nudge 之后、失败率 40%）。
+        // workflow_write 记账仍在 events-translate-tools.ts（state.workflowWriteSucceeded），仅供诊断。
         // 2026-10-21 工具生命周期终态：扫超时未终态的调用，只播「未确认」，禁止改写成功。
         // 位置＝canvas 闸之后、turn.done 之前；每 callId 只播一次。
         {

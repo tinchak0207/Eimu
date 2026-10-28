@@ -178,13 +178,12 @@
 
 生产证据：媒体会话 `workflow_write` 覆盖率 ≈1%（ledger 有影音交付、画布却空／只 dry_run）。用户裁定三件必须落地，禁止只写文档：
 
-1. **收盘硬闸（gateway）**：多步影音制作意图（首期＝music + 多镜视频／`feature_film`／`shortdrama_visual`／`novel_film`／`single_video`）在 `session.idle` **未成功 `workflow_write`（非 dry_run）不得完成**——网关拦截 `turn.done` 并补写一次 nudge。
+1. **收盘硬闸（gateway）：已停用（2026-10-28 用户裁定删闸，见记忆 2026-10-28-eimu-context-rot-root-cause）**。原因：闸门奖励形式——`workflow_write` 86% 发生在 nudge 之后、失败率 40%、32% 生图 prompt 从 DSL 抄、执行 0 次。`session.idle` 不再因未 `workflow_write` 拦截 `turn.done` 或注入补写 nudge；写穿记账保留供诊断。
 2. **默认起画布骨架**：命中意图即 PROMPT_SKELETON／DSL 模板上画布；模型只改 DSL（`canvas_get_state` → 改 steps → `workflow_write`），禁止只交 document 链接冒充灶上有菜。
-3. **覆盖率发版门**：近 N 天媒体会话 `workflow_write` 覆盖率须过门槛（默认 7 天 ≥15%）。发版前跑：
-   `MEDIA_WF_DAYS=7 MEDIA_WF_MIN_COVERAGE=0.15 python3 tools/check-media-workflow-write-coverage.py`
+3. **覆盖率发版门：已停用（2026-10-28，同上）**。`gateway-release.sh` 不再调用 `check-media-workflow-write-coverage.py`（脚本文件保留，仅作诊断，不是门）。
    诊断全量统计：`python3 tools/media-session-canvas-stats.py`（需 VPS ledger + opencode.db）。
 
-真源接线：`deploy-staging/gateway/canvas-write-gate.ts`、`opencode-event-handler.ts`（idle）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
+真源接线：`deploy-staging/gateway/canvas-write-gate.ts`（意图/骨架纯函数；拦截与 nudge 路径已不接线）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
 
 ## 按需附件（排障/设计/产品决策时才读，平时不载入）
 

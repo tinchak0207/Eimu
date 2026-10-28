@@ -486,7 +486,7 @@ cmd_release() {
   local GW_EXPECTED
   GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
   run_recon
-  run_media_wf_coverage
+  # 2026-10-28 用户裁定：媒体会话 workflow_write 覆盖率不再作为发版门（run_media_wf_coverage 保留但不调用，见根因 note）。
   local stage_tar="/tmp/gw-release-$rel.tar" stage_dir="/tmp/gw-release-$rel"
   git -C "$REPO_ROOT" archive --format=tar "$sha_full" "$SRC_SUBDIR" | run_remote_binary "cat > $stage_tar"
   run_gateway_activation "$rel" "$sha_full" "$sha_short" "$stage_tar" "$stage_dir" "$STATE_DIR" <<'REMOTE'
