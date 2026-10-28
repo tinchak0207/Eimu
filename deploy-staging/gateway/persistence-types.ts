@@ -36,6 +36,8 @@ export interface PersistableState {
   /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨
    *  agent-gateway 重启存活（否则用户批准过的偏离出口会被重启关上）。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文（≤12k），压缩/重启后每回合重注 system。 */
+  originalUserPrompt?: string
 }
 /** DB row 的 data 栏位 JSON 形状（Map/Set 均序列化为阵列）。 */
 export interface PersistedData {
@@ -62,6 +64,8 @@ export interface PersistedData {
   title?: string | null
   /** 2026-10-02：模板偏离 token 镜像（shape 防护在 hydrateRow，坏形状一律还原为 null）。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文镜像。 */
+  originalUserPrompt?: string
 }
 
 export interface PersistedRow {

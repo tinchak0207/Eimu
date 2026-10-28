@@ -394,6 +394,7 @@ function stripSecondarySystemBlocks(system: string): string {
     .filter((chunk) => {
       const head = chunk.trimStart()
       if (head.startsWith("【硬约束")) return true
+      if (head.startsWith("【用户原始目标")) return true
       return !SECONDARY_SYSTEM_HEADERS.some((header) => head.startsWith(header))
     })
     .join("\n")
@@ -409,12 +410,28 @@ function isSecondaryTail(part: GatewayPromptPart, index: number): boolean {
   return SECONDARY_SYSTEM_HEADERS.some((header) => text.includes(header))
 }
 
-type PinnedSession = SessionState & { pinnedConstraints?: string }
+// 2026-10-28：用户原始目标全文钉死上限（压缩后 active context 只剩 summary，
+// 每回合由 system 重注原文；与硬约束句并存）。
+const ORIGINAL_USER_PROMPT_CAP = 12_000
+
+type PinnedSession = SessionState & { pinnedConstraints?: string; originalUserPrompt?: string }
 
 export function rememberPinnedConstraints(state: SessionState, content: string): void {
   const bag = state as PinnedSession
-  if (bag.pinnedConstraints !== undefined) return
-  bag.pinnedConstraints = (state.turnGen ?? 0) === 0 ? extractPinnedConstraints(content) : ""
+  if (bag.pinnedConstraints === undefined) {
+    bag.pinnedConstraints = (state.turnGen ?? 0) === 0 ? extractPinnedConstraints(content) : ""
+  }
+  // 原始目标全文：首回合写一次（持久化，见 persistence-io）；空正文不占位。
+  if (bag.originalUserPrompt === undefined && (state.turnGen ?? 0) === 0) {
+    const raw = String(content ?? "").trim()
+    if (raw) bag.originalUserPrompt = raw.slice(0, ORIGINAL_USER_PROMPT_CAP)
+  }
+}
+
+/** 压缩不可丢的用户原始目标（首回合全文，≤12k）。 */
+export function originalUserPromptText(state: SessionState): string {
+  const text = (state as PinnedSession).originalUserPrompt ?? ""
+  return text.length > ORIGINAL_USER_PROMPT_CAP ? text.slice(0, ORIGINAL_USER_PROMPT_CAP) : text
 }
 
 export function pinnedConstraintsText(state: SessionState): string {

@@ -32,6 +32,7 @@ export const PERSISTED_DATA_KEYS = [
   "lastTurnActiveAt",
   "title", // 别名：记忆体 sessionTitle ↔ 落盘 title（见 hydrateRow）
   "tplDeviateToken",
+  "originalUserPrompt",
 ] as const
 
 export function serialize(state: PersistableState): PersistedData {
@@ -61,6 +62,7 @@ export function serialize(state: PersistableState): PersistedData {
     lastTurnActiveAt: state.lastTurnActiveAt,
     title: state.sessionTitle ?? null,
     tplDeviateToken: state.tplDeviateToken ?? null,
+    originalUserPrompt: typeof state.originalUserPrompt === "string" ? state.originalUserPrompt : undefined,
   }
 }
 
@@ -115,6 +117,10 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
       const at = (t as { at?: unknown }).at
       return { token, at: typeof at === "number" && Number.isFinite(at) ? at : Date.now() }
     })(),
+    // 2026-10-28：老会话（无此键但已有事件）还原为 ""，防重启后 turnGen 归零把后续消息误钉成原始目标。
+    originalUserPrompt: typeof d.originalUserPrompt === "string"
+      ? d.originalUserPrompt
+      : (typeof d.eventCounter === "number" && d.eventCounter > 0 ? "" : undefined),
   }
 }
 

@@ -27,7 +27,7 @@ import { ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, sch
 import { personaModel, isVisionModel } from "./model-registry.ts"
 import { buildTurnImageParts } from "./turn-image-parts.ts"
 import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSessionUsedTokens, estimateActiveContextTokens, COMPACTION_MAX_DEFER_MS } from "./messages-gw-compaction.ts"
-import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedConstraintsText, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, type SystemPromptSection } from "./messages-gw-types.ts"
+import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedConstraintsText, originalUserPromptText, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, type SystemPromptSection } from "./messages-gw-types.ts"
 
 export async function handleSendMessage(key: string, id: string, req: Request): Promise<Response> {
   const state = getOwnedSession(key, id)
@@ -652,6 +652,8 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     latch: latchSystemSection,
   })
   promptBody.system = renderedPrompt.text
+  const originalGoal = originalUserPromptText(state)
+  if (originalGoal) promptBody.system = `${promptBody.system}\n\n【用户原始目标·压缩不可丢】\n${originalGoal}`
   const pinned = pinnedConstraintsText(state)
   if (pinned) promptBody.system = `${promptBody.system}\n\n【硬约束·必须遵守】\n${pinned}`
   const systemChars = promptBody.system.length

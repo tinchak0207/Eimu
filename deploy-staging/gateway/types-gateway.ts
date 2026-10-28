@@ -146,6 +146,8 @@ export interface SessionState {
   pendingCompact?: boolean
   /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨 agent-gateway 重启存活。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文（≤12k，持久化），每回合注入【用户原始目标·压缩不可丢】。 */
+  originalUserPrompt?: string
   /** 已上报过 turn.status 的 compaction part id（2026-10-02 压缩可见化去重，volatile）。 */
   compactionNotified?: Set<string>
   /** 已发过 context.compacted 边界事件的摘要讯息去重键（2026-10-02 压缩语义化，volatile）。
