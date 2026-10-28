@@ -42,3 +42,30 @@ export { DELIVERY_CONTRACTS_FILE, DELIVERY_GATE_MARK, REWORK_FAIL_MARK, ORPHANED
 export { CRITIC_PASS_MARK, CRITIC_REJECT_MARK, CRITIC_UNREVIEWED_DECL, CRITIC_UNREVIEWED_DECL_SIMP, CRITIC_PASS_MAX_TARGETS, CRITIC_PASS_PER_TARGET_CHARS, CRITIC_PASS_TOTAL_CHARS, shouldTriggerCriticPass, declaresUnreviewed, hasRealDeliverable, countDeliverableEvidence, buildCriticPassSpec, VIDEO_MOTION_RECEIPT_POLICY, checkCriticReceipt, criticVerdictRejected, CRITIC_VERDICT_CONFLICT_CODE, conflictingVerdicts, CRITIC_SCORE_THRESHOLD_POLICY, evaluateCriticScoreThreshold } from "./delivery-gate-critic.ts"
 export type { CriticScoreThresholdPolicy, CriticScoreSample, VerdictConflict } from "./delivery-gate-critic.ts"
 export { classifyInternalReviewPayload, scrubVisibleProse, scrubSubagentPayload, scrubVisibleFrame } from "./delivery-gate-scrub.ts"
+
+// ── S17（设计文档 §3.9「闸：删闸不加闸」）────────────────────────────────────
+// 工程模式下交付只存在于 export 节点的产物，字段名存在性检查（「交付文本里有没有出现
+// requiredFields 这些栏位名」）不接线：模型的自然语言怎么措辞都不该被检查。
+// 产物证据（artifact verify blocked）仍走同一函数——那是产物检查，不是措辞检查。
+import { checkDelivery as checkDeliveryFields } from "./delivery-gate-contracts.ts"
+import type { ArtifactVerifyRecord, DeliveryContracts, DeliveryGateResult } from "./delivery-gate-types.ts"
+
+/** false = 不接线字段名检查（工程模式）；旧席位/缺省 true，旧行为逐字不变。 */
+export function deliveryFieldCheckApplies(projectMode: boolean | undefined): boolean {
+  return projectMode !== true
+}
+
+/**
+ * 会话层入口：工程模式把 agent 置空（无契约可判）→ 只保留产物证据判定；
+ * 旧席位把 agent 原样交回 checkDelivery，行为逐字不变。
+ */
+export function checkDeliveryForSession(
+  session: { projectMode?: boolean } | null | undefined,
+  agent: string | undefined,
+  text: string,
+  contracts: DeliveryContracts,
+  artifactVerify?: ReadonlyArray<ArtifactVerifyRecord> | null,
+): DeliveryGateResult {
+  const applicable = deliveryFieldCheckApplies(session?.projectMode)
+  return checkDeliveryFields(applicable ? agent : undefined, text, contracts, artifactVerify)
+}

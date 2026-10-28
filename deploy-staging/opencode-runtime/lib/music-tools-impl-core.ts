@@ -185,6 +185,8 @@ export interface MusicToolArgSpec {
 
 export interface MusicToolContext {
   abort?: AbortSignal
+  beforeSubmit?: () => Promise<void>
+  operationId?: string
   /**
    * 会话 id（音频落盘目标会话；缺省时跳过上传，result 只带 audio_base64）。
    * VPS harness 落位后由 adapter 从 opencode session 注入。

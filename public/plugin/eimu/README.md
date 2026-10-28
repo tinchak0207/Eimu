@@ -2,7 +2,8 @@
 
 把这个包交给你的 coding agent（Codex、Claude Code、Cursor、OpenClaw 或任何会说 MCP 的客户端），它就能直接用 Eimu 干活：生成图片、按指令改图、生成视频、文字转语音、放大图像，查余额、查任务结果，检索 Eimu 的公开技能库。
 
-- 插件主页（文件位置）：https://eimu.dev/plugin/
+- 插件接入主页：https://eimu.dev/mcp#plugin
+- 整包下载：https://eimu.dev/plugin/eimu-plugin.tar.gz
 - 入口说明（本文件）：https://eimu.dev/plugin/eimu/README.md
 - MCP 配置指南：https://eimu.dev/mcp
 - MCP 端点：`https://eimu.dev/api/mcp`（JSON-RPC 2.0 / Streamable HTTP）
@@ -56,7 +57,14 @@ claude mcp add --transport http eimu https://eimu.dev/api/mcp \
 
 ### 装法二：把插件目录复制到本机
 
-包内所有文件都发布在 `https://eimu.dev/plugin/`，可逐档下载；目前**没有** zip / tar.gz 整包，取回时请按下面的文件清单逐档拿：
+下载官方整包并解压（包含隐藏配置文件和三个 Skill，无需逐档下载）：
+
+```bash
+curl --fail --location https://eimu.dev/plugin/eimu-plugin.tar.gz --output eimu-plugin.tar.gz
+tar -xzf eimu-plugin.tar.gz
+```
+
+解压后得到 `plugin/marketplace.json` 和 `plugin/eimu/`，然后：
 
 1. 在你的工作机建一个插件目录，把 `plugin/eimu/` 整个复制进去（Codex 常见的本地插件目录是 `~/.codex/plugins/`，最终以你所用版本的约定为准）。
 2. 让你的客户端读取其中的 `.codex-plugin/plugin.json` 与 `.mcp.json`；出包的 `.mcp.json` 已带 `Authorization: Bearer ${EIMU_BIZ_KEY}`，`.mcp.json` 里的 `mcpServers.eimu` 也可以直接合并进你已有的 MCP 配置。
@@ -70,7 +78,7 @@ claude mcp add --transport http eimu https://eimu.dev/api/mcp \
 
 Eimu 目前**还没有公开的插件市集仓**（市集仓尚未建立），也**没有可提供的市集地址**，所以 `codex plugin marketplace add …` 这条命令现在无法执行——别照抄任何带占位符的地址。等仓建立、地址确定之后，再按市集自己的文档安装。
 
-`marketplace.json` 目前只是把仓的索引形状先定下来。今天要装 Eimu，请走上面的装法一（手工配置 MCP）或装法二（逐档取回插件目录）。
+`marketplace.json` 目前只是插件索引，不代表已发布市集。今天要装 Eimu，请走上面的装法一（手工配置 MCP）或装法二（下载整包）。公开源码仓 https://github.com/tinchak0207/Eimu 与插件市集是两回事，不要把源码仓当市集地址。
 
 ## 能力与边界
 

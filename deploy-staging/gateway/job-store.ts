@@ -53,7 +53,7 @@ export function generationParent(child: string): { parent_gw: string; parent_oc:
 }
 
 // 工作控制与既有生成回执共用一个耐久数据库。停止模型不等于撤销外部副作用。
-export function generationWorkControl(parentGw: string): { version: number; cancelled: boolean; reason?: string } {
+export function generationWorkControl(parentGw: string): { version: number; cancelled: boolean; reason?: string; changed_mono?: string } {
   const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(`intent:${parentGw}`) as { value: string } | null
   return row ? JSON.parse(row.value) : { version: 0, cancelled: false }
 }
@@ -62,17 +62,79 @@ export function setGenerationWorkCancelled(parentGw: string, cancelled: boolean,
     const current = generationWorkControl(parentGw)
     if (current.cancelled === cancelled) return
     db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value")
-      .run(`intent:${parentGw}`, JSON.stringify({ version: current.version + 1, cancelled, reason, changed_at: Date.now() }))
+      .run(`intent:${parentGw}`, JSON.stringify({ version: current.version + 1, cancelled, reason, changed_at: Date.now(), changed_mono: process.hrtime.bigint().toString() }))
   }).immediate()
 }
 export function cancelGenerationProducer(producer: string): void {
+  const revision = generationProducerRevision(producer) + 1
+  db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value")
+    .run(`producer-revision:${producer}`, String(revision))
   db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO NOTHING")
     .run(`producer-cancel:${producer}`, String(Date.now()))
 }
 /** 续跑同一 producer（沿用同一 opencodeSessionId）＝新工作代：删掉 hard stop 留下的封条，
  *  否则该子会话恢复后所有新提交都会被 assertGenerationWorkActive 永久挡成 409。 */
-export function clearGenerationProducerCancel(producer: string): void {
+export function clearGenerationProducerCancel(producer: string, newWork = false): void {
   db().query("DELETE FROM generation_runtime_control WHERE name=?").run(`producer-cancel:${producer}`)
+  const parent = generationParent(producer)
+  if (newWork && parent) db().query("UPDATE generation_consumers SET intent_version=? WHERE child_oc=?")
+    .run(generationWorkControl(parent.parent_gw).version, producer)
+}
+function generationProducerRevision(producer: string): number {
+  return Number((db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(`producer-revision:${producer}`) as any)?.value || 0)
+}
+function musicOperationKey(producer: string, operation: string): string {
+  return `music-operation:${createHash("sha256").update(producer + "\0" + operation).digest("hex")}`
+}
+export function captureMusicOperation(parent: string, producer: string, operation: string, invocation: string, startedMono?: string): any {
+  return db().transaction(() => {
+    const key = musicOperationKey(producer, operation)
+    const existing = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(key) as any
+    if (existing) {
+      const value = JSON.parse(existing.value)
+      const result = generationReceipt(key)?.result
+      if (result) return { ...value, result }
+      if (value.invocation !== invocation) throw new Error("music_submission_unknown: 原调用尚无完成回执，禁止重放生成")
+      return value
+    }
+    assertGenerationWorkActive(parent, producer)
+    const changedMono = generationWorkControl(parent).changed_mono
+    if (changedMono && startedMono && BigInt(startedMono) <= BigInt(changedMono))
+      throw new Error("generation_work_cancelled: 原调用开始后工作代已改变")
+    const version = generationWorkControl(parent).version
+    const binding = db().query("SELECT intent_version FROM generation_consumers WHERE child_oc=?").get(producer) as any
+    if (binding && binding.intent_version !== version) throw new Error("generation_work_cancelled: 旧 producer 不得继承新工作代")
+    const value = { parent, producer, operation, invocation, version, producer_revision: generationProducerRevision(producer) }
+    db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?)").run(key, JSON.stringify(value))
+    registerGenerationReceipt({ task_id: key, parent_gw: parent, producer_oc: producer,
+      consumer_oc: generationParent(producer)?.parent_oc || producer, kind: "audio",
+      operation_id: operation, work_version: version, result_source: "runtime_music", submission_state: "admitted" })
+    return value
+  }).immediate()
+}
+export function checkMusicOperation(parent: string, producer: string, operation: string, invocation: string): void {
+  const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(musicOperationKey(producer, operation)) as any
+  if (!row) throw new Error("music_operation_missing")
+  const value = JSON.parse(row.value)
+  if (value.parent !== parent || value.invocation !== invocation) throw new Error("music_operation_owner_mismatch")
+  assertGenerationWorkActive(parent, producer)
+  if (value.version !== generationWorkControl(parent).version || value.producer_revision !== generationProducerRevision(producer))
+    throw new Error("generation_work_cancelled: 原调用的工作代已撤销，不能继承后续新工作")
+  completeGenerationReceipt(musicOperationKey(producer, operation), "unknown", [], { submission_state: "dispatch_requested" })
+}
+export function completeMusicOperation(parent: string, producer: string, operation: string, invocation: string, result: any): void {
+  const key = musicOperationKey(producer, operation)
+  const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(key) as any
+  if (!row) throw new Error("music_operation_missing")
+  const value = JSON.parse(row.value)
+  if (value.parent !== parent || value.invocation !== invocation) throw new Error("music_operation_owner_mismatch")
+  // Runtime audio operation ID is not a platform job ID. Preserve the actual
+  // result and billing receipt even when its model run has been cancelled.
+  const body = JSON.parse(result.output)
+  const urls = new Set<string>([body.url, ...(Array.isArray(body.audios) ? body.audios.map((a: any) => a.url) : [])].filter((url) => typeof url === "string" && /^https?:\/\//.test(url)))
+  const artifacts = [...urls].map((url) => ({ url, ...(body.mime_type ? { mimeType: body.mime_type } : {}) }))
+  completeGenerationReceipt(key, body.ok === false ? "failed" : artifacts.length ? "succeeded" : "unknown", artifacts,
+    { result, cost_coins: body.cost_coins, reason: body.message || body.code, submission_state: "completed" })
 }
 /** 封条 TTL：封条只封停止当时那批工作，不封会话终身。 */
 export const PRODUCER_CANCEL_TTL_MS = 6 * 3600 * 1000
@@ -115,7 +177,21 @@ export function generationReceipt(id: string): GenerationReceipt | undefined {
   const row = db().query("SELECT * FROM generation_receipts WHERE task_id=?").get(id)
   return row ? decode(row) : undefined
 }
+/** S5：工程会话（ProjectGraph）标记。持久化在 generation_runtime_control，重启不丢；未标记的会话行为逐字不变。 */
+export function markProjectSession(parentGw: string): void {
+  db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO NOTHING").run(`project-mode:${parentGw}`, "1")
+}
+export function isProjectSession(parentGw: string): boolean {
+  return !!db().query("SELECT 1 FROM generation_runtime_control WHERE name=?").get(`project-mode:${parentGw}`)
+}
+/** 工程会话里无 node_id 的图/视频登记＝绕过工程图的直接生成，一律 409（路由层应把 status 透出，见 S5 回报）。 */
+export class ProjectNodeRequiredError extends Error {
+  readonly status = 409
+  readonly code = "project_node_required"
+  constructor() { super("project_node_required: 工程会话的图片/视频生成必须经 project_run 绑定 node_id；未登记。") }
+}
 export function registerGenerationReceipt(input: Record<string, any>): GenerationReceipt {
+  if ((input.kind === "image" || input.kind === "video") && !input.node_id && input.parent_gw && isProjectSession(input.parent_gw)) throw new ProjectNodeRequiredError()
   const now = Date.now()
   db().query("INSERT INTO generation_receipts(task_id,parent_gw,producer_oc,consumer_oc,kind,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO NOTHING")
     .run(input.task_id, input.parent_gw, input.producer_oc, input.consumer_oc || input.producer_oc, input.kind, JSON.stringify(input), now, now)
@@ -150,7 +226,7 @@ export function generationReceipts(parentGw?: string, pendingOnly = false): Gene
   const rows = parentGw
     ? db().query("SELECT * FROM generation_receipts WHERE parent_gw=? ORDER BY created_at").all(parentGw)
     : db().query("SELECT * FROM generation_receipts ORDER BY created_at").all()
-  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.status !== "succeeded"))
+  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.result_source !== "runtime_music" && r.status !== "succeeded"))
 }
 export function acknowledgeGeneration(id: string, stage: string, extra: Record<string, any>): void {
   const row = generationReceipt(id)
@@ -161,10 +237,19 @@ export function acknowledgeGeneration(id: string, stage: string, extra: Record<s
     if (!["succeeded", "failed", "refunded", "cancelled"].includes(row.status) || !row.artifacts.length || urls.size !== list.length || list.length !== row.artifacts.length || !row.artifacts.every((a) => urls.has(a.url)))
       throw new Error("download ACK must cover exactly every authoritative artifact")
   }
+  // S5：下载 ACK 的实算 sha256 按 url 留存（data.artifact_sha256）。不写回 artifacts 列：completeGenerationReceipt
+  // 用列内容判 changed，列里混入 sha256 会让重复终态回调清掉 downloaded_at 而重复通知。
+  const hashes: Record<string, string> = {}
+  if (stage === "downloaded" && Array.isArray(extra.downloaded_artifacts))
+    for (const a of extra.downloaded_artifacts) if (typeof a?.url === "string" && typeof a?.sha256 === "string") hashes[a.url] = a.sha256
+  const artifactSha256 = Object.keys(hashes).length ? { artifact_sha256: { ...(row.artifact_sha256 ?? {}), ...hashes } } : {}
   db().query(`UPDATE generation_receipts SET observed_at=COALESCE(observed_at,?),
     downloaded_at=CASE WHEN ? THEN COALESCE(downloaded_at,?) ELSE downloaded_at END,
     data=?,updated_at=? WHERE task_id=?`)
-    .run(Date.now(), stage === "downloaded" ? 1 : 0, Date.now(), JSON.stringify({ ...row, ...extra, artifacts: undefined }), Date.now(), id)
+    .run(Date.now(), stage === "downloaded" ? 1 : 0, Date.now(), JSON.stringify({ ...row, ...extra, ...artifactSha256, artifacts: undefined }), Date.now(), id)
+}
+export function generationArtifactSha256(id: string): Record<string, string> {
+  return (generationReceipt(id)?.artifact_sha256 as Record<string, string> | undefined) ?? {}
 }
 export function notifyGeneration(ids: string[]): void {
   const update = db().query("UPDATE generation_receipts SET notified_at=?,notify_count=COALESCE(notify_count,0)+1 WHERE task_id=?")

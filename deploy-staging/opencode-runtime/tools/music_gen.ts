@@ -11,7 +11,7 @@
 // 失败政策（**fail-open**）：解析失败／逾时／形状不符 → 用原文照常送，并在回执带一行提示。
 // 理由＝本轮硬契约「解析失败永不得阻断音频生成」（与 image_generate 的 fail-closed 不同：
 // 生图端把原始 token 送模型会生出废图，音频端宁可照原样念也不要整条生成被挡）。
-import { wrapMusicTool, musicGenTool } from "../lib/music-tools-adapter"
+import { wrapMusicTool, musicGenTool, runMusicOperation } from "../lib/music-tools-adapter"
 import { siteFetch } from "../lib/client"
 import { registerMusicGenTrack } from "../lib/music-lyric-register"
 
@@ -80,6 +80,7 @@ const musicGenBase = wrapMusicTool(musicGenTool)
 export default {
   ...musicGenBase,
   async execute(args: Record<string, unknown>, context: any) {
+    return runMusicOperation(args, context, async (context) => {
     const prompt = typeof args?.prompt === "string" ? args.prompt : ""
     // 不含 `@[` → 完全不呼叫站点（不多一个 RTT，行为与改动前逐位元相同）。
     if (!prompt.includes("@[")) {
@@ -93,5 +94,6 @@ export default {
     // 出曲即入库：登记用**原始入参**（args.lyrics），不受 tag 展开影响。
     await registerMusicGenTrack(args, result)
     return withCardNote(result, resolved.note)
+    })
   },
 }

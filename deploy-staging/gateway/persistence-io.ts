@@ -33,6 +33,9 @@ export const PERSISTED_DATA_KEYS = [
   "title", // 别名：记忆体 sessionTitle ↔ 落盘 title（见 hydrateRow）
   "tplDeviateToken",
   "originalUserPrompt",
+  "projectMode", // S19 席位锁存：缺键旧行 → false（hydrateRow）
+  "seat", // S19 席位锁存：缺键旧行 → "creator_legacy"
+  "beast", // S19 席位锁存：缺键旧行 → false
 ] as const
 
 export function serialize(state: PersistableState): PersistedData {
@@ -63,6 +66,10 @@ export function serialize(state: PersistableState): PersistedData {
     title: state.sessionTitle ?? null,
     tplDeviateToken: state.tplDeviateToken ?? null,
     originalUserPrompt: typeof state.originalUserPrompt === "string" ? state.originalUserPrompt : undefined,
+    // S19：锁存值直接落盘（undefined=未锁存，hydrateRow 按旧会话回退口径还原）。
+    projectMode: state.projectMode,
+    seat: state.seat,
+    beast: state.beast,
   }
 }
 
@@ -121,6 +128,11 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     originalUserPrompt: typeof d.originalUserPrompt === "string"
       ? d.originalUserPrompt
       : (typeof d.eventCounter === "number" && d.eventCounter > 0 ? "" : undefined),
+    // S19 席位锁存：缺键的旧行一律回到旧席位（设计文档 §7「旧会话读回时缺这些键 → creator_legacy/projectMode=false」）。
+    // 已锁存的会话读回原值——env 的回滚只影响新建会话，不改已开工会话的席位。
+    projectMode: d.projectMode === true,
+    seat: d.seat === "creator" ? "creator" : "creator_legacy",
+    beast: d.beast === true,
   }
 }
 

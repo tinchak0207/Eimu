@@ -168,17 +168,25 @@ describe("DANGEROUS 标记：故意不稳定的段必须写理由", () => {
 })
 
 describe("尾端注入块（appendSystemPayloadToTurnTail）格式与位置不变", () => {
-  test("附在最后一个 text part 尾端、带会话凭证、同 byte 不重贴", () => {
+  // f6ab64753（messages-gw-types.ts）现行契约：尾端块是**独立**签名上下文 part，不改用户原始文本 part；
+  // 每轮事实必须随请求发送，不再按 hash 跳过重贴（增量附件去重改由成功投递后的版本水位负责）。
+  test("追加独立 text part（用户原文不动）、带会话凭证；同 payload 每轮照贴并记指纹", () => {
     const state = { gwNonce: NONCE_A, lastTailPayloadHash: undefined } as unknown as SessionState
     const parts = [{ type: "text", text: "USER" }]
     const pb = { parts } as { parts: { type: string; text: string }[]; system?: string }
     appendSystemPayloadToTurnTail(state, pb, "PAYLOAD", "【标签】")
-    expect(pb.parts.length).toBe(1)
-    expect(pb.parts[0].text).toBe(`USER${TAIL_PAYLOAD_MARKER}⟦gw:${NONCE_A}⟧ 【标签】\nPAYLOAD`)
-    // 同 hash 再贴 → 不重复（内容已在历史中）
-    const before = pb.parts[0].text
+    expect(pb.parts.length).toBe(2)
+    expect(pb.parts[0].text).toBe("USER")
+    expect(pb.parts[1].text).toBe(`${TAIL_PAYLOAD_MARKER}⟦gw:${NONCE_A}⟧ 【标签】\nPAYLOAD`)
+    expect((state as { lastTailPayloadHash?: string }).lastTailPayloadHash).toMatch(/^[0-9a-f]{64}$/)
+    // 同 payload 再贴：每轮事实必须随请求发送 → 追加第二块，用户原文仍不变
     appendSystemPayloadToTurnTail(state, pb, "PAYLOAD", "【标签】")
-    expect(pb.parts[0].text).toBe(before)
+    expect(pb.parts.length).toBe(3)
+    expect(pb.parts[2].text).toBe(pb.parts[1].text)
+    expect(pb.parts[0].text).toBe("USER")
+    // 空 payload 不贴
+    appendSystemPayloadToTurnTail(state, pb, "   ", "【标签】")
+    expect(pb.parts.length).toBe(3)
   })
 })
 
@@ -236,7 +244,9 @@ describe("(d) 环境事实段接线：userId 进 collectRuntimeEnvironment，稳
     expect(section.text).toContain("本机文件通道：在线可用")
   })
 
-  test("取不到 userId ⇒ 维持 unknown（不得猜）且回落 session latch", async () => {
+  // 现行契约（messages-gw-types.ts buildEnvironmentSection，f6ab64753）：环境段恒为 dangerousUncachedSystemSection（turn），
+  // 理由「工具表、设备与客户端环境是本轮事实，未知状态也须重新核实」——unknown 也不再走 session latch 黏著。
+  test("取不到 userId ⇒ 维持 unknown（不得猜），且仍每轮重算（turn，不黏著）", async () => {
     const { seen, collect } = harness({ roots: 3 })
     const section = await buildEnvironmentSection({
       state: {},
@@ -246,9 +256,9 @@ describe("(d) 环境事实段接线：userId 进 collectRuntimeEnvironment，稳
       collect,
     })
     expect(seen[0].userId).toBeNull()
-    // 即使装置桥会回报 online，缺身分一律 unknown（unknown ≠ 没有）
-    expect(section.stability).toBe("session")
-    expect(section.cacheBreakReason).toBeUndefined()
+    // 即使装置桥会回报 online，缺身分一律 unknown（unknown ≠ 没有）；但 unknown 也是 turn：下一轮必须重新核实
+    expect(section.stability).toBe("turn")
+    expect(section.cacheBreakReason).toBeTruthy()
     expect(section.text).toContain("本机文件通道：未知（本轮无法判定）")
   })
 
@@ -264,11 +274,11 @@ describe("(d) 环境事实段接线：userId 进 collectRuntimeEnvironment，稳
       collect,
     })
     expect(seen[0].userId).toBeNull()
-    expect(section.stability).toBe("session")
+    expect(section.stability).toBe("turn")
     expect(section.text).toContain("本机文件通道：未知（本轮无法判定）")
   })
 
-  test("端点：unknown 先被黏著，一有 userId 即转 turn 端出即时事实（不被旧 latch 黏死）", async () => {
+  test("端点：unknown 不被黏著，下一轮一有 userId 即端出即时事实（不被旧 unknown 快取黏死）", async () => {
     const state = {}
     const unknownHarness = harness({})
     const unknownSec = await buildEnvironmentSection({
@@ -278,7 +288,7 @@ describe("(d) 环境事实段接线：userId 进 collectRuntimeEnvironment，稳
       resolveUserId: async () => null,
       collect: unknownHarness.collect,
     })
-    expect(unknownSec.stability).toBe("session")
+    expect(unknownSec.stability).toBe("turn")
     // 同一 state 下一轮拿到 userId：必须走 turn、端出线上事实，而非回旧的 unknown 快取
     const onlineHarness = harness({ roots: 2 })
     const onlineSec = await buildEnvironmentSection({

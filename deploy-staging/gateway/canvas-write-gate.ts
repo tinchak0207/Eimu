@@ -133,13 +133,17 @@ export interface WorkflowWriteGateInput {
   nudgeSent: boolean
   turnAborted?: boolean
   hasLastPromptBody?: boolean
+  /** S17（§3.9）：工程模式交付只认 export 产物，画布写穿残余一律不接线。 */
+  projectMode?: boolean
 }
 
 /**
  * 收盘点是否应拦截 turn.done 并补写 nudge。
  * 条件：多步影音意图 + 尚未真写穿 + 尚未 nudge 过 + 有可重投的 lastPromptBody + 非用户中止。
+ * 工程模式（projectMode=true）恒 false：该闸 2026-10-28 已停产，此处只防将来误接。
  */
 export function shouldBlockCompletionForWorkflowWrite(input: WorkflowWriteGateInput): boolean {
+  if (input.projectMode === true) return false
   if (!input.avProductionIntent) return false
   if (input.workflowWriteSucceeded) return false
   if (input.nudgeSent) return false

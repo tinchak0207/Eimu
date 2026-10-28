@@ -8,6 +8,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { LEDGER_PATH, QUOTA_URL } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
 import { hashKey } from "./auth-gw.ts"
+import type { LedgerEntryProjectFields } from "./project/types.ts"
 export function extractBalance(data: unknown): number | null {
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>
@@ -82,7 +83,7 @@ export async function emitQuotaChanged(state: SessionState): Promise<void> {
 
 // ---- internal handlers (loopback only) ----
 
-export interface LedgerEntry {
+export interface LedgerEntry extends LedgerEntryProjectFields {
   ts: string
   user_id: string
   session_id: string

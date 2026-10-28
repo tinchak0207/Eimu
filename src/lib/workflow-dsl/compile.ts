@@ -34,6 +34,7 @@ import {
   type WorkflowDslStep,
   type WorkflowValidationIssue,
 } from "./schema";
+import { compileProjectDsl, type ProjectCompileInput, type ProjectCompileResult } from "./project-ops";
 
 // WorkflowValidationIssue 的权威定义在 schema.ts（compile/decompile 共用），此处按契约再导出。
 export type { WorkflowValidationIssue } from "./schema";
@@ -383,6 +384,27 @@ function suggestTools(input: string): string[] {
 
 // ─────────────────────────── 编译主入口
 
+const PROJECT_ONLY_STEP_KEYS = ["forEach", "takes", "onFail", "pinned", "refs", "intent", "params", "inputs"];
+
+/**
+ * DSL v2 入口（2026-10-28）：target:"canvas" = 旧 compileWorkflow（一字不变）；
+ * target:"project" = 编译成工程图强类型 PatchOp[]（project-ops.ts）。
+ */
+export function compileWorkflowForTarget(
+  target: "canvas",
+  source: WorkflowDslSource,
+  current: WorkflowCompileInput,
+): WorkflowCompileResult;
+export function compileWorkflowForTarget(target: "project", source: unknown, current: ProjectCompileInput): ProjectCompileResult;
+export function compileWorkflowForTarget(
+  target: "canvas" | "project",
+  source: WorkflowDslSource | unknown,
+  current: WorkflowCompileInput | ProjectCompileInput,
+): WorkflowCompileResult | ProjectCompileResult {
+  if (target === "project") return compileProjectDsl(source, current as ProjectCompileInput);
+  return compileWorkflow(source as WorkflowDslSource, current as WorkflowCompileInput);
+}
+
 /**
  * 全图校验 → 增量 op 发射（对 current）。任何 error → ok:false、ops 空。
  * current 仅读；呼叫方把 ops 交 canvas_apply_ops / 前端 adapter 执行。
@@ -399,6 +421,9 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
   const topoOrder = graph.topoOrder;
 
   const warnings: string[] = [];
+  // DSL v2 字段只在 target:"project" 下生效；画布路径不静默吞掉（旧 DSL 不含这些键，输出不变）。
+  const v2Only = valid.steps.filter((s) => PROJECT_ONLY_STEP_KEYS.some((k) => k in s));
+  if (v2Only.length > 0) warnings.push(`步骤 ${v2Only.map((s) => s.id).join("、")} 含 forEach/takes/onFail/pinned/refs/intent/params/inputs 字段，仅 target:"project" 生效，画布编译已忽略`);
   const nodeIds = new Map<string, string>();
   for (const step of topoOrder) nodeIds.set(step.id, workflowNodeId(valid.workflow, step.id));
 

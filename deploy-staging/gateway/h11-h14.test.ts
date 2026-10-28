@@ -5,7 +5,7 @@ import { join } from "node:path"
 import test from "node:test"
 import assert from "node:assert/strict"
 
-process.env.GATEWAY_DB_PATH = join(mkdtempSync(join(tmpdir(), "h11h14-")), "gw.db")
+process.env.SESSIONS_DB_PATH = join(mkdtempSync(join(tmpdir(), "h11h14-")), "gw.db")
 
 const { isSystemWakeText, markSystemWakeMessage } = await import("./opencode-event-handler.ts")
 const { handleSessionTasks } = await import("./internal-http.ts")

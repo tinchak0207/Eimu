@@ -596,6 +596,144 @@ function userTextOf(msg: PluginMsg): string {
   return texts.join("\n")
 }
 
+// ── S15 工程模式窗口（网关装配；旧席位不经过这里）──────────────────────────
+// opencode 1.18.14：transform 与 toModelMessages 共用同一个 msgs 数组，只能原地改写。
+const PROJECT_CONTEXT_PATH = "/internal/project/context"
+const PROJECT_CONTEXT_TIMEOUT_MS = 1500
+const PROJECT_CONTEXT_RECHECK_MS = 60_000
+const PROJECT_SYNTHETIC_PREFIX = "prt_eimuproject_"
+const PROJECT_DIGEST_TAG = "<eimu-project-digest>"
+const projectModeOffAt = new Map<string, number>()
+
+type ProjectWindow = {
+  keepIds: string[]
+  synthetic: string
+  replacements: { messageId: string; partIndex: number; text: string }[]
+  dropParts: { messageId: string; partIndex: number }[]
+}
+
+/** 发给网关的消息清单：文本/工具输出照发（网关要算字节并给出裁剪文本），二进制只报字节。 */
+function projectManifest(msgs: PluginMsg[]): Array<Record<string, unknown>> {
+  return msgs.map((m) => ({
+    id: typeof m?.info?.id === "string" ? m.info.id : "",
+    role: typeof m?.info?.role === "string" ? m.info.role : "",
+    summary: m?.info?.summary === true,
+    parts: (Array.isArray(m?.parts) ? m.parts : []).map((p) => {
+      const state = p?.state as { status?: unknown; output?: unknown } | undefined
+      return {
+        type: String(p?.type ?? ""),
+        ...(p?.type !== "tool" && typeof p?.text === "string" ? { text: p.text } : {}),
+        ...(p?.synthetic === true ? { synthetic: true } : {}),
+        ...(p?.ignored === true ? { ignored: true } : {}),
+        ...(p?.metadata?.compaction_continue === true ? { metadata: { compaction_continue: true } } : {}),
+        ...(typeof p?.id === "string" ? { id: p.id } : {}),
+        ...(typeof p?.tool === "string" ? { tool: p.tool } : {}),
+        ...(typeof p?.callID === "string" ? { callID: p.callID } : {}),
+        ...(state && typeof state === "object"
+          ? {
+              state: {
+                ...(typeof state.status === "string" ? { status: state.status } : {}),
+                ...(typeof state.output === "string" ? { output: state.output } : {}),
+              },
+            }
+          : {}),
+        ...(typeof (p as { bytes?: unknown })?.bytes === "number" ? { bytes: (p as { bytes: number }).bytes } : {}),
+      }
+    }),
+  }))
+}
+
+/** 问网关要本轮窗口；404/5xx/超时/非工程模式 → null（旧席位路径原样执行）。 */
+async function projectContextWindow(sessionID: string, msgs: PluginMsg[]): Promise<ProjectWindow | null> {
+  const offAt = projectModeOffAt.get(sessionID)
+  if (offAt !== undefined && Date.now() - offAt < PROJECT_CONTEXT_RECHECK_MS) return null
+  try {
+    const res = await fetch(`${GATEWAY}${PROJECT_CONTEXT_PATH}`, {
+      method: "POST",
+      headers: harnessInternalHeaders(),
+      body: JSON.stringify({ session_id: sessionID, messages: projectManifest(msgs) }),
+      signal: AbortSignal.timeout(PROJECT_CONTEXT_TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    const data = (await res.json().catch(() => null)) as {
+      project_mode?: unknown
+      keep_ids?: unknown
+      synthetic?: unknown
+      replacements?: unknown
+      drop_parts?: unknown
+    } | null
+    if (!data || data.project_mode !== true || !Array.isArray(data.keep_ids)) {
+      projectModeOffAt.set(sessionID, Date.now())
+      boundMap(projectModeOffAt, 200)
+      return null
+    }
+    projectModeOffAt.delete(sessionID)
+    const replacements = Array.isArray(data.replacements)
+      ? (data.replacements as Array<Record<string, unknown>>)
+          .filter((r) => typeof r?.messageId === "string" && typeof r?.partIndex === "number" && typeof r?.text === "string")
+          .map((r) => ({ messageId: r.messageId as string, partIndex: r.partIndex as number, text: r.text as string }))
+      : []
+    const dropParts = Array.isArray(data.drop_parts)
+      ? (data.drop_parts as Array<Record<string, unknown>>)
+          .filter((r) => typeof r?.messageId === "string" && typeof r?.partIndex === "number")
+          .map((r) => ({ messageId: r.messageId as string, partIndex: r.partIndex as number }))
+      : []
+    return {
+      keepIds: (data.keep_ids as unknown[]).filter((x): x is string => typeof x === "string"),
+      synthetic: typeof data.synthetic === "string" ? data.synthetic : "",
+      replacements,
+      dropParts,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 原地应用网关窗口：剥旧合成片段 → 换/删部件 → 只留窗口 → 追加合成片段。 */
+function applyProjectWindow(msgs: PluginMsg[], plan: ProjectWindow): void {
+  const isOwnSynthetic = (p: Record<string, any> | undefined): boolean => {
+    if (p?.synthetic !== true) return false
+    if (String(p?.id ?? "").startsWith(PROJECT_SYNTHETIC_PREFIX)) return true
+    const text = typeof p?.text === "string" ? p.text.trimStart() : ""
+    return text.startsWith(GOAL_CARD_TAG) || text.startsWith(PROJECT_DIGEST_TAG)
+  }
+  for (const m of msgs) {
+    if (!Array.isArray(m?.parts)) continue
+    m.parts = m.parts.filter((p) => !isOwnSynthetic(p))
+  }
+  const byId = new Map(msgs.map((m) => [String(m?.info?.id ?? ""), m]))
+  // 先替换（下标是原始下标），再按原始下标倒序删。
+  for (const r of plan.replacements) {
+    const p = byId.get(r.messageId)?.parts?.[r.partIndex]
+    if (!p) continue
+    if (typeof p.text === "string") p.text = r.text
+    if (p.state && typeof p.state === "object") (p.state as { output?: string }).output = r.text
+  }
+  for (const d of [...plan.dropParts].sort((a, b) => b.partIndex - a.partIndex)) {
+    const m = byId.get(d.messageId)
+    if (Array.isArray(m?.parts) && m.parts[d.partIndex]) m.parts.splice(d.partIndex, 1)
+  }
+  const keep = new Set(plan.keepIds)
+  const kept = msgs.filter((m) => keep.has(String(m?.info?.id ?? "")))
+  if (plan.synthetic) {
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const m = kept[i]
+      if (m?.info?.role !== "user" || !Array.isArray(m.parts)) continue
+      m.parts.push({
+        id: `${PROJECT_SYNTHETIC_PREFIX}${String(m.info.id ?? "")}`,
+        sessionID: m.info.sessionID,
+        messageID: m.info.id,
+        type: "text",
+        text: plan.synthetic,
+        synthetic: true,
+      })
+      break
+    }
+  }
+  msgs.length = 0
+  msgs.push(...kept)
+}
+
 /**
  * 目标卡：首条 + 最近若干条（≤70% 余量）+ 更早的纠正/否决/授权类（按新到旧），其余折叠并标注条数。
  * 用户原话逐字；只有单条本身超出预算时才折叠该条中段。
@@ -1215,6 +1353,15 @@ export const EimuGuard: Plugin = async ({ client }) => {
           if (typeof sid === "string") sessionID = sid
         }
         if (!sessionID) return
+        // S15（工程模式）：每轮窗口由网关装配（目标卡＋工程摘要＋最近 K 步）。
+        // 命中 → 原地裁剪 + 追加合成片段并 return（不走下面的旧目标卡逻辑；工程模式不再压缩）。
+        // 探针依据：opencode 1.18.14 prompt.ts:1255 的 transform 与 :1257 的 toModelMessages
+        // 共用同一个 msgs 数组 ⇒ 只能原地改写（length=0 + push）；重赋值 output.messages 无效。
+        const projectWindow = await projectContextWindow(sessionID, msgs)
+        if (projectWindow) {
+          applyProjectWindow(msgs, projectWindow)
+          return
+        }
         const at = compactingAt.get(sessionID)
         if (at !== undefined) {
           compactingAt.delete(sessionID)

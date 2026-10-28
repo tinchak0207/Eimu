@@ -88,7 +88,10 @@ test("reasoning-cap：长时间空转（超时）→ hard 且 overMs=true", () =
 })
 
 test("plan-promise：计画点名专家但零 subagent.started → 诚实告知；有派或没点名 → 不吭声", () => {
-  assert.match(unfulfilledPlanNotice({ planExperts: ["screenwriter"], turnSubagentStarts: 0 })!, /screenwriter.*未实际派出/)
+  // 2026-10-04 F4（plan-promise.ts:16）：用户可见文字不再交代内部路由（谁被点名、谁没派出），只说结果语言。
+  const notice = unfulfilledPlanNotice({ planExperts: ["screenwriter"], turnSubagentStarts: 0 })!
+  assert.match(notice, /本轮由我直接完成/)
+  assert.doesNotMatch(notice, /screenwriter/, "内部专家 id 不得泄给用户")
   assert.equal(unfulfilledPlanNotice({ planExperts: ["screenwriter"], turnSubagentStarts: 1 }), null)
   assert.equal(unfulfilledPlanNotice({ turnSubagentStarts: 0 }), null)
 })
@@ -131,7 +134,8 @@ test("plan-promise 诚实告知走耐久通道 message.delta（真送出一帧�
   assert.equal(emitUnfulfilledPlanNotice(st, emit), true, "未兑现计画必须真的送出")
   assert.equal(frames.length, 1, "必须送出一帧")
   assert.equal(frames[0].name, "message.delta", "必须走耐久通道（非 turn.status）")
-  assert.match((frames[0].data as { text: string }).text, /screenwriter/)
+  assert.match((frames[0].data as { text: string }).text, /本轮由我直接完成/)
+  assert.doesNotMatch((frames[0].data as { text: string }).text, /screenwriter/, "内部专家 id 不得泄给用户（F4）")
   // 已兑现 / 中止 → 一帧都不送
   frames.length = 0
   assert.equal(emitUnfulfilledPlanNotice({ planExperts: ["screenwriter"], turnSubagentStarts: 2 }, emit), false)

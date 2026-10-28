@@ -43,6 +43,10 @@ import { computeSwimlanePositions } from "../workflow-service.ts"
 // lanes  = computeSwimlanePositions 的 distinct x（＝DAG 分层栏数）
 // ys     = computeSwimlanePositions 的 distinct y
 // ────────────────────────────────────────────────────────────────────────────
+// 2026-10-28 重冻（single_video / feature_film / novel_film）：74ebf1d12「影片生成改为状态变化范式，接入 3D 预演」
+// 在 single_video、feature_film 各新增 text 主节点 `previz`（主节点 +1、placeholder 键 +1、衍生卡随之增加），
+// novel_film 的 `previs` 改名 `previz`（主节点数不变）；已用 `git diff 74ebf1d12^ HEAD -- workflow-templates/*.ts`
+// 逐 role 核对，上述三支新值＝该提交的预期增量，其余 10 个模板数值未动。
 type Baseline = {
   nodes: number; conns: number; main: number; tool: number; note: number; gate: number
   textPh: number; lanes: number; ys: number
@@ -52,9 +56,9 @@ const BASELINE: Record<string, Baseline> = {
   single_image:      { nodes:  7, conns:  6, main:  3, tool:  2, note:  2, gate: 0, textPh: 1, lanes:  3, ys:  3 },
   character_sheet:   { nodes: 12, conns: 11, main:  6, tool:  2, note:  3, gate: 1, textPh: 1, lanes:  3, ys:  8 },
   scene_setup:       { nodes:  8, conns:  7, main:  3, tool:  2, note:  3, gate: 0, textPh: 1, lanes:  3, ys:  4 },
-  single_video:      { nodes: 10, conns:  9, main:  4, tool:  2, note:  3, gate: 1, textPh: 1, lanes:  3, ys:  6 },
-  feature_film:      { nodes: 53, conns: 52, main: 14, tool: 14, note: 19, gate: 6, textPh: 4, lanes:  6, ys: 29 },
-  novel_film:        { nodes: 92, conns: 94, main: 16, tool: 31, note: 37, gate: 8, textPh: 6, lanes:  9, ys: 50 },
+  single_video:      { nodes: 27, conns: 26, main:  5, tool:  9, note: 11, gate: 2, textPh: 2, lanes:  4, ys: 15 },
+  feature_film:      { nodes: 70, conns: 70, main: 15, tool: 21, note: 27, gate: 7, textPh: 5, lanes:  6, ys: 39 },
+  novel_film:        { nodes: 98, conns: 100, main: 16, tool: 33, note: 40, gate: 9, textPh: 6, lanes:  9, ys: 56 },
   novel_ip:          { nodes: 81, conns: 80, main: 15, tool: 24, note: 34, gate: 8, textPh: 1, lanes: 15, ys: 10 },
   ecom_launch:       { nodes: 85, conns: 84, main: 15, tool: 23, note: 39, gate: 8, textPh: 1, lanes: 15, ys: 10 },
   ecom_model:        { nodes: 79, conns: 78, main: 14, tool: 21, note: 37, gate: 7, textPh: 0, lanes: 14, ys: 11 },
@@ -75,6 +79,8 @@ const FRONTEND = { CARD_W: 300, CARD_GAP_X: 60, LANE_GAP_Y: 330 } as const
  * 移除任何跨栏连线，此表必须同步——这就是「漂移必红」的棘轮。
  */
 const CROSS_LANE: Record<string, readonly string[]> = {
+  // 2026-10-28：previz（3D 预演帧）与 reference（参考图）同为 generation 的参考条件，合流扇入（74ebf1d12 / single_video.ts connections）。
+  single_video:      ["reference->generation"],
   feature_film:      ["shot1->shot1_gen"],
   novel_film:        ["char_card->video_gen", "art_card->video_gen", "voiceover->final_cut"],
   shortdrama_visual: ["cast_card->video_gen", "voiceover->final_cut"],

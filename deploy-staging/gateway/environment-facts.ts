@@ -523,10 +523,11 @@ function renderClientRenderHost(host: ClientRenderHost | undefined): string {
  * 能力断路事实（单一宣告真源）。由 toolSurface 推导清单与数字，路由语义为既有
  * 规则的固定外框（与旧散文同语义）。legacy v1 帧与环境段共用此函式 ⇒ 不会各自为真源。
  */
-/** 开放工具面（beast OFF / creator）：无显式 held、断路很少且不含「仅保留派遣面」语义。 */
+/** 开放工具面（beast OFF / creator）：断路很少且不含「仅保留派遣面」语义。
+ *  held（显式 true）不影响判定：真源语义是「未列出＝默认开」，creator 显式开几个结果取件工具
+ *  （image_get_result 等）不会让它变成受限席位；受限席位的标志是大量 cut，而非 held 非空。 */
 export function isOpenToolSurface(ts: ToolSurface): boolean {
   if (!ts.known) return false
-  if (ts.held.length > 0) return false
   // creator 真源仅禁 task；亦容忍 cut 为空（未列＝全开）。
   return ts.cut.length === 0 || (ts.cut.length <= 2 && ts.cut.every((id) => id === "task"))
 }

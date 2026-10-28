@@ -221,21 +221,6 @@ gateway_prepare() {
   trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
   maintenance_begin "${12}"
   drain_gate "${@:8:6}"
-  # 维护/共享锁已持有；recent 时间窗不能替代执行端真实空闲。
-  sudo python3 - <<'PY'
-import base64, json, subprocess, urllib.request
-pid = subprocess.check_output(['systemctl', 'show', 'agent-gateway', '-p', 'MainPID', '--value'], text=True).strip()
-env = dict(v.split(b'=', 1) for v in open('/proc/' + pid + '/environ', 'rb').read().split(b'\0') if b'=' in v)
-origin = env.get(b'OPENCODE_URL', b'http://127.0.0.1:4096').decode().rstrip('/')
-auth = 'Basic ' + base64.b64encode(b'opencode:' + env.get(b'OPENCODE_PASSWORD', b'')).decode()
-states = json.load(urllib.request.urlopen(urllib.request.Request(origin + '/session/status', headers={'Authorization': auth}), timeout=8))
-if not isinstance(states, dict) or any(not k.startswith('ses_') or not isinstance(v, dict) or v.get('type') not in ['idle', 'busy', 'retry'] for k, v in states.items()):
-    raise SystemExit('OPENCODE_ACTIVITY_UNKNOWN: activation refused')
-active = sum(v['type'] != 'idle' for v in states.values())
-if active:
-    raise SystemExit('OPENCODE_NOT_IDLE: activation refused count=' + str(active))
-print('OPENCODE_IDLE_CONFIRMED under maintenance and activation lock')
-PY
 }
 
 gateway_identity() {

@@ -1,0 +1,48 @@
+{
+ "canvas": {
+  "url": "https://www.liblib.tv/canvas?spaceId=11960020&projectId=9966031b259a4293805cff7daea364b1",
+  "title": "未命名项目 - 画布 1 - LibTV - 专业视频创作工具",
+  "text": "画布 1\n开通会员\n节后特惠 11:51:11\n100\nTV Director\n\nAgent 已升级为 TV Director\n\n全流程成片规划、批量执行、创意脑暴、剧本创编…… 现在统统交给 TV Director。\n\n下次再说\n去体验\n视频节点 1\n尝试：\n5分钟超长视频\n首尾帧生成视频\n首帧生成视频\n资产管理\n77%\n正在跟随\n取消ESC\n按 ESC 退出",
+  "modelCandidates": [],
+  "modelClickError": "TimeoutError: locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator('text=/Seedance|Wan 3|Vidu/').first()\n"
+ },
+ "member": {
+  "error": "TimeoutError: locator.click: Timeout 12000ms exceeded.\nCall log:\n  - waiting for getByText('开通会员', { exact: true }).first()\n    - locator resolved to <span>开通会员</span>\n  - attempting click action\n    ",
+  "url": "https://www.liblib.tv/"
+ },
+ "项目": {
+  "popup": false,
+  "url": "https://www.liblib.tv/project",
+  "text": "0\n3\n:\n0\n2\n:\n0\n6\n:\n3\n7\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\n积分超市\n开通会员\n节后特惠 11:50:32\n100\n返回\n全部项目\n回收站\n新建文件夹\n开始创作\n\n创建新的视频项目\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-10-17\n\n未命名项目\n\n2026-09-27\n\n没有更多了\n?"
+ },
+ "资产": {
+  "popup": false,
+  "url": "https://www.liblib.tv/assets",
+  "text": "0\n3\n:\n0\n2\n:\n0\n6\n:\n2\n4\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\n积分超市\n开通会员\n节后特惠 11:50:19\n100\n生成历史\n所有评级\n全部\n0\n图片\n0\n视频\n0\n音频\n0\n暂无历史记录\n生成历史\n0\n个人资产库\n0\n可灵资产库\n0\n?"
+ },
+ "插件": {
+  "popup": false,
+  "url": "https://www.liblib.tv/",
+  "text": "0\n3\n:\n0\n2\n:\n0\n6\n:\n1\n1\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\n积分超市\n开通会员\n节后特惠 11:50:06\n100\n新建画布创作\nWan 3.0\nVidu Q4 Preview\nSeedance 2.5\n视频生成\n图片生成\n音频生成\n剧本生成\n智能剪辑\n最近项目\n查看全部\n未命名项目\n2026-10-17\n未命名项目\n2026-10-17\n未命名项目\n2026-10-17\n未命名项目\n2026-10-17\n特色功能\n蜜雪冰城联名投稿活动\n进行中\n3D-BOX\n剧本原创与改编\n导演执导\n角色造型室\n创作精选\n全部\nLibTV·「X小时之后」AI短片黑客松\n全网爆款\n王者无界剧场计划\n精选画布\n专业影视\n短剧漫剧\n商业广告\n动漫游戏\n教育生活\nTV工具箱\n\n长生无忌第20集\n\n小安Anleo\n\n《王者镇妖司》混沌的世道，妖魔横行\n\n粿条\n\n诡界游记第五集\n\n哈基乱剪\n\n纸人讨账\n\n全网点赞30万+\n鱼白蓝\n\nSansanYe-AiVlog详细制作流程\n\nSansanYe\n\n嫡女重生\n\n百诺AI\n\n《这里是苍梧山》第四集\n\n拉k兔\n\n青梅少女镇\n\n班壳\n\n琵琶行\n\n176****7697\n\n微恐短片《回魂》\n\n小懒\n\n《弥寿计划》Ⅱ\n\n全网点赞10万+\n小小汤AIGC\n\n这一夜，韩熙载知道有人在看他\n\n宇宙电影AI\n\n运动相机TVC广告\n\n小杰AIGC\n\n女主人和可爱小猫的故事\n\njasper\n\nSkill: 角色三视图设定｜锁定脸部\n\n《人间月团圆》中秋节MV\n\n曾小寻\n\n南乔\n\nEcho\n\n漫改犬夜叉\n\n事故唠怪\n\n《水神笔记》\n\n全网点赞10万+\nLET蜜橙\n\n东方曜|《查无此人》难道人只能为他人而活？\n\n蚀刻Etch\n\n工资\n\n全网点赞10万+\n菠萝大王\n\n【AI短片】《一根筋》\n\n星星\n\n人民的狼叔\n\n全网点赞100万+\n巴仕德板\n\n《名次之外》\n\nJcy樂多\nLibTV·「X小时之后」AI短片黑客松 - 最佳视效成就奖\n\n幕Scene\n\n草帽小蔡\n全网百万赞作品｜去创作精选看看\nBlender 插件\nLibTV Plugin\n?"
+ },
+ "LibTV 画布": {
+  "popup": false,
+  "url": "https://www.liblib.tv/canvas?spaceId=11960188&projectId=b7688fe0217a4e7ba497e79fc4949674",
+  "text": "画布 1\n开通会员\n节后特惠 11:49:53\n100\nTV Director\n\nAgent 已升级为 TV Director\n\n全流程成片规划、批量执行、创意脑暴、剧本创编…… 现在统统交给 TV Director。\n\n下次再说\n去体验\n\n双击画布\n\n自由生成节点\n\n图片生成\n视频生成\n音频生成\n剧本生成\n智能剪辑\n资产管理\n100%\n正在跟随\n取消ESC\n按 ESC 退出"
+ },
+ "LibTV Agent": {
+  "popup": false,
+  "url": "https://www.liblib.tv/skill",
+  "text": "0\n3\n:\n0\n2\n:\n0\n5\n:\n4\n4\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\n积分超市\n开通会员\n节后特惠 11:49:40\n100\nSkill 就位，ready when you are\n\n\n\n\nSkill\n收藏\n我的\n推荐\n专业影视\n商业广告\n短剧漫剧\n动漫游戏\n音乐MV\n自媒体创作\n通用技能\n发现\n视频\n/viral-video-replicator\n爆款拉片复刻\nAI拆解爆款视频，一键复刻同款\n江户川阿伟\n2.7w\n使用\n图片\n/apple-style-ad-tvc\nApple风广告TVC\n上传一张图或输入一个产品，让任何东西都拥有一支 30 秒旗舰\n哩布视频\n836\n使用\n视频\n/cinematic-shot-designer\nAI电影镜头设计师\n把简单的场景设计成专业电影级镜头语言\nAIGC肖学长\n1.9k\n使用\n视频\n/koreeda-film-aesthetic\n是枝裕和电影美学\n是枝裕和电影美学。用日常写实的生活肌理，包裹克制又轻盈的情感\nAI搬砖侠\n6.8k\n使用\n文本\n/professional-storyboard-script-builder\nyukioliam影视顶级分镜脚本生成\n融合三大顶级导演体系生成专业分镜脚本\n137****4562\n382\n使用\n视频\n/oriental-giant-plant-prompts\n巨物植物美学\n生成东方巨物图片与视频提示词\nWhitelang\n412\n使用\n文本\n/cinematic-storyboard-prompter\n分镜提示词\n解决复杂场景问题，从剧本生成可直接用于出图的电影分镜表提示词\nJM32\n547\n使用\n视频\n/neo-chinese-aesthetic-tvc\n新中式美学TVC\n新中式美学全案：从妆造、布景到广告成片，一站式惊艳视觉\nAI萨大法官\n1.6w\n使用\n视频\n/shunji-iwai-cinematic-aesthetic\n岩井俊二电影美学\n岩井俊二纯爱电影美学，高度呈现其诗意、细腻、青春感的视听语言\n没有工作的天\n2.8k\n使用\n视频\n/narrative-tvc-creator\n剧情TVC广告片\n创作剧情化商品、品牌、服务类 TVC 广告片\n设计师雪梨\n8.8k\n使用\n视频\n/micro-expression-analyst\n微表情情绪精控\n告别瘫脸尬演，精准拿捏微表情\n像素炼金师\n1.5k\n使用\n视频\n/xingrannvpin\n精品女频短剧一键成片\n告别粗糙流水线成片，纯精品短剧工业化全流程一键出片\n星燃AI\n1.9w\n使用\n视频\n/oriental-aesthetic-film\n仙侠氛围美学短片\n仙侠氛围美学短片\n鱿鱼chill\n3.7k\n使用\n视频\n/xianxia-drama-planner\n东方巨构美学短剧\n一站式生成东方巨构美学短剧\n鱿鱼chill\n6.9k\n使用\n视频\n/cinematic-shot-scheduler\n影视分镜自动调度镜头\n剧情片段 AIGC 专业镜头调度分镜视频工作流\n星星\n1.3k\n使用\n视频\n/hujinquanwuxia\n古典武侠电影全流程导演\n一键把武侠灵感转化为胡金铨，邵氏，古典武侠等美学风格视频\n虾饺o\n1.6w\n使用\n图片\n/cinematic-image-transformer\n电影质感画面专业生成\n一句大白话就能生成超质感电影级多风格图片\n星曜AG\n5.2k\n使用\n视频\n/xingran-nanpintongyongban\n爆款男频短剧skill\n高能爽点拉满，无须你懂逻辑，一键成片效率超高\n星燃AI\n3.8k\n使用\n图片\n/casting-director\n选角Casting\n你的专属选角导演，一键为你挑选最合适的角色\n苏打绿豆\n7.0k\n使用\n视频\n/taiwan-new-wave-aesthetic\n宝岛浪潮电影美学\n台湾新浪潮电影美学，细腻呈现其凝视、疏离、写实感的电影表达\nvibe fckuing\n2.7k\n使用\n?"
+ },
+ "创作者挑战赛": {
+  "popup": false,
+  "url": "https://www.liblib.tv/activity",
+  "text": "0\n3\n:\n0\n2\n:\n0\n5\n:\n3\n1\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\n积分超市\n开通会员\n节后特惠 11:49:27\n100\n返回\n挑战赛\n进行中\n❄️多重福利加码 | 百变雪王，由你定义\nLibTV × 蜜雪冰城 | 百变雪王杯AI创意大赛\n已颁奖\n🎬大咖云集，500,000+现金奖池等你来拿！\nLibTV·「X小时之后」AI短片黑客松正式开启！\n进行中\n👑 150万现金奖池｜英雄故事，值得加冕\nLibTV x 王者荣耀｜王者无界剧场计划\n已颁奖\n💡灯光就位，好戏开场 ｜8万+奖池等你挑战\nLibTV x 北京电影学院文学系｜「一场戏的诞生」\n已颁奖\n🤪 越抽象，越有戏｜5 万+奖池等你来整活\nLibTV「AI重制那头牛」大赛\n已颁奖\n🚀 多重福利加码｜积分、现金、官方周边、赛事门票\nLibTV x 游可爱｜瓦漫节·无畏契约觉醒计划\n已颁奖\n🥇 13万现金＋70万积分，等你的 Skill 一战封神\nLibTV Skill 导演大师赛\n已颁奖\n🏆15万丰厚奖池｜高德扫街榜活动来袭！\n高德 x LibTV x 阿里云｜走，我们扫街去\n已颁奖\n🎬价值10万+奖池已就位，只等你的Action\nLibTVC｜广告“导演”请就位！\n已颁奖\n千万算力+百万现金激励+非遗认证｜奖池拉满🔥\nLibTV x 优酷 AI 漫剧「精卫计划」\n已颁奖\n这一轮用AI释放脑洞🧠，解锁丰厚算力\nLibTV大乱斗｜vol.2《AI，想象和尖叫》\n已颁奖\n👀 别藏了——丰厚奖池等你显形\nLibTV大乱斗｜vol.1 显形记\n已颁奖\n百万级奖池🏆｜现金积分马力全开⚡️\nLib TV x Seedance 2.0｜百万AI影像狂飙季\n没有更多了\n?"
+ },
+ "学院": {
+  "popup": false,
+  "url": "https://www.liblib.tv/academy",
+  "text": "0\n3\n:\n0\n2\n:\n0\n5\n:\n1\n9\n8\n节后复工｜至尊会员上新：Seedance 2.5 720P 有参低至0.19元/秒、无参低至0.46元/秒\n限时抢购\n首页\n项目\n资产\n插件\n创作\nLibTV 画布\nLibTV Agent\nBETA\n社区\n学院\n大师开讲\n创作精选\n全网爆款\n创作者挑战赛\n王者大赛\n版本更新记录\nv1.5\nAI 大师公开课\n\nLibTV x 抖音联合出品「AI大师公开课」首期上线！\n\n重磅解读抖音AI创作大赛金奖作品《合龙》\n\n2XLabs首次公开AI创作三心法「叙事」「美术」「表演」\n\n在技术平权的时代，如何快速缩短认识差距？\n\n2XLabs\n刘树恒 王语宸\n查看课程\n学习广场\n图文教程\n亮点功能\n阅读 15min\n\n涉及功能：画布，文本、图片、视频、音频节点\n\n阅读 10min\n\n涉及功能：Seedance 2.5模型能力、真人素材使用、专属提示词优化\n\n阅读 7min\n\n涉及功能：故事板、剧情推演、多机位、设定图、人像调节\n\n阅读 15min\n\n涉及功能：全景、多角度、打光、九宫格、图像基础编辑、标注、分镜组\n\n阅读 10min\n\n涉及功能：视频高清、片段重拍、智能续写、逐帧拉片、深度动作捕捉、音视频分离\n\n阅读 5min\n\n涉及功能：音频截取、变速、切分、音色克隆\n\n阅读 10min\n\n涉及功能：工作流、打组、资产管理、智能引用\n\n阅读 7min\n\n涉及功能：标记、风格、聚焦、摄像机控制\n\n阅读 5min\n\n涉及功能：视频主体库、运镜预设\n\n阅读 12min\n\n涉及功能：脚本节点、批量产出分镜和视频\n\n阅读 15min\n\n涉及功能：3D导演台、角色模型、相机机位、多视角截图、运动轨迹、运镜轨迹、Blender插件\n\n?"
+ }
+}

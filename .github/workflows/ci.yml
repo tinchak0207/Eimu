@@ -1,6 +1,6 @@
 name: CI
 
-# 为什么 CI 只做 typecheck + test：这两个是本 repo 唯一有真实断言、且不依赖生产凭证的闸。
+# CI 不使用生产凭证：类型检查、单测、发布脚本语法和锁定 SDK 的工具 schema 兼容检查。
 # 刻意「不做」的事：不部署（Vercel 部署需 scope/auth，属人工授权动作）、不跑 build
 # （remote build 才是稳路，本地 build 会因自装 node_modules 缺 sharp 而炸）。
 
@@ -12,6 +12,13 @@ on:
   # 外部 PR 代码不应在维护者机器上执行。
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +27,7 @@ jobs:
   typecheck:
     name: Typecheck (tsc --noEmit)
     runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +44,7 @@ jobs:
   gateway-typecheck:
     name: Gateway typecheck (tsc --noEmit)
     runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,13 +58,14 @@ jobs:
         run: npm install --prefix deploy-staging/gateway --no-package-lock --no-audit --no-fund
       # 闸的覆盖范围：deploy-staging/gateway/** 下所有 *.ts（含 director-engine/、editor/
       # 子目录；排除 *.test.ts 与 node_modules）。不含 deploy-staging/opencode-runtime
-      # ——那是独立运行树，由它自己的工具链负责。根 tsconfig 的 exclude 含
+      # ——独立运行树的工具 schema 由 tool-schema-compatibility job 覆盖。根 tsconfig 的 exclude 含
       # "deploy-staging"，因此本 job 是生产控制面唯一进 tsc 的入口。
       - run: npx tsc -p deploy-staging/gateway --noEmit
 
   test:
     name: Unit tests
     runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -135,3 +145,52 @@ jobs:
           # 测试指令以 package.json 的 test script 为准（tsx --test）；
           # 不吞 exit code：任何非预期失败都会让 job 变红。
           npx --yes tsx --test "${RUN[@]}"
+
+  tool-schema-compatibility:
+    name: Runtime tool schema compatibility (plugin 1.18.14 / Zod 4.1.8)
+    runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Import and convert every tool schema with the runtime's locked SDK
+        run: |
+          set -euo pipefail
+          # The release commands use this same commit-bound entry before activation.
+          bun tools/check-opencode-tool-schemas.mjs --commit "$GITHUB_SHA" --repo "$GITHUB_WORKSPACE"
+
+  release-script-syntax:
+    name: Release script Bash syntax
+    runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse tracked release scripts without executing them
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t scripts < <(git ls-files -z 'deploy/vps/*.sh')
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "::error::no release scripts selected"
+            exit 1
+          fi
+          for script in "${scripts[@]}"; do bash -n "$script"; done
+
+  # S18：工程图 P3 上线门（设计文档 docs/architecture/project-graph.md §8）。
+  # 九条结构不变量各有独立期望来源（文档常量 / 测试自己发送的字节串 / fake 服务器原始请求 /
+  # 按拓扑手写的集合 / 13 个模板 id 与旧可执行数）。测试只用 127.0.0.1 的 fake opencode 与
+  # fake 计费平台，禁止真实上游；gateway 依赖全是 bun/node 内建，不需要 npm install。
+  project-invariants:
+    name: Project invariants (S18 / project-graph §8)
+    runs-on: [self-hosted, eimu-local]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Project invariants (bun test, ≤8 min)
+        run: |
+          set -euo pipefail
+          time bun test deploy-staging/gateway/project/__invariants__

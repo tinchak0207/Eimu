@@ -150,7 +150,7 @@ export const musicGenTool: MusicToolDef = {
       // 音乐扣费 ref（2026-10-10「音乐 1 币/次」）：**每次工具调用生成一次**，同一次调用内的
       // 通路重试／回落全部沿用同一个 ref（平台按 ref 幂等 ⇒ 绝不双扣）。此处位于任何生成副作用
       // 之前；probe=true 已提前 return、三通路全失败在下游 throw，都到不了扣费点。
-      const musicChargeRef = `music:${context?.sessionId ?? "anon"}:${randomUUID()}`
+      const musicChargeRef = context?.operationId ?? `music:${context?.sessionId ?? "anon"}:${randomUUID()}`
       // </harness-only>
       // cot_mode 缺省：常规＝full；翻唱（带 source_audio）＝melody（官方翻唱模式：
       // 只保留旋律骨干、伴奏自由适配新风格）；显式传 full 也允许＝保留原和声的重渲染。
@@ -263,6 +263,7 @@ export const musicGenTool: MusicToolDef = {
             melodyOnly: true,
           })
         } catch (e) {
+          if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
           if (e instanceof Yue2TranscribeError) {
             // abc_missing（422）＝这份音频扒不出旋律，重试同一份不会变好，hint 如实说。
             return fail(
@@ -333,14 +334,15 @@ export const musicGenTool: MusicToolDef = {
           generated =
             channel === "yue2"
               ? await generateYue2TrackResilient({
+                  beforeSubmit: context?.beforeSubmit,
                   style: finalPrompt,
                   lyrics: lyricsForChannel("yue2"),
                   cot: cotMode,
                   ...(effectiveAbc !== undefined ? { abc: effectiveAbc } : {}),
                 })
               : channel === "flowmusic"
-                ? await generateFlowMusicTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("flowmusic"), model: flowMusicModel })
-                : await generateLyriaTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
+                ? await generateFlowMusicTrack({ beforeSubmit: context?.beforeSubmit, prompt: finalPrompt, lyrics: lyricsForChannel("flowmusic"), model: flowMusicModel })
+                : await generateLyriaTrack({ beforeSubmit: context?.beforeSubmit, prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
           break
         } catch (e) {
           // YuE2 瞬时故障穷尽：不回落、直接如实 fail（未扣费）。硬失败与其余通路走既有回落链。

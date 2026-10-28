@@ -507,6 +507,27 @@ function defineTools(): ToolDefinition[] {
         }),
     },
     {
+      name: "get_agent_generation_task",
+      title: "读取本会话生成订单与费用",
+      description: bilingual(
+        "读取自有 Eimu Agent 会话中登记的生成订单及真实费用。需 session_id 和 task_id；适用于 Agent 使用账号派生密钥提交、直接图片任务查询返回404的情况。仅允许本会话耐久登记且平台租户核验通过的订单。费用查不到时返回null与unknown，不当作零。只读，不生成、不重试订单。",
+        "Read an owned agent session's durably registered generation task and ledger cost. Requires session_id and task_id. Read-only; missing cost stays unknown. Other sessions and tenants remain inaccessible.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "自有 Agent 会话ID" },
+          task_id: { type: "string", description: "该会话真实生成任务ID" },
+        },
+        required: ["session_id", "task_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) => runForward({
+        method: "GET",
+        path: (a) => agentSessionPath(pickString(a, "session_id") ?? "", `/generations/${encodeURIComponent(pickString(a, "task_id") ?? "")}`),
+      }, "get_agent_generation_task", args, ctx),
+    },
+    {
       name: "get_agent_session",
       title: "读取 agent 会话",
       description: bilingual(

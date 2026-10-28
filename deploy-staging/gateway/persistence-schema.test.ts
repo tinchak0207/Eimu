@@ -66,6 +66,10 @@ function minimalState(): Record<string, unknown> {
     lastTurnActiveAt: 999,
     sessionTitle: "测试标题",
     tplDeviateToken: { token: "tpl-fake", at: 222 },
+    // S19 席位锁存：三键与 PERSISTED_DATA_KEYS 同批
+    projectMode: true,
+    seat: "creator",
+    beast: true,
   }
 }
 
@@ -147,6 +151,44 @@ describe("新增栏位同步集合检查（需求 3）", () => {
   })
 })
 
+// ── S19 席位锁存键（2026-10-28）：新增持久化栏位必须「清单＋serialize＋hydrate」同批 ──
+// 独立期望来源：设计文档 §7（会话创建时写入 seat/beast/projectMode，缺键旧会话读回
+// creator_legacy/projectMode=false；回滚 off 只影响新建会话，已锁存的会话保持原值）。
+describe("S19 席位锁存键（projectMode/seat/beast）", () => {
+  test("新键进守门清单、serialize 有输出、往返后原值一致", () => {
+    for (const k of ["projectMode", "seat", "beast"]) expect([...persistence.PERSISTED_DATA_KEYS]).toContain(k)
+    const state = minimalState()
+    const serialized = persistence.serialize(state as never) as Record<string, unknown>
+    expect(serialized.projectMode).toBe(true)
+    expect(serialized.seat).toBe("creator")
+    expect(serialized.beast).toBe(true)
+    persistence.saveSession(state as never)
+    const h = persistence.hydrateRow(persistence.loadSessionById(state.sessionId as string)!)
+    expect(h.projectMode).toBe(true)
+    expect(h.seat).toBe("creator")
+    expect(h.beast).toBe(true)
+  })
+
+  test("缺键旧行读回 creator_legacy / projectMode=false / beast=false（回滚口径）", () => {
+    // sess-legacy 的 data 是 v0 时代形状：没有这三个键（见档头 fixture）
+    const raw = persistence.loadSessionById("sess-legacy")!
+    expect("seat" in (raw.data as Record<string, unknown>)).toBe(false)
+    const h = persistence.hydrateRow(raw)
+    expect(h.seat).toBe("creator_legacy")
+    expect(h.projectMode).toBe(false)
+    expect(h.beast).toBe(false)
+  })
+
+  test("旧席位会话（creator_legacy）落盘后不被读回成 creator", () => {
+    const state = { ...minimalState(), projectMode: false, seat: "creator_legacy", beast: false }
+    persistence.saveSession(state as never)
+    const h = persistence.hydrateRow(persistence.loadSessionById(state.sessionId as string)!)
+    expect(h.seat).toBe("creator_legacy")
+    expect(h.projectMode).toBe(false)
+    expect(h.beast).toBe(false)
+  })
+})
+
 // ── v2 → v3 增量升级：真实的旧生产库（2026-10-03）──────────────────────────────
 // 为何另造一个库：上面那个 fixture 是 user_version=0 的最旧库，一路 0→3；本节专门覆盖
 // 「已上线的 v2 生产库（user_version=2）升到 v3」这条真实路径，v3 产物（human_labels 表、
@@ -195,14 +237,16 @@ const v2db = new Database(v2Path)
 const v2Report = persistence.runMigrations(v2db)
 
 describe("v2 → v3 增量升级（真实旧库）", () => {
-  test("runMigrations 把 v2 升到 v3：只套用 v3、user_version==3", () => {
+  // v4（harness_security_state，30739cc06）已发布：v2 库现在一路升到 v4，只套用 v3、v4，不重放 v1/v2。
+  test("runMigrations 把 v2 升到最新（v4）：只套用 v3、v4、user_version==4", () => {
     expect(v2Report.from).toBe(2)
-    expect(v2Report.to).toBe(3)
-    expect(v2Report.applied).toEqual([3])
+    expect(v2Report.to).toBe(4)
+    expect(v2Report.applied).toEqual([3, 4])
     expect(v2Report.failures).toEqual([])
     const v = (v2db.query("PRAGMA user_version").get() as { user_version: number }).user_version
     expect(v).toBe(persistence.SCHEMA_VERSION)
-    expect(v).toBe(3)
+    expect(v).toBe(4)
+    expect(v2db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='harness_security_state'").get()).not.toBeNull()
   })
 
   test("v3 产物齐备：human_labels 表存在、critic_verdicts 有 score_source 栏", () => {
@@ -225,7 +269,7 @@ describe("v2 → v3 增量升级（真实旧库）", () => {
 
   test("v3 对「栏已存在」的库幂等：可重跑、不重复 ALTER、审计表不长新列", () => {
     const report = persistence.runMigrations(v2db)
-    expect(report.from).toBe(3)
+    expect(report.from).toBe(4)
     expect(report.applied).toEqual([])
     expect(report.failures).toEqual([])
     const n = (v2db.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).filter(
@@ -233,6 +277,6 @@ describe("v2 → v3 增量升级（真实旧库）", () => {
     ).length
     expect(n).toBe(1)
     const audits = v2db.query("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[]
-    expect(audits.map((a) => a.version)).toEqual([1, 2, 3])
+    expect(audits.map((a) => a.version)).toEqual([1, 2, 3, 4])
   })
 })

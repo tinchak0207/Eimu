@@ -204,3 +204,13 @@ redteam-*
 /work/
 /_inbox/
 
+# ── 工程图交付期的本地临时目录与超大证据/依赖（2026-10-28）──
+/.memory-queue/
+/.patch-staging/
+/deploy-staging/gateway/.memory-queue/
+# agent-evolve 评测语料 2.8GB（只保留同目录报告，语料不入库）
+/docs/evidence/agent-evolve-20261021/corpus/
+/miniapp/node_modules/
+/miniapp/dist/
+/miniapp/.swc/
+

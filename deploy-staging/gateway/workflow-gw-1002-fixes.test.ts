@@ -4,6 +4,12 @@
 //   2) capacity_saturated：换道门槛（WORKFLOW_QUEUE_SWITCH_MS=300000）内必须
 //      __queueSwitches ≥ 1 且画布提示帧原文含「5 分钟」。
 // 跑法：timeout 120 bun run deploy-staging/gateway/workflow-gw-1002-fixes.test.ts
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+// 沙箱隔离：submitWorkflowNode 链路（job-store）会开 sessions.db，缺省 /opt/agent-harness/state 在 dev 机不存在。
+// env 必须在下方动态 import gw 之前设置。
+process.env.SESSIONS_DB_PATH = join(mkdtempSync(join(tmpdir(), "wf1002-")), "sessions.db")
 process.env.PLATFORM_BASE = "http://test.local"
 process.env.QUOTA_URL = "http://test.local/v1/quota"
 process.env.OPENCODE_URL = "http://test.local"
@@ -111,8 +117,10 @@ async function run(): Promise<void> {
       }
       if (url.endsWith("/v1/models")) {
         return json({ data: [
-          { id: "modelA", x_coins_per_second: { "720": 5 } },
-          { id: "modelB", x_coins_per_second: { "720": 5 } },
+          // 现行提交契约（pricing-gateway.ts resolveVideoSubmissionOptions，08ff5b6e0）：目录必须给出模型默认分辨率
+          // （x_capabilities.defaultResolution），否则 fail-closed「目录未提供模型默认分辨率」不提交；价目键为 "720p"。
+          { id: "modelA", x_coins_per_second: { "720p": 5 }, x_capabilities: { defaultResolution: "720p" }, x_billing: { currency: "coins", unit: "per_second" } },
+          { id: "modelB", x_coins_per_second: { "720p": 5 }, x_capabilities: { defaultResolution: "720p" }, x_billing: { currency: "coins", unit: "per_second" } },
         ] })
       }
       if (url.includes("/v1/videos/generations") && method === "POST") {
@@ -137,7 +145,7 @@ async function run(): Promise<void> {
       const r = await gw.submitWorkflowNode(state, node as never, new Map(), graph as never)
       const switches = Number((node.metadata as Record<string, unknown>).__queueSwitches ?? 0)
       const hintFrames = captured.filter((f) => f.includes("canvas.node.updated") && f.includes("排队"))
-      console.log(`  [2] result.ok=${r.ok} content=${r.content} __queueSwitches=${switches} hintFrames=${hintFrames.length}`)
+      console.log(`  [2] result=${JSON.stringify(r).slice(0, 400)} ok=${r.ok} content=${r.content} __queueSwitches=${switches} hintFrames=${hintFrames.length}`)
       console.log(`  [2] hint frame raw: ${hintFrames[0]?.trim().replace(/\n/g, " | ")}`)
       assert.equal(r.ok, true, "换道后应成功")
       assert.ok(switches >= 1, `capacity_saturated 应触发换道，实得 __queueSwitches=${switches}`)

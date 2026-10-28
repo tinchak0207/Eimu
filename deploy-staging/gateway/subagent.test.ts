@@ -4,20 +4,31 @@
 // D2（2026-10-02）：派工错误必带 code 与缺栏清单；D4：latest 别名 + not_found 附最近 run。
 // 全程 mock globalThis.fetch，不依赖真实网路或上游；完成的 run 之落盘档在 afterAll 精确清除。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CRITIC_PASS_MARK } from "./delivery-gate"
-import { CONTINUATION_DIRECTIVE_MARK, ORPHAN_TOOL_USE_MARK } from "./error-classify.ts"
-import {
+
+// 沙箱隔离：DB / 落盘目录 / 转写目录全指向临时目录，不碰 /opt/agent-harness（dev 机无权限，生产默认路径不变）。
+// 必须在 import subagent（连带 persistence、subagent-types）之前设置，故用动态 import。
+const SANDBOX_DIR = mkdtempSync(join(tmpdir(), "subagent-test-"))
+process.env.SESSIONS_DB_PATH = join(SANDBOX_DIR, "sessions.db")
+process.env.SUBAGENT_OUTPUT_DIR = join(SANDBOX_DIR, "outputs-subagent")
+process.env.SUBAGENT_TRANSCRIPT_DIR = join(SANDBOX_DIR, "transcripts")
+// 生产上该目录恒存在（researchPredecessors 的 readdirSync 依赖它，缺失即 fail-closed 503）；沙箱里补建以对齐。
+mkdirSync(process.env.SUBAGENT_OUTPUT_DIR, { recursive: true })
+
+const { CRITIC_PASS_MARK } = await import("./delivery-gate")
+const { CONTINUATION_DIRECTIVE_MARK, ORPHAN_TOOL_USE_MARK } = await import("./error-classify.ts")
+const {
   handleSubagentDispatch,
   handleSubagentEvent,
   handleSubagentStatus,
   initSubagent,
   maybeRunMachineCriticPass,
   handleLoopBreaker,
-} from "./subagent.ts"
-import { handleOpencodeEvent } from "./opencode-event-handler.ts"
-import { sessions } from "./sessions-core.ts"
+} = await import("./subagent.ts")
+const { handleOpencodeEvent } = await import("./opencode-event-handler.ts")
+const { sessions } = await import("./sessions-core.ts")
 
 // ── 捕获：子代理 done 帧（需求1）、主路径 prompt_async 注入体（需求2）──────────
 const emitted: Array<{ name: string; data: any }> = []
@@ -37,9 +48,11 @@ function json(obj: unknown, status = 200): Response {
 function childOf(url: string): string | undefined {
   return /\/session\/(ses_[^/]+)/.exec(url)?.[1]
 }
+// 成品证据只认 http(s) 媒体 URL（F3-B hasRealDeliverable，media-quality.URL_RE）：file:// 用户打不开，不算交付，
+// 机器 critic 会据此零派遣，所以夹具里的 music 交付用可达的 https 地址。
 function assistantText(kind: string | undefined): string {
   if (kind === "music") {
-    return "emotion_contract: 温暖\nlyrics: 歌词\nmelody_notation: 1 2 3\naudio_url: file:///m/1.mp3\nduration_source: ffprobe\nqc: ok"
+    return "emotion_contract: 温暖\nlyrics: 歌词\nmelody_notation: 1 2 3\naudio_url: https://cdn.example.test/m/1.mp3\nduration_source: ffprobe\nqc: ok"
   }
   if (kind === "critic") {
     return "verdict：通过\nissues：[]\nevidence：逐栏核验完毕\nqc：签名"
@@ -73,9 +86,12 @@ globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: stri
   if (url.includes("/abort")) return json({})
   if (method === "DELETE") return json({})
   if (url.includes("/message")) {
-    if (messageFixture) return json(messageFixture)
+    // 真实 opencode 的每则 message 必带 info.time.created；D3 时间窗（subagent-policy.ts messagesInWindow）
+    // 对缺该栏的消息一律判窗外（防父消息冒充本 run 产出），所以夹具补上与真上游一致的时间戳。
+    const stamp = (m: any) => ({ ...m, info: { ...m.info, time: { created: Date.now(), ...m.info?.time } } })
+    if (messageFixture) return json(messageFixture.map(stamp))
     const cid = childOf(url)
-    return json([{ info: { role: "assistant" }, parts: [{ type: "text", text: assistantText(cid ? childKind.get(cid) : undefined) }] }])
+    return json([stamp({ info: { role: "assistant" }, parts: [{ type: "text", text: assistantText(cid ? childKind.get(cid) : undefined) }] })])
   }
   return json({})
 }) as typeof fetch
@@ -114,8 +130,9 @@ async function dispatch(
   const body = (await res.json()) as { subagent_id: string; label: string }
   return { ...body, childId: createdChildren[before] }
 }
-async function status(id: string): Promise<{ code: number; body: Record<string, unknown> }> {
-  const res = await handleSubagentStatus(req("http://gw.test/internal/subagent/status", { session_id: "x", subagent_id: id }))
+// S4（2026-10-14 FIX-G2）起 status 的 session_id 必须解析到真实会话，故必须传真实父会话 id（"x" 现回 404 unknown_session）。
+async function status(id: string, sessionId: string): Promise<{ code: number; body: Record<string, unknown> }> {
+  const res = await handleSubagentStatus(req("http://gw.test/internal/subagent/status", { session_id: sessionId, subagent_id: id }))
   return { code: res.status, body: (await res.json()) as Record<string, unknown> }
 }
 async function settle(ms = 25): Promise<void> {
@@ -150,11 +167,12 @@ afterAll(() => {
   globalThis.fetch = realFetch
   for (const w of writtenFiles) {
     try {
-      rmSync(join("/opt/agent-harness/workspace/outputs/subagent", `${w.id}-${safeLabel(w.label)}.md`), { force: true })
+      rmSync(join(process.env.SUBAGENT_OUTPUT_DIR!, `${w.id}-${safeLabel(w.label)}.md`), { force: true })
     } catch {
       /* best-effort 清理，不影响测试结果 */
     }
   }
+  rmSync(SANDBOX_DIR, { recursive: true, force: true })
 })
 
 // ── 修 2 ─────────────────────────────────────────────────────────────────────
@@ -163,7 +181,7 @@ describe("修 2 subagent_status 精确查询", () => {
     const p = makeParent("gw-fix2-a")
     const a = await dispatch(p, "甲研一")
     await dispatch(p, "甲研二")
-    const s = await status(a.subagent_id)
+    const s = await status(a.subagent_id, p.sessionId)
     expect(s.code).toBe(200)
     expect(s.body.done).toBe(false)
     expect(s.body.label).toBe("甲研一")
@@ -174,7 +192,7 @@ describe("修 2 subagent_status 精确查询", () => {
     await dispatch(p, "丙研一")
     await dispatch(p, "丙研二")
     await dispatch(p, "丁写作")
-    const s = await status("丙研")
+    const s = await status("丙研", p.sessionId)
     expect(s.code).toBe(200)
     expect(s.body.multiple).toBe(true)
     const cands = s.body.candidates as Array<{ runId: string; label: string; status: string }>
@@ -190,7 +208,7 @@ describe("修 2 subagent_status 精确查询", () => {
     const p = makeParent("gw-fix2-c")
     await dispatch(p, "戊写作")
     await dispatch(p, "庚研究")
-    const s = await status("戊写作")
+    const s = await status("戊写作", p.sessionId)
     expect(s.code).toBe(200)
     expect(s.body.multiple).toBeUndefined()
     expect(s.body.done).toBe(false)
@@ -200,7 +218,7 @@ describe("修 2 subagent_status 精确查询", () => {
   test("真正零命中 → not_found(404)", async () => {
     const p = makeParent("gw-fix2-d")
     await dispatch(p, "辛研一")
-    const s = await status("zzz-查无此代理-zzz")
+    const s = await status("zzz-查无此代理-zzz", p.sessionId)
     expect(s.code).toBe(404)
     expect(s.body.ok).toBe(false)
   })
@@ -208,6 +226,17 @@ describe("修 2 subagent_status 精确查询", () => {
 
 // ── 修 1 ─────────────────────────────────────────────────────────────────────
 describe("修 1 critic 排队重试 + verdict 回灌", () => {
+  // 2026-10-27 起并发默认不限（c00678f77 取消硬顶 3），「槽位满」只在 env SUBAGENT_MAX_ACTIVE_PER_PARENT 收紧时存在；
+  // 本组验的正是收紧后的入队/补跑语义，所以显式设 3（同 D2 并发上限用例做法），组后还原。
+  let prevCap: string | undefined
+  beforeAll(() => {
+    prevCap = process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+    process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT = "3"
+  })
+  afterAll(() => {
+    if (prevCap === undefined) delete process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+    else process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT = prevCap
+  })
   test("槽位满→入队；槽位释放→补跑；critic PASS verdict 回灌父会话；只触发一次", async () => {
     const p = makeParent("gw-fix1")
     const filler1 = await dispatch(p, "填充甲")
@@ -230,10 +259,10 @@ describe("修 1 critic 排队重试 + verdict 回灌", () => {
     expect(createdChildren.length).toBe(beforeQueue + 1)
 
     // 修 2 顺带验证：critic run 可用 label 查到（在跑）
-    const st = await status("机器审核")
+    const st = await status("复核", p.sessionId)
     expect(st.code).toBe(200)
     expect(st.body.done).toBe(false)
-    expect(st.body.label).toBe("机器审核")
+    expect(st.body.label).toBe("复核")
 
     // critic 正常收尾（verdict=PASS）→ 以正常完成仪式回灌父会话
     const criticChild = createdChildren[createdChildren.length - 1]
@@ -242,8 +271,12 @@ describe("修 1 critic 排队重试 + verdict 回灌", () => {
     await handleSubagentEvent({ type: "session.idle" }, criticChild)
     await settle()
     expect(wakes.length).toBeGreaterThan(wakesBefore)
-    const passWake = wakes.find((w) => w.summary.includes(CRITIC_PASS_MARK))
+    // F6（2026-10-04）起唤醒摘要对用户可读：内审判词标记（CRITIC_PASS_MARK）属内部脚手架，在出口被
+    // scrubSubagentPayload 剥离——所以验「critic run 自己的终态确实唤醒了父会话」且摘要不泄漏内部标记。
+    const criticRunId = st.body.subagent_id as string
+    const passWake = wakes.find((w) => w.id === criticRunId)
     expect(passWake).toBeTruthy()
+    expect(passWake!.summary.includes(CRITIC_PASS_MARK)).toBe(false)
 
     // 只触发一次语义：已用过 pass，再呼叫不再派遣
     expect(maybeRunMachineCriticPass(p, false)).toBe(false)
@@ -251,7 +284,7 @@ describe("修 1 critic 排队重试 + verdict 回灌", () => {
     // 记录本次确实落盘的档（afterAll 精确清除）
     writtenFiles.push({ id: filler1.subagent_id, label: "填充甲" })
     writtenFiles.push({ id: expert.subagent_id, label: "音乐交付" })
-    writtenFiles.push({ id: (st.body.subagent_id as string) ?? "", label: "机器审核" })
+    writtenFiles.push({ id: (st.body.subagent_id as string) ?? "", label: "复核" })
   })
 })
 
@@ -312,13 +345,15 @@ describe("D2 派工硬化：失败必带 code 与缺栏", () => {
     expect(body.missing).toEqual(["label", "prompt"])
   })
 
-  test("父会话不存在 → 404 code=session_not_found", async () => {
+  // S4（2026-10-14 FIX-G2，subagent-runs.ts resolveParentSession）：不认的 session id 一律 404 unknown_session，
+  // 不再回退原始字符串当父键（伪造 id 不得冒充父会话）——旧码 session_not_found 随该安全修复淘汰。
+  test("父会话不存在 → 404 code=unknown_session（fail-closed）", async () => {
     const res = await handleSubagentDispatch(
       req("http://gw.test/internal/subagent/dispatch", { sessionId: "gw-nonexistent", label: "x", prompt: "y" }),
     )
     expect(res.status).toBe(404)
     const body = (await res.json()) as { code: string }
-    expect(body.code).toBe("session_not_found")
+    expect(body.code).toBe("unknown_session")
   })
 
   test("并发上限（env=3）→ code=concurrency_limit 且附在跑清单", async () => {
@@ -433,9 +468,10 @@ describe("需求1 子代理回传契约：最后一则 assistant 文字＋用量
     expect(d.summary.includes("[已截断")).toBe(false)
     // 第一则文字与中间 tool 噪音不得被拼进摘要（取最后一则，不回顾拼接）
     expect(d.summary.includes("第一则：先做准备")).toBe(false)
-    // 用量栏位：tool part 共 2 个；token＝最后一则 assistant 的 input+output+cache
+    // 用量栏位：tool part 共 2 个；token＝窗口内**全部** assistant 消息累加（D3／CC 2.1.302 用量契约：
+    // 子代理花的是整个 run 的 token，不是末则）：(100+50)+(1+2)+(7+3+5+0)=168。
     expect(d.usage?.tool_calls).toBe(2)
-    expect(d.usage?.tokens).toBe(15)
+    expect(d.usage?.tokens).toBe(168)
     expect(d.usage?.duration_ms).toBeGreaterThanOrEqual(0)
     // 键集比对：既有三键必在；其余只能是允许的新/可选键（一字不改既有栏名）
     const keys = Object.keys(d)
@@ -455,12 +491,16 @@ describe("需求1 子代理回传契约：最后一则 assistant 文字＋用量
     ])
     const inline = inlineOf(d.summary)
     expect(inline.length).toBeLessThanOrEqual(4000)
-    expect(d.summary.includes("[已截断")).toBe(true)
+    // F6（2026-10-04）起 done 摘要对用户可读：截断提示（含「落盘指标」内部指针）与用量行已在出口被
+    // scrubSubagentPayload 剥离（delivery-gate-scrub.ts 脚手架清洗），摘要里不得再出现。
+    expect(d.summary.includes("[已截断")).toBe(false)
+    expect(d.summary.includes("落盘指标")).toBe(false)
+    expect(d.summary.includes("[子代理用量]")).toBe(false)
     // 取的是「末则」的开头（不是别的讯息、不是尾部）
     expect(inline.startsWith("LINE0-")).toBe(true)
     expect(longText.startsWith(inline)).toBe(true)
-    // 截断提示带实际被截字数
-    expect(d.summary).toMatch(/\[已截断 \d+ 字元；完整结果见落盘指标\]/)
+    // 确实被截（未截断的全文 >12000，摘要整体仍 ≤4000＋少量空白）
+    expect(d.summary.length).toBeLessThan(longText.length / 2)
   })
 })
 

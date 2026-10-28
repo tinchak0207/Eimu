@@ -194,7 +194,7 @@ const body4b = (await res4b.json()) as { error?: { code?: string }; status?: str
 check("已 applied 的 id 重放也被拒且回报 applied", res4b.status === 409 && body4b.error?.code === "steer_replay_settled" && body4b.status === "applied", JSON.stringify(body4b))
 
 // ═══════════ ⑥ 第二条投递腿（question 断点注入）同样带身份与 tombstone ═══════════
-console.log("\n[6] question 断点注入腿：身份 + tombstone 同样生效（含重连后不得重放）")
+console.log("\n[6] question 断点下的 steer：一律排队，身份落地，重连后重放被拒")
 const sid2 = "ses_d2b_q"
 const qstate = makeState(sid2)
 qstate.pendingQuestions.set("que_1", { requestId: "que_1", callId: "call_1", questions: [{ question: "要继续吗", options: [] }] })
@@ -210,12 +210,14 @@ globalThis.fetch = (async (input: unknown) => {
 
 const resQ = await handleSteer(KEY, sid2, steerReq(sid2, { content: "先改成冷色调", steer_id: "steer-d2b-q1" }))
 const bodyQ = (await resQ.json()) as Record<string, unknown>
-check("注入腿回 200 injected", resQ.status === 200 && bodyQ.status === "injected", `status=${resQ.status} body=${JSON.stringify(bodyQ)}`)
-check("注入＝往上游回灌一次答覆", questionReplies === 1, `replies=${questionReplies}`)
-check("注入腿的身份同样先落地并落终态 injected", reader.get("steer-d2b-q1")?.state === "injected")
-check("注入腿也记了 dispatched 时刻（投递发生过的证据）", typeof reader.get("steer-d2b-q1")?.dispatchedAt === "number")
+// 2026-10 现行契约（steer-gw.ts「① 一律排队」）：question 断点没有可信注入接口，注入腿已删除——
+// 有断点时 steer 照样排队，不往上游 /reply 回灌（旧版回 injected 是吞指令的假话）。
+check("question 断点下 steer 照常受理为 queued（不谎报 injected）", resQ.status === 200 && bodyQ.status === "queued", `status=${resQ.status} body=${JSON.stringify(bodyQ)}`)
+check("不往上游回灌答覆（注入腿已删，零副作用）", questionReplies === 0, `replies=${questionReplies}`)
+check("身份先落地并停在 queued（未投递、未伪造 injected）", reader.get("steer-d2b-q1")?.state === "queued", String(reader.get("steer-d2b-q1")?.state))
+check("排队态没有 dispatched 时刻（投递未发生）", reader.get("steer-d2b-q1")?.dispatchedAt == null)
 
-// 重连／重启后同一 id 重放：不得再注入一次（否则模型收到两次而 View 只显示一次）。
+// 重连／重启后同一 id 重放：仍在途（queued）＝拒绝，不得再入队一次，也不得往上游回灌。
 sessions.clear()
 persistence.initPersistence()
 const qstate2 = makeState(sid2)
@@ -223,10 +225,10 @@ qstate2.pendingQuestions.set("que_2", { requestId: "que_2", callId: "call_2", qu
 sessions.set(sid2, qstate2)
 const resQ2 = await handleSteer(KEY, sid2, steerReq(sid2, { content: "先改成冷色调", steer_id: "steer-d2b-q1" }))
 const bodyQ2 = (await resQ2.json()) as { error?: { code?: string }; status?: string }
-check("重放被拒（不再注入第二次）", resQ2.status === 409 && bodyQ2.error?.code === "steer_replay_settled", JSON.stringify(bodyQ2))
-check("重放拒绝回报既有终态 injected", bodyQ2.status === "injected", String(bodyQ2.status))
-check("上游只被回灌过一次（真副作用计数＝模型不会收到两次）", questionReplies === 1, `replies=${questionReplies}`)
-check("断点仍在（注入腿确实有可用断点，不是空跑）", qstate2.pendingQuestions.size === 1)
+check("重放被拒（在途，不重复受理）", resQ2.status === 409 && bodyQ2.error?.code === "steer_replay_in_flight", JSON.stringify(bodyQ2))
+check("重放拒绝回报既有真实状态 queued", bodyQ2.status === "queued", String(bodyQ2.status))
+check("上游仍零回灌（重放没有制造任何投递）", questionReplies === 0, `replies=${questionReplies}`)
+check("断点原样保留（steer 没有吞掉待答问题）", qstate2.pendingQuestions.size === 1)
 globalThis.fetch = realFetch
 
 // ═══════════ ⑦ 回归保护：无 steer 的会话零动作 ═══════════

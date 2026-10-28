@@ -30,16 +30,23 @@ async function run(): Promise<void> {
   assert.ok(!ranked.some((r) => r.id === "minimax-h3"))
   console.log("  ✓ rank: seedance-2.0(proven) 优先，minimax-h3/unavailable 排除")
 
-  // 2. 断路器 open 栏位也排除；无样本者 seedance 优先
+  // 2. 断路器 open 栏位也排除；无样本者序：主兜底 minimax-h3（2026-10-12 产品裁定，有交付史）→ 其他 → 免费兜底 agnes（最后手段）。
+  //    minimax-h3 断路器 open 时被排除，剩余无样本者按目录序（稳定排序）取首个。
   const onlyUnproven = sel.pickVideoModel([
     { id: "minimax-h3", media_type: "video", availability: "available", breaker_state: "open" },
     { id: "metaso-video", media_type: "video", availability: "available" },
     { id: "seedance-2.0", media_type: "video", availability: "available" },
   ])
-  assert.equal(onlyUnproven?.id, "seedance-2.0")
+  assert.equal(onlyUnproven?.id, "metaso-video")
   assert.equal(onlyUnproven?.proven, false)
   assert.equal(sel.pickVideoModel([{ id: "minimax-h3", media_type: "video", availability: "available", breaker_state: "open" }]), null)
-  console.log("  ✓ breaker open 排除；无证据者 seedance 优先；无人可选回 null")
+  const healthyNoSample = sel.rankVideoModels([
+    { id: "agnes-video-2.5-flash", media_type: "video", availability: "available" },
+    { id: "seedance-2.0", media_type: "video", availability: "available" },
+    { id: "minimax-h3", media_type: "video", availability: "available" },
+  ])
+  assert.deepEqual(healthyNoSample.map((r) => r.id), ["minimax-h3", "seedance-2.0", "agnes-video-2.5-flash"])
+  console.log("  ✓ breaker open 排除；无证据者 minimax-h3 优先、agnes 垫底；无人可选回 null")
 
   // 3. 已存在节点写死 minimax-h3：生成前被替换并留回执
   const realFetch = globalThis.fetch

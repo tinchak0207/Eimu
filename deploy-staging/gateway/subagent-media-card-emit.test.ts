@@ -7,7 +7,19 @@
 // video-audio-media-card-emit.test.ts（makeState 收父会话 SSE 帧），不自创框架。
 // 跑法：cd deploy-staging/gateway && bun test subagent-media-card-emit.test.ts
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test"
-import {
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// 沙箱隔离：DB／落盘／转写目录指向临时目录（dev 机无权限写 /opt/agent-harness；生产默认路径不变）。
+// 必须在 import subagent 之前设置，故用动态 import（同 subagent.test.ts）。
+const SANDBOX_DIR = mkdtempSync(join(tmpdir(), "subagent-media-card-"))
+process.env.SESSIONS_DB_PATH = join(SANDBOX_DIR, "sessions.db")
+process.env.SUBAGENT_OUTPUT_DIR = join(SANDBOX_DIR, "outputs-subagent")
+process.env.SUBAGENT_TRANSCRIPT_DIR = join(SANDBOX_DIR, "transcripts")
+mkdirSync(process.env.SUBAGENT_OUTPUT_DIR, { recursive: true })
+
+const {
   handleSubagentDispatch,
   handleSubagentEvent,
   initSubagent,
@@ -15,9 +27,9 @@ import {
   stopSubagentRun,
   subagentParentState,
   subagentHandlesSession,
-} from "./subagent.ts"
-import { collectToolOutputMediaUrls, parseToolOutput } from "./events-translate.ts"
-import { sessions, dirtySessions } from "./sessions-core.ts"
+} = await import("./subagent.ts")
+const { collectToolOutputMediaUrls, parseToolOutput } = await import("./events-translate.ts")
+const { sessions, dirtySessions } = await import("./sessions-core.ts")
 import type { SessionState } from "./types-gateway.ts"
 
 // ── mock fetch（复制 subagent.test.ts 骨架：建会话／prompt_async／abort／DELETE／message）──
@@ -131,6 +143,7 @@ afterAll(() => {
     sessions.delete(p.sessionId)
     dirtySessions.delete(p.sessionId)
   }
+  rmSync(SANDBOX_DIR, { recursive: true, force: true })
 })
 
 async function dispatchSub(p: Parent, label: string): Promise<string> {
@@ -331,7 +344,7 @@ test("FIX-B：run 收尾 unbind 后，subagentParentState(childId) 仍解析得�
   expect(subagentParentState(childId)).toBe(p.state)
 })
 
-test("FIX-B：映射超过 TTL（2h）后解析不到（lazy prune）", async () => {
+test("FIX-B：内存映射过 TTL（2h）被 lazy prune 后，仍由耐久登记（generation_consumers）解析到父会话；从未登记的子会话 id 解析不到", async () => {
   const p = makeParent("fixb-ttl")
   const childId = await dispatchSub(p, "耐久乙")
   const run = findRunningRun(p.sessionId, "耐久乙")
@@ -342,7 +355,11 @@ test("FIX-B：映射超过 TTL（2h）后解析不到（lazy prune）", async ()
   expect(subagentParentState(childId)).toBe(p.state)
   setSystemTime(realNow + 2 * 60 * 60 * 1000 + 60_000)
   try {
-    expect(subagentParentState(childId)).toBeUndefined()
+    // 内存 TTL 表已过期被清；但派工时已耐久登记（subagent-runs.ts subagentParentState 的 generationParent 回退，
+    // 晚到的生成回执不能因 2h 内存窗口过期而失去归属）⇒ 仍解析到同一父会话。
+    expect(subagentParentState(childId)).toBe(p.state)
+    // 从未登记过的子会话 id：内存表与耐久表都没有 ⇒ 解析不到（防伪造）。
+    expect(subagentParentState("ses_never_registered")).toBeUndefined()
   } finally {
     setSystemTime(realNow)
   }

@@ -44,7 +44,8 @@ test("刀3 点名域＝最终裁决（routeExpertAuthoritative 不再改派）",
 test("M1 研究模板与 playbook 带『不得填 critic』", () => {
   const t = JSON.parse(readFileSync(`${dir}spec-templates.json`, "utf8")) as Record<string, string>
   assert.match(t.research, /不得填 critic/)
-  assert.match(readFileSync(`${dir}expert/orchestrator-dispatch-playbook.md`, "utf8"), /不得填 critic/)
+  // playbook v3.0 全文改口语（"无新增或删减约束，只换说法"）：同一条约束现为「研究和分析的活不要填 critic」。
+  assert.match(readFileSync(`${dir}expert/orchestrator-dispatch-playbook.md`, "utf8"), /研究和分析的活不要填 critic/)
 })
 
 test("M2 music 在途 → 依赖音乐的剪辑任务挡下", () => {
@@ -80,7 +81,8 @@ test("M3 返工侦测与内容锁", () => {
   assert.match(reworkLockDirective(""), /原稿路径缺失/)
 })
 
-test("subagent.ts 已接线四个守卫", () => {
-  const s = readFileSync(`${dir}subagent.ts`, "utf8")
+test("派遣入口已接线四个守卫", () => {
+  // 36844fad6 重构把 subagent.ts 的派遣实现拆进 subagent-dispatch.ts（守卫调用原样搬走）。
+  const s = readFileSync(`${dir}subagent-dispatch.ts`, "utf8")
   for (const k of ["guardExpertContent(", "musicFirstBlockReason(", "isReworkSpec(", "reworkLockDirective("]) assert.ok(s.includes(k), k)
 })

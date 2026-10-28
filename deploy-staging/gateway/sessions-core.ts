@@ -1,8 +1,10 @@
+import { opencodeAdmissionFetch } from "./opencode-client"
 // sessions-core.ts —— 自 index.ts 第二阶段 Wave1 抽取：服务端会话持久化／N1 重启重投／会话解析与 SSE 票据／会话拆除（逐行原样搬运）。
+import { createHash } from "node:crypto"
 import { rm } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import path from "node:path"
-import { initPersistence, saveSession, loadSessionById, loadSessionByOpencodeId, deleteSessionRow, hydrateRow } from "./persistence"
+import { initPersistence, saveSession, loadSessionById, loadSessionByOpencodeId, deleteSessionRow, hydrateRow, loadUserSettings } from "./persistence"
 import { forgetCriticPassState, forgetSessionWorkspaceState } from "./subagent"
 import type { SessionState } from "./types-gateway.ts"
 import { OPENCODE_URL, UPLOADS_DIR, RESTORED_TURN_NOTICE_MS, RESTORED_TURN_REAP_MS } from "./constants-gateway.ts"
@@ -27,7 +29,85 @@ import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
 // fan-out ���内存 miss 时 lazy reload。讯息历史的权威存储是 opencode（重启不丢），
 // DB 只保存 gateway 自有的那部分状态（身分映射 / replayBuffer / 去重集合 / 注入标记）。
 initPersistence()
-export const sessions = new Map<string, SessionState>()
+
+// ── 席位锁存（S19，设计文档 §7）────────────────────────────────────────────────
+// 会话创建时写入 state.seat / state.beast / state.projectMode，随 PERSISTED_DATA_KEYS
+// 落盘，之后永不变——这就是「会话内工具集不变」的实现。缺键的旧会话由 hydrateRow 还原成
+// creator_legacy / projectMode=false（回滚口径）。
+// 接线位置：真实的会话创建点是 session-lifecycle.ts:handleCreateSession（不在本切片的可写
+// 文件清单内），它和本档两条 DB 恢复路径一样只经 `sessions.set()` 入册，故锁存挂在入册这一步：
+// 新建 state 没有 seat → 按开关锁存；从 DB 读回的 state 已有 seat（hydrateRow）→ 原值保
+// 留，env 事后改成 off 也不会把已开工会话踢回旧席位，projects/<sid> 图文件同样不受影响。
+export type ProjectModeSwitch = "on" | "off" | "allowlist"
+export type SessionSeat = "creator" | "creator_legacy"
+
+/** EIMU_PROJECT_MODE=on|off|allowlist；缺省/拼错一律 off（回滚是安全侧）。 */
+export function projectModeSwitch(env: Record<string, string | undefined> = process.env): ProjectModeSwitch {
+  const raw = (env.EIMU_PROJECT_MODE ?? "").trim().toLowerCase()
+  return raw === "on" || raw === "allowlist" ? raw : "off"
+}
+
+/** allowlist 名单：EIMU_PROJECT_MODE_ALLOWLIST="<userId>,<userId>"（逗号/空白分隔）。 */
+export function projectModeAllowlist(env: Record<string, string | undefined> = process.env): string[] {
+  return (env.EIMU_PROJECT_MODE_ALLOWLIST ?? "")
+    .split(/[\s,]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/** 会话 userId：由**已鉴权** apiKey 派生（与 auth-gw.hashKey 同值：SHA-256 前 12 字节 hex），
+ *  同步实现——sessions.set 是同步路径。绝不读客户端传入的任何 id/开关。 */
+export function seatUserId(apiKey: string): string {
+  return createHash("sha256").update(apiKey).digest("hex").slice(0, 24)
+}
+
+/** 纯决策：开关 + userId → 席位/工程模式/野兽模式。allowlist 只看 userId 是否在名单里。 */
+export function seatDecision(opts: {
+  mode: ProjectModeSwitch
+  userId: string
+  allowlist?: readonly string[]
+  beastMode?: boolean
+}): { seat: SessionSeat; projectMode: boolean; beast: boolean } {
+  const allow = new Set((opts.allowlist ?? []).map((s) => s.trim().toLowerCase()))
+  const projectMode = opts.mode === "on" || (opts.mode === "allowlist" && allow.has(opts.userId.toLowerCase()))
+  return { seat: projectMode ? "creator" : "creator_legacy", projectMode, beast: opts.beastMode === true }
+}
+
+/** 给一个还没有锁存的 state 写入三个键。已锁存（seat 已存在）＝永不再改。 */
+export function latchSessionSeat(state: SessionState, env: Record<string, string | undefined> = process.env): void {
+  if (state.seat !== undefined) return
+  let beastMode = false
+  try {
+    beastMode = loadUserSettings(state.apiKey)?.beast_mode === true
+  } catch {
+    beastMode = false
+  }
+  const decision = seatDecision({
+    mode: projectModeSwitch(env),
+    userId: seatUserId(state.apiKey),
+    allowlist: projectModeAllowlist(env),
+    beastMode,
+  })
+  state.seat = decision.seat
+  state.projectMode = decision.projectMode
+  state.beast = decision.beast
+}
+
+/** sessions Map 的唯一职责差：入册时锁存席位（见上）。其余 Map 语义逐字不变。 */
+class SeatLatchedSessions extends Map<string, SessionState> {
+  override set(sessionId: string, state: SessionState): this {
+    if (state && typeof state.apiKey === "string") {
+      try {
+        latchSessionSeat(state)
+      } catch (e) {
+        // 锁存失败不得阻断会话创建（同 fail-open 语义）；缺键读回仍是 creator_legacy。
+        console.error(`[gateway] seat latch failed for ${sessionId}:`, e)
+      }
+    }
+    return super.set(sessionId, state)
+  }
+}
+export const sessions = new SeatLatchedSessions()
 
 const sessionTeardownHooks: Array<(sessionId: string) => void> = []
 
@@ -149,7 +229,7 @@ export function stashOrEmitRestoreNotice(state: SessionState, text: string): voi
 }
 
 /** R4-A S3②：重投被斩 turn 的共用投递体（原 maybeReprompInterruptedTurn 内联逻辑）。 */export function dispatchInterruptedTurn(state: SessionState, body: NonNullable<SessionState["lastPromptBody"]>, gen: number): void {
-  fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+  opencodeAdmissionFetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     headers: opencodeHeaders(),
     body: JSON.stringify(body),

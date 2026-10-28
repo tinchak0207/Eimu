@@ -284,6 +284,13 @@ const DURABLE_FIELD_CLEANERS: Record<MetadataCleanerName, (raw: unknown) => unkn
   // `normalizeTaskVersions` 用 `undefined` 表示「省略键」（空集合/无任务版本）；
   // 逐笔非法在函式内丢弃（不连坐整包），`selectedVersion` 非成员即不收。
   taskVersions: (v) => normalizeTaskVersions(v),
+  // ── S10b 工程桥（S10a `bridge-canvas.ts`）──
+  // 工程签名：S10a 在 `signature === null` 时写空字串——「图里有节点、签名未知」必须
+  // 与「不是工程卡」区分，故**不能**用 trimmedString（那会把空字串当没值剥掉）。
+  projectSig: (v) => (typeof v === "string" ? v : undefined),
+  // 工程旗标三键：false 是语义（工程卡但未钉住/未过期/未复用），不能像 unsupportedFlag
+  // 那样只留 truthy（那会把 false 剥成缺键）。
+  projectFlag: (v) => (typeof v === "boolean" ? v : undefined),
 };
 
 /**

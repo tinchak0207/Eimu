@@ -1,3 +1,4 @@
+import { opencodeAdmissionFetch } from "./opencode-client"
 // gateway 第二阶段重构 Wave2（2026-09-19）：opencode-event-handler.ts
 // 机械抽取自 index.ts 3620–4085（handleOpencodeEvent 全函数：session.idle 收盘、
 // failover/jitter 两台重试机、critic pass、Jev gate、question freeze、video release、
@@ -569,7 +570,7 @@ export function handleOpencodeEvent(event: any): void {
               }
               // 2026-10-01 去重：上一条 user（原 prompt 或上一条续写提示）其后零产出 → 先撤再投，不叠两条。
               await revertDeadTail(cur.opencodeSessionId)
-              const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+              const res = await opencodeAdmissionFetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
                 body: JSON.stringify(dispatchBody),
@@ -661,7 +662,7 @@ export function handleOpencodeEvent(event: any): void {
                   `[gateway] steer retry-injection: appended ${retrySteers.steers.length} steer(s) to jitter retry body — session=${cur.sessionId}`,
                 )
               }
-              const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+              const res = await opencodeAdmissionFetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
                 body: JSON.stringify(dispatchBody),
@@ -787,6 +788,8 @@ export function handleOpencodeEvent(event: any): void {
         }
         // 2026-10-21 无回执完成主张闸：本轮正文有「已完成/已交付」类主张但零证据 → 拦一次。
         // canvas 闸已 block 时走不到这里（上方 break）；每 turnGen 只拦一次；turnAborted 不拦。
+        // S17（设计文档 §3.9）：工程模式的交付只由 export 节点产物决定，正文措辞不受任何闸检查，
+        // 故 projectMode=true 时本闸与其 nudge 整段不接线（旧席位路径逐字不变）。
         {
           const gen = state.turnGen ?? 0
           const tail = state.turnAssistantTail && state.turnAssistantTail.gen === gen ? state.turnAssistantTail.text : ""
@@ -794,6 +797,7 @@ export function handleOpencodeEvent(event: any): void {
           const evidenceCount =
             state.claimEvidence && state.claimEvidence.gen === gen ? state.claimEvidence.items.length : 0
           if (
+            state.projectMode !== true &&
             shouldBlockCompletionForUnbackedClaim({
               claim,
               evidenceCount,

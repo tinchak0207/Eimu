@@ -1,3 +1,4 @@
+import { opencodeAdmissionFetch } from "./opencode-client"
 // timers-gw.ts —— 自 index.ts 第二阶段 Wave3 抽取：S6 异步心跳汇报制全家族
 // （clearAckTimer/armAckTimer、N1 心跳 clearHeartbeatTimer/armHeartbeatTimer、
 // R2-A watchdog clearWatchdogTimer/armWatchdogTimer、R5-C 中段停滞哨
@@ -165,7 +166,7 @@ export function armMidturnStallTimer(state: SessionState): void {
         return
       }
       // 2026-10-01 去重：清僵尸后撤零产出死尾（revertDeadTail 内部吞错，永不挡重投）。
-      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => opencodeAdmissionFetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         headers: opencodeHeaders(),
         body: JSON.stringify(body),
@@ -372,7 +373,7 @@ export function armWatchdogTimer(state: SessionState): void {
       const body = cur.lastPromptBody
       if (!body) return
       // 2026-10-01 去重：清僵尸后撤零产出死尾（revertDeadTail 内部吞错，永不挡重投）。
-      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => opencodeAdmissionFetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         headers: opencodeHeaders(),
         body: JSON.stringify(body),

@@ -37,6 +37,8 @@ import { handleTranscript, handleAbortSession } from "./session-read.ts"
 import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
 import { handleGenerationDelivery } from "./job-delivery"
+// S9：工程图内部路由（context/get/patch/run）与公开路由（会话主人）的唯一入口。
+import { handleProjectInternal, handleProjectSessionRoute } from "./project/routes.ts"
 import { generationMaintenanceEnabled } from "./job-store"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // W6a（2026-10-04）：装置桥云端侧（本机 daemon 出站注册／取件）。总开关 EIMU_DEVICE_BRIDGE，预设 OFF。
@@ -182,7 +184,11 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       if (!isLoopback(clientIp)) {
         return jsonError(403, "internal endpoint only reachable from localhost", "forbidden", "forbidden")
       }
-      if (req.method === "POST" && ["/internal/job-register", "/internal/job-completion", "/internal/job-ack", "/internal/job-transfer", "/internal/job-pending", "/internal/job-bind", "/internal/job-import", "/internal/job-maintenance", "/internal/project-budget"].includes(pathname)) {
+      // S9 工程图内部面（context/get/patch/run）：loopback + X-Internal-Token（handler 内校验令牌）。
+      if (pathname.startsWith("/internal/project/")) {
+        return handleProjectInternal(req, pathname)
+      }
+      if (req.method === "POST" && ["/internal/job-register", "/internal/job-completion", "/internal/job-ack", "/internal/job-transfer", "/internal/job-pending", "/internal/job-bind", "/internal/job-import", "/internal/job-maintenance", "/internal/project-budget", "/internal/music-operation"].includes(pathname)) {
         return handleGenerationDelivery(req, pathname)
       }
       if (req.method === "POST" && pathname === "/internal/confirm-request") {
@@ -855,6 +861,11 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/canvas\/ops-result$/)
     if (req.method === "POST" && m) {
       return handleCanvasOpsResultPublic(key, m[1], req)
+    }
+
+    // ── S9 工程图（会话主人鉴权）：GET 读图 / patch 人手回写（Actor=user）/ run ──
+    if (/^\/agent\/v1\/sessions\/[^/]+\/project(?:\/(?:patch|run))?$/.test(pathname)) {
+      return handleProjectSessionRoute(key, pathname.split("/")[4], req, pathname)
     }
 
     // ── PRD P0-4（2026-09-15）记忆 trace 与召回路由（认证＝同族 Bearer 闸门）──

@@ -192,6 +192,12 @@ function applyAgentFieldTransform(transform: AgentFieldTransform, raw: unknown):
       // `normalizeApprovalState` 用 `null` 表示「整包丢弃」，本函式的 `undefined` 才是
       // 「省略键」——不转换会写出 `approval: null` 的空壳键。
       return normalizeApprovalState(raw) ?? undefined;
+    case "projectSig":
+      // 工程签名：空字串是「签名未知」的合法值（S10a 对 signature=null 写 ""），原样传。
+      return typeof raw === "string" ? raw : undefined;
+    case "projectFlag":
+      // 工程旗标：true/false 两态都是语义，不能走 truthy（false 会被剥成缺键）。
+      return typeof raw === "boolean" ? raw : undefined;
   }
 }
 

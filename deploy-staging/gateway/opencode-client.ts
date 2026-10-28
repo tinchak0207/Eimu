@@ -4,6 +4,19 @@ import { sleep } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
 import { handleOpencodeEvent } from "./opencode-event-handler.ts"
+import { generationMaintenanceEnabled } from "./job-store"
+
+/** Shared gateway admission boundary. Read/control/receipt requests remain live. */
+export function opencodeAdmissionFetch(input: string, init?: RequestInit): Promise<Response> {
+  if (init?.method?.toUpperCase() === "POST" && /^\/(?:api\/)?session\/[^/]+\/(?:prompt|prompt_async)\/?$/.test(new URL(input).pathname)) {
+    try {
+      if (generationMaintenanceEnabled()) return Promise.resolve(Response.json({ error: "generation_maintenance", retryable: true }, { status: 503, headers: { "Retry-After": "2" } }))
+    } catch {
+      return Promise.resolve(Response.json({ error: "generation_admission_unavailable", retryable: true }, { status: 503 }))
+    }
+  }
+  return fetch(input, init)
+}
 // TODO(整合)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build 对未 export 的 named import 报错，已实测 2026-09-19）。
 // 依第一阶段 subagent 占位符法（记忆 gateway-index-refactor-stage1-0919）：declare 占位可过 bun build；整合 subagent 统一换真 import 或于 index.ts 补 export。
 // ---- opencode client helpers ----
@@ -23,7 +36,7 @@ export async function opencodeFetch(path: string, init?: RequestInit & { timeout
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await fetch(`${OPENCODE_URL}${path}`, {
+    return await opencodeAdmissionFetch(`${OPENCODE_URL}${path}`, {
       ...rest,
       headers: opencodeHeaders(),
       signal: controller.signal,

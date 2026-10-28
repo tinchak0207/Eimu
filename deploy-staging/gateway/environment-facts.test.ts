@@ -8,14 +8,27 @@
  * 原则：期望值一律从真源档（opencode-agents.json / registry-digest.txt）或本测试自带的
  * 合成输入在执行时推导，不手抄生产工具清单当真源；零网路、零上游、零付费。
  */
-import test from "node:test"
+import test, { after } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import {
+import type { CollectEnvironmentInputs, LocalBridgeState, LocalFilePolicyFacts } from "./environment-facts.ts"
+import { DIRECT_GENERATION_TOOLS } from "./project/constants.ts"
+
+// 2026-10-28（S14 收尾，修全量共跑红）：
+// 本档的 import 链 environment-facts → device-bridge → device-bridge-routes → persistence
+// 会在**模组载入时**把 SESSIONS_DB_PATH 固定成模组常量（persistence-schema.ts:7）。
+// 本档在 bun test 里按档名最先加载；若此时不给一个可写的临时库，同进程后跑的测试档
+// （messages-gw-admission-project 的 plan 用例）会继承 /opt 下打不开的默认路径 →
+// harness_security_store_unavailable。故把 environment-facts 改成「先设 env、再
+// dynamic import」；库文件留到进程退出才删（后跑的档共享同一个固定路径）。
+const DB_DIR = mkdtempSync(join(tmpdir(), "env-facts-db-"))
+const PREV_SESSIONS_DB_PATH = process.env.SESSIONS_DB_PATH
+process.env.SESSIONS_DB_PATH = join(DB_DIR, "sessions.db")
+const {
   collectRuntimeEnvironment,
   deriveCapabilityCutoff,
   deriveLocalBridgeState,
@@ -26,10 +39,15 @@ import {
   resolveLocalBridgeState,
   resolveLocalFilePolicy,
   sanitizeClientEnvironmentReport,
-  type CollectEnvironmentInputs,
-  type LocalBridgeState,
-  type LocalFilePolicyFacts,
-} from "./environment-facts.ts"
+} = await import("./environment-facts.ts")
+
+after(() => {
+  // 还原 env（不把本档的临时路径泄漏给外部）；DB 文件留到进程退出，避免后跑的档
+  // 拿到已删除的库路径（模组常量已无法改指）。
+  if (PREV_SESSIONS_DB_PATH === undefined) delete process.env.SESSIONS_DB_PATH
+  else process.env.SESSIONS_DB_PATH = PREV_SESSIONS_DB_PATH
+  process.once("exit", () => rmSync(DB_DIR, { recursive: true, force: true }))
+})
 
 const REAL_TABLE = fileURLToPath(new URL("./expert/opencode-agents.json", import.meta.url))
 const DIGEST = fileURLToPath(new URL("./expert/registry-digest.txt", import.meta.url))
@@ -300,7 +318,10 @@ test("稳定度：本机档案权限事实每轮可变（授权根/模式在对�
 })
 
 test("一致性探针（防漂移）：环境段宣告的断路工具 ⊇ registry-digest 全部域工具；豁免项不被切", () => {
-  const orch = collect({ plane: "orchestrator" })
+  // S14 席位重命名（设计文档 §3.7 第 9 点）：旧行为整体冻结给 orchestrator_legacy，
+  // 新 orchestrator 是与 creator 逐项相同的 10 工具工程席位（下方另测）。本探针查的是
+  // 「旧协调者席位是否漏切域工具」，故指向 legacy 席位；断言本身一条未删。
+  const orch = collect({ plane: "orchestrator_legacy" })
   assert.equal(orch.capabilityCutoff.known, true)
 
   // registry-digest.txt 对每个 Expert 明列「工具 …」——这是另一份生成产物，用来对帐
@@ -318,9 +339,16 @@ test("一致性探针（防漂移）：环境段宣告的断路工具 ⊇ regist
   // digest 可能把同一工具列在别域的「工具 …」清单里（如 image_generate），故先剔除豁免项。
   // held 面（含 canvas_get_state / workflow_write / quote_bundle / subagent_* 等）本就不该被切。
   const keptByOrchestrator = new Set(orch.toolSurface.held)
+  // 17508b330（2026-10-18 用户裁定「3D 任务直调 blender_*」）：三个 blender 工具是全席位共享工具
+  // （tools/export-expert-agents.ts SHARED_TOOLS），真源刻意不对 orchestrator 断路——digest 仍把它们
+  // 列在 3D Expert 名下，但它们不是「应被切断的域工具」。反向也锁：它们不得出现在断路清单。
+  const OPEN_TO_ALL_SEATS = ["blender_exec", "blender_render", "blender_export_gltf"]
+  for (const t of OPEN_TO_ALL_SEATS) {
+    assert.equal(orch.capabilityCutoff.tools.includes(t), false, `${t} 是全席位共享工具，不应被 orchestrator_legacy 断路`)
+  }
   for (const t of domainTools) {
-    if (keptByOrchestrator.has(t)) continue
-    assert.ok(orch.capabilityCutoff.tools.includes(t), `域工具 ${t} 应被 orchestrator 物理切断（能力断路漏切）`)
+    if (keptByOrchestrator.has(t) || OPEN_TO_ALL_SEATS.includes(t)) continue
+    assert.ok(orch.capabilityCutoff.tools.includes(t), `域工具 ${t} 应被 orchestrator_legacy 物理切断（能力断路漏切）`)
   }
   for (const t of keptByOrchestrator) {
     assert.equal(orch.capabilityCutoff.tools.includes(t), false, `${t} 属 held，不应被切断`)
@@ -328,7 +356,7 @@ test("一致性探针（防漂移）：环境段宣告的断路工具 ⊇ regist
 
   // 2026-10-11 context-slim：cut>24 时环境段只报数量＋held，不灌百级工具名。
   const rendered = renderEnvironmentSection(orch)
-  assert.ok(orch.capabilityCutoff.tools.length > 24, "orchestrator 断路应 >24 才走省略路径")
+  assert.ok(orch.capabilityCutoff.tools.length > 24, "orchestrator_legacy 断路应 >24 才走省略路径")
   assert.match(rendered, new RegExp(`${orch.capabilityCutoff.tools.length} 个域工具`))
   assert.doesNotMatch(rendered, /image_edit/) // 名单省略：具体断路名不进段
 })
@@ -344,8 +372,10 @@ test("renderCapabilityCutoffFact：数字/清单来自事实，未知时诚实",
   assert.match(renderCapabilityCutoffFact(unknown), /工具面未知/)
 })
 
-test("beast OFF / creator：开放工具面，禁止套用 Expert 唯一通路话术", () => {
-  const env = collect({ plane: "creator" })
+test("beast OFF / creator_legacy：开放工具面，禁止套用 Expert 唯一通路话术", () => {
+  // S14 席位重命名（设计文档 §3.7 第 9 点）：beast OFF 的旧行为归 creator_legacy
+  // （原 creator 逐字拷贝），新 creator 是工程模式 10 工具席位（下方另测）。
+  const env = collect({ plane: "creator_legacy" })
   assert.equal(env.toolSurface.known, true)
   assert.ok(isOpenToolSurface(env.toolSurface))
   assert.deepEqual(env.toolSurface.cut, ["task"])
@@ -356,6 +386,29 @@ test("beast OFF / creator：开放工具面，禁止套用 Expert 唯一通路�
   const fact = renderCapabilityCutoffFact(env)
   assert.match(fact, /域生成工具可直调/)
   assert.doesNotMatch(fact, /唯一通路/)
+})
+
+test("工程模式 creator：固定 10 工具；直接生成工具 0；blender 0", () => {
+  // 独立依据：设计文档 §3.7 第 8 点的十个工具清单 + project/constants.ts 的
+  // DIRECT_GENERATION_TOOLS。断言的是「启用集」，不是断路名单。
+  const MAIN_TOOLS = [
+    "project_get", "project_patch", "project_run", "subagent_dispatch", "subagent_stop",
+    "question", "read_image", "search_web", "asset_search", "read",
+  ].sort()
+  const env = collect({ plane: "creator" })
+  assert.equal(env.toolSurface.known, true)
+  assert.deepEqual([...env.toolSurface.held].sort(), MAIN_TOOLS)
+  assert.equal(env.toolSurface.held.includes("image_generate"), false)
+  for (const tool of DIRECT_GENERATION_TOOLS) {
+    assert.equal(env.toolSurface.held.includes(tool), false, `${tool} 不得在工程模式主席位启用`)
+  }
+  for (const tool of ["blender_exec", "blender_render", "blender_export_gltf"]) {
+    assert.equal(env.toolSurface.held.includes(tool), false, `${tool} 不得在工程模式主席位启用`)
+    assert.ok(env.capabilityCutoff.tools.includes(tool), `${tool} 应出现在工程主席位的断路清单`)
+  }
+  // 新 orchestrator 与 creator 逐项相同（§3.7 第 9 点）。
+  const orch = collect({ plane: "orchestrator" })
+  assert.deepEqual([...orch.toolSurface.held].sort(), MAIN_TOOLS)
 })
 
 // ── 客户端环境上报（本包）：净化 / 渲染 / 稳定度 ─────────────────────────

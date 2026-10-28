@@ -19,6 +19,8 @@ import { parentOwnsRunId } from "./subagent-messages.ts"
 // C1（2026-10-21）：席位能力预检——任务书点名了该席位未启用的工具时，派工当刻就把
 // 提示写回 orchestrator（原先 editor 无 image_generate 仍先派工、跑 10 分钟才 BLOCKED）。
 import { checkSeatTools, formatSeatPreflightNotice, loadSeatToolTable, type SeatToolCheck } from "./seat-preflight.ts"
+// S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位映射与 lane 规范化（旧会话不经过这两步）。
+import { isExpertSeat, normalizeLane, projectSeatOf } from "./project/lanes.ts"
 
 function readCompletedPredecessor(record: ResearchPredecessor): string | null {
   if (!record.relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return null
@@ -262,6 +264,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     model?: string
     effort?: string
     name?: string
+    // S16（§3.8）：工程模式下本子代理可写的节点集；缺省/空=只读。旧会话忽略。
+    lane?: unknown
   }
   const label = typeof body.label === "string" ? body.label.trim() : ""
   // `fork:true` 与 `subagent_type:"fork"` 等价（照 CC Agent schema 的 subagent_type）。
@@ -897,6 +901,14 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
       }
     }
   }
+  // S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位解析与 lane。
+  // 工程会话把专家席位换成工程版 `<expert>_p`（S14 在 opencode.json 建条目），未知席位不派；
+  // lane 进子运行配置（补丁 Actor 由此取）。旧会话（projectMode 非 true）逐字不变：
+  // seat＝原 expertId、lane 为空、run 上不写新栏位。
+  const projectMode = parent.projectMode === true
+  const projectSeatBase = projectMode ? expertId || rawExpert : ""
+  const seat = projectMode ? (isExpertSeat(projectSeatBase) ? projectSeatOf(projectSeatBase, true) : "") : expertId
+  const lane = projectMode ? normalizeLane(body.lane) : []
   const runId = crypto.randomUUID()
   const run: SubagentRun = {
     id: runId,
@@ -933,7 +945,8 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     pendingQuestions: [],
     submissionSeq: 0,
     beastMode: deps.beastMode(parent),
-    agent: expertId || undefined,
+    agent: seat || undefined,
+    ...(projectMode ? { projectMode: true, lane, ...(seat ? { seat } : {}) } : {}),
     researchTask,
     asyncMode,
     messageRole: new Map(),

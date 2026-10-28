@@ -1009,7 +1009,7 @@ test("consent: authorize(session) 后，下一发 invoke 的 message 带 consent
   await pending
 })
 
-test("consent: authorize(permanent) 同理（scope=permanent）；session＋permanent 混用取 permanent、roots 取全部", async () => {
+test("consent: authorize(permanent) 同理（scope=permanent）；session＋permanent 混用：按请求路径落在哪种 scope 的根决定下发 scope，roots 只取该 scope 的（绝不把 session 根以 permanent 名义下发）", async () => {
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "ask", home: CONSENT_HOME })
   await handleInternalDeviceAuthorize(authorizeReq({ scope: "permanent", root: `${CONSENT_HOME}/docs` }), internalDeps(bridge))
@@ -1019,23 +1019,32 @@ test("consent: authorize(permanent) 同理（scope=permanent）；session＋perm
   finish(bridge, reg.deviceId, reg.connectionId, m1)
   await p1
 
-  // 追加 session 于另一个根：roots 应含两根，scope 仍 permanent。
+  // 追加 session 于另一个根：落在 permanent 根内的请求仍下发 permanent，但 roots 只含 permanent 根——
+  // session 根若混进 permanent 下发，装置会把它永久落盘＝把同意升级（device-bridge-class.ts「绝不升级同意」硬禁）。
   await handleInternalDeviceAuthorize(authorizeReq({ scope: "session", root: `${CONSENT_HOME}/project` }), internalDeps(bridge))
   const p2 = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/docs/a.txt` } })
   const m2 = await takeMessage(bridge, reg.deviceId, reg.connectionId)
   const consent = (m2 as { consent?: { scope: string; roots: string[] } }).consent
   assert.equal(consent?.scope, "permanent")
-  assert.deepEqual(consent?.roots?.slice().sort(), [`${CONSENT_HOME}/docs`, `${CONSENT_HOME}/project`].sort())
+  assert.deepEqual(consent?.roots, [`${CONSENT_HOME}/docs`])
   finish(bridge, reg.deviceId, reg.connectionId, m2)
   await p2
+
+  // 落在 session 根内的请求：下发 session、roots 只含 session 根（permanent 根不随之下发）。
+  const p3 = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
+  const m3 = await takeMessage(bridge, reg.deviceId, reg.connectionId)
+  assert.deepEqual((m3 as { consent?: unknown }).consent, { scope: "session", roots: [`${CONSENT_HOME}/project`] })
+  finish(bridge, reg.deviceId, reg.connectionId, m3)
+  await p3
 })
 
-test("consent: 无任何授权记录时，message 不得出现 consent 栏位（装置不得无条件落盘）", async () => {
+test("consent: full 模式无任何授权记录时，message 的 consent 只含家目录且 scope=session（不得是 permanent／once，装置不得据此永久落盘）", async () => {
+  // 6d88c78e0「收编生产已在跑的完全访问家目录授权」：full 语义＝家目录，home 并进 consent roots，scope 保持 session。
   const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
   const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", mode: "full", home: CONSENT_HOME })
   const pending = bridge.invoke({ tenant: "u:1", deviceId: reg.deviceId, tool: "read_file", args: { path: `${CONSENT_HOME}/project/a.txt` } })
   const msg = await takeMessage(bridge, reg.deviceId, reg.connectionId)
-  assert.equal("consent" in msg, false)
+  assert.deepEqual((msg as { consent?: unknown }).consent, { scope: "session", roots: [CONSENT_HOME] })
   finish(bridge, reg.deviceId, reg.connectionId, msg)
   await pending
 })
@@ -1061,7 +1070,8 @@ test("once: 无 token 自动核销（第一发放行、message.consent=once；�
 
 test("suggestAuthorizationRoot: 夹制四案例（家目录／档案系统根／root_too_broad／home=null）", () => {
   // 0) 主修：list_dir 目录 ⇒ 建议目录本身（不再建议过宽的家目录）
-  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, true), `${CONSENT_HOME}/downloads`)
+  // 保留原大小写（装置端逐字比对；suggestAuthorizationRoot 现用 expandToAbsolutePreserveCase，不再小写化）
+  assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, true), `${CONSENT_HOME}/Downloads`)
   // 不加 isDirectory（read_file/stat 语义）时仍建议父目录（此处父目录＝家目录）
   assert.equal(suggestAuthorizationRoot(`${CONSENT_HOME}/Downloads`, CONSENT_HOME, false), CONSENT_HOME)
   // 1) 建议值等于家目录 → 回被存取路径本身，不得 null

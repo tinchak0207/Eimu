@@ -61,10 +61,14 @@ function asstMsg(parts: Part[], created: number): Msg {
   return { info: { role: "assistant", time: { created } }, parts }
 }
 
-/** 8 笔小工具结果（依序 tool-0..tool-7），最后 user 讯息时间可指定。 */
+// 只有「可丢的查阅类」工具结果才允许被 microCompact 清除（context-slim-core.ts MICROCOMPACT_LOOKUP_TOOLS，
+// 2026-10-12 起）；未知工具与带回执／账本／task_id 的输出一律保留。所以 8 笔夹具必须是查阅类工具名。
+const LOOKUP_TOOL_NAMES = ["read", "glob", "grep", "list", "webfetch", "websearch", "search_web", "bash"]
+
+/** 8 笔小工具结果（依序 LOOKUP_TOOL_NAMES[0..7]），最后 user 讯息时间可指定。 */
 function eightTools(lastUserCreated: number): { messages: Msg[]; outputs: string[] } {
   const outputs = Array.from({ length: 8 }, (_, i) => `OUTPUT-${i}-` + "x".repeat(50))
-  const parts = outputs.map((o, i) => toolPart(`tool-${i}`, o, lastUserCreated + i * 1000))
+  const parts = outputs.map((o, i) => toolPart(LOOKUP_TOOL_NAMES[i], o, lastUserCreated + i * 1000))
   return {
     messages: [userMsg(lastUserCreated, "请帮我连续做八件事"), asstMsg(parts, lastUserCreated + 1)],
     outputs,
@@ -155,6 +159,21 @@ describe("A microCompact：>1h 才清旧工具结果", () => {
     // 4 笔中 skill 豁免 → 可压缩 3 笔，keep=5 → 全保留
     expect(res.cleared).toBe(0)
     expect(toolState(messages[1], 0).output).toContain("SKILL-OUT-")
+  })
+
+  test("(d2) 非查阅类工具与带回执的输出受保护：即使很旧、超出 keep 也不清", async () => {
+    const now = Date.now()
+    const old = now - 2 * HOUR
+    const { messages: base } = eightTools(old)
+    const protectedParts = [
+      toolPart("workflow_start", "ok workflow_id=wf_123", old), // 非查阅类工具
+      toolPart("bash", "submitted task_id=abc cost_coins=3", old), // 查阅类工具但输出含回执/账本字段
+    ]
+    const messages: Msg[] = [base[0], asstMsg([...protectedParts, ...base[1].parts], old + 1)]
+    const res = await slimMessages(messages, { now })
+    expect(res.cleared).toBe(3) // 只清 8 笔普通查阅输出里最旧的 3 笔
+    expect(toolState(messages[1], 0).output).toBe("ok workflow_id=wf_123")
+    expect(toolState(messages[1], 1).output).toBe("submitted task_id=abc cost_coins=3")
   })
 
   test("(e) 未完成／error 状态不动", async () => {

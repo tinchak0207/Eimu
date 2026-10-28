@@ -146,7 +146,7 @@ _ARTIFACT_CONTENT_TYPES = {
 # 禁 traversal：无 ".."、无绝对路径、无反斜线、不以点开头（同构
 # src/app/api/blender-artifact/route.ts 的 isSafeArtifactName，多允许一段子目录）。
 _ARTIFACT_PATH_RE = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{0,120})?$"
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{0,120}){0,7}$"
 )
 
 # 死线②（片AN）：.asset-cache 资产字节通路白名单。repo 根 = server.py 上两级
@@ -608,7 +608,7 @@ def handle_artifact(raw_path):
     if rel.startswith(".asset-cache/"):
         return handle_asset_cache_artifact(rel)
     if not _ARTIFACT_PATH_RE.match(rel) or ".." in rel:
-        return 400, None, "path 不合法（仅允许 out/ 内单段相对路径）"
+        return 400, None, "path 不合法（仅允许 out/ 内最多八段相对路径）"
     ext = os.path.splitext(rel)[1].lower()
     content_type = _ARTIFACT_CONTENT_TYPES.get(ext)
     if not content_type:

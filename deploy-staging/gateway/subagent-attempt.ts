@@ -1,3 +1,4 @@
+import { opencodeAdmissionFetch } from "./opencode-client"
 import { readFileSync } from "node:fs"
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
@@ -260,7 +261,7 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
   // fork 不带 agent/model：fork 端点已把父会话的 agent/model 复制进子会话（useExactTools）。
   if (!run.isFork && run.agent) body.agent = run.agent
   const postPrompt = (payload: Record<string, unknown>) =>
-    fetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
+    opencodeAdmissionFetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
       method: "POST",
       headers: deps!.openCodeHeaders(),
       body: JSON.stringify(payload),

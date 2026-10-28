@@ -6,10 +6,10 @@ import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
-import { estimateTtsCoins } from "./pricing-and-validation"
 import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
-import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
+import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP } from "./constants-gateway.ts"
+import { synthesizeSpeech, type SpeechDeps } from "./project/speech.ts"
 import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, checkTemplateGuard, canvasResultNodeId, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
 import { resolveSession, getOwnedSession, sessions } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
@@ -20,7 +20,6 @@ import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
-import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 import { notify } from "./internal-waiters.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
@@ -280,148 +279,31 @@ export async function handleCanvasOpsResultPublic(key: string, id: string, req: 
 
 // ─────────────────────────── TTS（配音）工具支持
 //
-// 背景：novel_film 8 环承诺里的「配音」环此前是墙上菜单——剧本表按 4.5 字/秒
-// 折算了秒数但整条链路没有任何 TTS 消费方。此端点把配音变成真实可调用的
-// 最小闭环：同步快速调用（不走 poller），输入台词文本，产出音频 URL。
-//
-// 诚实原则（honest-error）：2026-08-30 起 TTS_UPSTREAM 指向本机 edge-tts-proxy(127.0.0.1:8893，
-// /opt/edge-tts/，Microsoft edge-tts 免 key 中文音色)；此前 Groq playai-tts 已下架、orpheus 被 org 条款锁死：
-// - Groq playai-tts 已 decommissioned；canopylabs/orpheus-* 需 org 条款接受
-//   且只有英文/阿拉伯文音色，无中文；
-// - 平台 image.tinchak0207.xyz /v1/models 无任何 TTS 条目（seed_audio、
-//   qwen_audio_tts、text2speech_v2 只存在于 higgsfield 快照文档，未上线）；
-// - new-api 渠道表只有 gpt-image-2 / nano-banana-pro，无 TTS 渠道。
-// 所以本端点的上游调用路径是「探测 → 上游不存在 → 诚实报错」，不接任何
-// 不稳定的外部免费 API 凑数。上游接入后只需改 TTS_UPSTREAM 一处。
-
-export const TTS_UPSTREAM = {
-  // Groq audio proxy（VPS 本机 8892，透传 api.groq.com，KEY 在 .env）
-  base: process.env.TTS_UPSTREAM_BASE || "http://127.0.0.1:8892",
-  speechPath: "/openai/v1/audio/speech",
-  model: process.env.TTS_UPSTREAM_MODEL || "canopylabs/orpheus-v1-english",
-  voice: process.env.TTS_UPSTREAM_VOICE || "tara",
-}
-
-interface TtsProbeResult {
-  available: boolean
-  note: string
-}
-
-/** 探测 TTS 上游。负缓存只覆盖网络连接失败，且不超过 5 秒；HTTP 403 不缓存。 */
-const TTS_PROBE_NEGATIVE_TTL_MS = 5_000
-let ttsProbeCache: { at: number; ttl: number; result: TtsProbeResult } | null = null
-export async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeResult> {
-  if (ttsProbeCache && Date.now() - ttsProbeCache.at < ttsProbeCache.ttl) return ttsProbeCache.result
-  let result: TtsProbeResult
-  let cacheNegative = false
-  try {
-    const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: TTS_UPSTREAM.model,
-        input: "测",
-        voice: TTS_UPSTREAM.voice,
-        response_format: "mp3",
-      }),
-      signal: signal ?? AbortSignal.timeout(20_000),
-    })
-    if (res.ok) {
-      const buf = await res.arrayBuffer()
-      const head = new Uint8Array(buf.slice(0, 3))
-      const looksLikeAudio = buf.byteLength > 64 && (head[0] === 0x49 || head[0] === 0x52 || head[0] === 0xff)
-      result = looksLikeAudio
-        ? { available: true, note: "上游可用" }
-        : { available: false, note: "上游返回 200 但载荷不是音频" }
-    } else {
-      const bodyText = await res.text().catch(() => "")
-      let msg = bodyText.slice(0, 200)
-      try {
-        const j = JSON.parse(bodyText)
-        msg = (j?.error?.message || msg).slice(0, 200)
-      } catch { /* keep raw */ }
-      result = { available: false, note: `上游 HTTP ${res.status}: ${msg}` }
-    }
-  } catch (e) {
-    const name = e instanceof Error ? e.name : ""
-    const aborted = name === "AbortError" || name === "TimeoutError"
-    result = { available: false, note: `上游不可达: ${e instanceof Error ? e.message : String(e)}` }
-    cacheNegative = !aborted
-  }
-  if (result.available) ttsProbeCache = { at: Date.now(), ttl: 60_000, result }
-  else if (cacheNegative) ttsProbeCache = { at: Date.now(), ttl: TTS_PROBE_NEGATIVE_TTL_MS, result }
-  else ttsProbeCache = null
-  return result
-}
+// 实现已合并到 project/speech.ts 的 synthesizeSpeech（S8a，设计文档 §3.5）：旧的
+// handleTts 逻辑（探测 → 展开 `@[音频:X]` → 调上游 → 落盘/计价 → 响应形状）逐行搬过去，
+// 这里只保留 HTTP 壳。行为逐字节不变；workflow-gw-service.ts 的内联 audio 路径仍用
+// 本文件再导出的 TTS_UPSTREAM / probeTtsUpstream（旧 world2 路径冻结）。
+export { TTS_UPSTREAM, probeTtsUpstream } from "./project/speech.ts"
 
 /**
  * POST /agent/v1/tts { text, voice?, session 带 Bearer key }
- * 同步调用：成功 → { ok, url, cost_coins, chars }；上游不可用 → 503 诚实错误。
+ * 同步调用：成功 → { ok, url, cost_coins, chars, format }；上游不可用 → 503 诚实错误。
  * 定价一律走 pricing-and-validation.ts 的 estimateTtsCoins（工具侧不硬编码）。
  */
-export async function handleTts(key: string, req: Request): Promise<Response> {
+export async function handleTts(key: string, req: Request, deps?: SpeechDeps): Promise<Response> {
   let body: { text?: string; voice?: string }
   try {
     body = (await req.json()) as { text?: string; voice?: string }
   } catch {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
-  const text = typeof body.text === "string" ? body.text.trim() : ""
-  if (!text) return jsonError(400, "text is required", "bad_request", "bad_request")
-  if (text.length > 2000) return jsonError(400, "text too long (max 2000 chars)", "bad_request", "bad_request")
-
-  const probe = await probeTtsUpstream()
-  if (!probe.available) {
-    return jsonError(
-      503,
-      `配音（TTS）上游暂不可用：${probe.note}。台词已收到，但当前无法真实生成音轨；请如实告知用户，勿编造音频链接。`,
-      "tts_unavailable",
-      "tts_unavailable",
-    )
-  }
-
-  // 行内实体 tag（`@[音频:夜雨环境音]`）展开（2026-09-25，音频卡接线）。
-  // 背景：`applyCharacterCards(..., { target: "audio" })` 此前**零生产呼叫端**——音频卡只是
-  // 型别层能力，`tts_speak` 收到 `@[音频:X]` 只会把字面串念出来。这里在**送上游前**补上：
-  // 文字含 `@[` 才打站点（零 token 零 HTTP），站点用 `target:"audio"` 就地展开音频卡的锁定片段。
-  // **fail-open 硬契约**：解析失败／逾时／形状不符／缺 key → 原文照送，永不阻断配音
-  // （薄客户端 entity-resolve.ts 已内建；其 warn 只印长度与 status，prompt 全文与 key 永不落 log）。
-  const ttsText = await resolveAudioEntityTokens(text, undefined, { apiKey: key })
-  if (ttsText.prompt !== text) {
-    console.info(`[tts] 已展开行内实体 tag：prompt_length=${text.length}→${ttsText.prompt.length}`)
-  }
-
-  // 上游可用路径（目前现实中走不到，保留完整闭环以便上游接入后即刻生效）
-  try {
-    const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: TTS_UPSTREAM.model,
-        input: ttsText.prompt,
-        voice: body.voice || TTS_UPSTREAM.voice,
-        response_format: "mp3",
-      }),
-      signal: AbortSignal.timeout(60_000),
-    })
-    if (!res.ok) {
-      const msg = (await res.text().catch(() => "")).slice(0, 200)
-      return jsonError(502, `TTS upstream error: ${msg}`, "tts_upstream_error", "tts_upstream_error")
-    }
-    const buf = await res.arrayBuffer()
-    if (buf.byteLength < 64) {
-      return jsonError(502, "TTS upstream returned empty audio", "tts_empty_audio", "tts_empty_audio")
-    }
-    const id = `tts_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-    const fileName = `${id}.mp3`
-    await mkdir(TTS_AUDIO_DIR, { recursive: true })
-    await Bun.write(path.join(TTS_AUDIO_DIR, fileName), buf)
-    const cost_coins = estimateTtsCoins("tts-zh", text)
-    const url = `${TTS_PUBLIC_BASE}/${fileName}`
-    return Response.json({ ok: true, url, chars: text.length, cost_coins, format: "mp3" })
-  } catch (e) {
-    return jsonError(502, `TTS upstream error: ${e instanceof Error ? e.message : String(e)}`, "tts_upstream_error", "tts_upstream_error")
-  }
+  const r = await synthesizeSpeech(
+    // 旧路由不接受 speed（旧实现忽略该键）；照旧只传 text/voice，保证同输入同上游请求。
+    { text: body.text as string, voice: body.voice, apiKey: key },
+    deps,
+  )
+  if (r.ok === false) return jsonError(r.status, r.message, r.code, r.code)
+  return Response.json({ ok: true, url: r.url, chars: r.chars, cost_coins: r.costCoins, format: r.format })
 }
 
 export async function handleConfirmRequest(req: Request): Promise<Response> {  let body: {

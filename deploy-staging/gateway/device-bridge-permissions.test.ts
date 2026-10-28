@@ -193,7 +193,8 @@ test("决策矩阵：四模式 × 根内/根外（read_file）", () => {
   const cases: { mode: string; path: string; decision: string; reason: string }[] = [
     { mode: "off", path: `${HOME}/project/a.ts`, decision: "deny", reason: "mode_off" },
     { mode: "off", path: "/tmp/a.txt", decision: "deny", reason: "mode_off" },
-    { mode: "ask", path: `${HOME}/project/a.ts`, decision: "ask", reason: "mode_ask" },
+    // a9cd889da（用户 2026-10-05 原话「最低的权限也应该要预设允许读，写的时候询问」）：ask 档授权根内的只读工具直接放行，根外仍询问。
+    { mode: "ask", path: `${HOME}/project/a.ts`, decision: "allow", reason: "mode_ask_read_in_root" },
     { mode: "ask", path: "/tmp/a.txt", decision: "ask", reason: "mode_ask" },
     { mode: "auto", path: `${HOME}/project/a.ts`, decision: "allow", reason: "authorized_root" },
     { mode: "auto", path: `${HOME}/other/a.ts`, decision: "ask", reason: "outside_roots" },

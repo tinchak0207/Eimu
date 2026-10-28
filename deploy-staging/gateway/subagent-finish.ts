@@ -14,6 +14,8 @@ import { maybeDrainCriticQueue } from "./subagent-events.ts"
 import { writeLiveLog, appendTranscriptEnd } from "./subagent-live.ts"
 import { deliverChildTurn, findRunById, forkResultDeliveryTarget } from "./subagent-messages.ts"
 import { checkPendingResumeQueue } from "./subagent-suspend.ts"
+// S16（2026-10-28，设计 §3.8）：工程模式回父摘要预算与完成事件。
+import { compactSubagentSummary, emitSubagentProjectEvent } from "./project/lanes.ts"
 
 /**
  * 2026-10-03（v3 接线）：开关 `CRITIC_SCORE_ENFORCE`。真值＝**必须字面 "1"**。
@@ -444,7 +446,12 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   const visibleSummary = qualityReviewPartial
     ? `作品已保留，质量检查尚未完成，缺少${qualityReviewMissing}；补齐这些检查后继续，当前无需重新制作。`
     : scrubSubagentPayload(summary)
-  run.summary = visibleSummary
+  // S16（2026-10-28，设计 §3.8）：工程模式回父内容有界（≤4096B、nodeIds ≤20；全文在节点产物），
+  // 且完成事件写进 events.jsonl、不唤醒父会话。旧会话（projectMode 非 true）逐字不变。
+  const projectMode = parentStateOf(run)?.projectMode === true
+  const compactSummary = projectMode ? compactSubagentSummary(visibleSummary, run.lane ?? []) : null
+  const parentSummary = compactSummary ? compactSummary.text : visibleSummary
+  run.summary = parentSummary
   // Durable terminal/outbox must commit before releasing the watcher or dispatching queued work.
   deleteReworkRecord(run.id) // 刀 F：终态即清持久记录（幂等；非 rework run 无记录=no-op）
   // X7/C4（2026-10-14）：自然终态（ok/error，含 soft 收尾）进入**接续窗口**——子会话刻意
@@ -459,7 +466,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   run.livePath = writeLiveLog(run, true) ?? run.livePath
   const durableResult = {
     status,
-    summary: visibleSummary,
+    summary: parentSummary,
     error,
     finishedAt: Date.now(),
     label: run.label,
@@ -546,6 +553,18 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       ...(softStop ? { soft_stopped: true, stopped_by: softStop.by, reason: softStop.reason } : {}),
     })
     appendTranscriptEnd(run, status, visibleSummary)
+    // S16（设计 §3.8）：工程模式完成事件落 events.jsonl（主代理经 project_get 取到）；
+    // 工程不存在时 emitSubagentProjectEvent 静默 no-op，写失败只打日志，不阻断收尾。
+    if (projectMode) {
+      await emitSubagentProjectEvent(run.parentGatewaySessionId, {
+        kind: "run_finished",
+        runId: run.id,
+        status,
+        nodeIds: compactSummary?.nodeIds ?? [],
+        summary: parentSummary,
+        data: { label: run.label, ...(run.seat ? { seat: run.seat } : {}) },
+      })
+    }
     // G3（2026-10-10）：用户默认面要「本路刚完成／失败」人话摘要——走 turn.status，
     // 禁止 message.delta。run 已从注册表摘除；若仍有兄弟在跑，同一帧带上剩余路数
     // （避免先写完成句再立刻被 emitRunningSubagentsStatus 覆盖而看不见）。
@@ -560,7 +579,9 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
     // resume 查询），只是不再由它负责唤醒。
     // 注：HEAD 在本函数开头有 `const asyncMode = run.asyncMode === true`（本工作树一并删除），
     // 复位时改为就地读取 run.asyncMode，保持「只改这一处」。
-    if (run.asyncMode === true && run.isFork) {
+    if (projectMode) {
+      // S16：工程模式不唤醒父会话——完成事件已写入 events.jsonl（§3.8），唤醒会多起一轮空转。
+    } else if (run.asyncMode === true && run.isFork) {
       // D7：fork 的完成/失败结果回到**发起 fork 的子代理会话**（requester），不是主会话。
       // 走既有 deliverChildTurn（与 dispatchAttempt 同一条 prompt_async 轮廓），不新造通路。
       const requester = run.forkRequesterRunId ? findRunById(run.forkRequesterRunId) : undefined

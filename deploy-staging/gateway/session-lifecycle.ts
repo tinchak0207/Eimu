@@ -5,7 +5,7 @@
 // 前缀＋本档头＋单行 import，其余一字未动。
 import type { MemoryDocLite, SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
-import { getOwnedSession, sessions, deleteOpencodeSession } from "./sessions-core.ts"
+import { getOwnedSession, sessions, deleteOpencodeSession, seatDecision, projectModeSwitch, seatUserId, projectModeAllowlist } from "./sessions-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { hashKey } from "./auth-gw.ts"
 import { loadUserSettings, saveSession } from "./persistence.ts"
@@ -18,9 +18,13 @@ import { MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // agent（opencode.json agent.orchestrator.tools 把 blender_exec/blender_render/
 // blender_export_gltf/music_gen 从工具表物理移除）→ 主会话无法直调域工具，只能
 // subagent_dispatch 派发 Expert。OFF 不带 agent 栏＝default build agent＝零变化。
+// S19（2026-10-28）：推送路径按**锁存席位**映射——`creator` 已被 S14 重定义为 10 工具
+// 工程席位，旧席位会话（含缺键→creator_legacy）的野兽模式必须走 orchestrator_legacy
+// （原席位逐字拷贝），不能指到新的 orchestrator。工程会话恒 creator，beast 不换席位、也不读设置。
 export function beastAgentField(state: SessionState): Record<string, string> {
+  if (state.seat === "creator") return { agent: "creator" }
   try {
-    if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator" }
+    if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator_legacy" }
   } catch {}
   return {}
 }
@@ -64,12 +68,25 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
   // 2026-10-19 修画布写穿：创建时必须带真实席位。过去 body 是空对象，OpenCode
   // 会把会话绑定到默认 build；后续每轮 prompt 虽带 agent=creator/orchestrator，
   // 工具 schema 仍是创建时的 build（workflow_write=false），调用根本到不了网关。
-  let agent: "orchestrator" | "creator" = "creator"
+  // S19 回滚安全（2026-10-28）：`creator` 已被 S14 重定义为 10 工具的工程席位，而 OpenCode
+  // 在创建时绑定工具表。创建 body 的 agent 必须与随后 `sessions.set` 的席位锁存**同一决定**，
+  // 否则 EIMU_PROJECT_MODE=off 时新会话会绑到新 creator，回滚路径直接坏掉。这里只读一次
+  // 设置/env，算出决定后把三个键随 state 一起写死（锁存见到已存在的 seat 不再二次读 env）。
+  let beastMode = false
   try {
-    if (loadUserSettings(key)?.beast_mode === true) agent = "orchestrator"
+    beastMode = loadUserSettings(key)?.beast_mode === true
   } catch {
-    agent = "creator"
+    beastMode = false
   }
+  const seat = seatDecision({
+    mode: projectModeSwitch(),
+    userId: seatUserId(key),
+    allowlist: projectModeAllowlist(),
+    beastMode,
+  })
+  // 工程席位 → creator；旧席位 → beast ? orchestrator_legacy : creator_legacy（与 S14
+  // resolvePromptSeat 的每轮席位逐项一致）。
+  const agent = seat.seat === "creator" ? "creator" : seat.beast ? "orchestrator_legacy" : "creator_legacy"
   let res: Response
   try {
     res = await opencodeFetch(`/session`, {
@@ -97,6 +114,10 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     sessionId,
     apiKey: key,
     opencodeSessionId: body.id,
+    // S19：与创建 body 同一份决定（不二次读 env）——sessions.set 的锁存见到 seat 已存在即跳过。
+    seat: seat.seat,
+    projectMode: seat.projectMode,
+    beast: seat.beast,
     clients: new Set(),
     pendingConfirms: new Map(),
     pendingQuestions: new Map(),

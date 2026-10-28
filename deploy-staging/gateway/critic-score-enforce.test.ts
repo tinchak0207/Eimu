@@ -11,17 +11,26 @@
 // DB 路径在 import subagent（连带 persistence）之前指向临时档，不碰生产 sessions.db。
 
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const TEST_DB_DIR = mkdtempSync(join(tmpdir(), "critic-score-"))
 process.env.SESSIONS_DB_PATH = join(TEST_DB_DIR, "sessions.db")
+// 同 subagent.test.ts 的沙箱法：落盘 / 转写目录指向临时目录（生产默认 /opt/agent-harness 在 dev 机不存在）。
+// 生产上输出目录恒存在，缺失会 fail-closed，故沙箱里补建以对齐。必须在 import subagent 之前设置。
+process.env.SUBAGENT_OUTPUT_DIR = join(TEST_DB_DIR, "outputs-subagent")
+process.env.SUBAGENT_TRANSCRIPT_DIR = join(TEST_DB_DIR, "transcripts")
+mkdirSync(process.env.SUBAGENT_OUTPUT_DIR, { recursive: true })
 
 const MEASURED_MARK = "【技术硬检·measured】"
 // 可控量测结果：每个测试设定 mockScore（null＝量测失败/无量测）。
 let mockScore: number | null = 3
+// 只替换量测三件，其余导出（extractMediaTargets 等被 delivery-gate / claim-gate / delivery-gate-critic 静态引用）取真实模组，
+// 否则 mock 缺导出会让下游 import 直接 SyntaxError。
+const realMediaQuality = { ...(await import("./media-quality.ts")) }
 mock.module("./media-quality.ts", () => ({
+  ...realMediaQuality,
   measureMediaScore: async () =>
     mockScore === null ? null : { score: mockScore, detail: `技术分 ${mockScore}/10（mock 硬检）`, artifacts: 1 },
   mediaQualityGateEnabled: () => true,
@@ -34,7 +43,7 @@ const persistence = await import("./persistence.ts")
 persistence.initPersistence()
 
 const { initSubagent, handleSubagentDispatch, handleSubagentEvent, maybeRunMachineCriticPass, criticScoreEnforcementEnabled, shouldForceCriticRejectByScore } = sg
-const { CRITIC_PASS_MARK, CRITIC_REJECT_MARK, CRITIC_SCORE_THRESHOLD_POLICY } = dg
+const { CRITIC_REJECT_MARK, CRITIC_SCORE_THRESHOLD_POLICY } = dg
 
 // ── 极简 gateway harness（同 subagent.test.ts 口径，mock fetch） ─────────────────
 const parents = new Map<string, { sessionId: string; opencodeSessionId: string; turnGen: number }>()
@@ -46,6 +55,7 @@ let sessionSeq = 0
 let parentSeq = 0
 
 const realFetch = globalThis.fetch
+const ART_URL = "https://cdn.example.com/cover.png"
 function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } })
 }
@@ -85,8 +95,23 @@ globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: stri
   if (url.includes("/abort")) return json({})
   if (method === "DELETE") return json({})
   if (url.includes("/message")) {
+    // 真实 opencode 的每则 message 必带 info.time.created；D3 时间窗（subagent-policy.ts messagesInWindow）
+    // 对缺该栏的消息一律判窗外（防父消息冒充本 run 产出），故夹具补时间戳，与 subagent.test.ts 同口径。
     const cid = childOf(url)
-    return json([{ info: { role: "assistant" }, parts: [{ type: "text", text: assistantText(cid ? childKind.get(cid) : undefined) }] }])
+    const kind = cid ? childKind.get(cid) : undefined
+    const info = { role: "assistant", time: { created: Date.now() } }
+    const msgs: unknown[] = [{ info, parts: [{ type: "text", text: assistantText(kind) }] }]
+    // 判 PASS 的前提（现行 fail-closed 契约）：被审成品必须来自作者真实成功的工具回执，且 critic 有绑定该成品的真实读图回执
+    // （subagent-finish.ts 的 artifacts 收集 + delivery-gate-critic.ts checkCriticReceipt）；缺回执一律 PARTIAL→退回，
+    // 与本测要锁的「measured 分数阈值」无关，所以夹具给齐回执，让判决只取决于开关与 measured 分。
+    // 注：音频成品目前没有可满足 checkCriticReceipt 的感知通路（读图回执只认图片扩展名），故夹具用图片成品。
+    if (kind === "music") {
+      msgs.push({ info, parts: [{ type: "tool", tool: "image_generate", callID: "call_gen", state: { status: "completed", input: {}, output: JSON.stringify({ ok: true, url: ART_URL }) } }] })
+    }
+    if (kind === "critic") {
+      msgs.push({ info, parts: [{ type: "tool", tool: "read_image", callID: "call_read", state: { status: "completed", input: { image_url: ART_URL }, output: JSON.stringify({ ok: true, attached: true, bytes: 2048, mime: "image/png" }) } }] })
+    }
+    return json(msgs)
   }
   return json({})
 }) as typeof fetch
@@ -125,7 +150,7 @@ async function runCriticFlow(p: { sessionId: string }): Promise<{ criticRunId: s
   await settle()
   const criticChild = createdChildren[createdChildren.length - 1]
   expect(childKind.get(criticChild)).toBe("critic")
-  const startEvt = [...emitted].reverse().find((e) => e.name === "subagent.started" && e.data?.label === "机器审核")
+  const startEvt = [...emitted].reverse().find((e) => e.name === "subagent.started" && e.data?.label === "复核")
   const criticRunId = String(startEvt?.data?.id ?? "")
   expect(criticRunId).not.toBe("")
   await handleSubagentEvent({ type: "session.idle" }, criticChild)
@@ -215,8 +240,9 @@ describe("machine critic 判决：measured 阈值接入既有 reject 链", () =>
     const p = makeParent("gw-score-a")
     const { criticRunId } = await runCriticFlow(p)
     const w = wakes[wakes.length - 1]
-    expect(w.summary).toContain(CRITIC_PASS_MARK)
+    // F6（2026-10-04）起唤醒摘要对用户可读：内审标记（PASS/REJECT_MARK）在出口被剥离，判决方向改看落库的 verdict（见下）。
     expect(w.summary).not.toContain(CRITIC_REJECT_MARK)
+    expect(persistence.getCriticVerdictByRun(criticRunId)?.verdict).toBe("pass")
     // 未启用＝不 await 量测；fire-and-forget 旁路仍照写 measured 供观测。
     await settle()
     const v = persistence.getCriticVerdictByRun(criticRunId)
@@ -228,8 +254,8 @@ describe("machine critic 判决：measured 阈值接入既有 reject 链", () =>
     mockScore = 2
     const p = makeParent("gw-score-b")
     const { criticRunId } = await runCriticFlow(p)
-    const w = wakes[wakes.length - 1]
-    expect(w.summary).toContain(CRITIC_REJECT_MARK)
+    // 判决方向看落库 verdict（唤醒摘要已剥内审标记，见 (a) 注）；reject 且 measured 分 2。
+    expect(wakes[wakes.length - 1].id).toBe(criticRunId)
     // measured 落库：score=2、来源 measured、判决 reject（供审计与下游 join）。
     const v = persistence.getCriticVerdictByRun(criticRunId)
     expect(v?.score).toBe(2)
@@ -245,8 +271,8 @@ describe("machine critic 判决：measured 阈值接入既有 reject 链", () =>
     const p = makeParent("gw-score-d")
     const { criticRunId } = await runCriticFlow(p)
     const w = wakes[wakes.length - 1]
-    expect(w.summary).toContain(CRITIC_PASS_MARK)
     expect(w.summary).not.toContain(CRITIC_REJECT_MARK)
+    expect(persistence.getCriticVerdictByRun(criticRunId)?.verdict).toBe("pass")
     const v = persistence.getCriticVerdictByRun(criticRunId)
     // 无量测 → 诚实 null 分、来源 model_self（自评只作筛子，永不触发阈值）。
     expect(v?.score).toBeNull()
