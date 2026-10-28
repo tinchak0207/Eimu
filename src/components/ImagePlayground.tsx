@@ -66,7 +66,6 @@ import {
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
-import { ReplicateFilmRow } from "@/components/canvas-workstation/ReplicateFilmRow";
 import { ProjectSidebar } from "@/components/projects/ProjectSidebar";
 import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
 import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
@@ -335,18 +334,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
-  const handleReplicateFilm = useCallback((sentence: string) => {
-    const text = sentence.trim();
-    if (!text) return;
-    const inject = () => {
-      setAgentTemplateInjection({ text, nonce: Date.now(), echo: true });
-      setAgentTemplateDismissed(true);
-    };
-    const start = startNewSessionRef.current;
-    if (!start) return inject();
-    void Promise.resolve(start()).then(inject);
-  }, []);
-
   // Bug1b：会话恢复回填。refresh/重进后左聊天续上（本地存档 resume），但右画布
   // 空白 —— 快照此前只有上行没有下行。监听 currentSessionId：每个新拿到的 sid 拉
   // 一次闸道存档（GET 同上行端点），仅当 nodes>0 才回填；拉取异步到达时 sessionId
@@ -903,12 +890,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   )}
                 >
                   {(chatHeaderExtra) => (
-                    <div className="flex h-full min-h-0 flex-col">
+                    <>
                   {/* 罪状 7（暴君人肉评测）：聊天框顶栏的「AI 助理改了 N 项设置 /
                       模型 / 恢复我的设定」撤销条整块删除（非隐藏）——控件上已是现值，
                       再画一遍被动过什么只是噪音；D-12 的参数回流本身（模型/比例/
                       解析度真正被改掉）仍然生效，撤的只是这条提示栏。 */}
-                  <div className="min-h-0 flex-1">
                   <PromptInput
                     onSubmit={handlePromptSubmit}
                     isLoading={isLoading}
@@ -958,9 +944,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onUserMessage={() => setAgentTemplateDismissed(true)}
                     onSendBlockedByAuth={handleSendBlockedByAuth}
                   />
-                  </div>
-                  {showAgentTemplateGallery ? <ReplicateFilmRow onReplicate={handleReplicateFilm} /> : null}
-                    </div>
+                    </>
                   )}
                 </CanvasChatWorkstation>
                 </div>
