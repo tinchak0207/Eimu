@@ -6,7 +6,7 @@ import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
 import { armWatchdogTimer } from "./timers-gw"
 import { emitImageDone, emitVideoDone } from "./events-translate"
-import { emitImageFailed } from "./media-internal-routes"
+import { emitImageFailed, emitVideoFailed, emitAudioFailed } from "./media-internal-routes"
 import { realpath, stat } from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import { createHash } from "node:crypto"
@@ -205,7 +205,11 @@ export async function drainGenerationInbox(): Promise<void> {
             else await emitImageDone(parent, artifact.url, cost, receipt.task_id)
           }
         } else if (receipt.kind !== "message") {
-          emitImageFailed(parent, receipt.task_id, receipt.reason || receipt.status, receipt.status === "refunded")
+          const refunded = receipt.status === "refunded"
+          const reason = receipt.reason || receipt.status
+          if (receipt.kind === "video") emitVideoFailed(parent, receipt.task_id, reason, refunded)
+          else if (receipt.kind === "audio") emitAudioFailed(parent, receipt.task_id, reason, refunded)
+          else emitImageFailed(parent, receipt.task_id, reason, refunded)
         }
         renderedGeneration(receipt.task_id)
       }
