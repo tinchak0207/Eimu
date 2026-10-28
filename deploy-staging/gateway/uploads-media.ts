@@ -102,6 +102,10 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     const files = form.getAll("file") as File[]
     if (files.length === 0) return jsonError(400, "no file field", "bad_request", "bad_request")
     if (files.some((file) => !(file instanceof File))) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
+    // 0 字节文件在 Bun 里可能被解析成 String（无 filename 的 part），file.name 为 undefined，
+    // sanitizeUploadName 的 path.basename(undefined) 抛 TypeError → 500「upload failed」。
+    // 空文件是坏请求，统一回 400（2026-10-28 实测：用户传空 wav 只看到一句上传失败，没有原因）。
+    if (files.some((file) => file.size === 0)) return jsonError(400, "empty file", "bad_request", "bad_request")
     const uploadDir = path.join(UPLOADS_DIR, state.sessionId)
     await mkdir(uploadDir, { recursive: true })
     const results: { name: string; path: string; size: number; sha256: string; upload_id: string; content_type: string }[] = []
@@ -110,9 +114,11 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       if (file.size > UPLOAD_MAX_BYTES) {
         return jsonError(413, "file exceeds 4MB limit", "payload_too_large", "payload_too_large")
       }
-      const safeName = sanitizeUploadName(file.name)
+      // 无 filename 的 part 会让 file.name 为 undefined；此处统一按空名处理，避免 path.extname 抛错。
+      const rawName = typeof file.name === "string" ? file.name : ""
+      const safeName = sanitizeUploadName(rawName)
       if (!safeName) {
-        return jsonError(400, `disallowed file type: ${path.extname(file.name)}`, "bad_request", "bad_request")
+        return jsonError(400, `disallowed file type: ${path.extname(rawName)}`, "bad_request", "bad_request")
       }
       // 同名不覆盖：原子占位改得实际落盘名，清单与磁碟保持一致（P1）。
       const finalName = await reserveUniqueUploadName(uploadDir, safeName)
