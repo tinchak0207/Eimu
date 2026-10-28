@@ -40,6 +40,7 @@ export const sceneSetupRecipe: Recipe = {
         intent: "旧 notes 门禁：光源方向/色温与设定一致、无人物与文字、构图可作为背景参考锚点。",
         params: { mode: "critic", rubric: "scene_default", thresholds: { keepLightDirection: true, noCharacters: true, noText: true } },
         inputs: { image: { from: "keyframe" } },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",

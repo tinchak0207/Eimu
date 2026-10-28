@@ -27,6 +27,7 @@ mkdirSync(MEDIA, { recursive: true })
 mkdirSync(join(WS, "home"), { recursive: true })
 
 const { exportExecutor } = await import("./export")
+const { signedCriticVerdictOutput } = await import("./qc")
 const { emitDeliveryCards } = await import("../delivery")
 
 afterAll(() => rmSync(WS, { recursive: true, force: true }))
@@ -126,7 +127,13 @@ function makeCtx(nodeId: string, inputs: Record<string, Output[]>): ExecContext 
     sessionId: SID,
     session: {} as never,
     params: { preset: "image_pack" } as Record<string, Json>,
-    inputs,
+    inputs: inputs.verdict ? inputs : {
+      ...inputs,
+      verdict: [signedCriticVerdictOutput(MEDIA, {
+        parentSessionId: SID,
+        artifactSha256: (Object.values(inputs).flat().find((o) => o.mime.startsWith("image/")) ?? INPUT_A).sha256,
+      })],
+    },
     refs: [],
     signal: new AbortController().signal,
     ingest: (src, hint) => ingestTest(src, hint),

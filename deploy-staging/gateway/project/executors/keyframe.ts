@@ -129,7 +129,8 @@ export const keyframeExecutor: NodeExecutor = {
     const model = textParam(eff.model)
     const apiKey = apiKeyOf(session)
     if (!model || !apiKey) return null // 报不出价：不猜目录价
-    const unit = await estimateNodeCoins({ kind: "image", metadata: { model } }, apiKey)
+    const quality = textParam(eff.quality)
+    const unit = await estimateNodeCoins({ kind: "image", metadata: { model } }, apiKey, undefined, quality)
     if (unit === null) return null
     const n = typeof eff.n === "number" && Number.isInteger(eff.n) && eff.n > 0 ? eff.n : 1
     return Math.round(unit * n * 1e6) / 1e6 // S5 的 cost = unit × n，报价同口径

@@ -1,14 +1,38 @@
 // 配方 ecom_model —— 由旧模板 deploy-staging/gateway/workflow-templates/ecom_model.ts（只读）改写。
 // 映射原则：docs/architecture/project-graph.md §6（电商族：shotlist(items) + keyframe#item → qc → export(image_pack)）。
-// 旧 role：7 支 *_gen config + 7 个 image 环。image 环化为行表 item 的 22 行；行内承载旧 notes/deliverable，
+// 旧 role：7 支 *_gen config + 7 个 image 环。image 环仍是 22 张图，各自一个 keyframe；行内承载旧 notes/deliverable，
 // 候选数量用行字段 n 表达（模特卡 3 候选、每个试穿姿势 2 候选），gate 并入 qc.thresholds。
+// 旧图生图链：garment_asset → model_card → tryon → retouch → grid → detail_page → distribution。
+// 参考图上限 5。服装锁与三张人设卡先占格，剩下的给直接上游。
 import type { Json, NewNode, ProjectDefaults, Recipe } from "../types"
-import { materializeDefaults } from "../specs"
+import { materializeDefaults, MAX_REFERENCE_IMAGES } from "../specs"
 
 const str = (v: Json | undefined, fallback: string): string => (typeof v === "string" && v.trim() !== "" ? v : fallback)
 
 type Row = { id: string; role: string; label: string; size: string; prompt: string; n?: number }
 const asRow = (r: Row): { [k: string]: Json } => ({ id: r.id, role: r.role, label: r.label, size: r.size, prompt: r.prompt, n: r.n ?? 1 })
+
+/** locks 先占格（服装锁 + 人设卡），direct 是旧图生图边的直接上游。合计不超过关键帧参考图上限。 */
+function imageRefs(locks: readonly string[], direct: readonly string[]): Record<string, { from: string }> {
+  const out: Record<string, { from: string }> = {}
+  for (const id of [...locks, ...direct]) {
+    if (Object.prototype.hasOwnProperty.call(out, id)) continue
+    if (Object.keys(out).length >= MAX_REFERENCE_IMAGES) break
+    out[id] = { from: id }
+  }
+  return out
+}
+
+function frame(id: string, row: Row, defaults: ProjectDefaults, inputs: Record<string, { from: string }>): NewNode {
+  return {
+    id, type: "keyframe",
+    intent: `旧 role ${row.role}：${row.label}。上游定稿图接在 inputs。`,
+    params: materializeDefaults("keyframe", id, {
+      title: row.label, prompt: row.prompt, role: row.role, size: row.size, n: row.n ?? 1,
+    }, defaults),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
+  }
+}
 
 function buildRows(garment: string): Row[] {
   const lock = `服装：${garment}。以服装 DNA 卡为唯一基准：材质/版型/颜色（3 处主色 HEX）/标签四维逐项复用，禁止同义改写。`
@@ -120,23 +144,29 @@ export const ecomModelRecipe: Recipe = {
       ...(typeof p.style === "string" && p.style ? { style: p.style } : {}),
     }
     const rows = buildRows(str(p.garment, "锁定服装"))
+    const ids = (role: string) => rows.filter((r) => r.role === role).map((r) => r.id)
+    const garment = ids("garment_asset")
+    const model = ids("model_card")
+    const tryon = ids("tryon")
+    const detail = ids("detail_page")
+    const locks = [...garment, ...model]
+    const refsOf = (role: string): Record<string, { from: string }> => {
+      if (role === "garment_asset") return { catalog: { from: "items" } }
+      if (role === "model_card") return imageRefs(garment, [])
+      if (role === "tryon") return imageRefs(garment, model)
+      if (role === "retouch") return imageRefs(locks, tryon)
+      if (role === "grid") return imageRefs(locks, ["retouch"])
+      if (role === "detail_page") return imageRefs(locks, ["grid"])
+      return imageRefs(locks, detail)
+    }
+    const pictures = Object.fromEntries(rows.map((r) => [r.id, { from: r.id }]))
     const nodes: NewNode[] = [
       {
         id: "items", type: "shotlist",
         intent: "旧 7 个 image 环的行表：服装资产 / 人设卡 ×3 / 试穿 ×3 / 精修 / 九宫格 / 详情 ×6 / 分发 ×7，共 22 行（服装 DNA + FaceID 为全链基准）。",
         params: { kind: "items", rows: rows.map(asRow) },
       },
-      {
-        id: "keyframe", type: "keyframe", forEach: { over: "items", as: "item" },
-        intent: "旧 role garment_asset/model_card/tryon/retouch/grid/detail_page/distribution 都由此节点按行产出；旧 7 支 *_gen config 的 model/size/count 并入每行 params 与 defaults。",
-        params: materializeDefaults("keyframe", "keyframe", {
-          title: "${row.label}",
-          prompt: "${row.prompt}",
-          role: "${row.role}",
-          size: "${row.size}",
-          n: "${row.n}",
-        }, defaults),
-      },
+      ...rows.map((r) => frame(r.id, r, defaults, refsOf(r.role))),
       {
         id: "qc", type: "qc",
         intent: "旧各环门禁：抠图边缘无光晕、FaceID 三锚点一致、手部无畸变、服色 ΔE≤5、九宫格主色偏差≤10%、文字≥24px、平台安全区、短边≥2048。",
@@ -149,31 +179,32 @@ export const ecomModelRecipe: Recipe = {
             garmentInputShortEdgePx: 1024, evidenceMapRegions: true,
           },
         },
-        inputs: { image: { from: "keyframe" } },
+        inputs: pictures,
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",
         intent: "旧 role distribution 的交付：小红书 3:4 / 抖音 9:16 / 淘宝主图 1:1 五张按平台规格打包，重排不重生；安全区与分辨率套检 100% 通过后出口。",
         params: { preset: "image_pack" },
-        inputs: { images: { from: "keyframe" }, verdict: { from: "qc" } },
+        inputs: { ...pictures, verdict: { from: "qc" } },
       },
     ]
     return { nodes, targets: { shots: rows.length, subtitles: false, audio: "none" }, defaults }
   },
   legacyRoleMap: {
-    garment_gen: { intentOf: "keyframe" }, // config 不成节点：model/size/count 已并入行 params 与 defaults
-    garment_asset: "keyframe#garment_asset",
-    model_gen: { intentOf: "keyframe" },
-    model_card: "keyframe", // 3 行（model_card_1..3，正面特写 3 候选 + 全身 + 侧面）
-    tryon_gen: { intentOf: "keyframe" },
-    tryon: "keyframe", // 3 行（正/侧/背，每行 2 候选）
-    retouch_gen: { intentOf: "keyframe" },
-    retouch: "keyframe#retouch",
-    grid_gen: { intentOf: "keyframe" },
-    grid: "keyframe#grid",
-    detail_gen: { intentOf: "keyframe" },
-    detail_page: "keyframe", // 6 行（detail_page_1..6）
-    reflow_gen: { intentOf: "keyframe" },
-    distribution: "keyframe", // 7 行（小红书 / 抖音 / 淘宝主图 ×5）
+    garment_gen: { intentOf: "garment_asset" },
+    garment_asset: "garment_asset",
+    model_gen: { intentOf: "model_card_1" },
+    model_card: "model_card_1",
+    tryon_gen: { intentOf: "tryon_1" },
+    tryon: "tryon_1",
+    retouch_gen: { intentOf: "retouch" },
+    retouch: "retouch",
+    grid_gen: { intentOf: "grid" },
+    grid: "grid",
+    detail_gen: { intentOf: "detail_page_1" },
+    detail_page: "detail_page_1",
+    reflow_gen: { intentOf: "dist_xhs_34" },
+    distribution: "dist_xhs_34",
   },
 }

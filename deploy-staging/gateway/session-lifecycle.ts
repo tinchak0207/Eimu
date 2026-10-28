@@ -17,16 +17,16 @@ import { MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // ── 能力断路（MOE 评测死线1，2026-09-08）：野兽模式 ON 时主会话跑 orchestrator
 // agent（opencode.json agent.orchestrator.tools 把 blender_exec/blender_render/
 // blender_export_gltf/music_gen 从工具表物理移除）→ 主会话无法直调域工具，只能
-// subagent_dispatch 派发 Expert。OFF 不带 agent 栏＝default build agent＝零变化。
+// subagent_dispatch 派发 Expert。S2：空 agent 会被 opencode 落到 build，这里始终带席位。
 // S19（2026-10-28）：推送路径按**锁存席位**映射——`creator` 已被 S14 重定义为 10 工具
 // 工程席位，旧席位会话（含缺键→creator_legacy）的野兽模式必须走 orchestrator_legacy
 // （原席位逐字拷贝），不能指到新的 orchestrator。工程会话恒 creator，beast 不换席位、也不读设置。
 export function beastAgentField(state: SessionState): Record<string, string> {
-  if (state.seat === "creator") return { agent: "creator" }
+  if (state.projectMode === true || state.seat === "creator") return { agent: "creator" }
   try {
     if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator_legacy" }
   } catch {}
-  return {}
+  return { agent: "creator_legacy" }
 }
 
 // ---- public handlers ----

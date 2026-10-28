@@ -26,6 +26,7 @@ const { admit } = await import("../admission.ts")
 const { clearExecutors, getExecutor, listExecutors } = await import("../executor-registry.ts")
 const { defaultExecutors, installDefaultExecutors } = await import("../executors/index.ts")
 const pricing = await import("../../pricing-gateway.ts")
+pricing.resetCatalogCacheForTest()
 
 // 13 个命名导出（与 RECIPES 必须是同一批对象）。
 const NAMED_RECIPES = [

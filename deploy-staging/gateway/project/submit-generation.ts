@@ -25,6 +25,57 @@ export interface SubmitGenerationDeps {
 export const idempotencyKeyOf = (r: Pick<SubmitGenerationReq, "projectId" | "signature" | "take" | "attempt">): string =>
   `pg:${r.projectId}:${r.signature.slice(0, 40)}:t${r.take}:a${r.attempt}`
 
+// 图片档位价。选择规则与 image_generate.ts:403 相同：hd 取 hd ?? standard，其余取 standard ?? hd。
+// 不抄工具本体。非 hd 在目录行缺失时回退 catalogUnitCoins，避免把 standard 报价抬成 hd。
+type ImageTiers = { standard?: number; hd?: number }
+let imageTierCache: { at: number; byModel: Record<string, ImageTiers> } | null = null
+const IMAGE_TIER_TTL_MS = 10 * 60 * 1000
+
+function pickImageUnit(tiers: ImageTiers | undefined, quality: string | undefined): number | null {
+  if (!tiers) return null
+  const unit = quality === "hd" ? (tiers.hd ?? tiers.standard) : (tiers.standard ?? tiers.hd)
+  return typeof unit === "number" && Number.isFinite(unit) && unit >= 0 ? unit : null
+}
+
+async function loadImageTiers(apiKey: string): Promise<Record<string, ImageTiers> | null> {
+  const now = Date.now()
+  if (imageTierCache && now - imageTierCache.at <= IMAGE_TIER_TTL_MS) return imageTierCache.byModel
+  try {
+    const res = await fetch(`${PLATFORM_BASE}/v1/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return imageTierCache?.byModel ?? null
+    const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
+    const byModel: Record<string, ImageTiers> = {}
+    for (const m of body.data ?? []) {
+      const id = typeof m.id === "string" ? m.id : null
+      if (!id) continue
+      const raw = m.x_coins_per_image
+      if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) byModel[id] = { standard: raw, hd: raw }
+      else if (raw && typeof raw === "object") {
+        const o = raw as Record<string, unknown>
+        const tiers: ImageTiers = {}
+        if (typeof o.standard === "number" && Number.isFinite(o.standard) && o.standard >= 0) tiers.standard = o.standard
+        if (typeof o.hd === "number" && Number.isFinite(o.hd) && o.hd >= 0) tiers.hd = o.hd
+        if (tiers.standard !== undefined || tiers.hd !== undefined) byModel[id] = tiers
+      }
+    }
+    imageTierCache = { at: now, byModel }
+    return byModel
+  } catch {
+    return imageTierCache?.byModel ?? null
+  }
+}
+
+async function imageUnitCoins(model: string, apiKey: string, quality: string | undefined): Promise<number | null> {
+  const table = await loadImageTiers(apiKey)
+  const fromTiers = pickImageUnit(table?.[model], quality)
+  if (fromTiers !== null) return fromTiers
+  if (quality === "hd") return null
+  return catalogUnitCoins(model, apiKey)
+}
+
 // ↓ 逐字复制自 opencode-runtime/lib/video-prompt-schema.ts:255-263（网关与 runtime 是两棵树，不能互相 import）。
 const VIDEO_MOTION_FALLBACK =
   "Continuous physical action drives the shot: the subject's position, pose, and silhouette change measurably from the first frame to the last, with at least one change in the environment or staging along the way. The camera move follows that change instead of replacing it."
@@ -44,7 +95,12 @@ const acceptedTask = new Map<string, string>()
 const submittedLogged = new Set<string>()
 const nodeMemory = new Map<string, Record<string, unknown>>()
 function bound<K, V>(m: Map<K, V>) { while (m.size > MEMORY_MAX) m.delete(m.keys().next().value as K) }
-export function __resetSubmitGenerationMemory(): void { acceptedTask.clear(); submittedLogged.clear(); nodeMemory.clear() }
+export function __resetSubmitGenerationMemory(): void {
+  acceptedTask.clear()
+  submittedLogged.clear()
+  nodeMemory.clear()
+  imageTierCache = null
+}
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -104,7 +160,7 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
   let videoResolution: string | null = null
   let generateAudio = req.generateAudio
   if (kind === "image") {
-    const unit = await catalogUnitCoins(model, req.apiKey)
+    const unit = await imageUnitCoins(model, req.apiKey, req.quality)
     if (unit === null) return fail("price_unknown", "没有本次模型档位的权威报价，未提交。", true)
     cost = Math.round(unit * n * 1e6) / 1e6
   } else {

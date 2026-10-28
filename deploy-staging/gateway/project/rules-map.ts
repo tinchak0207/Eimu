@@ -40,8 +40,8 @@ export const RULES_MAP: Readonly<Record<string, RuleMapping>> = {
     test: "qc 前置检查：好片全过（响度/黑帧/冻结/分数）",
   },
   "R-06": {
-    enforce: "deploy-staging/gateway/project/executors/qc.ts:runQc + normalizeCriticVerdict",
-    test: "critic 模式执行器不派发子代理：返回明确的接线错误",
+    enforce: "deploy-staging/gateway/project/executors/qc.ts:runCritic + verifySignedCriticVerdict",
+    test: "critic 判不过 → 重生 → 第二轮判过；同一轮只派一次",
   },
 
   // ── 钱与授权 ────────────────────────────────────────────────────

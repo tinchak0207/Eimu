@@ -1,11 +1,11 @@
 // ProjectGraph S3：图校验。纯函数、无 IO。
 // 错误分两级：error=图结构非法（补丁引擎据此给整批 GRAPH_INVALID）；warning=能存但跑不了（缺必需参数、悬空的 orphaned 节点等）。
 // 每条 issue 都带 fix（可直接照抄的修正示例）和 patchCode（对应契约 PatchErrorCode）。
-import type { Json, NodeId, PatchErrorCode, ProjectGraph, ProjectNode } from "./types"
+import type { Json, NodeId, PatchErrorCode, ProjectDefaults, ProjectGraph, ProjectNode } from "./types"
 import { PROJECT_SCHEMA_VERSION } from "./types"
 import { LIMITS } from "./constants"
 import {
-  ARTIFACT_ID_RE, NODE_ID_RE, NODE_TYPES, checkMusicRights, checkParam, checkParams, missingRequired,
+  ARTIFACT_ID_RE, NODE_ID_RE, NODE_TYPES, checkMusicRights, checkParam, checkParams, materializeDefaults, missingRequired,
   pinInvariantViolations, portKindCompatible, portKindOf, resolvePort, specOf,
 } from "./specs"
 import type { PortKind } from "./specs"
@@ -14,7 +14,7 @@ export type ValidateCode =
   | "BAD_SCHEMA" | "BAD_ID" | "ID_MISMATCH" | "DUP_ID" | "UNKNOWN_TYPE" | "BAD_INTENT" | "BAD_PARAM" | "MISSING_PARAM" | "MUSIC_RIGHTS"
   | "BAD_INPUT" | "DANGLING_INPUT" | "DANGLING_REF" | "BAD_REF" | "BAD_PORT" | "PORT_TYPE" | "CYCLE"
   | "FOREACH_BAD_OVER" | "FOREACH_NESTED" | "FOREACH_BAD_ALIAS" | "ROW_OUTSIDE_FOREACH" | "BAD_INSTANCE"
-  | "BAD_TAKES" | "BAD_ONFAIL" | "BAD_REFS" | "TOO_MANY_REFERENCES" | "PIN_INVARIANT" | "BAD_ORDER"
+  | "BAD_TAKES" | "BAD_ONFAIL" | "BAD_REFS" | "TOO_MANY_REFERENCES" | "PIN_INVARIANT" | "BAD_ORDER" | "UNFILLED_PLACEHOLDER"
 
 export interface ValidationIssue {
   severity: "error" | "warning"
@@ -358,14 +358,48 @@ export function findCycle(edges: readonly Edge[]): Edge[] | null {
   return null
 }
 
-/** 某节点运行前的就绪检查：把“缺必需参数”升级成 error。给 S6 admission / dry_run 用。 */
+/**
+ * 配方默认未填句。script 正文里的「（待写」、镜头行里的「主体动作与可见状态变化」。
+ * 只拦会送进付费上游的字段；句子留在配方里，这里不删。
+ */
+const UNFILLED_MARKERS = ["（待写", "主体动作与可见状态变化"] as const
+const PAID_PROMPT_FIELDS: Partial<Record<string, readonly string[]>> = {
+  keyframe: ["prompt", "styleLock"],
+  clip: ["prompt", "styleLock"],
+  voice: ["text"],
+  music: ["prompt", "lyrics"],
+}
+
+function unfilledPlaceholderIssues(n: ProjectNode, defaults: ProjectDefaults): ValidationIssue[] {
+  const fields = PAID_PROMPT_FIELDS[n.type]
+  if (!fields) return []
+  // 付费提交走 materializeDefaults：缺 styleLock 时用 defaults.style。扫物化结果，显式 params 仍优先（只补缺失键）。
+  const params = materializeDefaults(n.type, n.id, n.params ?? {}, defaults)
+  const spec = specOf(n.type)
+  const issues: ValidationIssue[] = []
+  for (const k of fields) {
+    const v = params[k]
+    if (typeof v !== "string" || v.length === 0) continue
+    const marker = UNFILLED_MARKERS.find((m) => v.includes(m))
+    if (!marker) continue
+    issues.push({
+      severity: "error", code: "UNFILLED_PLACEHOLDER", patchCode: "BAD_VALUE", node: n.id, path: `params.${k}`,
+      message: `${n.type} 节点 ${n.id} 的 params.${k} 仍是未填占位（含「${marker}」），不能进入付费生成`,
+      fix: op({ op: "set", node: n.id, path: `params.${k}`, value: spec?.params[k]?.example ?? null }),
+    })
+  }
+  return issues
+}
+
+/** 某节点运行前的就绪检查：把“缺必需参数”升级成 error，并拒绝付费字段里的未填占位。给 S6 admission 用。 */
 export function checkRunnable(graph: Readonly<ProjectGraph>, nodeId: NodeId): ValidationIssue[] {
   const n = graph.nodes[nodeId]
   if (!n) return [{ severity: "error", code: "DANGLING_REF", patchCode: "NOT_FOUND", node: nodeId, message: `节点 ${nodeId} 不存在` }]
   const spec = specOf(n.type)
   if (!spec) return [{ severity: "error", code: "UNKNOWN_TYPE", patchCode: "BAD_VALUE", node: nodeId, message: `未知节点类型 ${n.type}` }]
-  return missingRequired(n, graph.defaults ?? {}).map((k): ValidationIssue => ({
+  const missing = missingRequired(n, graph.defaults ?? {}).map((k): ValidationIssue => ({
     severity: "error", code: "MISSING_PARAM", patchCode: "BAD_VALUE", node: nodeId, path: `params.${k}`,
     message: `${n.type} 节点 ${nodeId} 缺少必需参数 ${k}，不能运行`, fix: op({ op: "set", node: nodeId, path: `params.${k}`, value: spec.params[k]?.example ?? null }),
   }))
+  return [...missing, ...unfilledPlaceholderIssues(n, graph.defaults ?? {})]
 }

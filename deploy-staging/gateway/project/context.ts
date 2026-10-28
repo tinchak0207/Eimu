@@ -10,7 +10,8 @@
 // 会被采用；`output.messages = 新数组` 这种重赋值**不会**被采用（prompt.ts 用的是局部常量 msgs）。
 // 本档的 applyProjectContext 因此一律原地改写。
 import { LIMITS } from "./constants.ts"
-import { GOAL_CARD_TAG, renderGoalCard } from "./brief.ts"
+import { GOAL_CARD_TAG, appendBriefEntry, renderGoalCard } from "./brief.ts"
+import { visibleUserTextFromPart } from "./goal-card.ts"
 import { renderDigest } from "./digest.ts"
 import type { DigestInputs } from "./digest.ts"
 import type { BriefEntry, ProjectGraph } from "./types.ts"
@@ -89,9 +90,6 @@ export interface AgentMessage {
   parts: AgentPart[]
 }
 
-const INJECTED_USER_TEXT_RE =
-  /^\s*(?:【目标验收|\[Monitor Result\]|<system-reminder|后台命令已结束|<eimu-goal-card>|<eimu-project-digest>)/
-
 const PART_OVERHEAD = 64
 const MSG_OVERHEAD = 40
 
@@ -117,15 +115,13 @@ export function messageBytes(msg: AgentMessage): number {
   return (msg.parts ?? []).reduce((n, p) => n + partBytes(p), 0) + MSG_OVERHEAD
 }
 
-/** 真实用户原话（排除网关/插件注入与合成片段）。 */
+/** 真实用户原话（排除网关/插件注入与合成片段）。与目标卡共用 visibleUserTextFromPart。 */
 export function userTextOfMessage(msg: AgentMessage | undefined): string {
   if (!msg || msg.info?.role !== "user" || !Array.isArray(msg.parts)) return ""
   const texts: string[] = []
   for (const part of msg.parts) {
-    if (part?.type !== "text" || typeof part.text !== "string") continue
-    if (part.synthetic === true || part.ignored === true) continue
-    if (!part.text.trim() || INJECTED_USER_TEXT_RE.test(part.text)) continue
-    texts.push(part.text)
+    const text = visibleUserTextFromPart(part)
+    if (text) texts.push(text)
   }
   return texts.join("\n")
 }
@@ -558,3 +554,70 @@ export function projectContextResponse(
 }
 
 export { PART_OVERHEAD, MSG_OVERHEAD }
+
+export interface ProjectIngressLike {
+  sessionId: string
+  messageId: string
+  text: string
+  at: string
+  first: boolean
+  recipe: string | null
+}
+
+/** 与 messages-gw-types.ts ingressProjectBrief 的 messageId 同式，先写的那次占住去重键。 */
+async function briefMessageId(turn: number, text: string): Promise<string> {
+  const { createHash } = await import("node:crypto")
+  return `u${turn}_${createHash("sha256").update(text).digest("hex").slice(0, 16)}`
+}
+
+/**
+ * 首条（以及之后每一条）用户原文同步落盘。返回时 project.json 里已经有这段原话。
+ * 不调用分类。分类仍由 ingress 在之后异步补上。
+ */
+export async function persistUserBriefNow(sessionId: string, text: string, turn: number): Promise<void> {
+  const raw = String(text ?? "")
+  if (!visibleUserTextFromPart({ type: "text", text: raw })) return
+  const { ensureProject } = await import("./store.ts")
+  const messageId = await briefMessageId(turn, raw)
+  const { store, created } = await ensureProject(sessionId)
+  const added = await store.update((g) => appendBriefEntry(g.brief, { at: new Date().toISOString(), messageId, text: raw }) !== null)
+  if (!added) return
+  await store.appendEvents([
+    { kind: "brief", data: { messageId, chars: [...raw].length, recipe: "", created } },
+  ])
+}
+
+/**
+ * 替换默认 ingress sink：brief 已由 persistUserBriefNow 写过时仍补配方。
+ * 不在这里调用分类模型。
+ */
+export async function acceptProjectIngress(record: ProjectIngressLike): Promise<void> {
+  const { ensureProject } = await import("./store.ts")
+  const { store, created } = await ensureProject(record.sessionId, {
+    ...(record.first && record.recipe ? { templateId: record.recipe } : {}),
+  })
+  const added = await store.update((g) => {
+    const entry = appendBriefEntry(g.brief, { at: record.at, messageId: record.messageId, text: record.text })
+    return entry !== null
+  })
+  if (added) {
+    await store.appendEvents([
+      {
+        kind: "brief",
+        data: { messageId: record.messageId, chars: [...record.text].length, recipe: record.recipe ?? "", created },
+      },
+    ])
+  }
+  if (!(record.first && record.recipe)) return
+  const g = await store.read()
+  if (Object.keys(g.nodes).length > 0) return
+  const outcome = await store.applyPatches(
+    { ops: [{ op: "apply_recipe", recipe: record.recipe, params: {} }] },
+    { kind: "user" },
+  )
+  if (outcome.receipt.rejected.length > 0) {
+    console.warn(
+      `[gateway] project apply_recipe rejected: session=${record.sessionId} recipe=${record.recipe} ${outcome.receipt.rejected.map((r) => r.code).join(",")}`,
+    )
+  }
+}

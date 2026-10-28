@@ -20,10 +20,13 @@ const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex")
 const PNG_SHA = sha(PNG_BYTES)
 const MP4_SHA = sha(MP4_BYTES)
 
-// 目录价：img-fast 0.5 币/张（standard）；vid-fast 按条 5 秒 1.5 币（720p，无音轨 1.5 / 带音轨 2）。
+// 目录价：img-fast standard 0.5 / hd 1 币/张；img-std-only 只有 standard 0.25；img-hd-only 只有 hd 2。
+// vid-fast 按条 5 秒 1.5 币（720p，无音轨 1.5 / 带音轨 2）。
 const CATALOG = {
   data: [
     { id: "img-fast", x_coins_per_image: { standard: 0.5, hd: 1 } },
+    { id: "img-std-only", x_coins_per_image: { standard: 0.25 } },
+    { id: "img-hd-only", x_coins_per_image: { hd: 2 } },
     {
       id: "vid-fast",
       x_coins_per_second: { "720p": 0.3 },
@@ -75,6 +78,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
 const { ArtifactStore } = await import("../artifacts.ts")
 const jobStore = await import("../../job-store.ts")
 const pricing = await import("../../pricing-gateway.ts")
+jobStore.reopenSessionsDbForTest()
+pricing.resetCatalogCacheForTest()
 const { referenceExecutor } = await import("./reference.ts")
 const { scriptExecutor, shotlistExecutor } = await import("./authored.ts")
 const { keyframeExecutor } = await import("./keyframe.ts")
@@ -340,6 +345,30 @@ describe("keyframe 执行器", () => {
     const defaulted = node("kf7", "keyframe", { prompt: "p" })
     expect(await keyframeExecutor.estimate(defaulted as any, graphOf([defaulted]) as any, { apiKey: "sk-test" })).toBeNull()
     expect(await keyframeExecutor.estimate(priced as any, graphOf([priced]) as any, {})).toBeNull() // 没凭证拿不到目录
+  })
+
+  test("quality=hd 用 hd 单价 × params.n；standard 与缺省仍是 standard", async () => {
+    const hd = node("kf-hd", "keyframe", { prompt: "p", model: "img-fast", n: 2, quality: "hd" }, { takes: { n: 4, select: "first" } })
+    // 依据：本文件 CATALOG img-fast.x_coins_per_image.hd = 1（standard = 0.5）。
+    // 乘法在 estimate 内只乘 params.n：1 × 2 = 2。takes.n 由 admission.computeQuote 再乘，这里不乘。
+    expect(await keyframeExecutor.estimate(hd as any, graphOf([hd]) as any, { apiKey: "sk-test" })).toBe(2)
+    const standard = node("kf-std", "keyframe", { prompt: "p", model: "img-fast", n: 2, quality: "standard" })
+    // 依据：x_coins_per_image.standard = 0.5，不是 hd 的 1。estimate 内 0.5 × params.n(2) = 1。
+    expect(await keyframeExecutor.estimate(standard as any, graphOf([standard]) as any, { apiKey: "sk-test" })).toBe(1)
+    const omitted = node("kf-omit", "keyframe", { prompt: "p", model: "img-fast", n: 1 })
+    // 缺省 quality 落到硬默认 standard。报价是 standard 单价 0.5 × params.n(1) = 0.5，不抬成 hd。
+    expect(await keyframeExecutor.estimate(omitted as any, graphOf([omitted]) as any, { apiKey: "sk-test" })).toBe(0.5)
+    // 不传 quality 的 estimateNodeCoins 仍回 standard，不读 hd 键。
+    expect(await pricing.estimateNodeCoins({ kind: "image", metadata: { model: "img-fast" } }, "sk-test")).toBe(0.5)
+  })
+
+  test("hd 缺价回 standard，standard 缺价回 hd", async () => {
+    const hdFallback = node("kf-hd-fb", "keyframe", { prompt: "p", model: "img-std-only", n: 2, quality: "hd" })
+    // 依据：img-std-only 只有 x_coins_per_image.standard = 0.25，没有 hd。规则 hd ?? standard。0.25 × params.n(2) = 0.5。
+    expect(await keyframeExecutor.estimate(hdFallback as any, graphOf([hdFallback]) as any, { apiKey: "sk-test" })).toBe(0.5)
+    const standardFallback = node("kf-std-fb", "keyframe", { prompt: "p", model: "img-hd-only", n: 1, quality: "standard" })
+    // 依据：img-hd-only 只有 x_coins_per_image.hd = 2，没有 standard。规则 standard ?? hd。2 × params.n(1) = 2。
+    expect(await keyframeExecutor.estimate(standardFallback as any, graphOf([standardFallback]) as any, { apiKey: "sk-test" })).toBe(2)
   })
 
   test("失败码透传：provider_error / timeout / submit_unknown", async () => {

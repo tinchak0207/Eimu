@@ -116,6 +116,7 @@ export const novelIpRecipe: Recipe = {
           role: "style_anchor",
           size: "1536x1024",
         }, defaults),
+        inputs: { mood: { from: "moodboard" } },
       },
       {
         id: "char_view", type: "keyframe", forEach: { over: "views", as: "view" },
@@ -126,6 +127,7 @@ export const novelIpRecipe: Recipe = {
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { style: { from: "style_anchor" } },
       },
       {
         id: "scene_frame", type: "keyframe", forEach: { over: "scenes", as: "scene" },
@@ -136,6 +138,7 @@ export const novelIpRecipe: Recipe = {
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { chars: { from: "char_view" } },
       },
       {
         id: "cover", type: "keyframe",
@@ -146,6 +149,7 @@ export const novelIpRecipe: Recipe = {
           role: "cover",
           size: "768x1024",
         }, defaults),
+        inputs: { scenes: { from: "scene_frame" } },
         takes: { n: 2, select: "user" },
       },
       {
@@ -157,20 +161,22 @@ export const novelIpRecipe: Recipe = {
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { cover: { from: "cover" } },
       },
       {
         id: "derivative_item", type: "keyframe", forEach: { over: "derivatives", as: "item" },
         intent: "旧 role derivative_pack：头像 / 立绘 / 海报 / Q 版表情包逐张派生；规格固定、不引入规范外色彩；归档记来源 asset_id / seed / sref 版本。",
         params: materializeDefaults("keyframe", "derivative_item", {
           title: "${row.label}",
-          prompt: "${row.prompt}\n规格：${row.label}\n从锁定资产（DNA 表 + key art + 多画幅包）派生，不做新设定；主视觉：${cover}；风格锚：${style_anchor}；登记来源 asset_id / seed / sref 配方。",
+          prompt: "${row.prompt}\n规格：${row.label}\n从锁定封面、四画幅与风格锚派生，不做新设定；主视觉：${cover}；多画幅：${aspect_frame}；风格锚：${style_anchor}；登记来源 asset_id / seed / sref 配方。",
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { aspects: { from: "aspect_frame" } },
       },
       {
         id: "check", type: "qc",
-        intent: "独立评审：情绪板盲测频道、角色洗牌盲认、名场面并排零漂移、封面书名区、多画幅安全区、归档完整性；不达标逐环回炉，critic 分只当筛选器。",
+        intent: "独立评审：情绪板盲测频道、角色洗牌盲认、名场面并排零漂移、封面书名区、多画幅安全区、归档完整性；不达标逐环回炉，critic 分只当筛选器。条目 mood_blind、style_retest、shuffle_recognize、zero_drift。",
         params: {
           mode: "critic",
           rubric: "ip_pack_visual",
@@ -183,6 +189,7 @@ export const novelIpRecipe: Recipe = {
             aspects: { sizes: ["768x1024", "1024x1024", "864x1536", "1536x864"], safetyZones: true },
             derivatives: { specs: { avatar: "512x512", standee: "1024x1536", poster: "1536x864", emoji: "240x240" } },
             archive: { required: ["dna_table", "sref_recipe", "derivatives"] },
+            items: ["mood_blind", "style_retest", "shuffle_recognize", "zero_drift", "cover_title", "archive"],
             minScore: 0.7,
           },
         },
@@ -195,6 +202,7 @@ export const novelIpRecipe: Recipe = {
           aspects: { from: "aspect_frame" },
           derivatives: { from: "derivative_item" },
         },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "pack", type: "export",

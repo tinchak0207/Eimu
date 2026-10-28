@@ -40,6 +40,7 @@ export const singleImageRecipe: Recipe = {
         intent: "旧 notes 的核对门禁：主体/风格/构图三要素是否命中，不命中先改提示词重出。评审结论随产物重算。",
         params: { mode: "critic", rubric: "image_default", thresholds: { mustHit: ["主体", "风格", "构图"], noFakeText: true } },
         inputs: { image: { from: "keyframe" } },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",

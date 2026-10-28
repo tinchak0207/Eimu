@@ -4,7 +4,7 @@
 // preset="image_pack" → 产出包清单（每项 sha256，内容寻址的 artifactId 一并列出）。
 // 所有产物经 ctx.ingest 入库（sha256 由 artifact-store 现算）。
 import { createHash } from "node:crypto"
-import { createReadStream } from "node:fs"
+import { createReadStream, readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { MASTER_PRESETS, type MasterPresetId } from "../../master.ts"
@@ -12,6 +12,7 @@ import { assembleFromClips, type AssembleClipInput, type AssembleAudioInput } fr
 import { EXPORT_PRESETS, NODE_SPECS } from "../specs"
 // S20：交付只认产物（§3.9）＋ 产物公网化（失败不抛，交付继续）。
 import { checkExportArtifacts } from "../gates.ts"
+import { verifySignedCriticVerdict } from "./qc.ts"
 import { isPublishFailure, publishProjectArtifact } from "../publish.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output } from "../types"
 import { appendInterchangeOutputs } from "./interchange"
@@ -67,6 +68,22 @@ function binaryItems(entries: ReturnType<typeof flattenInputs>): ReturnType<type
   return out
 }
 
+function rejectUnsignedVerdict(ctx: ExecContext): ExecResult | null {
+  const list = ctx.inputs?.verdict
+  if (!list || list.length === 0) {
+    return { ok: false, code: "qc_failed", message: "export 缺少 critic 签名 verdict，拒绝放行", retryable: false }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(list[0].path, "utf-8"))
+  } catch {
+    return { ok: false, code: "qc_failed", message: "export 的 verdict 文件不可读", retryable: false }
+  }
+  const checked = verifySignedCriticVerdict(parsed, ctx.sessionId)
+  if (!checked.ok) return { ok: false, code: "qc_failed", message: `export 拒绝放行：${checked.reason}`, retryable: false }
+  return null
+}
+
 export const exportExecutor: NodeExecutor = {
   type: "export",
   specVersion: NODE_SPECS.export.specVersion,
@@ -76,6 +93,8 @@ export const exportExecutor: NodeExecutor = {
     if (!(EXPORT_PRESETS as readonly string[]).includes(preset)) {
       return { ok: false, code: "bad_input", message: `未知导出预设 ${preset || "(空)"}：可选 ${EXPORT_PRESETS.join(" / ")}`, retryable: false }
     }
+    const verdictBlock = rejectUnsignedVerdict(ctx)
+    if (verdictBlock) return verdictBlock
     const entries = flattenInputs(ctx)
     const scratch = projectScratchDir(ctx.sessionId, `export-${ctx.node.id}`)
     await mkdir(scratch, { recursive: true })

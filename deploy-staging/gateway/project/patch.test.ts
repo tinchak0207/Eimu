@@ -94,6 +94,21 @@ async function apply(g: ProjectGraph, ops: PatchOp[], actor: Actor = AGENT, extr
 
 const codeOf = (r: Awaited<ReturnType<typeof apply>>): PatchErrorCode | null => (r.receipt.ok ? null : (r.receipt.rejected[0]?.code ?? null))
 
+test("set path=budget.capCoins 写入图级硬预算，不锁节点、不把已完成节点打成 stale", async () => {
+  const g = graph([node("k1", "keyframe", { params: { prompt: "keep", model: "m" }, status: "done" })])
+  const r = await apply(g, [{ op: "set", node: "k1", path: "budget.capCoins", value: 4 }])
+  expect(r.receipt.ok).toBe(true)
+  expect(r.graph.budget.capCoins).toBe(4)
+  expect(r.graph.nodes.k1.status).toBe("done")
+  expect(r.graph.nodes.k1.params.prompt).toBe("keep")
+  expect(r.graph.nodes.k1.locked).toBeUndefined()
+  const cleared = await apply(r.graph, [{ op: "set", node: "k1", path: "budget.capCoins", value: null }])
+  expect(cleared.graph.budget.capCoins).toBeNull()
+  const bad = await apply(g, [{ op: "set", node: "k1", path: "budget.capCoins", value: -1 }])
+  expect(codeOf(bad)).toBe("BAD_VALUE")
+  expect(bad.graph.budget.capCoins).toBeNull()
+})
+
 // ───────────────────────────── 1) 16 种 PatchOp 语义 ─────────────────────────────
 
 describe("16 种 PatchOp 语义（§3 契约）", () => {
@@ -220,22 +235,28 @@ describe("16 种 PatchOp 语义（§3 契约）", () => {
     expect(r.graph.nodes.k1.rev).toBe(2)
   })
 
-  test("write_result：script 落 params.text + 产物；shotlist 落 rows；qc(critic) 落 verdict", async () => {
+  test("write_result：script 落 params.text + 产物；shotlist 落 rows；qc verdict 只许 critic lane", async () => {
     const g = graph([
       node("s1", "script", { params: { text: "旧" } }),
       node("sl", "shotlist", { params: { kind: "shots", rows: [{ id: "a" }] } }),
       node("q1", "qc", { params: { mode: "critic" } }),
     ])
+    const forged = await apply(g, [{ op: "write_result", node: "q1", value: { pass: true, score: 8.5, deficiencies: [] } }])
+    expect(forged.receipt.ok).toBe(false)
+    expect(forged.receipt.rejected[0]?.code).toBe("LANE_VIOLATION")
+    expect(forged.graph.nodes.q1.outputs).toHaveLength(0)
     const r = await apply(g, [
       { op: "write_result", node: "s1", value: { text: "新剧本" } },
       { op: "write_result", node: "sl", value: { kind: "shots", rows: [{ id: "s1", action: "推镜" }] } },
-      { op: "write_result", node: "q1", value: { pass: true, score: 8.5, deficiencies: [] } },
     ])
     expect(r.receipt.ok).toBe(true)
     expect(r.graph.nodes.s1.params.text).toBe("新剧本")
     expect(r.graph.nodes.s1.outputs[0].sha256).toBe(createHash("sha256").update("新剧本").digest("hex"))
     expect(r.graph.nodes.sl.params.rows).toEqual([{ id: "s1", action: "推镜" }])
-    expect(r.graph.nodes.q1.outputs[0].mime).toBe("application/json")
+    const critic: Actor = { kind: "subagent", runId: "critic", lane: ["q1"] }
+    const wrote = await apply(r.graph, [{ op: "write_result", node: "q1", value: { pass: true, score: 8.5, deficiencies: [] } }], critic)
+    expect(wrote.receipt.ok).toBe(true)
+    expect(wrote.graph.nodes.q1.outputs[0].mime).toBe("application/json")
     expect(r.graph.nodes.s1.status).toBe("done")
   })
 
@@ -595,5 +616,100 @@ describe("跨切片：expand（S4）派生的 ref: 输入键通过 validate（S3
       const r = await apply(g, [{ op: "add_node", node: { id: "k2", type: "keyframe", inputs: { [name]: { from: "r1" } } as never } }])
       expect(codeOf(r), name).toBe("BAD_VALUE")
     }
+  })
+})
+
+describe("用户手改不被模板回滚，锁不能被删行绕过", () => {
+  async function seed() {
+    return apply(graph([]), [
+      { op: "add_node", node: { id: "sl", type: "shotlist", params: { kind: "shots", rows: [{ id: "s1", action: "跑" }, { id: "s2", action: "跳" }] } } },
+      { op: "add_node", node: { id: "kf", type: "keyframe", params: { prompt: "猫 ${row.action}", model: "m" }, forEach: { over: "sl", as: "s" } } },
+      { op: "add_node", node: { id: "solo", type: "keyframe", params: { prompt: "原始", model: "m" } } },
+    ])
+  }
+
+  test("user set 实例 prompt 后加一行仍是用户值，回执带 warning；agent 直接改被拒，未锁节点仍可改", async () => {
+    const seeded = await seed()
+    expect(seeded.receipt.ok).toBe(true)
+    const userSet = await apply(seeded.graph, [{ op: "set", node: "kf#s1", path: "params.prompt", value: "用户精修的 prompt" }], USER)
+    expect(userSet.receipt.ok).toBe(true)
+    expect(userSet.receipt.applied).toBe(1)
+    expect(userSet.graph.nodes["kf#s1"].params.prompt).toBe("用户精修的 prompt")
+    expect(userSet.graph.nodes["kf#s1"].locked?.by).toBe("user")
+    expect(userSet.graph.nodes["kf#s1"].locked?.fields).toContain("params.prompt")
+    expect(userSet.receipt.warnings.some((w) => w.includes("kf#s1.params.prompt"))).toBe(true)
+
+    const more = await apply(userSet.graph, [{ op: "set", node: "sl", path: "params.rows", value: [{ id: "s1", action: "跑" }, { id: "s2", action: "跳" }, { id: "s3", action: "走" }] }])
+    expect(more.receipt.ok).toBe(true)
+    expect(more.graph.nodes["kf#s1"].params.prompt).toBe("用户精修的 prompt")
+    expect(more.graph.nodes["kf#s3"]).toBeDefined()
+
+    const overwrite = await apply(userSet.graph, [{ op: "set", node: "kf#s1", path: "params.prompt", value: "agent 覆盖" }])
+    expect(codeOf(overwrite)).toBe("LOCKED")
+    expect(overwrite.graph.nodes["kf#s1"].params.prompt).toBe("用户精修的 prompt")
+
+    const indirect = await apply(userSet.graph, [{ op: "set", node: "sl", path: "params.rows", value: [{ id: "s1", action: "飞" }, { id: "s2", action: "跳" }] }])
+    expect(codeOf(indirect)).toBe("LOCKED")
+    expect(indirect.graph.nodes["kf#s1"].params.prompt).toBe("用户精修的 prompt")
+
+    const agentSolo = await apply(seeded.graph, [{ op: "set", node: "solo", path: "params.prompt", value: "agent 自己改" }])
+    expect(agentSolo.receipt.ok).toBe(true)
+    expect(agentSolo.graph.nodes.solo.params.prompt).toBe("agent 自己改")
+  })
+
+  test("agent 删 locked 或 pinned 实例对应行被拒；用户删行允许", async () => {
+    const seeded = await seed()
+    const locked = await apply(seeded.graph, [{ op: "lock", node: "kf#s2", fields: "*" }], USER)
+    expect(locked.graph.nodes["kf#s2"].locked?.by).toBe("user")
+    const del = await apply(locked.graph, [{ op: "set", node: "sl", path: "params.rows", value: [{ id: "s1", action: "跑" }] }])
+    expect(codeOf(del)).toBe("LOCKED")
+    expect(del.graph.nodes["kf#s2"]).toBeDefined()
+    expect(del.graph.nodes["kf#s2"].params.prompt).toBe(locked.graph.nodes["kf#s2"].params.prompt)
+
+    seeded.graph.nodes["kf#s2"].outputs = [out()]
+    seeded.graph.nodes["kf#s2"].status = "done"
+    const pinned = await apply(seeded.graph, [{ op: "pin", node: "kf#s2" }], USER)
+    expect(pinned.receipt.ok).toBe(true)
+    const delPin = await apply(pinned.graph, [{ op: "set", node: "sl", path: "params.rows", value: [{ id: "s1", action: "跑" }] }])
+    expect(codeOf(delPin)).toBe("LOCKED")
+    expect(delPin.graph.nodes["kf#s2"]).toBeDefined()
+
+    const userDel = await apply(locked.graph, [{ op: "set", node: "sl", path: "params.rows", value: [{ id: "s1", action: "跑" }] }], USER)
+    expect(userDel.receipt.ok).toBe(true)
+    expect(userDel.graph.nodes["kf#s2"]).toBeUndefined()
+  })
+})
+
+describe("patch 阶段拒绝未知键、类型不符、不存在的端口", () => {
+  test("四条坏 op 全部拒绝，回执带 field 与期望，且 ≤1KB；合法 set 仍通过", async () => {
+    const seeded = await apply(graph([]), [
+      { op: "add_node", node: { id: "v1", type: "voice", params: { text: "hi" } } },
+      { op: "add_node", node: { id: "k1", type: "keyframe", params: { prompt: "p", model: "m" } } },
+      { op: "add_node", node: { id: "c1", type: "clip", params: { prompt: "p", model: "m", seconds: 5 }, inputs: { first: { from: "k1" } } } },
+    ])
+    expect(seeded.receipt.ok).toBe(true)
+    const bad = await apply(seeded.graph, [
+      { op: "set", node: "k1", path: "params.model", value: 123 as never },
+      { op: "set", node: "k1", path: "params.no_such_param", value: "x" },
+      { op: "connect", to: "k1", input: "frame", from: "v1", port: "zzz" },
+      { op: "set", node: "c1", path: "params.seconds", value: "abc" },
+    ])
+    expect(bad.receipt.applied).toBe(0)
+    expect(bad.receipt.rejected).toHaveLength(4)
+    const msgs = bad.receipt.rejected.map((r) => r.msg).join("\n")
+    expect(msgs).toContain("field=params.model")
+    expect(msgs).toContain("必须是字符串")
+    expect(msgs).toContain("field=params.no_such_param")
+    expect(msgs).toContain("field=inputs.frame.port")
+    expect(msgs).toContain("期望端口")
+    expect(msgs).toContain("field=params.seconds")
+    expect(msgs).toContain("必须是数字")
+    expect(utf8Bytes(JSON.stringify(bad.receipt))).toBeLessThanOrEqual(1024)
+    expect(bad.graph.nodes.k1.params.model).toBe("m")
+    expect(bad.graph.nodes.c1.params.seconds).toBe(5)
+
+    const ok = await apply(seeded.graph, [{ op: "set", node: "k1", path: "params.prompt", value: "仍然合法" }])
+    expect(ok.receipt.ok).toBe(true)
+    expect(ok.graph.nodes.k1.params.prompt).toBe("仍然合法")
   })
 })

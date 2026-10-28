@@ -16,6 +16,7 @@
 import { readFile } from "node:fs/promises"
 import { idempotencyKeyOf } from "./submit-generation.ts"
 import { NODE_SPECS_LITE, materializeDefaults, specOf } from "./specs.ts"
+import { upstreamOf } from "./expand.ts"
 import { computeSignature, findReusable, nodeDependencies, type CacheLookup } from "./signature.ts"
 import { decideOnFail, effectiveSeed, selectTake, type FailureKind } from "./takes.ts"
 import { getExecutor } from "./executor-registry.ts"
@@ -28,6 +29,17 @@ import type { ProjectStore } from "./store.ts"
 
 const MAIN_PORT = "out"
 const AUTHOR_AWAITING = /awaiting authored content/i
+
+/** inflight 记下提交时的 startSig。类型 Inflight 在 types.ts（本片不改），sig 运行时挂上，恢复时读回。 */
+function inflightOf(idemKey: string, since: string, sig: string, extra?: { submitUnknown?: boolean; keys?: string[] }): Inflight {
+  const rec: Inflight = { idemKey, since, ...(extra?.submitUnknown ? { submitUnknown: true } : {}) }
+  const keys = extra?.keys && extra.keys.length ? extra.keys : [idemKey]
+  return Object.assign(rec, { sig, keys })
+}
+
+function takeKeys(projectId: string, signature: string, takes: number[], attempt: number): string[] {
+  return takes.map((take) => idempotencyKeyOf({ projectId, signature, take, attempt }))
+}
 
 /** 层内并发上限。0=不限（与网关现有「同层 Promise.all」行为一致）；env PROJECT_RUN_CONCURRENCY 可收紧，不是必需 env。 */
 export function concurrencyLimit(override?: number): number {
@@ -93,6 +105,8 @@ export interface ExecuteNodeOptions {
   attempt?: number
   /** 只跑指定 take（恢复单候选用）。 */
   take?: number
+  /** 恢复多 take：这些 take 都要续，不另开一轮。 */
+  takes?: number[]
   /** 恢复路径：不跑 onFail 的 regenerate（禁止盲重试）。 */
   noRegenerate?: boolean
 }
@@ -132,9 +146,12 @@ function collectInputs(graph: Readonly<ProjectGraph>, node: Readonly<ProjectNode
   const out: Record<string, Output[]> = {}
   for (const name of Object.keys(node.inputs ?? {}).sort()) {
     const ref = node.inputs[name]
-    const up = graph.nodes[ref.from]
-    if (!up) continue
-    const outs = outputsAt(graph, up, ref.port)
+    const outs: Output[] = []
+    for (const id of upstreamOf(graph, ref.from)) {
+      const up = graph.nodes[id]
+      if (!up) continue
+      outs.push(...outputsAt(graph, up, ref.port))
+    }
     if (outs.length) out[name] = outs
   }
   return out
@@ -281,17 +298,22 @@ async function runRound(
   const pool: Output[] = []
   let cost = 0
   let failure: RoundOutcome["failure"]
+  let unknown: RoundOutcome["failure"]
   for (const { take, res } of results) {
     cost += typeof res.costCoins === "number" ? res.costCoins : 0
     if (res.ok) {
       for (const out of res.outputs ?? []) pool.push({ ...out, port: out.port || MAIN_PORT, ...(multi ? { take } : {}) })
       if (res.pool) for (const out of res.pool) pool.push({ ...out, port: out.port || MAIN_PORT, ...(multi ? { take } : {}) })
-    } else if (!failure) {
+    } else {
       // strictNullChecks=false 下联合类型不按 boolean 字面量收窄：显式取失败分支（类型与 ExecResult 的失败臂逐字段一致）。
       const bad = res as Extract<ExecResult, { ok: false }>
-      failure = { code: bad.code, message: bad.message, retryable: bad.retryable, ...(bad.submitUnknown ? { submitUnknown: true } : {}) }
+      const fact = { code: bad.code, message: bad.message, retryable: bad.retryable, ...(bad.submitUnknown ? { submitUnknown: true } : {}) }
+      // 任一 take 未决就整轮算未决。不能让旁边 take 的可重试失败把 submit_unknown 盖掉再重生。
+      if (bad.submitUnknown) unknown = fact
+      else if (!failure) failure = fact
     }
   }
+  if (unknown) failure = unknown
   return { pool, ...(failure ? { failure } : {}), cost }
 }
 
@@ -340,23 +362,27 @@ async function commitNode(
     }
     const finalStatus: NodeStatus = stale && args.status === "done" ? "stale" : args.status
     n.status = finalStatus
-    n.signature = postSig
+    // stale：产物是 startSig 产的。n.signature 保持旧值（不写成事后签名），lastRun 也只记 startSig。
+    // 否则下一轮 planRun 会把旧图当成新参数的完成态。
+    const producedSig = finalStatus === "stale" ? args.startSig : (postSig ?? args.startSig)
+    if (finalStatus !== "stale") n.signature = postSig
     if (finalStatus === "done" || finalStatus === "stale") {
       n.lastRun = {
-        runId, at: nowIso, via: "executed", signature: postSig ?? args.startSig,
+        runId, at: nowIso, via: "executed", signature: producedSig,
         costCoins: args.costCoins, attempt: args.attempt, durationMs: args.durationMs,
       }
     }
-    return { missing: false as const, finalStatus, postSig, outputs: n.outputs }
+    return { missing: false as const, finalStatus, postSig, producedSig, outputs: n.outputs }
   })
   if (committed.missing) return { node: nodeId, status: "blocked", costCoins: 0, reason: "node not found" }
   const finalStatus = committed.finalStatus!
   const n = { outputs: committed.outputs! }
 
-  // 缓存索引（§3.2 第 6 条）：产出成功（done/stale）按「产出这些 outputs 的签名」记一条，供同签名节点跨节点复用。
+  // 缓存索引只记「真正产出这些 outputs 的签名」。stale 时是 startSig，不是事后签名。
   // 写失败不阻断（缓存丢了只会多重跑，不会错用旧产物）。
-  if ((finalStatus === "done" || finalStatus === "stale") && deps.cache?.put && args.outputs.length) {
-    try { await deps.cache.put(committed.postSig ?? args.startSig, args.outputs, args.costCoins) } catch { /* 见上 */ }
+  const cacheSig = committed.producedSig ?? (finalStatus === "stale" ? args.startSig : (committed.postSig ?? args.startSig))
+  if ((finalStatus === "done" || finalStatus === "stale") && cacheSig && deps.cache?.put && args.outputs.length) {
+    try { await deps.cache.put(cacheSig, args.outputs, args.costCoins) } catch { /* 见上 */ }
   }
 
   const events: { kind: "node_status" | "node_output" | "cost"; node: NodeId; run: RunId; data: Record<string, Json> }[] = [
@@ -426,15 +452,16 @@ export async function executeNode(
     return { node: nodeId, status: "pending", costCoins: 0, needsUser: true, reason: "awaiting take select", outputs: [] }
   }
 
-  const attempts = opts.take !== undefined ? [opts.take] : Array.from({ length: nTakes }, (_, i) => i)
-  const firstKey = idempotencyKeyOf({ projectId: graph0.id, signature: startSig, take: attempts[0], attempt: opts.attempt ?? 0 })
+  const attempts = opts.takes && opts.takes.length ? opts.takes : opts.take !== undefined ? [opts.take] : Array.from({ length: nTakes }, (_, i) => i)
+  const keys = takeKeys(graph0.id, startSig, attempts, opts.attempt ?? 0)
+  const firstKey = keys[0] ?? idempotencyKeyOf({ projectId: graph0.id, signature: startSig, take: attempts[0], attempt: opts.attempt ?? 0 })
 
   // 开跑：running + inflight（崩溃后 recovery 靠它接续，不盲重投）
   await store.update((g) => {
     const n = g.nodes[nodeId]
     if (!n) return
     n.status = "running"
-    n.inflight = { idemKey: firstKey, since: iso(deps) }
+    n.inflight = inflightOf(firstKey, iso(deps), startSig, { keys })
     n.error = undefined
   })
   await store.appendEvents([{ kind: "node_status", node: nodeId, run: runId, data: { status: "running", attempt: opts.attempt ?? 0 } }])
@@ -461,7 +488,7 @@ export async function executeNode(
         const n = g.nodes[nodeId]
         if (!n) return
         n.status = "running"
-        n.inflight = { idemKey: firstKey, since: iso(deps), submitUnknown: true }
+        n.inflight = inflightOf(firstKey, iso(deps), startSig, { submitUnknown: true, keys })
         n.error = { ...err, at: iso(deps) }
         g.budget.spentCoins = round6((g.budget.spentCoins ?? 0) + totalCost)
       })
@@ -516,14 +543,14 @@ export async function executeNode(
     }
 
     const kind: FailureKind = failure.code === "qc_failed" ? "qc_fail" : "error"
-    const decision = opts.noRegenerate ? { do: "fail" as const } : decideOnFail(node.onFail, kind, retriesUsed)
+    const decision = opts.noRegenerate ? { do: "fail" as const } : decideOnFail(node.onFail, { kind, retryable: failure.retryable }, retriesUsed)
     if (decision.do === "regenerate") {
       attempt = decision.retryNo
       retriesUsed = decision.retryNo
       await store.update((g) => {
         const n = g.nodes[nodeId]
         if (!n) return
-        n.inflight = { idemKey: idempotencyKeyOf({ projectId: g.id, signature: startSig, take: attempts[0], attempt }), since: iso(deps) }
+        n.inflight = inflightOf(idempotencyKeyOf({ projectId: g.id, signature: startSig, take: attempts[0], attempt }), iso(deps), startSig, { keys: takeKeys(g.id, startSig, attempts, attempt) })
       })
       continue
     }

@@ -77,8 +77,11 @@ const server = Bun.serve({
 process.env.PLATFORM_BASE = `http://127.0.0.1:${server.port}`
 
 const store = await import("../job-store.ts")
+store.reopenSessionsDbForTest()
 const { createSubmitGeneration, idempotencyKeyOf, __resetSubmitGenerationMemory } = await import("./submit-generation.ts")
-const { createLedgerWriter, createProjectBudget } = await import("./ledger.ts")
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
+const { accumulatedSpendCoins, createLedgerWriter, createProjectBudget } = await import("./ledger.ts")
 type Req = import("./types.ts").SubmitGenerationReq
 
 const SIG = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
@@ -126,7 +129,10 @@ describe("图片：载荷、Idempotency-Key、metadata、收据、账本", () =>
     // image_generate.ts:499-507 + 510-511 的字段集（手写）
     expect(Object.keys(p.body).sort()).toEqual(["cap_coins", "model", "n", "prompt", "quality", "reference_images", "response_format", "size", "workflow"])
     expect(p.body).toMatchObject({ model: "img-m", n: 2, size: "1536x1024", quality: "hd", response_format: "url", prompt: "STYLE-X\na red fox", reference_images: ["https://cdn.test/a.png", "https://cdn.test/b.png"] })
-    expect(p.body.cap_coins).toBe(1) // 目录价 0.5 × n=2
+    // 依据：本文件 CATALOG「img-m」的 x_coins_per_image.hd = 1（standard = 0.5）。
+    // 旧逻辑 image_generate.ts:403：quality==="hd" 时 unit = entry.hd ?? entry.standard。
+    // cap_coins = hd 单价 × n = 1 × 2 = 2。
+    expect(p.body.cap_coins).toBe(2)
     expect(p.body.workflow.metadata).toMatchObject({
       project_id: "p1", node_id: r.nodeId, signature: SIG, run_id: "run1", attempt: 2, take: 1, seed: 7,
       project: "p1", request_id: p.key, session_id: "gw-s5", size: "1536x1024", style_lock: "STYLE-X",
@@ -136,6 +142,31 @@ describe("图片：载荷、Idempotency-Key、metadata、收据、账本", () =>
     expect(res.costCoins).toBeCloseTo(1.8, 6) // fake 实扣 0.9 × 2
     expect(res.requestId).toBe(p.key)
     expect(res.executedModel).toBe("img-m")
+  })
+
+  test("quality=standard、n=1 按目录 standard 单价，不被 hd 分支抬高", async () => {
+    const res = await submit(req({ quality: "standard", n: 1 }))
+    expect(res.ok).toBe(true)
+    expect(posts).toHaveLength(1)
+    // 依据：CATALOG img-m.x_coins_per_image.standard = 0.5，不是 hd 的 1。
+    expect(posts[0].body.quality).toBe("standard")
+    expect(posts[0].body.cap_coins).toBe(0.5)
+    expect(posts[0].body.n).toBe(1)
+  })
+
+  test("Idempotency-Key 组成是 projectId、signature 前 40 位、take、attempt，没有 runId（需上游实证）", () => {
+    const key = idempotencyKeyOf({ projectId: "p1", signature: SIG, take: 1, attempt: 2 })
+    expect(key).toBe(`pg:p1:${SIG.slice(0, 40)}:t1:a2`)
+    expect(key).toContain("p1")
+    expect(key).toContain(SIG.slice(0, 40))
+    expect(key).toContain("t1")
+    expect(key).toContain("a2")
+    const withRunA = idempotencyKeyOf({ projectId: "p1", signature: SIG, take: 1, attempt: 2, runId: "run-A" } as never)
+    const withRunB = idempotencyKeyOf({ projectId: "p1", signature: SIG, take: 1, attempt: 2, runId: "run-OTHER" } as never)
+    expect(withRunA).toBe(withRunB)
+    expect(withRunA.includes("run-A")).toBe(false)
+    expect(withRunA.includes("run-OTHER")).toBe(false)
+    expect(withRunA.includes("runId")).toBe(false)
   })
 
   test("收据带 node_id 登记并在成功后完成+observed；账本 submitted→completed 都带 node_id/idem_key；预算 预留→实扣", async () => {
@@ -204,6 +235,45 @@ describe("视频载荷", () => {
 })
 
 describe("预算与 submit_unknown", () => {
+  test("跨轮已花费 + 本次报价超过图上 capCoins：不发 POST", async () => {
+    budget.noteCarry?.({ spentCoins: 0.4, capCoins: 0.6 })
+    const res = await submit(req())
+    expect(res.ok).toBe(false)
+    expect(posts).toHaveLength(0)
+    expect(budget.snapshot("p1").reserved).toBe(0)
+  })
+
+  test("未设 cap，或已花费未超 cap，仍然提交（fake，不打上游）", async () => {
+    budget.noteCarry?.({ spentCoins: 100, capCoins: null })
+    const open = await submit(req())
+    expect(open.ok).toBe(true)
+    expect(posts).toHaveLength(1)
+    posts.length = 0
+    __resetSubmitGenerationMemory()
+    const underBudget = createProjectBudget({ capOf: async () => null })
+    underBudget.noteCarry?.({ spentCoins: 0.2, capCoins: 1 })
+    const underSubmit = createSubmitGeneration({
+      session, ledger: createLedgerWriter(session, async () => {}), budget: underBudget, pollIntervalMs: 5,
+    })
+    const under = await underSubmit(req())
+    expect(under.ok).toBe(true)
+    expect(posts).toHaveLength(1)
+    expect(posts[0].body.cap_coins).toBe(0.5)
+  })
+
+  test("账本未决 submitted 计入已花费，完成与退回不重复加", () => {
+    const text = [
+      JSON.stringify({ project_id: "p1", event: "submitted", idem_key: "k-open", cost_coins: 0.5 }),
+      JSON.stringify({ project_id: "p1", event: "submitted", idem_key: "k-done", cost_coins: 0.5 }),
+      JSON.stringify({ project_id: "p1", event: "completed", idem_key: "k-done", cost_coins: 0.4 }),
+      JSON.stringify({ project_id: "p1", event: "submitted", idem_key: "k-back", cost_coins: 0.5 }),
+      JSON.stringify({ project_id: "p1", event: "refunded", idem_key: "k-back", cost_coins: 0.5 }),
+      JSON.stringify({ project_id: "other", event: "submitted", idem_key: "k-x", cost_coins: 9 }),
+    ].join("\n")
+    // 图上已花 0.4 与 completed 0.4 取较大值，再加未决 0.5。退回的 k-back 和其他项目不加。
+    expect(accumulatedSpendCoins({ id: "p1", budget: { spentCoins: 0.4 } }, text)).toBeCloseTo(0.9, 6)
+  })
+
   test("超项目硬预算：不发 POST，不留预留", async () => {
     cap = 0.4
     const res = await submit(req())

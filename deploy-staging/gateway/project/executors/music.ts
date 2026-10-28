@@ -14,6 +14,7 @@ import { NODE_SPECS } from "../specs"
 import { defaultClientTimeoutMs } from "../exec-bridge-client.ts"
 // S5 的 Idempotency-Key 同式（types.ts:224）；桥拿它当 musicChargeRef，重放同一式就天然幂等。
 import { idempotencyKeyOf } from "../submit-generation.ts"
+import { releaseGenerationCharge, reserveGenerationCharge, settleGenerationCharge } from "../ledger.ts"
 
 /** 设计文档 §3.5：music 1 币/次（平台目录 x_coins_per_music 的同源口径；实际扣费以桥回执为准）。 */
 export const MUSIC_COINS_PER_GENERATION = 1
@@ -126,6 +127,9 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
         project_id: ctx.project.id, node_id: ctx.node.id, signature: ctx.signature,
         run_id: ctx.runId, attempt: ctx.attempt, take: ctx.take, idem_key: idemKey,
       }
+      const reserved = await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: MUSIC_COINS_PER_GENERATION })
+      if (reserved.ok === false) return { ok: false, code: reserved.code, message: reserved.message, retryable: reserved.retryable }
+      if (reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
       const res = await ctx.execBridge.call(
         "music_gen",
         {
@@ -140,12 +144,23 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
       )
       if (res.ok === false) {
         const code: ExecErrorCode = res.code
+        if (code === "submit_unknown") {
+          return { ok: false, code, message: res.message, retryable: false, submitUnknown: true }
+        }
+        if (reserved.bound) {
+          releaseGenerationCharge(ctx.sessionId, idemKey)
+          await ctx.ledger.write({ ...common, event: "refunded", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
+        }
         if (code !== "bad_input" && code !== "cancelled") {
           await ctx.ledger.write({ ...common, event: "failed", model: MUSIC_MODEL_ID, cost_coins: 0 })
         }
         return { ok: false, code, message: res.message, retryable: res.retryable }
       }
       if (res.files.length === 0) {
+        if (reserved.bound) {
+          releaseGenerationCharge(ctx.sessionId, idemKey)
+          await ctx.ledger.write({ ...common, event: "refunded", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
+        }
         await ctx.ledger.write({ ...common, event: "failed", model: MUSIC_MODEL_ID, cost_coins: 0 })
         return { ok: false, code: "provider_error", message: "exec-bridge 回执成功但没有音频文件；未交付。", retryable: false }
       }
@@ -179,7 +194,8 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
         })
       }
 
-      await ctx.ledger.write({ ...common, event: "submitted", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
+      settleGenerationCharge(ctx.sessionId, idemKey, res.costCoins)
+      if (!reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
       await ctx.ledger.write({
         ...common, event: "completed", model: MUSIC_MODEL_ID, cost_coins: res.costCoins,
         ...(res.chargeRef ? { charge_ref: res.chargeRef } : {}),

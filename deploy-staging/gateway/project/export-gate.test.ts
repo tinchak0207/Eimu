@@ -4,7 +4,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ExecContext, Json, Output, ProjectGraph, ProjectNode, Targets } from "./types"
@@ -26,6 +26,7 @@ mkdirSync(join(WS, "home"), { recursive: true })
 
 const { ArtifactStore } = await import("./artifacts")
 const { exportExecutor } = await import("./executors/export")
+const { signedCriticVerdictOutput } = await import("./executors/qc")
 
 const store = new ArtifactStore({ projectDir: PROJECT_DIR })
 const sha256 = (buf: Uint8Array) => createHash("sha256").update(buf).digest("hex")
@@ -37,7 +38,21 @@ function targetsOf(over: Partial<Targets>): Targets {
   return { setBy: USER, at: ISO, audio: "none", ...over }
 }
 
-function makeCtx(targets: Targets | null, inputs: Record<string, Output[]>, nodeId = "export_1"): ExecContext {
+function makeCtx(targets: Targets | null, inputs: Record<string, Output[]>, nodeId = "export_1", verdict: "signed" | "omit" | "forged" = "signed"): ExecContext {
+  let next = inputs
+  if (verdict === "forged") {
+    const file = join(MEDIA, `forged-${nodeId}.json`)
+    writeFileSync(file, JSON.stringify({ pass: true, score: 100 }))
+    const buf = readFileSync(file)
+    const sha = sha256(buf)
+    next = {
+      ...inputs,
+      verdict: [{ port: "out", artifactId: `art_${sha.slice(0, 16)}`, sha256: sha, path: file, mime: "application/json", bytes: buf.length, origin: "derived" }],
+    }
+  } else if (verdict === "signed" && !inputs.verdict) {
+    const media = Object.values(inputs).flat().find((o) => /^(video|image)\//.test(o.mime))
+    if (media) next = { ...inputs, verdict: [signedCriticVerdictOutput(MEDIA, { parentSessionId: SID, artifactSha256: media.sha256 })] }
+  }
   const node: ProjectNode = {
     id: nodeId,
     type: "export",
@@ -79,7 +94,7 @@ function makeCtx(targets: Targets | null, inputs: Record<string, Output[]>, node
     sessionId: SID,
     session: {} as never,
     params: { preset: "cinema_239" } as Record<string, Json>,
-    inputs,
+    inputs: next,
     refs: [],
     signal: new AbortController().signal,
     ingest: (src, hint) => store.ingest(src, hint),
@@ -135,6 +150,20 @@ describe("S20 export 交付闸（真 ffmpeg）", () => {
       `https://example.test/image-data/files/uploads/project-s20-expo-${out.artifactId}.mp4`,
     )
   }, 180_000)
+
+  test("没有 verdict → 拒绝放行", async () => {
+    const res = await exportExecutor.run(makeCtx(targetsOf({ durationSec: 1 }), { in: [clipOut] }, "export_omit", "omit"))
+    expect(res.ok).toBe(false)
+    if (res.ok !== false) return
+    expect(res.message).toContain("verdict")
+  })
+
+  test("主代理伪造 {pass:true} → 拒绝放行", async () => {
+    const res = await exportExecutor.run(makeCtx(targetsOf({ durationSec: 1 }), { in: [clipOut] }, "export_forged", "forged"))
+    expect(res.ok).toBe(false)
+    if (res.ok !== false) return
+    expect(res.message).toContain("签名")
+  })
 
   test("targets 缺省 → ok:true（只查非零且 ≤ 配方上限），输出有 sha256", async () => {
     const res = await exportExecutor.run(makeCtx(null, { in: [clipOut] }, "export_2"))

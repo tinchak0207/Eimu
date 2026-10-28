@@ -49,6 +49,64 @@ describe("合法图", () => {
     expect(JSON.parse(run[0].fix!)).toMatchObject({ op: "set", node: "kf1", path: "params.prompt" })
     expect(checkRunnable(g, "nope")[0].patchCode).toBe("NOT_FOUND")
   })
+  test("params 里的未填占位点名节点和字段", () => {
+    const g = graph([
+      node("kf1", "keyframe", { params: { prompt: "（待写：场次表 / 逐镜景别机位运镜）" } }),
+      node("clip1", "clip", { params: { prompt: "镜头 1：主体动作与可见状态变化", model: "minimax-h3" } }),
+      node("vo1", "voice", { params: { text: "镜头 1：台词（待写）" } }),
+      node("kf2", "keyframe", { params: { prompt: "雨夜站台，男主回头。", styleLock: "统一赛璐珞（待写）" } }),
+    ])
+    const kf = checkRunnable(g, "kf1").find((i) => i.code === "UNFILLED_PLACEHOLDER")!
+    expect(kf).toMatchObject({ node: "kf1", path: "params.prompt", severity: "error" })
+    expect(kf.message).toContain("kf1")
+    expect(kf.message).toContain("params.prompt")
+    const clip = checkRunnable(g, "clip1").find((i) => i.code === "UNFILLED_PLACEHOLDER")!
+    expect(clip).toMatchObject({ node: "clip1", path: "params.prompt" })
+    expect(clip.message).toContain("clip1")
+    expect(clip.message).toContain("params.prompt")
+    const vo = checkRunnable(g, "vo1").find((i) => i.code === "UNFILLED_PLACEHOLDER")!
+    expect(vo).toMatchObject({ node: "vo1", path: "params.text" })
+    const lock = checkRunnable(g, "kf2").filter((i) => i.code === "UNFILLED_PLACEHOLDER")
+    expect(lock.map((i) => i.path)).toEqual(["params.styleLock"])
+    expect(lock[0].node).toBe("kf2")
+  })
+  test("真实句子不含占位时不因占位被拒", () => {
+    const g = graph([
+      node("kf1", "keyframe", { params: { prompt: "雨夜站台，男主背对镜头，火车进站时他回头。" } }),
+      node("clip1", "clip", { params: { prompt: "镜头缓推，雨滴落在伞面，人物回头", model: "minimax-h3", seconds: 5 } }),
+      node("vo1", "voice", { params: { text: "他终于回来了。" } }),
+      node("bgm", "music", { params: { prompt: "cinematic orchestral, 90 BPM, key of D minor" } }),
+    ])
+    for (const id of ["kf1", "clip1", "vo1", "bgm"]) {
+      expect(checkRunnable(g, id).filter((i) => i.code === "UNFILLED_PLACEHOLDER")).toEqual([])
+    }
+    const bare = graph([node("c", "clip", { params: { prompt: "镜头 1：主体动作与可见状态变化" } })], { defaults: {} })
+    const run = checkRunnable(bare, "c")
+    expect(run.some((i) => i.code === "MISSING_PARAM" && i.path === "params.model")).toBe(true)
+    expect(run.some((i) => i.code === "UNFILLED_PLACEHOLDER" && i.node === "c" && i.path === "params.prompt")).toBe(true)
+  })
+  test("defaults.style 的未填占位会进付费 styleLock；显式 styleLock 盖过 defaults", () => {
+    const prompt = "雨夜站台，男主回头，伞沿滴水。"
+    const pending = graph(
+      [node("kf1", "keyframe", { params: { prompt } })],
+      { defaults: { style: "统一赛璐珞（待写：色板）" } },
+    )
+    const holes = checkRunnable(pending, "kf1").filter((i) => i.code === "UNFILLED_PLACEHOLDER")
+    expect(holes).toHaveLength(1)
+    expect(holes[0]).toMatchObject({ node: "kf1", path: "params.styleLock" })
+
+    const explicit = graph(
+      [node("kf1", "keyframe", { params: { prompt, styleLock: "统一赛璐珞，冷青与暖橙" } })],
+      { defaults: { style: "统一赛璐珞（待写：色板）" } },
+    )
+    expect(checkRunnable(explicit, "kf1").filter((i) => i.code === "UNFILLED_PLACEHOLDER")).toEqual([])
+
+    const filled = graph(
+      [node("kf1", "keyframe", { params: { prompt } })],
+      { defaults: { style: "统一赛璐珞，冷青与暖橙" } },
+    )
+    expect(checkRunnable(filled, "kf1").filter((i) => i.code === "UNFILLED_PLACEHOLDER")).toEqual([])
+  })
 })
 
 describe("环", () => {

@@ -23,6 +23,12 @@ import type { RunDeps } from "./scheduler.ts"
 
 export interface Quote {
   coins: number | null
+  /** 含重生的最坏报价。确认阈值仍比 coins（不含重生的本轮底价），不比这个。 */
+  coinsHigh?: number | null
+  /** 本轮节点里 onFail.regenerate 的最大次数。 */
+  regenMax?: number
+  /** 确认卡文案：预计 x–y 币（含最多 k 次重生）。 */
+  rangeLabel?: string
   run: number
   reuse: number
   pinned: number
@@ -110,6 +116,8 @@ export async function computeQuote(
   // unknown 节点也要跑（§3.2.5「保守视为要跑」），所以一并报价。
   const planned = [...new Set([...plan.toRun, ...plan.unknown])]
   let coins = 0
+  let coinsHigh = 0
+  let regenMax = 0
   for (const id of planned) {
     const node = graph.nodes[id]
     if (!node) {
@@ -133,10 +141,22 @@ export async function computeQuote(
       unknownPrice.push(id)
       continue
     }
-    coins += unit * (node.takes?.n ?? 1)
+    const takesN = node.takes?.n ?? 1
+    const onFail = node.onFail as { action?: string; max?: number } | undefined
+    const regen = onFail?.action === "regenerate" && typeof onFail.max === "number" && onFail.max > 0 ? onFail.max : 0
+    const base = unit * takesN
+    coins += base
+    // 最坏：每个候选都按 onFail.max 重生，(1+max) 次提交。
+    coinsHigh += base * (1 + regen)
+    if (regen > regenMax) regenMax = regen
   }
+  const low = round6(coins)
+  const high = round6(coinsHigh)
   return {
-    coins: unknownPrice.length ? null : round6(coins),
+    coins: unknownPrice.length ? null : low,
+    coinsHigh: unknownPrice.length ? null : high,
+    regenMax,
+    ...(unknownPrice.length ? {} : { rangeLabel: `预计 ${low}–${high} 币（含最多 ${regenMax} 次重生）` }),
     run: planned.length,
     reuse: plan.reuse.length,
     pinned: plan.pinned.length,
@@ -190,11 +210,15 @@ export async function admit(input: AdmissionInput): Promise<AdmissionResult> {
   const caps = [graph.budget?.capCoins, input.budget_coins].filter((c): c is number => typeof c === "number" && Number.isFinite(c))
   const cap = caps.length ? Math.min(...caps) : null
   if (cap !== null) {
-    const spent = Number.isFinite(graph.budget?.spentCoins) ? graph.budget.spentCoins : 0
+    const graphSpent = Number.isFinite(graph.budget?.spentCoins) ? graph.budget.spentCoins : 0
+    let spent = graphSpent
     let reserved = 0
     if (input.budget) {
       try {
-        reserved = input.budget.snapshot(graph.id).reserved
+        const snap = input.budget.snapshot(graph.id)
+        reserved = snap.reserved
+        // snap.spent 含跨轮基线（图上已花 + submit_unknown 未决预留）。模拟口只填 reserved 时 spent 为 0，不能把图上已花抹掉。
+        if (Number.isFinite(snap.spent)) spent = Math.max(graphSpent, snap.spent)
       } catch {
         return { ok: false, status: "rejected", reason: "工程预算预留状态不可读，未开跑。", quote }
       }
@@ -209,6 +233,7 @@ export async function admit(input: AdmissionInput): Promise<AdmissionResult> {
     }
   }
 
+  // 阈值保持现状：比的是不含重生的本轮底价 quote.coins，不是最坏价。数字来自 CONFIRM_THRESHOLD_COINS。
   const threshold = input.confirmThreshold ?? CONFIRM_THRESHOLD_COINS
   if (quote.coins > 0 && quote.coins >= threshold) {
     const authorized = input.authorized ? await input.authorized() : await defaultAuthorized(deps.session)
@@ -228,7 +253,7 @@ export async function admit(input: AdmissionInput): Promise<AdmissionResult> {
         sessionId: store.sessionId,
         requestId,
         amountCoins: quote.coins,
-        description: `工程 ${graph.id} 本轮预计 ${quote.coins} 币（${quote.run} 个节点待跑）`,
+        description: `工程 ${graph.id} 本轮${quote.rangeLabel ?? `预计 ${quote.coins}–${quote.coinsHigh ?? quote.coins} 币（含最多 ${quote.regenMax ?? 0} 次重生）`}（${quote.run} 个节点待跑）`,
       })
       if (st === "approved") return { ok: true, mode: "run", quote }
       if (st === "denied") return { ok: false, status: "rejected", reason: "用户驳回了这笔花费，未开跑。", quote }

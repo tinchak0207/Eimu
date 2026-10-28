@@ -22,6 +22,17 @@ import { checkSeatTools, formatSeatPreflightNotice, loadSeatToolTable, type Seat
 // S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位映射与 lane 规范化（旧会话不经过这两步）。
 import { isExpertSeat, normalizeLane, projectSeatOf } from "./project/lanes.ts"
 
+/** 子代理 prompt_async 的席位。空字符串会被 opencode 落到 build，这里始终返回一个席位名。 */
+export function resolveDispatchAgent(input: { projectMode: boolean; named: string; beast: boolean }): string {
+  const named = input.named.trim()
+  if (input.projectMode) {
+    if (named && isExpertSeat(named)) return projectSeatOf(named, true)
+    return "researcher"
+  }
+  if (named && isExpertSeat(named)) return named
+  return input.beast ? "orchestrator_legacy" : "creator_legacy"
+}
+
 function readCompletedPredecessor(record: ResearchPredecessor): string | null {
   if (!record.relPath.startsWith(`${SUBAGENT_OUTPUT_REL}/`)) return null
   const file = record.relPath.slice(SUBAGENT_OUTPUT_REL.length + 1)
@@ -902,12 +913,12 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     }
   }
   // S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位解析与 lane。
-  // 工程会话把专家席位换成工程版 `<expert>_p`（S14 在 opencode.json 建条目），未知席位不派；
-  // lane 进子运行配置（补丁 Actor 由此取）。旧会话（projectMode 非 true）逐字不变：
-  // seat＝原 expertId、lane 为空、run 上不写新栏位。
+  // 工程会话把专家席位换成 `<expert>_p`；非专家的通用子代理用 researcher，不落到 build。
+  // 旧会话：点名专家用原席位，未点名用 creator_legacy / orchestrator_legacy。
+  // lane 进子运行配置（补丁 Actor 由此取）。旧会话 lane 为空、run 上不写工程栏位。
   const projectMode = parent.projectMode === true
-  const projectSeatBase = projectMode ? expertId || rawExpert : ""
-  const seat = projectMode ? (isExpertSeat(projectSeatBase) ? projectSeatOf(projectSeatBase, true) : "") : expertId
+  const beast = deps.beastMode(parent)
+  const seat = resolveDispatchAgent({ projectMode, named: expertId || rawExpert || "", beast })
   const lane = projectMode ? normalizeLane(body.lane) : []
   const runId = crypto.randomUUID()
   const run: SubagentRun = {
@@ -944,8 +955,8 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
     pendingParentNotes: [],
     pendingQuestions: [],
     submissionSeq: 0,
-    beastMode: deps.beastMode(parent),
-    agent: seat || undefined,
+    beastMode: beast,
+    agent: seat,
     ...(projectMode ? { projectMode: true, lane, ...(seat ? { seat } : {}) } : {}),
     researchTask,
     asyncMode,

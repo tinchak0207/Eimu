@@ -16,7 +16,10 @@ const sigOf = (tag: string) => tag.repeat(64).slice(0, 64)
 const SESSION = { sessionId: "gw_i5", opencodeSessionId: "oc_i5", apiKey: "sk-i5-test-only" }
 
 const storeMod = await import("../../job-store.ts")
+storeMod.reopenSessionsDbForTest()
 const { createSubmitGeneration, idempotencyKeyOf, __resetSubmitGenerationMemory } = await import("../submit-generation.ts")
+const { resetCatalogCacheForTest } = await import("../../pricing-gateway.ts")
+resetCatalogCacheForTest()
 const { createLedgerWriter, createProjectBudget } = await import("../ledger.ts")
 const { markReused } = await import("../scheduler.ts")
 const { ensureProject } = await import("../store.ts")

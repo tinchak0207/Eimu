@@ -85,6 +85,7 @@ export const artCurationRecipe: Recipe = {
           role: "style_anchor",
           size: "1536x1024",
         }, defaults),
+        inputs: { mood: { from: "moodboard" } },
       },
       {
         id: "composition", type: "keyframe", forEach: { over: "compositions", as: "comp" },
@@ -95,6 +96,7 @@ export const artCurationRecipe: Recipe = {
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { style: { from: "style_anchor" } },
       },
       {
         id: "batch_render", type: "keyframe", forEach: { over: "compositions", as: "comp" },
@@ -105,16 +107,18 @@ export const artCurationRecipe: Recipe = {
           role: "batch_render",
           size: "1536x1024",
         }, defaults),
+        inputs: { style: { from: "style_anchor" }, sketch: { from: "composition" } },
       },
       {
         id: "exhibition_visual", type: "keyframe",
         intent: "旧 role exhibition_visual：海报（key art + 展名 + 立意句）+ 墙面布置模拟 + 图录版式；三者并排同色系、同留白节奏、同立意表达。",
         params: materializeDefaults("keyframe", "exhibition_visual", {
           title: "展陈主视觉",
-          prompt: "展陈主视觉：海报 1 张（key art + 展名 + 立意句排版）+ 墙面布置模拟（起承转合动线）+ 图录版式：\n${theme}\n风格锚：${style_anchor}\n单面墙 3-4 幅为限，挂画中心线统一 150cm，间距取单幅宽 50%-80%；展陈留白与作品留白同频。",
+          prompt: "展陈主视觉：海报 1 张（key art + 展名 + 立意句排版）+ 墙面布置模拟（起承转合动线）+ 图录版式：\n${theme}\n成组：${batch_render}\n风格锚：${style_anchor}\n单面墙 3-4 幅为限，挂画中心线统一 150cm，间距取单幅宽 50%-80%；展陈留白与作品留白同频。",
           role: "exhibition_visual",
           size: "1536x1024",
         }, defaults),
+        inputs: { batch: { from: "batch_render" } },
       },
       {
         id: "delivery_pack", type: "keyframe", forEach: { over: "deliverables", as: "item" },
@@ -125,10 +129,11 @@ export const artCurationRecipe: Recipe = {
           role: "${row.role}",
           size: "${row.size}",
         }, defaults),
+        inputs: { exhibit: { from: "exhibition_visual" } },
       },
       {
         id: "check", type: "qc",
-        intent: "一致性质检（旧 role audit）：逐张配色盘 HEX / 笔触密度 / 留白占比；色相偏移 >8° 或 ΔE>12、笔触差 >15%、留白出区间即 outlier 重生，不重跑全组。",
+        intent: "一致性质检（旧 role audit）：逐张配色盘 HEX / 笔触密度 / 留白占比；色相偏移 >8° 或 ΔE>12、笔触差 >15%、留白出区间即 outlier 重生，不重跑全组。条目 color_temp、light_direction、stroke、whitespace、no_outlier。",
         params: {
           mode: "critic",
           rubric: "curation_consistency",
@@ -139,6 +144,7 @@ export const artCurationRecipe: Recipe = {
             layout: { backgrounds: ["起", "承", "转", "合"], focusMax: 2 },
             batch: { min: 5, max: 6, colorTempAligned: true, lightDirectionAligned: true },
             delivery: { printDpi: 300, tacMax: 300, wallHeightCm: 150, wallSpacing: [0.5, 0.8] },
+            items: ["color_temp", "light_direction", "stroke", "whitespace", "no_outlier"],
             minScore: 0.7,
           },
         },
@@ -150,6 +156,7 @@ export const artCurationRecipe: Recipe = {
           exhibition: { from: "exhibition_visual" },
           delivery: { from: "delivery_pack" },
         },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "pack", type: "export",

@@ -20,6 +20,10 @@ const { registerExecutor, clearExecutors } = await import("./executor-registry.t
 const { computeSignature } = await import("./signature.ts")
 const { NODE_SPECS_LITE } = await import("./specs.ts")
 const { idempotencyKeyOf } = await import("./submit-generation.ts")
+const { reopenSessionsDbForTest } = await import("../job-store.ts")
+reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 const { LIMITS } = await import("./constants.ts")
 
 const bytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v), "utf8")
@@ -511,6 +515,57 @@ describe("RUN 准入与执行", () => {
       expect(receipt.quote.run).toBe(1)
       expect(runs).toBe(0)
       expect(bytes(receipt)).toBeLessThanOrEqual(LIMITS.RUN_RECEIPT_BYTES)
+    } finally {
+      restore()
+    }
+  })
+
+  test("project_patch 写入 capCoins 后，跨轮已花费超限不再调用执行；未超限仍跑", async () => {
+    const sid = nextSession("cap")
+    await projectWithNodes(sid, [{ id: "k1", type: "keyframe", params: { prompt: "x", model: "m" } }])
+    let runs = 0
+    fakeKeyframe(async () => { runs += 1; return { ok: true, outputs: [OK_OUTPUT], costCoins: 2 } }, 2)
+    const { createProjectBudget } = await import("./ledger.ts")
+    const budget = createProjectBudget({ capOf: async () => null })
+    const log = { submits: [] as unknown[], ledger: [] as unknown[] }
+    const restore = installHost(makeState(sid), log, {
+      deps: () => ({ ...makeDeps(makeState(sid), log), budget }),
+    })
+    try {
+      const patched = await (await internal("/internal/project/patch", {
+        session_id: sid,
+        ops: [{ op: "set", node: "k1", path: "budget.capCoins", value: 3 }],
+      })).json() as { ok?: boolean }
+      expect(patched.ok).toBe(true)
+      const { openProject } = await import("./store.ts")
+      expect((await (await openProject(sid)).read()).budget.capCoins).toBe(3)
+      const first = await (await internal("/internal/project/run", { session_id: sid, mode: "force", wait_sec: 10 })).json() as { status?: string }
+      expect(first.status).toBe("done")
+      expect(runs).toBe(1)
+      const second = await (await internal("/internal/project/run", { session_id: sid, mode: "force", wait_sec: 10 })).json() as { status?: string; reason?: string }
+      expect(second.status).toBe("rejected")
+      expect(second.reason ?? "").toContain("预算不足")
+      expect(runs).toBe(1)
+    } finally {
+      restore()
+    }
+  })
+
+  test("未设 capCoins 的运行仍发得出去", async () => {
+    const sid = nextSession("nocap")
+    await projectWithNodes(sid, [{ id: "k1", type: "keyframe", params: { prompt: "x", model: "m" } }])
+    let runs = 0
+    fakeKeyframe(async () => { runs += 1; return { ok: true, outputs: [OK_OUTPUT], costCoins: 2 } }, 2)
+    const { createProjectBudget } = await import("./ledger.ts")
+    const budget = createProjectBudget({ capOf: async () => null })
+    const log = { submits: [] as unknown[], ledger: [] as unknown[] }
+    const restore = installHost(makeState(sid), log, {
+      deps: () => ({ ...makeDeps(makeState(sid), log), budget }),
+    })
+    try {
+      const receipt = await (await internal("/internal/project/run", { session_id: sid, wait_sec: 10 })).json() as { status?: string }
+      expect(receipt.status).toBe("done")
+      expect(runs).toBe(1)
     } finally {
       restore()
     }

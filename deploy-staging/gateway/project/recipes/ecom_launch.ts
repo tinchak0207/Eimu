@@ -1,14 +1,38 @@
 // 配方 ecom_launch —— 由旧模板 deploy-staging/gateway/workflow-templates/ecom_launch.ts（只读）改写。
 // 映射原则：docs/architecture/project-graph.md §6（电商族：shotlist(items) + keyframe#item → qc → export(image_pack)）。
-// 旧 role：7 支 *_gen config + 7 个 image 环 + 1 个 delivery text。7 个 image 环化为行表 item 的 22 行，一个 forEach keyframe 扇出；
+// 旧 role：7 支 *_gen config + 7 个 image 环 + 1 个 delivery text。7 个 image 环仍是 22 张图，各自一个 keyframe；
 // 行内字段（prompt/size/role/n）逐行承载旧 notes 与 deliverable，config 的 model/size/count 并入 params/defaults，gate 并入 qc.thresholds。
+// 旧 connections 里 config 只是参数，图生图链是 product_card → scene_pack → model_shot → kv_hero → detail_page → aspect_matrix → final_assets。
+// 参考图上限 5（specs MAX_REFERENCE_IMAGES）。PRODUCT LOCK 先占 1 格，其余给直接上游；装不下的留在回报里。
 import type { Json, NewNode, ProjectDefaults, Recipe } from "../types"
-import { materializeDefaults } from "../specs"
+import { materializeDefaults, MAX_REFERENCE_IMAGES } from "../specs"
 
 const str = (v: Json | undefined, fallback: string): string => (typeof v === "string" && v.trim() !== "" ? v : fallback)
 
 type Row = { id: string; role: string; label: string; size: string; prompt: string; n?: number }
 const asRow = (r: Row): { [k: string]: Json } => ({ id: r.id, role: r.role, label: r.label, size: r.size, prompt: r.prompt, n: r.n ?? 1 })
+
+/** locks 先占格（产品锁），direct 是旧图生图边的直接上游。合计不超过关键帧参考图上限。 */
+function imageRefs(locks: readonly string[], direct: readonly string[]): Record<string, { from: string }> {
+  const out: Record<string, { from: string }> = {}
+  for (const id of [...locks, ...direct]) {
+    if (Object.prototype.hasOwnProperty.call(out, id)) continue
+    if (Object.keys(out).length >= MAX_REFERENCE_IMAGES) break
+    out[id] = { from: id }
+  }
+  return out
+}
+
+function frame(id: string, row: Row, defaults: ProjectDefaults, inputs: Record<string, { from: string }>): NewNode {
+  return {
+    id, type: "keyframe",
+    intent: `旧 role ${row.role}：${row.label}。上游定稿图接在 inputs。`,
+    params: materializeDefaults("keyframe", id, {
+      title: row.label, prompt: row.prompt, role: row.role, size: row.size, n: row.n ?? 1,
+    }, defaults),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
+  }
+}
 
 function buildRows(subject: string): Row[] {
   const lock = `产品：${subject}。以白底 PRODUCT LOCK 为唯一身份基准：形状/颜色/材质/包装标签/LOGO 位置零变形，禁止伪造文字与多余产品。`
@@ -120,23 +144,30 @@ export const ecomLaunchRecipe: Recipe = {
       ...(typeof p.style === "string" && p.style ? { style: p.style } : {}),
     }
     const rows = buildRows(str(p.product, "锁定商品"))
+    const ids = (role: string) => rows.filter((r) => r.role === role).map((r) => r.id)
+    const product = ids("product_card")
+    const scene = ids("scene_pack")
+    const model = ids("model_shot")
+    const kv = ids("kv_hero")
+    const detail = ids("detail_page")
+    const aspect = ids("aspect_matrix")
+    const refsOf = (role: string): Record<string, { from: string }> => {
+      if (role === "product_card") return { catalog: { from: "items" } }
+      if (role === "scene_pack") return imageRefs(product, [])
+      if (role === "model_shot") return imageRefs(product, scene)
+      if (role === "kv_hero") return imageRefs(product, model)
+      if (role === "detail_page") return imageRefs(product, kv)
+      if (role === "aspect_matrix") return imageRefs(product, detail)
+      return imageRefs(product, aspect)
+    }
+    const pictures = Object.fromEntries(rows.map((r) => [r.id, { from: r.id }]))
     const nodes: NewNode[] = [
       {
         id: "items", type: "shotlist",
         intent: "旧 7 个 image 环的行表：产品卡 / 场景包 ×3 / 模特 ×2 / KV ×2 / 详情 ×6 / 多画幅 ×4 / 精修 ×4，共 22 行（白底产品 DNA 为全链根基）。",
         params: { kind: "items", rows: rows.map(asRow) },
       },
-      {
-        id: "keyframe", type: "keyframe", forEach: { over: "items", as: "item" },
-        intent: "旧 role product_card/scene_pack/model_shot/kv_hero/detail_page/aspect_matrix/final_assets 都由此节点按行产出；旧 7 支 *_gen config 的 model/size/count 并入每行 params 与 defaults。",
-        params: materializeDefaults("keyframe", "keyframe", {
-          title: "${row.label}",
-          prompt: "${row.prompt}",
-          role: "${row.role}",
-          size: "${row.size}",
-          n: "${row.n}",
-        }, defaults),
-      },
+      ...rows.map((r) => frame(r.id, r, defaults, refsOf(r.role))),
       {
         id: "qc", type: "qc",
         intent: "旧各环 VLM/抽检/分辨率门禁：产品 DNA 零变形、标签与 LOGO 可读、手部无畸变、CTA 负空间≥30%、文字≥24pt、短边≥2048、sRGB；任一不符重出。",
@@ -150,32 +181,33 @@ export const ecomLaunchRecipe: Recipe = {
             spelling: true, noUnauthorizedLogo: true, noFalseClaim: true, commercialRights: true,
           },
         },
-        inputs: { image: { from: "keyframe" } },
+        inputs: pictures,
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",
         intent: "旧 role delivery：全包按渠道归档（主图/场景/模特/KV+CTA/详情/社媒矩阵），12 项终审全绿才算交付；命名 渠道_用途_SKU_画幅_序号，使用索引按 CSV 交付。",
         params: { preset: "image_pack" },
-        inputs: { images: { from: "keyframe" }, verdict: { from: "qc" } },
+        inputs: { ...pictures, verdict: { from: "qc" } },
       },
     ]
     return { nodes, targets: { shots: rows.length, subtitles: false, audio: "none" }, defaults }
   },
   legacyRoleMap: {
-    product_gen: { intentOf: "keyframe" }, // config 不成节点：model/size/count 已并入行 params 与 defaults
-    product_card: "keyframe#product_card",
-    scene_gen: { intentOf: "keyframe" },
-    scene_pack: "keyframe", // 3 行（scene_pack_1..3）同属这个 fan-out
-    model_gen: { intentOf: "keyframe" },
-    model_shot: "keyframe", // 2 行（model_shot_1..2）
-    kv_gen: { intentOf: "keyframe" },
-    kv_hero: "keyframe", // 2 行（kv_hero_1..2）
-    detail_gen: { intentOf: "keyframe" },
-    detail_page: "keyframe", // 6 行（detail_page_1..6）
-    aspect_gen: { intentOf: "keyframe" },
-    aspect_matrix: "keyframe", // 4 行（aspect_1x1 / aspect_3x1 / aspect_9x16 / aspect_16x9）
-    upscale_gen: { intentOf: "keyframe" }, // 放大并入 keyframe.size（final_* 行直接出高分辨率）
-    final_assets: "keyframe", // 4 行（final_main / final_banner / final_social / final_wide）
-    delivery: { intentOf: "export" }, // text 交付说明并入 export.intent
+    product_gen: { intentOf: "product_card" },
+    product_card: "product_card",
+    scene_gen: { intentOf: "scene_pack_1" },
+    scene_pack: "scene_pack_1",
+    model_gen: { intentOf: "model_shot_1" },
+    model_shot: "model_shot_1",
+    kv_gen: { intentOf: "kv_hero_1" },
+    kv_hero: "kv_hero_1",
+    detail_gen: { intentOf: "detail_page_1" },
+    detail_page: "detail_page_1",
+    aspect_gen: { intentOf: "aspect_1x1" },
+    aspect_matrix: "aspect_1x1",
+    upscale_gen: { intentOf: "final_main" },
+    final_assets: "final_main",
+    delivery: { intentOf: "export" },
   },
 }

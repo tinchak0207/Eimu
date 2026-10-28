@@ -19,6 +19,9 @@ process.env.LEDGER_PATH = join(ROOT, "ledger.jsonl")
 process.env.HARNESS_WORKSPACE = process.env.WORKSPACE_DIR
 process.env.HARNESS_STATE = join(ROOT, "state")
 process.env.OPENCODE_URL = "http://127.0.0.1:9" // 不可达 loopback：任何误投递都立即失败，不出网
+if (!process.env.PLATFORM_BASE || process.env.PLATFORM_BASE.includes("image.tinchak0207.xyz")) {
+  process.env.PLATFORM_BASE = "http://127.0.0.1:1"
+}
 process.env.CONFIRM_THRESHOLD_COINS = process.env.CONFIRM_THRESHOLD_COINS || "5"
 mkdirSync(process.env.WORKSPACE_DIR, { recursive: true })
 mkdirSync(process.env.HARNESS_STATE, { recursive: true })

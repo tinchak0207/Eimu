@@ -15,6 +15,9 @@ process.env.LEDGER_PATH = join(SANDBOX, "ledger.jsonl")
 
 const { ensureProject, openProject, projectDirFor, projectsRoot, scanProjectRecoveries, ackProjectArtifacts, defaultIngestRoots, workspaceDir, ProjectNotFoundError, KEEP_VERSIONS } = await import("./store.ts")
 const jobStore = await import("../job-store.ts")
+jobStore.reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 type Actor = import("./types.ts").Actor
 type PatchOp = import("./types.ts").PatchOp
 
@@ -84,7 +87,7 @@ describe("补丁提交：version、事件 seq、原子写", () => {
   test("重新 load 后读回同图、同 version、同事件序（seq 连续 = 行号）", async () => {
     const { store } = await ensureProject("ses_reload")
     await store.applyPatches({ ops: [addKeyframe("k1")] }, AGENT)
-    for (let i = 0; i < 5; i++) await store.applyPatches({ ops: [setOp("k1", `k${i}`, i)] }, AGENT)
+    for (let i = 0; i < 5; i++) await store.applyPatches({ ops: [setOp("k1", "prompt", `k${i}`)] }, AGENT)
     const before = await store.read()
     const openEvents = await store.log.read(0)
     expect(openEvents.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6])
@@ -113,16 +116,15 @@ describe("并发：50 个补丁串行提交，无丢失", () => {
   test("50 并发 → version=50、每个 op 的效果都在、事件 seq=1..50", async () => {
     const { store } = await ensureProject("ses_conc")
     const calls: Promise<unknown>[] = []
-    calls.push(store.applyPatches({ ops: [addKeyframe("k1")] }, AGENT))
-    for (let i = 0; i < 49; i++) calls.push(store.applyPatches({ ops: [setOp("k1", `p${i}`, i)] }, AGENT))
+    for (let i = 0; i < 50; i++) calls.push(store.applyPatches({ ops: [addKeyframe(`k${i}`)] }, AGENT))
     const receipts = (await Promise.all(calls)) as { receipt: { ok: boolean; version: number } }[]
     expect(receipts.every((r) => r.receipt.ok)).toBe(true)
     expect(receipts.map((r) => r.receipt.version).sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1))
 
     const g = await store.read()
     expect(g.version).toBe(50)
-    expect(g.order).toEqual(["k1"])
-    for (let i = 0; i < 49; i++) expect(g.nodes.k1.params[`p${i}`]).toBe(i)
+    expect([...g.order].sort()).toEqual(Array.from({ length: 50 }, (_, i) => `k${i}`).sort())
+    for (let i = 0; i < 50; i++) expect(g.nodes[`k${i}`].params.prompt).toBe("p")
     expect((await store.log.read(0)).map((e) => e.seq)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1))
     expect(g.seq).toBe(50)
   })
@@ -170,7 +172,7 @@ describe("版本快照保留 50 份", () => {
   test("60 个批次后 versions 只剩最近 50 份（0..10 被删）", async () => {
     const { store } = await ensureProject("ses_prune")
     await store.applyPatches({ ops: [addKeyframe("k1")] }, AGENT)
-    for (let i = 1; i <= 60; i++) await store.applyPatches({ ops: [setOp("k1", `v${i}`, i)] }, AGENT)
+    for (let i = 1; i <= 60; i++) await store.applyPatches({ ops: [setOp("k1", "prompt", `v${i}`)] }, AGENT)
     const files = versionFiles(projectDirFor("ses_prune"))
     expect(KEEP_VERSIONS).toBe(50)
     expect(files).toHaveLength(50)

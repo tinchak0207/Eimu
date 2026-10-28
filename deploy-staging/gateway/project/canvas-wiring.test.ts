@@ -20,6 +20,10 @@ const routes = await import("./routes.ts")
 const { ensureProject } = await import("./store.ts")
 const { emitDeliveryCards } = await import("./delivery.ts")
 const { getCanvasState } = await import("../canvas-cascade-state.ts")
+const { reopenSessionsDbForTest } = await import("../job-store.ts")
+reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 
 const ISO = "2026-10-28T00:00:00.000Z"
 

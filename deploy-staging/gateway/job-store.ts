@@ -32,6 +32,13 @@ function db(): Database {
   return next
 }
 
+/** 测试钩子：关掉当前连接，下次按当时的 SESSIONS_DB_PATH 重开。不删除数据库文件。生产路径不调用。 */
+export function reopenSessionsDbForTest(): void {
+  if (!connection) return
+  connection.close()
+  connection = undefined
+}
+
 export function bindGenerationConsumer(child: string, parentGw: string, parentOc: string, agent?: string): void {
   // intent_version：当前无业务读者，保留列不保留读者（既有库兼容）。
   db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent,intent_version) VALUES (?,?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")

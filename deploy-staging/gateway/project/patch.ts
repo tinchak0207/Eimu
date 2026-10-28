@@ -4,7 +4,7 @@
 // 状态口径：引擎（S1/S6）才有真签名；这里只做「结构性」过期标记——改动节点及其下游（遇 pinned 止步并计入 drift）。
 // 宁可多标 stale、不可漏标；真正是否重跑由 planRun 按签名裁决。
 import { ArtifactStore } from "./artifacts.ts"
-import { expandGraph } from "./expand.ts"
+import { expandGraph, readRows } from "./expand.ts"
 import type { EventDraft } from "./events.ts"
 import {
   NODE_ID_RE, INPUT_NAME_RE, PORT_RE, buildChildren, findGraphProblem, fnvSeed, idBase, reachesSelf, scanParamRefs,
@@ -14,7 +14,8 @@ import {
   checkTakes, checkTargets, checkWriteValue, isPlainObject, jsonEqual, lockCovers, type V,
 } from "./patch-validate.ts"
 import { buildPatchReceipt } from "./receipt.ts"
-import { materializeDefaults } from "./specs.ts"
+import { checkParams, materializeDefaults, resolvePort, specOf } from "./specs.ts"
+import { validateSet } from "./validate.ts"
 import type {
   Actor, Json, NodeId, NodeType, Output, PatchErrorCode, PatchOp, PatchReceipt, PatchRequest, ProjectGraph, ProjectNode, Recipe,
 } from "./types.ts"
@@ -107,6 +108,16 @@ function signedParam(ctx: Ctx, type: NodeType, key: string): boolean {
   return ctx.opts.isSignedParam ? ctx.opts.isSignedParam(type, key) : true
 }
 
+/** 用户（含画布回写）改成功的字段自动上锁，expand 不得再用模板盖掉。 */
+function lockFieldByUser(ctx: Ctx, node: ProjectNode, path: string): void {
+  if (ctx.actor.kind !== "user") return
+  const prev = node.locked
+  if (prev?.by === "user" && (prev.fields === "*" || prev.fields.includes(path))) return
+  const fields: string[] | "*" = prev?.fields === "*" ? "*" : [...new Set([...(prev?.fields ?? []), path])]
+  node.locked = { by: "user", fields, at: ctx.nowIso }
+  touch(ctx, node.id, "locked")
+}
+
 function currentSignature(node: ProjectNode): string {
   return node.signature ?? node.lastRun?.signature ?? ""
 }
@@ -143,6 +154,12 @@ function opAddNode(ctx: Ctx, raw: unknown): void {
   const params: Record<string, Json> = {
     ...materializeDefaults(type, id, unwrap(checkJson(paramsRaw, "params"), id) as Record<string, Json>, g.defaults ?? {}),
   }
+  const paramIssues = checkParams(type, params, id)
+  if (paramIssues.length) {
+    const issue = paramIssues[0]
+    const known = !!specOf(type)?.params[issue.key]
+    return fail(known ? "BAD_VALUE" : "BAD_PATH", `field=params.${issue.key}；${issue.message}`, id)
+  }
   const inputs = unwrap(checkInputs(g, raw.inputs ?? {}), id)
   const refs = unwrap(checkRefs(raw.refs ?? []), id)
   const forEach = raw.forEach == null ? null : unwrap(checkForEach(g, id, type, raw.forEach), id)
@@ -169,6 +186,22 @@ function opAddNode(ctx: Ctx, raw: unknown): void {
 const PARAM_PATH_RE = /^params\.([A-Za-z_][A-Za-z0-9_]*)$/
 
 function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
+  if (typeof op.path === "string" && (op.path === "outputs.verdict" || op.path.startsWith("outputs.verdict."))) {
+    const node = getNode(ctx, op.node)
+    return fail("LANE_VIOLATION", "主代理或非 critic lane 不能写 outputs.verdict", node.id)
+  }
+  // 图级硬预算。不进节点锁、不标脏、不改 expand 的输入。node 只是既有 set op 的必填位，这里不读取。
+  if (op.path === "budget.capCoins") {
+    const value = op.value
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      return fail("BAD_VALUE", "budget.capCoins 必须是非负有限数或 null")
+    }
+    if (!ctx.g.budget) ctx.g.budget = { capCoins: null, spentCoins: 0, savedCoins: 0 }
+    const next = value === null ? null : value
+    if (ctx.g.budget.capCoins === next) return
+    ctx.g.budget.capCoins = next
+    return
+  }
   const node = getNode(ctx, op.node)
   checkLane(ctx, node.id)
   const path = op.path
@@ -179,10 +212,15 @@ function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
   if (op.ifRev !== undefined && node.rev !== op.ifRev) return fail("REV_CONFLICT", `节点 ${node.id} rev=${node.rev}，ifRev=${op.ifRev}`, node.id)
   assertUnlocked(ctx, node, [path])
   const value = op.value
+  if (pm || path === "intent" || path === "takes" || path === "onFail" || path === "forEach" || path === "refs") {
+    const issue = validateSet(node, path, value as Json)
+    if (issue) return fail(issue.patchCode, `field=${issue.path ?? path}；${issue.message}`, node.id)
+  }
   if (path === "intent") {
     const next = unwrap(checkIntent(value), node.id)
     if (next === node.intent) return
     node.intent = next
+    lockFieldByUser(ctx, node, path)
   } else if (pm) {
     const next = unwrap(checkJson(value, "params 值"), node.id)
     if (jsonEqual(node.params[pm[1]], next) && pm[1] in node.params) return
@@ -197,17 +235,20 @@ function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
       throw e
     }
     if (signedParam(ctx, node.type, pm[1])) ctx.selfDirty.add(node.id)
+    lockFieldByUser(ctx, node, path)
   } else if (path === "takes") {
     const next = unwrap(checkTakes(value), node.id)
     if (jsonEqual(next, node.takes ?? null)) return
     if (next) node.takes = next
     else delete node.takes
     ctx.selfDirty.add(node.id)
+    lockFieldByUser(ctx, node, path)
   } else if (path === "onFail") {
     const next = unwrap(checkOnFail(value), node.id)
     if (jsonEqual(next, node.onFail ?? null)) return
     if (next) node.onFail = next
     else delete node.onFail
+    lockFieldByUser(ctx, node, path)
   } else if (path === "forEach") {
     const next = unwrap(checkForEach(ctx.g, node.id, node.type, value), node.id)
     if (jsonEqual(next, node.forEach ?? null)) return
@@ -222,11 +263,13 @@ function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
       throw e
     }
     ctx.selfDirty.add(node.id)
+    lockFieldByUser(ctx, node, path)
   } else {
     const next = unwrap(checkRefs(value), node.id)
     if (jsonEqual(next, node.refs)) return
     node.refs = next
     ctx.selfDirty.add(node.id)
+    lockFieldByUser(ctx, node, path)
   }
   node.rev += 1
   touch(ctx, node.id, path)
@@ -280,6 +323,11 @@ function opConnect(ctx: Ctx, op: Extract<PatchOp, { op: "connect" }>): void {
   checkEdgeNames(op.input, op.port)
   const from = ctx.g.nodes[op.from as string]
   if (!from) return fail("BAD_REF", `connect 的来源节点 ${String(op.from)} 不存在`, to.id)
+  const fromSpec = specOf(from.type)
+  if (!fromSpec || resolvePort(fromSpec, op.port) === null) {
+    const names = fromSpec ? fromSpec.outputs.map((o) => o.name).join("、") : ""
+    return fail("BAD_REF", `field=inputs.${op.input}.port；${from.id}（${from.type}）没有输出口 ${JSON.stringify(op.port ?? "out")}。期望端口：${names || "（未知类型）"}`, to.id)
+  }
   assertUnlocked(ctx, to, [`inputs.${op.input}`])
   const next = op.port === undefined ? { from: from.id } : { from: from.id, port: op.port }
   if (jsonEqual(to.inputs[op.input], next)) return
@@ -424,6 +472,9 @@ function opReroll(ctx: Ctx, op: Extract<PatchOp, { op: "reroll" }>): void {
 async function opWriteResult(ctx: Ctx, op: Extract<PatchOp, { op: "write_result" }>): Promise<void> {
   const node = getNode(ctx, op.node)
   checkLane(ctx, node.id)
+  if (node.type === "qc" && ctx.actor.kind !== "subagent") {
+    return fail("LANE_VIOLATION", "主代理或非 critic lane 不能写 outputs.verdict", node.id)
+  }
   const authored = node.type === "script" || node.type === "shotlist" || (node.type === "qc" && node.params.mode === "critic")
   if (!authored) return fail("NOT_AUTHORED", `${node.type} 节点不是作者型节点，不能写结果`, node.id)
   const lockFields = node.type === "script" ? ["params.text"] : node.type === "shotlist" ? ["params.rows", "params.kind"] : ["outputs"]
@@ -571,6 +622,31 @@ function propagate(ctx: Ctx, before: Map<NodeId, string>): { stale: NodeId[]; dr
   return { stale, drift: [...drift].sort() }
 }
 
+/** agent 改 shotlist 行：删掉或改写 locked/pinned 实例对应行 → 整批 LOCKED。用户删行允许。 */
+function protectedRowProblem(actor: Actor, before: ProjectGraph, after: ProjectGraph): { node: NodeId; msg: string } | null {
+  if (actor.kind === "user" || actor.kind === "engine") return null
+  for (const tpl of Object.values(before.nodes)) {
+    if (!tpl.forEach || tpl.derivedFrom) continue
+    const over = tpl.forEach.over
+    const oldSl = before.nodes[over]
+    const newSl = after.nodes[over]
+    if (!oldSl || !newSl || oldSl.type !== "shotlist") continue
+    const oldMap = new Map(readRows(oldSl).rows.map((r) => [r.id, JSON.stringify(r.data)]))
+    const newMap = new Map(readRows(newSl).rows.map((r) => [r.id, JSON.stringify(r.data)]))
+    for (const inst of Object.values(before.nodes)) {
+      if (inst.derivedFrom?.template !== tpl.id) continue
+      const rowId = inst.derivedFrom.rowId
+      const userLocked = inst.locked?.by === "user"
+      if (!newMap.has(rowId)) {
+        if (inst.locked || inst.pinned) return { node: inst.id, msg: `删除镜头行 ${rowId} 会去掉${inst.locked ? "锁定" : "钉住"}的实例 ${inst.id}，整批拒绝` }
+      } else if (userLocked && oldMap.get(rowId) !== newMap.get(rowId)) {
+        return { node: inst.id, msg: `改镜头行 ${rowId} 会改写用户锁定的实例 ${inst.id}，整批拒绝` }
+      }
+    }
+  }
+  return null
+}
+
 export async function applyPatch(graph: Readonly<ProjectGraph>, req: PatchRequest, actor: Actor, opts: PatchEngineOptions): Promise<PatchOutcome> {
   const base = graph as ProjectGraph
   if (!req || !Array.isArray(req.ops)) return wholeBatchFailure(base, "BAD_VALUE", "ops 必须是数组")
@@ -606,11 +682,22 @@ export async function applyPatch(graph: Readonly<ProjectGraph>, req: PatchReques
   }
   // S21：forEach 扇出在这里落图（§3.3）。expandGraph 是纯函数，只做「模板 → 实例」与引用规范化；
   // planRun 只认得已在图里的实例，所以每次成功补丁都必须展开。坏行表 / over 不是 shotlist 等 = 整批拒绝，图不变。
+  const rowGuard = protectedRowProblem(actor, base, ctx.g)
+  if (rowGuard) return wholeBatchFailure(base, "LOCKED", rowGuard.msg, 0, rowGuard.node)
   const exp = expandGraph(ctx.g)
   if (!exp.ok) {
     const issue = exp.issues[0]
     return wholeBatchFailure(base, issue.code, issue.message, 0, issue.node)
   }
+  if (actor.kind !== "user" && actor.kind !== "engine") {
+    for (const id of exp.removed) {
+      const prev = ctx.g.nodes[id]
+      if (prev?.locked || prev?.pinned) {
+        return wholeBatchFailure(base, "LOCKED", `展开会删除${prev.locked ? "锁定" : "钉住"}的实例 ${id}，整批拒绝`, 0, id)
+      }
+    }
+  }
+  for (const w of exp.warnings) if (!ctx.warnings.includes(w)) ctx.warnings.push(w)
   ctx.g.nodes = exp.nodes
   ctx.g.order = exp.order
   const { stale, drift } = propagate(ctx, before)

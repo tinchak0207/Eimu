@@ -6,7 +6,7 @@
 import "./fixtures/env"
 import "./fixtures/fake-platform"
 import { beforeEach, describe, expect, test } from "bun:test"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const { registerExecutor, clearExecutors } = await import("../executor-registry.ts")
@@ -175,6 +175,114 @@ describe("I6 增量重跑与 pinned", () => {
     expect(after.nodes.clip1.pinned?.by).toBe("user")
     // 第三轮里 clip1 的产物与上次运行记录都没被改写（pin 保护）。
     expect(after.nodes.clip1.lastRun?.runId).toBe(baselineRunId)
+  }, 30_000)
+
+  test("force 重跑 k1 换产物后，下一轮只重跑下游 c1", async () => {
+    const sessionId = "s18_i6_force"
+    const { store } = await ensureProject(sessionId)
+    await store.update((g: any) => {
+      for (const node of [
+        rawNode("k1", "keyframe", { prompt: "猫", model: "m", size: "1024x1024" }, {}),
+        rawNode("c1", "clip", { prompt: "跑", model: "m", seconds: 5 }, { first: { from: "k1" } }),
+        rawNode("k2", "keyframe", { prompt: "狗", model: "m", size: "1024x1024" }, {}),
+        rawNode("c2", "clip", { prompt: "坐", model: "m", seconds: 5 }, { first: { from: "k2" } }),
+      ]) { g.nodes[node.id] = node; g.order.push(node.id) }
+    })
+    const { deps } = makeDeps(sessionId)
+    expect((await runProject(store, deps)).status).toBe("done")
+    calls = []
+    expect((await runProject(store, deps, { targets: ["k1"], mode: "force" })).status).toBe("done")
+    expect(calls.map((c) => c.node)).toEqual(["k1"])
+    calls = []
+    expect((await runProject(store, deps)).status).toBe("done")
+    expect([...new Set(calls.map((c) => c.node))].sort()).toEqual(["c1"])
+  }, 30_000)
+
+  test("k1 产物文件丢失后，k1 与 c1 重跑，k2 不跑", async () => {
+    const sessionId = "s18_i6_missing"
+    const { store } = await ensureProject(sessionId)
+    await store.update((g: any) => {
+      for (const node of [
+        rawNode("k1", "keyframe", { prompt: "猫", model: "m", size: "1024x1024" }, {}),
+        rawNode("c1", "clip", { prompt: "跑", model: "m", seconds: 5 }, { first: { from: "k1" } }),
+        rawNode("k2", "keyframe", { prompt: "狗", model: "m", size: "1024x1024" }, {}),
+      ]) { g.nodes[node.id] = node; g.order.push(node.id) }
+    })
+    const { deps } = makeDeps(sessionId)
+    expect((await runProject(store, deps)).status).toBe("done")
+    const path = (await store.read()).nodes.k1.outputs[0].path
+    unlinkSync(path)
+    calls = []
+    expect((await runProject(store, deps)).status).toBe("done")
+    expect([...new Set(calls.map((c) => c.node))].sort()).toEqual(["c1", "k1"])
+  }, 30_000)
+
+  test("运行中把 k1 prompt 从 OLD 改成 NEW：第二轮执行器拿到 NEW，且是 executed", async () => {
+    const sessionId = "s18_i6_midrun"
+    const prompts: string[] = []
+    let store: Awaited<ReturnType<typeof ensureProject>>["store"]
+    clearExecutors()
+    registerExecutor({
+      type: "keyframe", specVersion: 1,
+      async estimate() { return 0 },
+      async run(ctx: any) {
+        prompts.push(ctx.node.params.prompt)
+        calls.push({ node: ctx.node.id, take: ctx.take, attempt: ctx.attempt })
+        if (prompts.length === 1) {
+          await store.applyPatches({ ops: [{ op: "set", node: "k1", path: "params.prompt", value: "NEW" }] }, { kind: "user" })
+        }
+        return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0 }
+      },
+    } as never)
+    store = (await ensureProject(sessionId)).store
+    await store.update((g: any) => {
+      const node = rawNode("k1", "keyframe", { prompt: "OLD", model: "m", size: "1024x1024" }, {})
+      g.nodes.k1 = node
+      g.order.push("k1")
+    })
+    const { deps } = makeDeps(sessionId)
+    await runProject(store, deps)
+    expect((await store.read()).nodes.k1.status).toBe("stale")
+    await runProject(store, deps)
+    expect(prompts).toEqual(["OLD", "NEW"])
+    expect((await store.read()).nodes.k1.lastRun?.via).toBe("executed")
+  }, 30_000)
+
+  test("恢复时 inflight 签名与改过的 prompt 不一致：music 节点 stale 且下一轮会跑", async () => {
+    const sessionId = "s18_i6_recover"
+    const { store } = await ensureProject(sessionId)
+    await store.update((g: any) => {
+      const node = rawNode("m1", "music", { prompt: "旧：悲伤钢琴" }, {})
+      node.status = "running"
+      g.nodes.m1 = node
+      g.order.push("m1")
+    })
+    const { computeSignature, planRun } = await import("../signature.ts")
+    const { NODE_SPECS_LITE } = await import("../specs.ts")
+    const { recoverProject } = await import("../recovery.ts")
+    const g0 = await store.read()
+    const oldSig = await computeSignature(g0, "m1", store.artifacts, NODE_SPECS_LITE)
+    expect(oldSig.ok).toBe(true)
+    if (!oldSig.ok) return
+    const inf = { idemKey: `pg:${sessionId}:${oldSig.signature.slice(0, 40)}:t0:a0`, since: "2026-10-28T00:00:00.000Z", submitUnknown: true }
+    await store.update((g: any) => { g.nodes.m1.inflight = Object.assign(inf, { sig: oldSig.signature }) })
+    expect((await store.applyPatches({ ops: [{ op: "set", node: "m1", path: "params.prompt", value: "新：欢快鼓点" }] }, { kind: "user" })).receipt.ok).toBe(true)
+    const dir = join(process.env.WORKSPACE_DIR!, "projects", sessionId, "tmp")
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, "old.mp3")
+    writeFileSync(file, "OLD-PROMPT-AUDIO")
+    const { deps } = makeDeps(sessionId)
+    deps.execBridge = {
+      call: async () => ({ ok: false, code: "bridge_unavailable", message: "no", retryable: false }),
+      result: async () => ({ state: "done", files: [{ path: file, mime: "audio/mpeg", bytes: 16 }], costCoins: 1 }),
+    } as never
+    await recoverProject(store, deps as never)
+    const g = await store.read()
+    expect(g.nodes.m1.status).toBe("stale")
+    expect(g.nodes.m1.outputs.length).toBeGreaterThan(0)
+    const plan = await planRun(g, undefined, "incremental", store.artifacts, NODE_SPECS_LITE)
+    expect(plan.toRun).toContain("m1")
+    expect(plan.reuse).not.toContain("m1")
   }, 30_000)
 
   test("反例：把 kf2 的改动误算成下游闭包时，期望集合必须报错（防把「重跑一切」当通过）", () => {

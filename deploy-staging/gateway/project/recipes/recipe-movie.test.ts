@@ -2,6 +2,7 @@
 // 期望值来源：设计文档 §6（族表与节点数下限）、§4.2 S11a 判准、§3.5（NODE_SPECS 执行器）；
 // 旧 role 清单从旧模板文件现算（不手抄）。
 import { describe, expect, test } from "bun:test"
+import { rubricOf } from "../rubrics"
 import { NODE_SPECS } from "../specs"
 import type { Json, NodeId, NodeType, ProjectGraph, ProjectNode, Recipe } from "../types"
 import { PROJECT_SCHEMA_VERSION } from "../types"
@@ -167,4 +168,94 @@ describe("S11a 配方：11 类节点与执行器", () => {
       }
     })
   }
+})
+
+const FLOOR: Record<string, number> = { feature_film: 14, novel_film: 15, single_video: 12, shortdrama_visual: 16 }
+const AUTHOR_TYPES = new Set<NodeType>(["script", "shotlist"])
+
+function froms(node: { inputs: Record<string, { from: string }> } | undefined): string[] {
+  return Object.values(node?.inputs ?? {}).map((i) => i.from)
+}
+
+describe("S6 电影族：旧模板的参考边和门禁", () => {
+  test("四个配方节点数不少于 S3，展开后文字节点不超过两成，没有 render3d", () => {
+    for (const { recipe } of FAMILY) {
+      const g = toGraph(recipe)
+      expect(g.order.length).toBeGreaterThanOrEqual(FLOOR[recipe.id])
+      const ex = expandGraph(g)
+      expect(ex.ok).toBe(true)
+      const nodes = Object.values(ex.nodes)
+      expect(nodes.some((n) => n.type === "render3d")).toBe(false)
+      const authored = nodes.filter((n) => AUTHOR_TYPES.has(n.type)).length
+      expect(authored / nodes.length).toBeLessThanOrEqual(0.2)
+      expect(JSON.stringify(g.nodes.shots.params.rows)).toContain("主体动作与可见状态变化")
+      const texts = nodes.filter((n) => n.type === "script").map((n) => String(n.params.text ?? ""))
+      expect(texts.some((t) => t.includes("（待写"))).toBe(true)
+    }
+  })
+
+  test("feature_film：角色图和场景图分开，逐镜接风格锚和本镜线稿，钩子位 3 张交给 film_frame_critic", () => {
+    const g = toGraph(featureFilmRecipe)
+    const ex = expandGraph(g)
+    const charId = destId(featureFilmRecipe.legacyRoleMap.char_view1)
+    const sceneId = destId(featureFilmRecipe.legacyRoleMap.scene_img)
+    expect(charId).not.toBe(sceneId)
+    expect(ex.nodes[charId as NodeId].forEach).toBeUndefined()
+    expect(ex.nodes[sceneId as NodeId].forEach).toBeUndefined()
+    const kf = ex.nodes["keyframe#s1"]
+    const ids = froms(kf)
+    expect(ids).toContain(charId)
+    expect(ids).toContain(sceneId)
+    expect(ids).toContain("style_anchor")
+    expect(ids).toContain("sketch#s1")
+    expect(ids.some((id) => ex.nodes[id]?.forEach)).toBe(false)
+    const hook = Object.values(g.nodes).find((n) => n.takes?.select === "qc")
+    expect(hook?.takes).toEqual({ n: 3, select: "qc", rubric: "film_frame_critic" })
+    expect(Object.values(g.nodes).some((n) => n.intent.includes("unsupported"))).toBe(true)
+    expect(g.nodes.qc.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.order.indexOf("qc_look")).toBeLessThan(g.order.indexOf("export"))
+  })
+
+  test("novel_film：美术卡不再并进角色卡，逐镜不拿整张角色表", () => {
+    const g = toGraph(novelFilmRecipe)
+    const ex = expandGraph(g)
+    const charId = destId(novelFilmRecipe.legacyRoleMap.char_card)
+    const sceneId = destId(novelFilmRecipe.legacyRoleMap.art_card)
+    expect(charId).not.toBe(sceneId)
+    const ids = froms(ex.nodes["keyframe#s1"])
+    expect(ids).toContain(charId)
+    expect(ids).toContain(sceneId)
+    expect(ids).toContain("style_anchor")
+    expect(ids).toContain("sketch#s1")
+    expect(g.nodes.qc_look.params.rubric).toBe("film_frame_critic")
+    const items = rubricOf("film_frame_critic")?.items?.map((i) => i.id) ?? []
+    for (const id of ["style_unity_70", "shot_consistency", "av_sync_0_5s", "storyboard_qc_17"]) expect(items).toContain(id)
+  })
+
+  test("shortdrama_visual：三视图是参考边，段≤15s 进机器阈值，正反打/轴线/切点在 film_frame_critic", () => {
+    const g = toGraph(shortdramaVisualRecipe)
+    const ex = expandGraph(g)
+    expect(ex.nodes.cast_sheet.forEach).toBeUndefined()
+    const ids = froms(ex.nodes["keyframe#s1"])
+    expect(ids).toContain("cast_sheet")
+    expect(ids).toContain("scene_1")
+    expect(ids).toContain("sketch#s1")
+    expect(g.nodes.qc.params.thresholds).toMatchObject({ maxDurationSec: 15 })
+    expect(g.nodes.qc_look.params.rubric).toBe("film_frame_critic")
+    const items = rubricOf("film_frame_critic")?.items?.map((i) => i.id) ?? []
+    for (const id of ["segment_le_15s", "shot_reverse_pair", "axis_continuous", "cut_dialogue"]) expect(items).toContain(id)
+    expect(g.nodes.qc.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.nodes.qc_look.onFail).toEqual({ action: "regenerate", max: 2 })
+  })
+
+  test("single_video：参考图单独接到视频，不跟关键帧收成同一张", () => {
+    const g = toGraph(singleVideoRecipe)
+    const ex = expandGraph(g)
+    const ref = destId(singleVideoRecipe.legacyRoleMap.reference)
+    expect(ref).not.toBe("keyframe")
+    expect(froms(ex.nodes["keyframe#s1"])).toContain(ref)
+    expect(froms(ex.nodes["clip#s1"])).toContain(ref)
+    expect(Object.values(g.nodes).some((n) => n.type === "render3d")).toBe(false)
+    expect(Object.values(g.nodes).some((n) => n.intent.includes("unsupported"))).toBe(true)
+  })
 })

@@ -1,6 +1,6 @@
 // 配方 character_sheet —— 由旧模板 deploy-staging/gateway/workflow-templates/character_sheet.ts（只读）改写。
 // 映射原则：docs/architecture/project-graph.md §6（角色族：shotlist(views) + keyframe#view → qc → export）。
-// 旧 role：character(text) / sheet(config) / view1..view4(image)。四个 image 是同构节点 → 一个 shotlist + 一个 forEach keyframe。
+// 旧 role：character(text) / sheet(config) / view1..view4(image)。正面是面部基线，侧面/背面/动作引用它。
 import type { Json, NewNode, ProjectDefaults, Recipe } from "../types"
 import { materializeDefaults } from "../specs"
 
@@ -56,12 +56,24 @@ export const characterSheetRecipe: Recipe = {
       },
       {
         id: "views", type: "shotlist",
-        intent: "旧 role view1..view4 的行表：四视图各自一个 row（正面/侧面/背面/动作），keyframe 按行扇出。",
-        params: { kind: "views", rows: VIEWS.map(asRow) },
+        intent: "旧 role view2..view4 的行表：侧面/背面/动作。正面 view_front 是面部基线，这三行引用它。",
+        params: { kind: "views", rows: VIEWS.filter((r) => r.id !== "front").map(asRow) },
+      },
+      {
+        id: "view_front", type: "keyframe",
+        intent: "旧 role view1：正面设定图，锁定面部基线，侧面/背面/动作引用这张。",
+        params: materializeDefaults("keyframe", "view_front", {
+          title: "正面",
+          prompt: "${character}\n本张视图：" + VIEWS[0].prompt,
+          role: "character_front",
+          size: "1024x1024",
+          n: 1,
+        }, defaults),
+        inputs: { brief: { from: "character" }, catalog: { from: "views" } },
       },
       {
         id: "keyframe", type: "keyframe", forEach: { over: "views", as: "view" },
-        intent: "旧 role view1-4 的图片在此生成（每行一张）：四视图共享本模板 seed 与 DNA 签名；旧 role sheet 的 4-view 配置（model/size/count=4）并入 params 与 defaults。",
+        intent: "旧 role view2-4：侧面/背面/动作，引用正面面部基线。旧 role sheet 的 4-view 配置并入 params 与 defaults。",
         params: materializeDefaults("keyframe", "keyframe", {
           title: "${row.label}",
           prompt: "${character}\n本张视图：${row.prompt}",
@@ -69,6 +81,7 @@ export const characterSheetRecipe: Recipe = {
           size: "${row.size}",
           n: "${row.n}",
         }, defaults),
+        inputs: { face: { from: "view_front" } },
       },
       {
         id: "qc", type: "qc",
@@ -78,13 +91,14 @@ export const characterSheetRecipe: Recipe = {
           rubric: "character_sheet",
           thresholds: { dnaDims: 8, identityAnchors: ["瞳距", "脸型轮廓", "发际线"], humanConfirm: true, noFakeText: true },
         },
-        inputs: { image: { from: "keyframe" } },
+        inputs: { image: { from: "keyframe" }, face: { from: "view_front" } },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",
         intent: "旧 role view1 的交付：四视图参考图组（view2/3/4 为本卡参考图）按图片包导出，供后续分镜引用。",
         params: { preset: "image_pack" },
-        inputs: { images: { from: "keyframe" }, verdict: { from: "qc" } },
+        inputs: { images: { from: "keyframe" }, face: { from: "view_front" }, verdict: { from: "qc" } },
       },
     ]
     return { nodes, targets: { shots: VIEWS.length, subtitles: false, audio: "none" }, defaults }
@@ -92,7 +106,7 @@ export const characterSheetRecipe: Recipe = {
   legacyRoleMap: {
     character: "character",
     sheet: { intentOf: "keyframe" }, // config 不成节点：model/size/count=4 已并入 keyframe.params 与 defaults
-    view1: "keyframe#front",
+    view1: "view_front",
     view2: "keyframe#side",
     view3: "keyframe#back",
     view4: "keyframe#action",

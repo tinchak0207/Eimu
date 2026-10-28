@@ -7,9 +7,11 @@
 //   ③ opencode.json / expert/opencode-agents.json 的席位表解析（只取启用集，不取生成清单）。
 import "./fixtures/env"
 import "./fixtures/fake-platform"
+import { INVARIANTS_SANDBOX } from "./fixtures/env"
 import { beforeAll, describe, expect, test } from "bun:test"
-import { readFileSync, readdirSync } from "node:fs"
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { RULES_MAP, extractRuleTags } from "../rules-map.ts"
 
 const HERE = import.meta.dir
 /** gateway/project/__invariants__ → deploy-staging */
@@ -168,5 +170,264 @@ describe("I4 主席位工具面", () => {
     const generation = new Set<string>(DOC_DIRECT_GENERATION_TOOLS)
     expect(() => assertNoGenerationTools("fake_p", ["read", "image_generate"], generation)).toThrow(/生成类工具/)
     expect(() => assertNoGenerationTools("fake_p", ["read", "project_get"], generation)).not.toThrow()
+  })
+})
+
+// ── 运行时席位选择（S2）────────────────────────────────────────────
+// 生成工具清单来源：deploy-staging/opencode-runtime/tools/*.ts 去注释后的静态扫描
+// （GENERATION_CALL_PATTERNS：生图/生视频端点、upscale、/agent/v1/tts、runGenBatch、
+// musicGen/wrapMusic、blender 包装、music_gen/blender_render/blender_exec 字面量）
+// 与设计文档超集 DOC_DIRECT_GENERATION_TOOLS 取并集。
+// 2026-10-28 扫描命中（文件名＝工具名）：audio_first_timeline、blender_exec、
+// blender_export_gltf、blender_render、canonical_key_art_lock、cast_asset_lock、
+// character_dna_turnaround、emotion_board_matrix、hand_contact_repair、image_edit、
+// image_generate、image_upscale、keyframe_render、last_frame_video_chain、
+// moodboard_diverge_converge、music_gen、product_conditioned_generation、product_lock、
+// scene_pack_batch、story_sequence_consistency、style_aligned_batch、tts_speak、
+// upscale_audit、virtual_tryon。
+// video_fetch / video_result_fetch / video_analyze / video_transcribe / video_measure /
+// video_evidence / video_quote 是取回或感知，不在这份生成清单里。bash/write/edit 不是生成工具。
+// 工程会话可达席位（creator、orchestrator、researcher、全部 *_p）不得启用上述并集。
+const RESEARCHER_TOOLS = ["grep", "project_get", "read", "read_image", "search_web"].sort()
+const CREATOR_PROMPT = [
+  "工程图是唯一工作面。读工程用 project_get，改工程用 project_patch，跑工程用 project_run。[R-01]",
+  "本席位不直接调用生成工具。要产出画面、影片或声音，改节点后 project_run。[R-02]",
+  "专家任务派 subagent_dispatch。子代理只能写自己 lane 里的节点，越界写入会被拒绝。[R-12]",
+  "问用户用 question。报价达到确认阈值且没有持续授权时，停下来等确认；持续授权只认网关核实的 auto/full。[R-07][R-08]",
+  "交付只认 export 产物，口头说完成不算交付。[R-03]",
+].join("\n")
+const ORCHESTRATOR_PROMPT = [
+  "工程图是唯一工作面。你负责读工程、改工程、派子代理、问用户、交付。",
+  "读工程用 project_get，改工程用 project_patch，跑工程用 project_run。[R-01]",
+  "本席位不直接调用生成工具。[R-02]",
+  "专家任务派 subagent_dispatch。子代理只能写自己 lane 里的节点。[R-12]",
+  "问用户用 question。收费确认按网关核实的授权与阈值执行。[R-07][R-08]",
+  "交付只认 export 产物。[R-03]",
+].join("\n")
+const CREATOR_LEGACY_PROMPT = "用户直接跟你说话，你要么当场把东西做出来，要么派给专家做。手上开放的工具就用来做图、做片、做音乐。开工前按任务读 .opencode/skills/_prompt-routing/creator-guide.md 里对应的那节和本域配方，不相关的域不要加载。不是一句话能办完的事先研究，做完要有人独立看过。多步骤的活派 subagent_dispatch。只写歌词派 lyricist；整首歌要原创歌词的，先 lyricist 后 music；用户给了完整原词就直接照原样谱曲；纯器乐不派歌词。其余规则见 workspace/AGENTS.md。"
+const ORCHESTRATOR_LEGACY_PROMPT = "用户在等你把东西做出来。你要做的：看懂他要什么，写成别人能直接执行的任务书，派合适的专家去做，把结果验过再交回去。出图、出片、写代码这些活由专家做，你手上没有这些工具，也不用为此向用户解释。报价和账本你来核（quote_bundle），画布你来控（canvas_get_state / workflow_write，收盘要真写穿）。读资料、看注册表是为了判断该派谁，不要把生产配方加载进来。对用户只说结果和进度，不说你是什么角色、有什么工具、系统怎么分的工。扣费与协作授权按网关这一轮核实的来。其余规则见 workspace/AGENTS.md 和派遣手册。"
+
+function assertPromptAgent(body: { agent?: unknown }, allowed: readonly string[]): void {
+  expect(typeof body.agent).toBe("string")
+  const agent = String(body.agent)
+  expect(agent.length).toBeGreaterThan(0)
+  expect(allowed).toContain(agent)
+}
+
+function wakeState(over: Record<string, unknown> = {}): any {
+  return {
+    sessionId: `gw-i4-${crypto.randomUUID()}`,
+    apiKey: `sk-i4-${crypto.randomUUID()}`,
+    opencodeSessionId: `ses_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    clients: new Set(),
+    replayBuffer: [],
+    eventCounter: 0,
+    messageRole: new Map(),
+    suppressedParts: new Set(),
+    pendingQuestions: new Map(),
+    pendingConfirms: new Map(),
+    partStripState: new Map(),
+    partTextEmitted: new Map(),
+    stepCostLogged: new Set(),
+    turnGen: 1,
+    turnTextChars: 0,
+    turnToolStarted: false,
+    turnAborted: false,
+    turnRetries: 0,
+    lastTurnActiveAt: 0,
+    sessionTitle: "i4",
+    seat: "creator_legacy",
+    projectMode: false,
+    beast: false,
+    ...over,
+  }
+}
+
+function installPromptCapture(): { bodies: Array<{ agent?: string }>; restore: () => void } {
+  const prev = globalThis.fetch
+  const bodies: Array<{ agent?: string }> = []
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : String(input?.url ?? "")
+    if (url.includes("/prompt_async")) {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      return new Response("{}", { status: 200 })
+    }
+    if (url.endsWith("/session") && (init?.method ?? "GET").toUpperCase() === "POST") {
+      return new Response(JSON.stringify({ id: "ses_i4child0001" }), { status: 200, headers: { "content-type": "application/json" } })
+    }
+    if (url.includes("/message")) return new Response("[]", { status: 200, headers: { "content-type": "application/json" } })
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
+  }) as typeof fetch
+  return { bodies, restore: () => { globalThis.fetch = prev } }
+}
+
+describe("I4 运行时席位：不带 agent 的 prompt 不得落到 build", () => {
+  test("opencode.json default_agent 指向 creator；工程提示词按规则表，legacy 提示词逐字不动", () => {
+    const raw = readJson<{ default_agent?: string; agent: Record<string, Seat & { prompt?: string }> }>(OPENCODE_JSON)
+    expect(raw.default_agent).toBe("creator")
+    const creator = raw.agent.creator.prompt ?? ""
+    const orchestrator = raw.agent.orchestrator.prompt ?? ""
+    expect(creator).toBe(CREATOR_PROMPT)
+    expect(orchestrator).toBe(ORCHESTRATOR_PROMPT)
+    expect(creator.split("\n").length).toBeLessThanOrEqual(40)
+    expect(orchestrator.split("\n").length).toBeLessThanOrEqual(40)
+    for (const prompt of [creator, orchestrator]) {
+      expect(prompt.includes("做图")).toBe(false)
+      expect(prompt.includes("做片")).toBe(false)
+      expect(prompt.includes("做音乐")).toBe(false)
+      expect(prompt.includes("workflow_write")).toBe(false)
+      expect(prompt.includes("canvas_get_state")).toBe(false)
+      for (const tag of extractRuleTags(prompt)) expect(RULES_MAP[tag]?.enforce).toBeTruthy()
+    }
+    expect(raw.agent.creator_legacy.prompt).toBe(CREATOR_LEGACY_PROMPT)
+    expect(raw.agent.orchestrator_legacy.prompt).toBe(ORCHESTRATOR_LEGACY_PROMPT)
+    const researcher = enabled(raw.agent.researcher)
+    expect(researcher).toEqual(RESEARCHER_TOOLS)
+  })
+
+  test("工程会话可达席位的启用集不含工具目录里的直调生成工具", () => {
+    const scan = scanGenerationTools()
+    const generation = new Set<string>([...DOC_DIRECT_GENERATION_TOOLS, ...scan.keys()])
+    const seats = seatsOf(OPENCODE_JSON)
+    const reachable = Object.keys(seats).filter((name) => name === "creator" || name === "orchestrator" || name === "researcher" || name.endsWith("_p"))
+    expect(reachable).toContain("creator")
+    expect(reachable).toContain("researcher")
+    expect(reachable.some((name) => name.endsWith("_p"))).toBe(true)
+    for (const name of reachable) assertNoGenerationTools(name, enabled(seats[name]), generation)
+    expect(enabled(seats.creator)).toEqual(DOC_MAIN_TOOLS)
+  })
+
+  test("主会话 prompt 的席位：工程 creator，legacy 非 beast creator_legacy，legacy beast orchestrator_legacy", () => {
+    expect(adm.resolvePromptSeat({ projectMode: true, seat: "creator", beast: false })).toBe("creator")
+    expect(adm.resolvePromptSeat({ projectMode: true, seat: "creator", beast: true })).toBe("creator")
+    expect(adm.resolvePromptSeat({ projectMode: false, seat: "creator_legacy", beast: false })).toBe("creator_legacy")
+    expect(adm.resolvePromptSeat({ projectMode: false, seat: "creator_legacy", beast: true })).toBe("orchestrator_legacy")
+  })
+
+  test("legacy 非 beast 的 wake/nudge 与工程 wakeup 字段带席位", async () => {
+    const lifecycle = await import("../../session-lifecycle.ts")
+    assertPromptAgent(lifecycle.beastAgentField(wakeState({ seat: "creator_legacy", projectMode: false })), ["creator_legacy"])
+    assertPromptAgent(lifecycle.beastAgentField(wakeState({ seat: "creator", projectMode: true })), ["creator"])
+    assertPromptAgent(lifecycle.beastAgentField(wakeState({ projectMode: false })), ["creator_legacy"])
+  })
+
+  test("通用子代理与 expert 子代理的 prompt_async body.agent", async () => {
+    const { resolveDispatchAgent } = await import("../../subagent-dispatch.ts")
+    expect(resolveDispatchAgent({ projectMode: true, named: "", beast: false })).toBe("researcher")
+    expect(resolveDispatchAgent({ projectMode: true, named: "editor", beast: false })).toBe("editor_p")
+    expect(resolveDispatchAgent({ projectMode: false, named: "", beast: false })).toBe("creator_legacy")
+    expect(resolveDispatchAgent({ projectMode: false, named: "", beast: true })).toBe("orchestrator_legacy")
+    expect(resolveDispatchAgent({ projectMode: false, named: "editor", beast: false })).toBe("editor")
+    const { initSubagent } = await import("../../subagent-runs.ts")
+    const { dispatchAttempt } = await import("../../subagent-attempt.ts")
+    initSubagent({
+      emitToSession: () => {},
+      resolveSession: () => undefined,
+      findSessionByOpenCodeId: () => undefined,
+      openCodeUrl: "http://127.0.0.1:9",
+      openCodeHeaders: () => ({ "content-type": "application/json" }),
+      describeError: (e: unknown) => String(e),
+      subagentModelChain: () => [{ providerID: "p", modelID: "m" }],
+      beastMode: () => false,
+      wakeParent: () => {},
+    } as any)
+    const cap = installPromptCapture()
+    try {
+      const generic = {
+        id: `run-${crypto.randomUUID()}`,
+        parentGatewaySessionId: "gw-parent",
+        parentOpencodeSessionId: "ses_parent0001",
+        opencodeSessionId: "",
+        label: "研究",
+        startedAt: Date.now(),
+        status: "running",
+        prompt: "把参考图里的构图写下来",
+        modelChain: [{ providerID: "p", modelID: "m" }],
+        attempt: 1,
+        messageRole: new Map(),
+        partEmitted: new Map(),
+        beastMode: false,
+        projectMode: true,
+        asyncMode: false,
+        partKind: new Map(),
+        suppressedParts: new Set(),
+        partText: new Map(),
+        pendingTools: new Set(),
+      } as any
+      expect(await dispatchAttempt(generic)).toBeUndefined()
+      assertPromptAgent(cap.bodies.at(-1) ?? {}, ["researcher"])
+      const expert = { ...generic, id: `run-${crypto.randomUUID()}`, agent: "editor_p", prompt: "剪一条成片" }
+      expect(await dispatchAttempt(expert)).toBeUndefined()
+      assertPromptAgent(cap.bodies.at(-1) ?? {}, ["editor_p"])
+    } finally {
+      cap.restore()
+    }
+  })
+
+  test("workflow 唤醒与 legacy goal nudge 的 prompt_async body.agent", async () => {
+    const cap = installPromptCapture()
+    const wf = wakeState({ seat: "creator", projectMode: true })
+    const nudge = wakeState({ seat: "creator_legacy", projectMode: false })
+    try {
+      const { dispatchWorkflowWake } = await import("../../workflow-gw-service.ts")
+      await dispatchWorkflowWake(wf, "wf-i4", "工程跑完了", "final")
+      assertPromptAgent(cap.bodies[0] ?? {}, ["creator"])
+      const { deliverGoalNudge } = await import("../../opencode-event-handler-goal.ts")
+      await deliverGoalNudge(nudge, "还没有成片")
+      assertPromptAgent(cap.bodies[1] ?? {}, ["creator_legacy"])
+    } finally {
+      cap.restore()
+      const { clearWatchdogTimer, clearMidturnStallTimer } = await import("../../timers-gw.ts")
+      clearWatchdogTimer(wf)
+      clearMidturnStallTimer(wf)
+      clearWatchdogTimer(nudge)
+      clearMidturnStallTimer(nudge)
+    }
+  })
+
+  test("failover 零产出重投沿用 lastPromptBody.agent", async () => {
+    const cap = installPromptCapture()
+    const fail = wakeState({
+      seat: "creator",
+      projectMode: true,
+      turnUpstreamError: "upstream tls reset",
+      lastPromptBody: { agent: "creator", parts: [{ type: "text", text: "做一张海报" }] },
+    })
+    try {
+      const { sessions } = await import("../../sessions-core.ts")
+      const { handleOpencodeEvent } = await import("../../opencode-event-handler.ts")
+      sessions.set(fail.sessionId, fail)
+      handleOpencodeEvent({ type: "session.idle", properties: { sessionID: fail.opencodeSessionId } })
+      const deadline = Date.now() + 2500
+      while (cap.bodies.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50))
+      assertPromptAgent(cap.bodies[0] ?? {}, ["creator"])
+    } finally {
+      cap.restore()
+      const { clearWatchdogTimer, clearMidturnStallTimer } = await import("../../timers-gw.ts")
+      clearWatchdogTimer(fail)
+      clearMidturnStallTimer(fail)
+    }
+  })
+
+  test("后台命令完成唤醒带会话当前席位，缺席位时不落到 build", async () => {
+    process.env.EIMU_WORKSPACE = join(INVARIANTS_SANDBOX, "oc-workspace")
+    const { sessionTmpDir } = await import("../../../opencode-runtime/lib/sandbox.ts")
+    const { EimuGuard } = await import("../../../opencode-runtime/plugin/eimu-guard.ts")
+    const sessionID = "ses_bgwake0001"
+    const dir = sessionTmpDir(sessionID)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, "task1.notify"), `${sessionID}\n0\n\n`)
+    const seen: Array<{ agent?: string }> = []
+    await EimuGuard({
+      client: {
+        session: {
+          get: async () => ({ data: { agent: "video-director_p" } }),
+          promptAsync: async (args: any) => { seen.push(args?.body ?? {}) },
+        },
+      },
+    } as any)
+    const until = Date.now() + 4000
+    while (seen.length === 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
+    assertPromptAgent(seen[0] ?? {}, ["video-director_p"])
   })
 })

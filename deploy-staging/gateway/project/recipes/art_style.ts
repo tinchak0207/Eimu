@@ -122,6 +122,7 @@ export const artStyleRecipe: Recipe = {
           role: "copy_compare",
           size: "1024x1024",
         }, defaults),
+        inputs: { dna: { from: "dna_card" } },
       },
       {
         id: "matrix", type: "shotlist",
@@ -137,6 +138,7 @@ export const artStyleRecipe: Recipe = {
           role: "variant_matrix",
           size: "1024x1024",
         }, defaults),
+        inputs: { dna: { from: "dna_card" } },
       },
       {
         id: "origin", type: "shotlist",
@@ -152,10 +154,11 @@ export const artStyleRecipe: Recipe = {
           role: "origin_set",
           size: "1024x1024",
         }, defaults),
+        inputs: { dna: { from: "dna_card" } },
       },
       {
         id: "check", type: "qc",
-        intent: "独立评审 + LoRA 可选轨记录：五维还原度 / 组内色盘 / 构图查重 / 题材查重；Lora 训练与挂载 upstream 未接＝unsupported_skip，不生成假模型文件。",
+        intent: "独立评审 + LoRA 可选轨记录：五维还原度 / 组内色盘 / 构图查重 / 题材查重；Lora 训练与挂载 upstream 未接＝unsupported_skip，不生成假模型文件。条目 restore_70、high_weight_85、grid_7_of_9。",
         params: {
           mode: "critic",
           rubric: "style_dna_consistency",
@@ -166,6 +169,7 @@ export const artStyleRecipe: Recipe = {
             origin: { count: [6, 8], colorOffsetMaxSteps: 2, uniqueAxes: ["景别", "视点", "负形"], themeNotReplicated: true },
             archive: { required: ["ref_pool", "dna_card", "copy_compare", "variant_matrix", "lora_skip", "origin_set", "prompt_skeleton"] },
             lora: { status: "unsupported_skip", reason: "upstream_unavailable", alt: "fixed_seed+shared_prompt_skeleton" },
+            items: ["restore_70", "high_weight_85", "grid_7_of_9", "palette_steps", "composition_unique", "theme_not_copy"],
             minScore: 0.7,
           },
         },
@@ -176,6 +180,7 @@ export const artStyleRecipe: Recipe = {
           variants: { from: "variant_matrix" },
           originals: { from: "origin_set" },
         },
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "pack", type: "export",

@@ -105,8 +105,8 @@ describe("补丁路径触发 forEach 扇出", () => {
     expect(r.receipt.warnings).toEqual([]) // 没有扇出变化就不刷摘要
   })
 
-  test("删行：无产物的实例随 row 消失；人手产物+pinned 的实例保留为 orphaned", async () => {
-    // 反例（证明会咬人）：kf#r2 有用户产物并 pin，删 row 后必须保留。
+  test("删行：无产物的实例随 row 消失；agent 删 pinned 行整批 LOCKED", async () => {
+    // kf#r2 已被 USER replace_output 钉住。agent 删对应行 → 整批 LOCKED，图不动。
     const keptStore = await fresh()
     await fanoutFixture(keptStore)
     const art: Output = await keptStore.artifacts.putBytes("用户手选的定格", { port: "out", origin: "user" })
@@ -115,33 +115,13 @@ describe("补丁路径触发 forEach 扇出", () => {
     expect(replaced.graph.nodes["kf#r2"].pinned).not.toBeNull()
 
     const r = await setRows(keptStore, [{ id: "r1", action: "雨夜奔跑" }])
-    expect(r.receipt.ok).toBe(true)
+    expect(r.receipt.ok).toBe(false)
+    expect(r.receipt.rejected[0].code).toBe("LOCKED")
     const kept = r.graph.nodes["kf#r2"]
     expect(kept).toBeDefined()
-    expect(kept.status).toBe("orphaned")
-    expect(kept.pinned).not.toBeNull() // 产物没被删
-    expect(kept.outputs.map((o) => o.artifactId)).toEqual([art.artifactId])
-    expect(r.graph.order).toContain("kf#r2")
-    expect(r.receipt.warnings).toEqual(["fanout:+0 -0 orphan:1"])
-    // 状态转换要有事件（画布据此换卡面），但实例不进 patch 事件的 nodes
-    expect(r.events.some((e) => e.kind === "node_status" && e.node === "kf#r2" && e.data.to === "orphaned")).toBe(true)
-    expect(patchEventOf(r.events).data.nodes).toEqual(["shots"])
-
-    // planRun：orphaned 实例不进任何计划桶（target=模板 与 默认全图 targets 两条路径都验）。
-    // 反例：若 planRun 没排除 orphaned，kf#r2 会以 pinned/toRun 出现在下面四个桶之一。
-    const plans = [
-      await planRun(r.graph, ["kf"], "incremental", keptStore.artifacts, NODE_SPECS_LITE),
-      await planRun(r.graph, undefined, "incremental", keptStore.artifacts, NODE_SPECS_LITE),
-    ]
-    for (const plan of plans) {
-      expect(plan.toRun).not.toContain("kf#r2")
-      expect(plan.reuse).not.toContain("kf#r2")
-      expect(plan.pinned).not.toContain("kf#r2")
-      expect(plan.blocked).not.toContain("kf#r2")
-      expect(plan.unknown).not.toContain("kf#r2")
-      // 防过度排除：存活的 kf#r1 必须仍在计划内
-      expect([...plan.toRun, ...plan.reuse, ...plan.pinned, ...plan.blocked, ...plan.unknown]).toContain("kf#r1")
-    }
+    expect(kept.pinned).not.toBeNull()
+    expect(kept.status).not.toBe("orphaned")
+    expect(r.graph.nodes.shots.params.rows).toEqual([{ id: "r1", action: "雨夜奔跑" }, { id: "r2", action: "回头" }])
 
     // 正向：没有人类产物时，删 row 后实例直接消失。
     const cutStore = await fresh()
@@ -155,6 +135,40 @@ describe("补丁路径触发 forEach 扇出", () => {
     // removed 不造事件（画布按既有约定保留旧卡），也不进 patch 事件 nodes
     expect(removed.events.some((e) => e.node === "kf#r2")).toBe(false)
     expect(patchEventOf(removed.events).data.nodes).toEqual(["shots"])
+  })
+
+  test("用户删行：人手产物+pinned 的实例保留为 orphaned", async () => {
+    const keptStore = await fresh()
+    await fanoutFixture(keptStore)
+    const art: Output = await keptStore.artifacts.putBytes("用户手选的定格", { port: "out", origin: "user" })
+    const replaced = await keptStore.applyPatches({ ops: [{ op: "replace_output", node: "kf#r2", artifactId: art.artifactId }] as never }, USER)
+    expect(replaced.receipt.ok).toBe(true)
+    expect(replaced.graph.nodes["kf#r2"].pinned).not.toBeNull()
+
+    const r = await keptStore.applyPatches({ ops: [{ op: "set", node: "shots", path: "params.rows", value: [{ id: "r1", action: "雨夜奔跑" }] }] as never }, USER)
+    expect(r.receipt.ok).toBe(true)
+    const kept = r.graph.nodes["kf#r2"]
+    expect(kept).toBeDefined()
+    expect(kept.status).toBe("orphaned")
+    expect(kept.pinned).not.toBeNull()
+    expect(kept.outputs.map((o) => o.artifactId)).toEqual([art.artifactId])
+    expect(r.graph.order).toContain("kf#r2")
+    expect(r.receipt.warnings).toEqual(["fanout:+0 -0 orphan:1"])
+    expect(r.events.some((e) => e.kind === "node_status" && e.node === "kf#r2" && e.data.to === "orphaned")).toBe(true)
+    expect(patchEventOf(r.events).data.nodes).toEqual(["shots"])
+
+    const plans = [
+      await planRun(r.graph, ["kf"], "incremental", keptStore.artifacts, NODE_SPECS_LITE),
+      await planRun(r.graph, undefined, "incremental", keptStore.artifacts, NODE_SPECS_LITE),
+    ]
+    for (const plan of plans) {
+      expect(plan.toRun).not.toContain("kf#r2")
+      expect(plan.reuse).not.toContain("kf#r2")
+      expect(plan.pinned).not.toContain("kf#r2")
+      expect(plan.blocked).not.toContain("kf#r2")
+      expect(plan.unknown).not.toContain("kf#r2")
+      expect([...plan.toRun, ...plan.reuse, ...plan.pinned, ...plan.blocked, ...plan.unknown]).toContain("kf#r1")
+    }
   })
 
   test("非法扇出整批拒绝：over 不是 shotlist / rows 不是数组 → ok=false、BAD_REF|BAD_VALUE、version 不变", async () => {

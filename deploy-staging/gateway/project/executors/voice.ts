@@ -6,6 +6,8 @@
 // durationSec 用 ffprobe 实测后写进 Output 与 meta.durationSec（下游 timeline/mix 需要）。
 import { execFile } from "node:child_process"
 import { estimateTtsCoins } from "../../pricing-and-validation.ts"
+import { releaseGenerationCharge, reserveGenerationCharge, settleGenerationCharge } from "../ledger.ts"
+import { idempotencyKeyOf } from "../submit-generation.ts"
 import type { ExecContext, ExecErrorCode, ExecResult, NodeExecutor, Output, ProjectNode } from "../types"
 import { NODE_SPECS } from "../specs"
 import { synthesizeSpeech, TTS_MODEL_ID, type SpeechDeps, type SynthesisErrorCode } from "../speech"
@@ -68,9 +70,18 @@ export function createVoiceExecutor(opts: VoiceExecutorOptions = {}): NodeExecut
         run_id: ctx.runId, attempt: ctx.attempt, take: ctx.take,
       }
 
+      const quoted = estimateTtsCoins(TTS_MODEL_ID, text.trim())
+      const idemKey = idempotencyKeyOf({ projectId: ctx.project.id, signature: ctx.signature, take: ctx.take, attempt: ctx.attempt })
+      const reserved = await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: quoted })
+      if (reserved.ok === false) return { ok: false, code: reserved.code, message: reserved.message, retryable: reserved.retryable }
+      if (reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: TTS_MODEL_ID, cost_coins: quoted, idem_key: idemKey })
       const r = await synthesizeSpeech({ text, voice, speed, apiKey, signal: ctx.signal }, opts.speech)
       if (r.ok === false) {
         const mapped = ERROR_MAP[r.code]
+        if (reserved.bound) {
+          releaseGenerationCharge(ctx.sessionId, idemKey)
+          await ctx.ledger.write({ ...common, event: "refunded", model: TTS_MODEL_ID, cost_coins: quoted, idem_key: idemKey })
+        }
         if (mapped.ledgerFailure) {
           await ctx.ledger.write({ ...common, event: "failed", model: TTS_MODEL_ID, cost_coins: 0 })
         }
@@ -100,7 +111,8 @@ export function createVoiceExecutor(opts: VoiceExecutorOptions = {}): NodeExecut
           ...(durationSec === null ? { durationProbe: "unavailable" } : {}),
         },
       }
-      await ctx.ledger.write({ ...common, event: "submitted", model: TTS_MODEL_ID, cost_coins: r.costCoins })
+      settleGenerationCharge(ctx.sessionId, idemKey, r.costCoins)
+      if (!reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: TTS_MODEL_ID, cost_coins: r.costCoins })
       await ctx.ledger.write({ ...common, event: "completed", model: TTS_MODEL_ID, cost_coins: r.costCoins, artifact_sha256: ingested.sha256 })
       return { ok: true, outputs: [output], costCoins: r.costCoins }
     },

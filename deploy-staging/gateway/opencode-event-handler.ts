@@ -514,14 +514,7 @@ export function handleOpencodeEvent(event: any): void {
           const orphanTools = hadOutput ? takeInFlightTools(state) : []
           clearInFlightTools(state)
           const retryInjection = buildFailoverInjection({ hadOutput, orphanTools })
-          const retryBody: NonNullable<SessionState["lastPromptBody"]> = hadOutput
-            ? // 有中断处：注入续写指示（＋孤儿工具补注），让模型从断点续跑。
-              { parts: [{ type: "text", text: retryInjection }] }
-            : baseBody
-              ? // 零产出：重放原任务书（没有中断处可续，不注入）。
-                { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }
-              : // 零产出且无原任务书可重放：仍须送非空文本（不可送空 prompt）。
-                { parts: [{ type: "text", text: buildContinuationDirective() }] }
+          const retryBody = failoverRetryBody({ hadOutput, baseBody, state, retryInjection })
           if (orphanTools.length > 0) {
             console.log(
               `[gateway] turn failover: injected orphan tool_use is_error note (x${orphanTools.length}) — session=${state.sessionId} tools=${orphanTools.map((t) => t.name || t.id).join(",")}`,
@@ -994,3 +987,32 @@ export function handleOpencodeEvent(event: any): void {
 }
 export { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools } from "./opencode-event-handler-hooks.ts"
 export { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"
+
+/**
+ * failover 三条重投 body。都带非空 agent，且不是 build：
+ * baseBody.agent 为非空字符串且不是 build 时沿用（会话当前席位，含 *_p），
+ * 否则用 beastAgentField（工程 creator / legacy beast orchestrator_legacy / legacy 非 beast creator_legacy）。
+ * hadOutput 只发续写 parts，不把原任务书 parts 并回去。
+ */
+export function failoverRetryBody(input: {
+  hadOutput: boolean
+  baseBody: SessionState["lastPromptBody"]
+  state: SessionState
+  retryInjection: string
+}): NonNullable<SessionState["lastPromptBody"]> & { agent: string } {
+  const carried = input.baseBody ? (input.baseBody as { agent?: unknown }).agent : undefined
+  const agent =
+    typeof carried === "string" && carried.length > 0 && carried !== "build"
+      ? carried
+      : beastAgentField(input.state).agent
+  if (input.hadOutput) {
+    // 有中断处：只注入续写指示（孤儿工具补注已在 retryInjection 里），不重放原任务书。
+    return { agent, parts: [{ type: "text", text: input.retryInjection }] }
+  }
+  if (input.baseBody) {
+    // 零产出：重放原任务书（没有中断处可续，不注入）。parts 浅拷贝，与展开 baseBody 相同。
+    return { ...input.baseBody, agent, parts: input.baseBody.parts.map((pt) => ({ ...pt })) }
+  }
+  // 零产出且无原任务书可重放：仍须送非空文本（不可送空 prompt）。
+  return { agent, parts: [{ type: "text", text: buildContinuationDirective() }] }
+}

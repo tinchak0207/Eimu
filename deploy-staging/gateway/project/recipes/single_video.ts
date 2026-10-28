@@ -1,6 +1,11 @@
 // S11a 配方（电影族）：single_video 单支影片。映射原则见设计文档 §6；旧模板 workflow-templates/single_video.ts 只读。
 // 旧 role 清单由测试从旧模板文件现算（不手抄）：shot / reference / previz / generation / result。
-// 骨架：script → shotlist(shots) → keyframe#shot → clip#shot → voice#shot → music → timeline → subtitle → mix → export → qc
+// 骨架：script → shotlist(shots) → anchor → keyframe#shot → clip#shot → voice#shot → music → timeline
+//   → subtitle → mix → qc → qc_look → export
+//
+// notes / 3D 预演（unsupported）：旧 previz 要白模 blocking、机位路径、首/中/尾帧作视频参考，不是成片。
+// project/executors/index.ts 未注册 render3d。不造会跑的假节点，也不把这段删掉。
+// 参考图是独立的 anchor，再接到关键帧和视频；不把参考图和成片关键帧收成同一张。
 import { ASPECTS, NODE_SPECS, materializeDefaults } from "../specs"
 import type { Json, NodeId, NewNode, NodeType, ProjectDefaults, Recipe } from "../types"
 
@@ -74,15 +79,23 @@ export const singleVideoRecipe: Recipe = {
       N("shots", "shotlist", "镜头表：每行一镜；action 写物理动作与环境变化，camera 写景别/机位/运镜，seconds 平台下限 5 秒", { kind: "shots", rows }, {
         inputs: { script: { from: "script" } },
       }),
-      N("keyframe", "keyframe", "本镜关键帧/参考图；3D 预演首中尾帧可作参考条件，预演帧不是成片", {
+      N("anchor", "keyframe", "参考图：角色/场景锚点，关键帧和视频都接这张，不跟成片关键帧收成同一张。", {
+        prompt: style ? `参考图：角色/场景锚点。${style}` : "参考图：角色/场景锚点，带上可保人物一致",
+        role: "reference",
+        size: imageSize,
+        n: 1,
+        ...(style ? { styleLock: style } : {}),
+        ...(imageModel ? { model: imageModel } : {}),
+      }),
+      N("keyframe", "keyframe", "本镜关键帧，接参考图。render3d 未注册，3D 预演 unsupported，预演帧不是成片。", {
         prompt: "镜头 ${row.action}，${row.camera}",
         role: "keyframe",
         size: imageSize,
         n: 1,
         ...(style ? { styleLock: style } : {}),
         ...(imageModel ? { model: imageModel } : {}),
-      }, { forEach: { over: "shots", as: "shot" } }),
-      N("clip", "clip", "本镜视频：动作镜头优先 T2V 或用预演关键帧作参考；抽帧与 motion 证据验形变/静态", {
+      }, { forEach: { over: "shots", as: "shot" }, inputs: { anchor: { from: "anchor" } } }),
+      N("clip", "clip", "本镜视频：动作镜头优先 T2V 或用关键帧作参考；抽帧查形变，静态与否见 film_frame_critic", {
         prompt: "${row.action}，${row.camera}",
         size: aspect,
         seconds,
@@ -90,7 +103,7 @@ export const singleVideoRecipe: Recipe = {
         generateAudio: false,
         ...(style ? { styleLock: style } : {}),
         ...(videoModel ? { model: videoModel } : {}),
-      }, { forEach: { over: "shots", as: "shot" }, inputs: { first: { from: "keyframe" } } }),
+      }, { forEach: { over: "shots", as: "shot" }, inputs: { first: { from: "keyframe" }, anchor: { from: "anchor" } } }),
       N("voice", "voice", "逐镜配音；时长以 ffprobe 实测为准，不把 4.5 字/秒折算当终值", { text: "${row.line}" }, {
         forEach: { over: "shots", as: "shot" },
       }),
@@ -104,14 +117,18 @@ export const singleVideoRecipe: Recipe = {
       N("mix", "mix", "混音：人声/BGM/音效独立轨道，响度对齐 -14 LUFS", { levels: { voice: 0, music: -18 }, ducking: true, targetLufs: -14 }, {
         inputs: { voice: { from: "voice" }, music: { from: "music" }, timeline: { from: "timeline" } },
       }),
-      N("export", "export", "唯一交付出口：成片 MP4（拼接+混音+字幕），交付前重检解码/时长/音轨", { preset }, {
-        inputs: { clips: { from: "clip" }, timeline: { from: "timeline" }, audio: { from: "mix" }, subtitle: { from: "subtitle", port: "srt" } },
-      }),
       N("qc", "qc", "机器质检：首中尾抽帧查形变闪帧，响度/黑帧/冻结帧过阈值，时长偏差 ±10%", {
         mode: "machine",
         rubric: "film_default",
         thresholds: { durationTolerance: 0.1, targetLufs: -14, requireAudio: true },
-      }, { inputs: { final: { from: "export" } } }),
+      }, { inputs: { final: { from: "clip" } }, onFail: { action: "regenerate", max: 2 } }),
+      N("qc_look", "qc", "对关键帧抽帧交给独立 critic，按 film_frame_critic 逐项判定；不过关不导出。", {
+        mode: "critic",
+        rubric: "film_frame_critic",
+      }, { inputs: { image: { from: "keyframe" } }, onFail: { action: "regenerate", max: 2 } }),
+      N("export", "export", "唯一交付出口：成片 MP4（拼接+混音+字幕），交付前重检解码/时长/音轨", { preset }, {
+        inputs: { clips: { from: "clip" }, timeline: { from: "timeline" }, audio: { from: "mix" }, subtitle: { from: "subtitle", port: "srt" }, machine: { from: "qc" }, verdict: { from: "qc_look" } },
+      }),
     ]
 
     return {
@@ -123,7 +140,7 @@ export const singleVideoRecipe: Recipe = {
   // 旧 role 去向：说明性 text 并入 intent，config 参数进下游 params/defaults。
   legacyRoleMap: {
     shot: "script",
-    reference: "keyframe",
+    reference: "anchor",
     previz: { intentOf: "keyframe" },
     generation: { intentOf: "clip" },
     result: "clip",

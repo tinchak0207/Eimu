@@ -27,7 +27,11 @@ import { ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, sch
 import { personaModel, isVisionModel } from "./model-registry.ts"
 import { buildTurnImageParts } from "./turn-image-parts.ts"
 import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSessionUsedTokens, estimateActiveContextTokens, COMPACTION_MAX_DEFER_MS } from "./messages-gw-compaction.ts"
-import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedConstraintsText, originalUserPromptText, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, type SystemPromptSection } from "./messages-gw-types.ts"
+import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedConstraintsText, originalUserPromptText, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, installProjectIngressSink, type SystemPromptSection } from "./messages-gw-types.ts"
+import { acceptOriginalUserPrompt, readOriginalPin, restoreOriginalPin, systemWithoutOriginalGoalEcho } from "./project/goal-card.ts"
+import { acceptProjectIngress, persistUserBriefNow } from "./project/context.ts"
+
+installProjectIngressSink((record) => acceptProjectIngress(record))
 
 // ── S14：席位／beast／骨架的纯决策（设计文档 §3.7 第 8-10 点）────────────────────
 // 为什么单独抽出来：这三条都是「会话内不得变」的性质，必须有非 I/O 的真实函数可断言；
@@ -233,7 +237,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   // 其余用户正文一字不动），超限标注「已截断」。
   const attachmentBudget = applyAttachmentBudget(sanitizeUserContent(rawContent))
   const content = attachmentBudget.text
-  rememberPinnedConstraints(state, content)
+  const priorPin = readOriginalPin(state)
   if (attachmentBudget.truncated) {
     console.log(
       `[gateway] attachment budget truncated: session=${state.sessionId} ${attachmentBudget.originalChars}->${attachmentBudget.chars} chars`,
@@ -268,6 +272,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
       }
     }
     if (state.pendingQuestions.size > 0) {
+      restoreOriginalPin(state, priorPin)
       return jsonError(503, "原问题未能确认关闭，请保留问题卡并重试；未将跳过当作同意。", "backend_error", "question_reject_unconfirmed")
     }
     clearQuestionHeartbeat(state)
@@ -408,6 +413,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   if (await gateUserInput(`user:${state.sessionId}`, content)) {
     // 2026-10-04 W：守卫文案一律简体（书写体镜像已拆）。硬拦截意图与 gateUserInput
     // 逻辑不动，只保留「用户可见字串」；错误改成可重试说明（保留硬拦）。
+    restoreOriginalPin(state, priorPin)
     return jsonError(
       400,
       "该请求含有一句无法执行的指令注入内容，已被安全闸拦截（其余需求未处理）。请删去该句后重新发送。",
@@ -415,7 +421,16 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
       "bad_request",
     )
   }
+  acceptOriginalUserPrompt(state, content)
   void skeletonTask
+  if (state.projectMode === true) {
+    try {
+      await persistUserBriefNow(state.sessionId, content, state.turnGen ?? 0)
+    } catch (e) {
+      console.warn(`[gateway] project brief sync failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  rememberPinnedConstraints(state, content)
   // ── 契约 §4/§7 每回合召回前缀（2026-09-15 PRD P0-4）─────────────────────
   // 沿用上一轮预取候选；召回走独立签名资料part，用户原文与稳定system保持独立。
   // 2026-10-01 新创作闸门：本轮用户要新创意 → 召回前缀（按上一轮话题算的、极易命中旧专案）
@@ -744,8 +759,6 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     systemStaticSection(
       "evidence-basis",
       "【可核事实】说具体法条编号或条文、平台政策、版权与商用条款、价格币数之前，要么给本回合的真实工具回执，要么明写「凭已有知识、未核验」。报价先跑 quote_bundle；工具表里没有它就直说没有、没报价，不要凭记忆报数。",
-      undefined,
-      { neverDrop: true },
     ),
   )
   // CC 2.1.302 编排内核（2026-10-18）：类型化 section → 确定性排序（layer→priority→id）
@@ -760,9 +773,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     cacheScope: state,
     latch: latchSystemSection,
   })
-  promptBody.system = renderedPrompt.text
-  const originalGoal = originalUserPromptText(state)
-  if (originalGoal) promptBody.system = `${promptBody.system}\n\n【用户原始目标·压缩不可丢】\n${originalGoal}`
+  promptBody.system = systemWithoutOriginalGoalEcho(renderedPrompt.text, originalUserPromptText(state))
   const pinned = pinnedConstraintsText(state)
   if (pinned) promptBody.system = `${promptBody.system}\n\n【硬约束·必须遵守】\n${pinned}`
   const systemChars = promptBody.system.length

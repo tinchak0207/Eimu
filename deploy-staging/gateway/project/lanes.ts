@@ -208,6 +208,13 @@ export interface CriticDispatchOutcome {
   seat: string
   lane: NodeId[]
   subagentId?: string
+  /** 子会话 id。执行器用来确认 critic 与父会话不是同一个。 */
+  sessionId?: string
+  agent?: string
+  /** fake / 同步 critic 把判决放在派发回执里；异步真派发没有这个字段。 */
+  verdict?: unknown
+  /** checkCriticReceipt 要的 assistant tool 回执。 */
+  messages?: unknown
   code?: string
   error?: string
 }
@@ -254,8 +261,15 @@ export async function dispatchCriticRun(
   }
   try {
     const res = (await dispatch(req)) ?? {}
+    const childSession = typeof res.session_id === "string" ? res.session_id : typeof res.child_session_id === "string" ? res.child_session_id : undefined
+    const extra = {
+      ...(childSession ? { sessionId: childSession } : {}),
+      ...(typeof res.agent === "string" ? { agent: res.agent } : {}),
+      ...(res.verdict !== undefined ? { verdict: res.verdict } : {}),
+      ...(res.messages !== undefined ? { messages: res.messages } : {}),
+    }
     if (res.ok === true) {
-      return { ok: true, seat, lane, ...(typeof res.subagent_id === "string" ? { subagentId: res.subagent_id } : {}) }
+      return { ok: true, seat, lane, ...(typeof res.subagent_id === "string" ? { subagentId: res.subagent_id } : {}), ...extra }
     }
     return {
       ok: false,

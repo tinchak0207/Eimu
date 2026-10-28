@@ -73,6 +73,15 @@ export function instancesOf(graph: Readonly<ProjectGraph>, templateId: NodeId): 
   })
 }
 
+/** 这条边的上游。模板（forEach 且没有 derivedFrom）已有实例时是这些实例，顺序跟 instancesOf（行序，不按 id 排）。
+ *  还没有实例时仍是模板自己，空扇出不算没有上游。普通节点、实例、悬空 id 原样返回。 */
+export function upstreamOf(graph: Readonly<ProjectGraph>, id: NodeId): NodeId[] {
+  const n = graph.nodes[id]
+  if (!n || !n.forEach || n.derivedFrom) return [id]
+  const inst = instancesOf(graph, id)
+  return inst.length ? inst : [id]
+}
+
 const hasHumanOutput = (n: ProjectNode) => n.pinned !== null || n.outputs.some((o) => o.origin === "user") || (n.takesPool ?? []).some((o) => o.origin === "user")
 
 function lockedKeep(existing: ProjectNode, def: Definition): Definition {
@@ -92,6 +101,26 @@ function lockedKeep(existing: ProjectNode, def: Definition): Definition {
       const k = f.slice(7)
       if (Object.prototype.hasOwnProperty.call(existing.params, k)) out.params[k] = existing.params[k]
       else delete out.params[k]
+    }
+  }
+  return out
+}
+
+/** 模板想改、锁保住的字段。回执要写明，不能静默。 */
+function lockedDriftWarnings(existing: ProjectNode, template: Definition): string[] {
+  const lk = existing.locked
+  if (!lk) return []
+  const who = lk.by === "user" ? "用户" : "锁"
+  const out: string[] = []
+  const fields = lk.fields === "*"
+    ? ["intent", ...Object.keys(template.params).map((k) => `params.${k}`)]
+    : lk.fields
+  for (const f of fields) {
+    if (f === "intent") {
+      if (template.intent !== existing.intent) out.push(`${existing.id}.intent 已被${who}保住，模板值未覆盖`)
+    } else if (f.startsWith("params.")) {
+      const k = f.slice("params.".length)
+      if (stable(template.params[k]) !== stable(existing.params[k])) out.push(`${existing.id}.${f} 已被${who}保住，模板值未覆盖`)
     }
   }
   return out
@@ -228,6 +257,7 @@ export function expandGraph(graph: Readonly<ProjectGraph>): ExpandResult {
         }
         created.push(iid)
       } else {
+        warnings.push(...lockedDriftWarnings(existing, def))
         def = lockedKeep(existing, def)
         const changed = defKey(def) !== defKey(existing as unknown as Definition)
         const wasOrphan = existing.status === "orphaned"

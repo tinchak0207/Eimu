@@ -16,6 +16,7 @@ import { artStyleTemplate } from "../../workflow-templates/art_style"
 import { novelIpRecipe } from "./novel_ip"
 import { artCurationRecipe } from "./art_curation"
 import { artStyleRecipe } from "./art_style"
+import { RUBRICS } from "../rubrics"
 
 const ISO = "2026-10-28T00:00:00.000Z"
 const OLD_EXEC_KINDS = new Set(["image", "video", "audio", "film"])
@@ -57,6 +58,18 @@ function depsOf(n: NewNode): string[] {
   }
   visit(n.params as Json | undefined)
   return [...deps]
+}
+
+/** build() 里的节点，或「模板#行 id」。行必须在 forEach 的 shotlist 里，展开后才有这个实例。 */
+function declared(id: string, byId: Map<string, NewNode>): boolean {
+  if (byId.has(id)) return true
+  const hash = id.indexOf("#")
+  if (hash <= 0) return false
+  const tpl = byId.get(id.slice(0, hash))
+  if (!tpl?.forEach) return false
+  const rows = byId.get(tpl.forEach.over)?.params?.rows
+  if (!Array.isArray(rows)) return false
+  return rows.some((r) => !!r && typeof r === "object" && (r as { id?: unknown }).id === id.slice(hash + 1))
 }
 
 const CASES: { recipe: Recipe; tpl: WorkflowTemplate }[] = [
@@ -114,7 +127,7 @@ for (const { recipe, tpl } of CASES) {
       const deps = new Map<string, string[]>()
       for (const n of built.nodes) {
         const ds = depsOf(n)
-        for (const d of ds) expect(byId.has(d)).toBe(true) // 悬空引用在这里就该暴露
+        for (const d of ds) expect(declared(d, byId)).toBe(true) // 悬空引用在这里就该暴露
         deps.set(n.id, ds)
       }
       const seen = new Set<string>()
@@ -166,3 +179,113 @@ for (const { recipe, tpl } of CASES) {
     })
   })
 }
+
+const GEN_TYPES = new Set(["keyframe", "reference"])
+const AUTHORED_TYPES = new Set(["script", "shotlist"])
+
+async function baked(recipe: Recipe) {
+  const outcome = await applyPatch(emptyGraph(), { ops: [{ op: "apply_recipe", recipe: recipe.id, params: {} }], atomic: true }, { kind: "agent" }, {
+    artifacts: {} as never,
+    recipes: (id) => (id === recipe.id ? recipe : undefined),
+  })
+  expect(outcome.receipt.rejected).toEqual([])
+  expect(outcome.committed).toBe(true)
+  return outcome.graph
+}
+
+function linked(graph: ProjectGraph, id: string, from: string): boolean {
+  const node = graph.nodes[id]
+  return !!node && Object.values(node.inputs).some((r) => r.from === from)
+}
+
+/** 展开后、去掉 forEach 模板本体：生成节点之间的输入边（含 ref:）。 */
+function genEdges(graph: ProjectGraph): number {
+  let n = 0
+  for (const node of Object.values(graph.nodes)) {
+    if (node.forEach && !node.id.includes("#")) continue
+    if (!GEN_TYPES.has(node.type)) continue
+    for (const ref of Object.values(node.inputs)) {
+      const up = graph.nodes[ref.from]
+      if (up && GEN_TYPES.has(up.type)) n++
+    }
+  }
+  return n
+}
+
+function authoredRatio(graph: ProjectGraph): number {
+  const exec = Object.values(graph.nodes).filter((n) => !(n.forEach && !n.id.includes("#")))
+  return exec.filter((n) => AUTHORED_TYPES.has(n.type)).length / exec.length
+}
+
+function ruleOf(rubricId: string, itemId: string): string {
+  return RUBRICS[rubricId]?.items?.find((item) => item.id === itemId)?.rule ?? ""
+}
+
+describe("S6 IP 链与可判定条目", () => {
+  test("novel_ip：情绪板到衍生的生成边，以及四条及格线", async () => {
+    expect(novelIpRecipe.build({}).nodes).toHaveLength(14)
+    const g = await baked(novelIpRecipe)
+    expect(linked(g, "style_anchor", "moodboard")).toBe(true)
+    expect(linked(g, "char_view#front", "style_anchor")).toBe(true)
+    expect(linked(g, "scene_frame#s1", "char_view")).toBe(true)
+    expect(linked(g, "scene_frame#s3", "char_view")).toBe(true)
+    expect(linked(g, "cover", "scene_frame")).toBe(true)
+    expect(linked(g, "aspect_frame#a34", "cover")).toBe(true)
+    expect(linked(g, "aspect_frame#a169", "cover")).toBe(true)
+    expect(linked(g, "derivative_item#avatar", "cover")).toBe(true)
+    expect(linked(g, "derivative_item#avatar", "aspect_frame")).toBe(true)
+    expect(linked(g, "derivative_item#emoji", "aspect_frame")).toBe(true)
+    expect(genEdges(g)).toBe(52)
+    expect(authoredRatio(g)).toBeLessThanOrEqual(0.2)
+    expect(g.nodes.check.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.nodes.check.params.rubric).toBe("ip_pack_visual")
+    expect(g.nodes.check.params.thresholds).toMatchObject({
+      items: ["mood_blind", "style_retest", "shuffle_recognize", "zero_drift", "cover_title", "archive"],
+    })
+    expect(ruleOf("ip_pack_visual", "mood_blind")).toContain("盲猜 3 次")
+    expect(ruleOf("ip_pack_visual", "mood_blind")).toContain("9 格至少 7 格")
+    expect(ruleOf("ip_pack_visual", "style_retest")).toContain("复测 2 次")
+    expect(ruleOf("ip_pack_visual", "style_retest")).toContain("色相偏移 0°")
+    expect(ruleOf("ip_pack_visual", "shuffle_recognize")).toContain("9/9")
+    expect(ruleOf("ip_pack_visual", "zero_drift")).toContain("不一致的张数是 0")
+  })
+
+  test("art_curation：风格锚到成组到展陈", async () => {
+    expect(artCurationRecipe.build({}).nodes).toHaveLength(11)
+    const g = await baked(artCurationRecipe)
+    expect(linked(g, "batch_render#c1", "style_anchor")).toBe(true)
+    expect(linked(g, "batch_render#c1", "composition#c1")).toBe(true)
+    expect(linked(g, "batch_render#c5", "composition#c5")).toBe(true)
+    expect(linked(g, "exhibition_visual", "batch_render")).toBe(true)
+    expect(linked(g, "delivery_pack#print_a2", "exhibition_visual")).toBe(true)
+    expect(genEdges(g)).toBe(43)
+    expect(authoredRatio(g)).toBeLessThanOrEqual(0.2)
+    expect(g.nodes.check.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.nodes.check.params.thresholds).toMatchObject({
+      items: ["color_temp", "light_direction", "stroke", "whitespace", "no_outlier"],
+    })
+  })
+
+  test("art_style：dna_card 接到临摹、矩阵和原创，分数线写在原条目里", async () => {
+    expect(artStyleRecipe.build({}).nodes).toHaveLength(13)
+    const g = await baked(artStyleRecipe)
+    expect(linked(g, "copy_compare#brush", "dna_card")).toBe(true)
+    expect(linked(g, "copy_compare#synth_b", "dna_card")).toBe(true)
+    expect(linked(g, "variant_matrix#m11", "dna_card")).toBe(true)
+    expect(linked(g, "variant_matrix#m33", "dna_card")).toBe(true)
+    expect(linked(g, "origin_set#o1", "dna_card")).toBe(true)
+    expect(linked(g, "origin_set#o6", "dna_card")).toBe(true)
+    expect(genEdges(g)).toBe(47)
+    expect(authoredRatio(g)).toBeLessThanOrEqual(0.2)
+    expect(g.nodes.check.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.nodes.check.params.rubric).toBe("style_dna_consistency")
+    expect(g.nodes.check.params.thresholds).toMatchObject({
+      items: ["restore_70", "high_weight_85", "grid_7_of_9", "palette_steps", "composition_unique", "theme_not_copy"],
+    })
+    expect(ruleOf("style_dna_consistency", "restore_70")).toContain("≥ 70%")
+    expect(ruleOf("style_dna_consistency", "restore_70")).toContain("中间 3 张的中位数")
+    expect(ruleOf("style_dna_consistency", "high_weight_85")).toContain("≥ 85%")
+    expect(ruleOf("style_dna_consistency", "high_weight_85")).toContain("3 处")
+    expect(ruleOf("style_dna_consistency", "grid_7_of_9")).toContain("9 格至少 7 格")
+  })
+})

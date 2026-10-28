@@ -37,6 +37,10 @@ const { initSubagent } = await import("../subagent-runs.ts")
 const { handleSubagentDispatch } = await import("../subagent.ts")
 const { finishRun } = await import("../subagent-finish.ts")
 const { byParent } = await import("../subagent-runs.ts")
+const { reopenSessionsDbForTest } = await import("../job-store.ts")
+reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 type Actor = import("./types.ts").Actor
 type NodeType = import("./types.ts").NodeType
 type Output = import("./types.ts").Output
@@ -351,6 +355,21 @@ describe("critic 经 qc 节点写 verdict（§3.8）", () => {
     expect(node.outputs).toHaveLength(1)
     const out = artifacts.items.get(node.outputs[0].artifactId)!
     expect(out.mime).toBe("application/json")
+  })
+
+  test("主代理 write_result verdict → LANE_VIOLATION，判决不落盘", async () => {
+    const g = pgraph([pnode("qc1", "qc", { params: { mode: "critic" }, status: "pending", outputs: [] })])
+    const r = await apply(g, [{ op: "write_result", node: "qc1", value: { score: 1, pass: true, deficiencies: [] } }], { kind: "agent" })
+    expect(r.receipt.ok).toBe(false)
+    expect(r.receipt.rejected[0]?.code).toBe("LANE_VIOLATION")
+    expect(r.graph.nodes.qc1.outputs).toHaveLength(0)
+  })
+
+  test("主代理 set outputs.verdict → LANE_VIOLATION", async () => {
+    const g = pgraph([pnode("qc1", "qc", { params: { mode: "critic" }, status: "pending", outputs: [] })])
+    const r = await apply(g, [{ op: "set", node: "qc1", path: "outputs.verdict", value: { pass: true } }], { kind: "agent" })
+    expect(r.receipt.ok).toBe(false)
+    expect(r.receipt.rejected[0]?.code).toBe("LANE_VIOLATION")
   })
 
   test("lane 不含该 QC 节点 → LANE_VIOLATION，判决不落盘", async () => {

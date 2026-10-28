@@ -25,6 +25,10 @@ const { ensureProject, openProject, projectDirFor } = await import("./store.ts")
 const { runProject } = await import("./run.ts")
 const { recoverProject } = await import("./recovery.ts")
 const { idempotencyKeyOf } = await import("./submit-generation.ts")
+const { reopenSessionsDbForTest } = await import("../job-store.ts")
+reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 type ExecContext = import("./types.ts").ExecContext
 type ExecResult = import("./types.ts").ExecResult
 type NodeExecutor = import("./types.ts").NodeExecutor
@@ -256,6 +260,27 @@ describe("onFail=regenerate", () => {
     expect(calls.map((c) => c.nodeSeed)).toEqual([100, 101, 102]) // S7 执行器读 ctx.node.params（effectiveParams）
     expect(r.status).toBe("failed")
     expect((await nodeOf(store, "kf")).status).toBe("failed")
+  }, 20_000)
+
+  test("retryable===false 不重生：节点 failed，原因透传", async () => {
+    const calls: Call[] = []
+    installExecutor("keyframe", {
+      calls,
+      run: async () => ({ ok: false, code: "safety_blocked", message: "safety: blocked", retryable: false }),
+    })
+    const store = await makeProject("s6_noretry", [
+      NODE("kf", "keyframe", {
+        params: { prompt: "p", model: "m" },
+        onFail: { action: "regenerate", max: 2, then: "skip" },
+      }),
+    ])
+    const r = await runProject(store, depsFor("s6_noretry").deps)
+    expect(calls.length).toBe(1)
+    expect(r.status).toBe("failed")
+    const node = await nodeOf(store, "kf")
+    expect(node.status).toBe("failed")
+    expect(node.error?.code).toBe("safety_blocked")
+    expect(node.error?.message).toBe("safety: blocked")
   }, 20_000)
 })
 
@@ -514,6 +539,40 @@ describe("运行期间改图", () => {
     expect(node.status).toBe("stale")
     expect(node.lastRun?.via).toBe("executed")
   }, 20_000)
+
+  test("运行中改参数：旧产物只登记在启动签名下，下一轮执行器拿到新参数", async () => {
+    const prompts: string[] = []
+    const calls: Call[] = []
+    const store = await makeProject("s6_mid_sig", [NODE("k1", "keyframe", { params: { prompt: "OLD", model: "m", size: "1024x1024" } })])
+    installExecutor("keyframe", {
+      calls,
+      run: async (ctx) => {
+        prompts.push(String(ctx.node.params.prompt))
+        if (prompts.length === 1) {
+          await store.applyPatches({ ops: [{ op: "set", node: "k1", path: "params.prompt", value: "NEW" }] }, { kind: "user" })
+        }
+        return okOne(ctx)
+      },
+    })
+    const { deps } = depsFor("s6_mid_sig")
+    await runProject(store, deps)
+    const g1 = await store.read()
+    expect(g1.nodes.k1.status).toBe("stale")
+    expect(g1.nodes.k1.params.prompt).toBe("NEW")
+    const { computeSignature } = await import("./signature.ts")
+    const { NODE_SPECS_LITE } = await import("./specs.ts")
+    const post = await computeSignature(g1, "k1", store.artifacts, NODE_SPECS_LITE)
+    expect(post.ok).toBe(true)
+    if (post.ok) {
+      expect(g1.nodes.k1.signature).not.toBe(post.signature)
+      expect(g1.nodes.k1.lastRun?.signature).not.toBe(post.signature)
+    }
+    await runProject(store, deps)
+    const g2 = await store.read()
+    expect(prompts).toEqual(["OLD", "NEW"])
+    expect(g2.nodes.k1.lastRun?.via).toBe("executed")
+    expect(g2.nodes.k1.status).toBe("done")
+  }, 20_000)
 })
 
 // ─────────────────────────────────────────────────────────────── 9. 作者节点无内容
@@ -607,6 +666,36 @@ describe("准入：确认", () => {
     expect(requests.length).toBe(1)
     expect(requests[0].amountCoins).toBe(6)
     expect(calls.length).toBe(0) // 没批准 = 一币不烧
+  }, 20_000)
+
+  test("确认卡展示预计 x–y 币（含最多 k 次重生）；阈值仍比不含重生的底价", async () => {
+    installExecutor("keyframe", { calls: [], estimate: 3, run: okOne })
+    const store = await makeProject("s6_regen_quote", [
+      NODE("kf", "keyframe", {
+        params: { prompt: "p", model: "m" },
+        takes: { n: 2, select: "first" },
+        onFail: { action: "regenerate", max: 2, then: "fail" },
+      }),
+    ])
+    const requests: { amountCoins: number; description: string }[] = []
+    const { deps } = depsFor("s6_regen_quote")
+    const r = await runProject(store, deps, {
+      confirmThreshold: 5,
+      authorized: async () => false,
+      confirm: {
+        async request(a) { requests.push({ amountCoins: a.amountCoins, description: a.description }); return "pending" },
+        async status() { return "pending" },
+      },
+    })
+    // 底价 = 3 × takes.n(2) = 6。最坏 = 6 × (1+max 2) = 18。k = 2。
+    expect(r.quote.coins).toBe(6)
+    expect(r.quote.coinsHigh).toBe(18)
+    expect(r.quote.regenMax).toBe(2)
+    expect(r.quote.rangeLabel).toBe("预计 6–18 币（含最多 2 次重生）")
+    expect(r.status).toBe("needs_user")
+    expect(requests).toHaveLength(1)
+    expect(requests[0].amountCoins).toBe(6)
+    expect(requests[0].description).toContain("预计 6–18 币（含最多 2 次重生）")
   }, 20_000)
 
   test("auto/full 授权直接放行；用户批准后重入也放行", async () => {
@@ -744,6 +833,43 @@ describe("恢复：confirm_unknown", () => {
     expect(out.resumed.find((r) => r.node === "m2")?.result).toBe("running")
     expect(calls.length).toBe(0)
   }, 20_000)
+
+  test("提交时签名与当前 prompt 不一致：产物留下，节点 stale，planRun 判 toRun", async () => {
+    const store = await makeProject("s6_rec_stale", [
+      NODE("m1", "music", { params: { prompt: "旧：悲伤钢琴" }, status: "running" }),
+    ])
+    const { computeSignature, planRun } = await import("./signature.ts")
+    const { NODE_SPECS_LITE } = await import("./specs.ts")
+    const g0 = await store.read()
+    const oldSig = await computeSignature(g0, "m1", store.artifacts, NODE_SPECS_LITE)
+    expect(oldSig.ok).toBe(true)
+    if (!oldSig.ok) return
+    const inf = { idemKey: `pg:s6_rec_stale:${oldSig.signature.slice(0, 40)}:t0:a0`, since: "2026-10-28T00:00:00.000Z", submitUnknown: true as const }
+    await store.update((g) => { g.nodes.m1.inflight = Object.assign(inf, { sig: oldSig.signature }) })
+    const edited = await store.applyPatches({ ops: [{ op: "set", node: "m1", path: "params.prompt", value: "新：欢快鼓点" }] }, { kind: "user" })
+    expect(edited.receipt.ok).toBe(true)
+    const dir = join(projectDirFor("s6_rec_stale"), "tmp")
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, "old.mp3")
+    writeFileSync(file, "OLD-PROMPT-AUDIO")
+    const { deps } = depsFor("s6_rec_stale", {
+      execBridge: {
+        async call() { return { ok: false as const, code: "bridge_unavailable" as const, message: "no", retryable: false } },
+        async result() { return { state: "done" as const, files: [{ path: file, mime: "audio/mpeg", bytes: 16 }], costCoins: 1 } },
+      },
+    })
+    await recoverProject(await openProject("s6_rec_stale"), deps)
+    const reopened = await openProject("s6_rec_stale")
+    const g = await reopened.read()
+    expect(g.nodes.m1.status).toBe("stale")
+    expect(g.nodes.m1.outputs.length).toBeGreaterThan(0)
+    const cur = await computeSignature(g, "m1", reopened.artifacts, NODE_SPECS_LITE)
+    expect(cur.ok).toBe(true)
+    if (cur.ok) expect(g.nodes.m1.lastRun?.signature).not.toBe(cur.signature)
+    const plan = await planRun(g, undefined, "incremental", reopened.artifacts, NODE_SPECS_LITE)
+    expect(plan.toRun).toContain("m1")
+    expect(plan.reuse).not.toContain("m1")
+  }, 20_000)
 })
 
 // ─────────────────────────────────────────────────────────────── 14. plan.unknown（保守视为要跑）
@@ -834,5 +960,114 @@ describe("submit_unknown", () => {
     expect(node.status).toBe("running")
     expect(node.inflight?.submitUnknown).toBe(true)
     expect(node.error?.code).toBe("submit_unknown")
+  }, 20_000)
+
+  test("任一 take 为 submit_unknown 则整轮冻结：其它 take 不重生，inflight 记下全部 key", async () => {
+    const seen: { take: number; attempt: number }[] = []
+    installExecutor("keyframe", {
+      calls: [],
+      run: async (ctx) => {
+        seen.push({ take: ctx.take, attempt: ctx.attempt })
+        if (ctx.take === 0) return { ok: false, code: "provider_error", message: "boom", retryable: true }
+        return { ok: false, code: "submit_unknown", message: "cut", retryable: false, submitUnknown: true }
+      },
+    })
+    const store = await makeProject("s6_multi_unknown", [
+      NODE("kf", "keyframe", {
+        params: { prompt: "p", model: "m" },
+        takes: { n: 2, select: "first" },
+        onFail: { action: "regenerate", max: 2, then: "fail" },
+      }),
+    ])
+    const { deps } = depsFor("s6_multi_unknown")
+    const r = await runProject(store, deps)
+    expect(seen).toHaveLength(2)
+    expect(seen.map((s) => s.take).sort()).toEqual([0, 1])
+    expect(seen.every((s) => s.attempt === 0)).toBe(true)
+    expect(r.inFlightUnknown).toEqual(["kf"])
+    expect(r.failed ?? []).toEqual([])
+    const node = await nodeOf(store, "kf")
+    expect(node.status).toBe("running")
+    expect(node.inflight?.submitUnknown).toBe(true)
+    const keys = (node.inflight as { keys?: string[] } | undefined)?.keys ?? []
+    expect(keys).toHaveLength(2)
+    expect(keys.some((k) => k.endsWith(":t0:a0"))).toBe(true)
+    expect(keys.some((k) => k.endsWith(":t1:a0"))).toBe(true)
+  }, 20_000)
+
+  test("两个 take 都成功时各跑一次并完成，不因为冻结逻辑少跑", async () => {
+    const seen: number[] = []
+    installExecutor("keyframe", {
+      calls: [],
+      run: async (ctx) => {
+        seen.push(ctx.take)
+        return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0 }
+      },
+    })
+    const store = await makeProject("s6_multi_ok", [
+      NODE("kf", "keyframe", {
+        params: { prompt: "p", model: "m" },
+        takes: { n: 2, select: "first" },
+        onFail: { action: "regenerate", max: 2, then: "fail" },
+      }),
+    ])
+    const { deps } = depsFor("s6_multi_ok")
+    const r = await runProject(store, deps)
+    expect(r.status).toBe("done")
+    expect(seen.sort()).toEqual([0, 1])
+    expect((await nodeOf(store, "kf")).status).toBe("done")
+  }, 20_000)
+
+  test("恢复续上 inflight.keys 里的每个 take，无 sig 的单 key 旧记录仍只续那一把", async () => {
+    const seen: number[] = []
+    installExecutor("keyframe", {
+      calls: [],
+      run: async (ctx) => {
+        seen.push(ctx.take)
+        return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0 }
+      },
+    })
+    const store = await makeProject("s6_resume_keys", [
+      NODE("kf", "keyframe", { params: { prompt: "p", model: "m" }, status: "running", takes: { n: 2, select: "first" } }),
+    ])
+    const { computeSignature } = await import("./signature.ts")
+    const { NODE_SPECS_LITE } = await import("./specs.ts")
+    const g0 = await store.read()
+    const sig = await computeSignature(g0, "kf", store.artifacts, NODE_SPECS_LITE)
+    expect(sig.ok).toBe(true)
+    if (!sig.ok) return
+    const keys = [0, 1].map((take) => idempotencyKeyOf({ projectId: g0.id, signature: sig.signature, take, attempt: 0 }))
+    await store.update((g) => {
+      g.nodes.kf.inflight = Object.assign({ idemKey: keys[0], since: "2026-10-28T00:00:00.000Z" }, { sig: sig.signature, keys })
+    })
+    const { deps } = depsFor("s6_resume_keys")
+    const out = await recoverProject(await openProject("s6_resume_keys"), deps)
+    expect(seen.sort()).toEqual([0, 1])
+    expect(out.resumed[0]?.result).toBe("done")
+
+    const seenOld: number[] = []
+    installExecutor("keyframe", {
+      calls: [],
+      run: async (ctx) => {
+        seenOld.push(ctx.take)
+        return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0 }
+      },
+    })
+    const old = await makeProject("s6_resume_oldkey", [
+      NODE("kf", "keyframe", { params: { prompt: "p", model: "m" }, status: "running" }),
+    ])
+    const gOld = await old.read()
+    const oldSig = await computeSignature(gOld, "kf", old.artifacts, NODE_SPECS_LITE)
+    expect(oldSig.ok).toBe(true)
+    if (!oldSig.ok) return
+    const oldKey = idempotencyKeyOf({ projectId: gOld.id, signature: oldSig.signature, take: 0, attempt: 0 })
+    await old.update((g) => {
+      g.nodes.kf.inflight = { idemKey: oldKey, since: "2026-10-28T00:00:00.000Z" }
+    })
+    const oldDeps = depsFor("s6_resume_oldkey")
+    const oldOut = await recoverProject(await openProject("s6_resume_oldkey"), oldDeps.deps)
+    expect(seenOld).toEqual([0])
+    expect(oldOut.manual).toEqual([])
+    expect(oldOut.resumed[0]?.result).toBe("done")
   }, 20_000)
 })

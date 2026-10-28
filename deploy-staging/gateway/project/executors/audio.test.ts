@@ -269,6 +269,28 @@ describe("voice 执行器", () => {
     expect(ttsCalls).toBe(0)
   })
 
+  test("绑定预算后失败退回预留，成功则实扣；未绑定时不改原账本", async () => {
+    const { bindSessionBudget, createProjectBudget } = await import("../ledger.ts")
+    const budget = createProjectBudget({ capOf: async () => 1 })
+    bindSessionBudget("s1", budget)
+    try {
+      const { ctx, ledger } = makeContext({ nodeType: "voice", params: { text: "你好世界", voice: "zh_female_1" } })
+      const ok = await voiceExecutor.run(ctx)
+      expect(ok.ok).toBe(true)
+      expect(ledger.map((e) => e.event)).toEqual(["submitted", "completed"])
+      expect(budget.snapshot("p1").reserved).toBe(0)
+      expect(budget.snapshot("p1").spent).toBeCloseTo(0.004, 6)
+      ttsMode = "error"
+      const { ctx: badCtx, ledger: badLedger } = makeContext({ nodeType: "voice", params: { text: "你好世界", voice: "zh_female_1" } })
+      const fail = await voiceExecutor.run(badCtx)
+      expect(fail.ok).toBe(false)
+      expect(badLedger.map((e) => e.event)).toEqual(["submitted", "refunded", "failed"])
+      expect(budget.snapshot("p1").reserved).toBe(0)
+    } finally {
+      bindSessionBudget("s1", undefined)
+    }
+  })
+
   test("estimate 按字数报价；缺 text 报不出价", async () => {
     const node = (text?: string) => ({ id: "vo1", type: "voice", params: text === undefined ? {} : { text } }) as never
     expect(await voiceExecutor.estimate(node("你好世界"), null as never, null)).toBe(0.004)
@@ -440,6 +462,45 @@ describe("music 执行器", () => {
     expect(rd.ok).toBe(false)
     if (!rd.ok) expect(rd.retryable).toBe(true)
     expect(down.ledger.map((e) => e.event)).toEqual(["failed"])
+  })
+
+  test("绑定预算后：成功预留再实扣，失败退回且不再占着预留，超限不调桥", async () => {
+    const { bindSessionBudget, createProjectBudget } = await import("../ledger.ts")
+    const budget = createProjectBudget({ capOf: async () => 3 })
+    bindSessionBudget("s1", budget)
+    try {
+      const bridge = makeFakeBridge()
+      const executor = createMusicExecutor()
+      const { ctx, ledger } = makeContext({ nodeType: "music", params: OK_PARAMS, execBridge: bridge.client })
+      const ok = await executor.run(ctx)
+      expect(ok.ok).toBe(true)
+      expect(bridge.calls).toHaveLength(1)
+      expect(ledger.map((e) => e.event)).toEqual(["submitted", "completed"])
+      expect(budget.snapshot("p1")).toEqual({ reserved: 0, spent: 1 })
+
+      const down = makeContext({
+        nodeType: "music",
+        params: OK_PARAMS,
+        execBridge: { call: async () => ({ ok: false as const, code: "bridge_unavailable" as const, message: "down", retryable: true }), result: async () => ({ state: "unknown" as const }) },
+      })
+      const fail = await executor.run(down.ctx)
+      expect(fail.ok).toBe(false)
+      expect(down.ledger.map((e) => e.event)).toEqual(["submitted", "refunded", "failed"])
+      expect(budget.snapshot("p1").reserved).toBe(0)
+      expect(budget.snapshot("p1").spent).toBe(1)
+
+      const tight = createProjectBudget({ capOf: async () => 0.5 })
+      bindSessionBudget("s1", tight)
+      const blockedBridge = makeFakeBridge()
+      const blocked = makeContext({ nodeType: "music", params: OK_PARAMS, execBridge: blockedBridge.client })
+      const denied = await executor.run(blocked.ctx)
+      expect(denied.ok).toBe(false)
+      if (denied.ok === false) expect(denied.code).toBe("bad_input")
+      expect(blockedBridge.calls).toHaveLength(0)
+      expect(tight.snapshot("p1").reserved).toBe(0)
+    } finally {
+      bindSessionBudget("s1", undefined)
+    }
   })
 
   test("estimate = 1 币/次（设计文档 §3.5 / 2026-10-10 记忆）", async () => {

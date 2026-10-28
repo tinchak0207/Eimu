@@ -1,27 +1,13 @@
 // signature.ts 行为测试（S1）。期望值来自设计文档 §3.2 第 4 条的性质，手写图、手算关系；不看也不抄 ComfyUI/n8n 源码。
 import { describe, expect, test } from "bun:test"
-import { canonicalJson, computeDrift, computeSignature, planRun, findReusable } from "./signature"
+import { expandGraph } from "./expand"
+import { canonicalJson, computeDrift, computeSignature, nodeDependencies, planRun, findReusable } from "./signature"
 import type { CacheLookup } from "./signature"
-import type { FingerprintResolver, Json, NodeSpecLite, NodeType, Output, ProjectGraph, ProjectNode } from "./types"
+import { NODE_SPECS_LITE } from "./specs"
+import type { FingerprintResolver, Json, NodeType, Output, ProjectGraph, ProjectNode } from "./types"
 
 const T0 = "2026-10-28T00:00:00.000Z"
-const sp = (type: NodeType, signedParams: string[], extra: Partial<NodeSpecLite> = {}): NodeSpecLite =>
-  ({ type, specVersion: 1, signedParams, pinnable: true, fingerprintMode: "structural", ...extra })
-const SPECS = {
-  reference: sp("reference", ["source", "artifactId"]),
-  script: sp("script", ["text"]),
-  shotlist: sp("shotlist", ["kind", "rows"]),
-  keyframe: sp("keyframe", ["prompt", "model", "seed", "role"]),
-  clip: sp("clip", ["prompt", "model", "seconds", "seed"]),
-  voice: sp("voice", ["text"]),
-  music: sp("music", ["prompt"]),
-  timeline: sp("timeline", ["order"], { fingerprintMode: "content" }),
-  subtitle: sp("subtitle", ["style"]),
-  mix: sp("mix", ["levels"]),
-  export: sp("export", ["preset"], { pinnable: false }),
-  qc: sp("qc", ["mode"], { pinnable: false }),
-  render3d: sp("render3d", ["script"], { volatile: true }),
-} as Record<NodeType, NodeSpecLite>
+const SPECS = NODE_SPECS_LITE
 
 function node(id: string, type: NodeType, o: Partial<ProjectNode> = {}): ProjectNode {
   return {
@@ -161,10 +147,12 @@ describe("reference / 指纹 / unstable", () => {
     expect(plan.toRun.sort()).toEqual(["kf", "ref"])
     expect(plan.reuse).toEqual([])
   })
-  test("volatile 类型节点永不命中，且让下游 unstable", async () => {
-    const g = graph([node("r3", "render3d", { params: { script: "s" } }), node("kf", "keyframe", { params: { prompt: "p" }, inputs: { i: { from: "r3" } } })])
-    expect((await computeSignature(g, "r3", fpOf({}), SPECS)).ok).toBe(false)
-    expect((await computeSignature(g, "kf", fpOf({}), SPECS)).ok).toBe(false)
+  test("真实规格 render3d 不标 volatile：同 script 签名稳定，改 script 则变", async () => {
+    const a = graph([node("r3", "render3d", { params: { script: "s" } })])
+    const b = graph([node("r3", "render3d", { params: { script: "s" } })])
+    const c = graph([node("r3", "render3d", { params: { script: "t" } })])
+    expect(await sig(a, "r3")).toBe(await sig(b, "r3"))
+    expect(await sig(a, "r3")).not.toBe(await sig(c, "r3"))
   })
   test("refs（外部常量素材）按内容 sha 进签名", async () => {
     const g = graph([node("kf", "keyframe", { params: { prompt: "p" }, refs: [{ artifactId: "art_9", role: "style" }] })])
@@ -216,13 +204,15 @@ describe("planRun 复用与 force", () => {
     const g = chain()
     const files: Record<string, string> = {}
     for (const id of ["script", "shots", "kf", "clip", "voice"]) {
-      const n = g.nodes[id]
       files[`art_${id}`] = `sha_${id}`
-      n.outputs = [out(`art_${id}`, `sha_${id}`)]
-      n.status = "done"
-      n.lastRun = { runId: "r", at: T0, via: "executed", signature: await sig(g, id), costCoins: 1, attempt: 1 }
+      g.nodes[id].outputs = [out(`art_${id}`, `sha_${id}`)]
+      g.nodes[id].status = "done"
     }
-    return { g, fp: fpOf(files), files }
+    const fp = fpOf(files)
+    for (const id of ["script", "shots", "kf", "clip", "voice"]) {
+      g.nodes[id].lastRun = { runId: "r", at: T0, via: "executed", signature: await sig(g, id, fp), costCoins: 1, attempt: 1 }
+    }
+    return { g, fp, files }
   }
   test("全部已完成 → 全 reuse（命中不入队：toRun 为空）", async () => {
     const { g, fp } = await completed()
@@ -278,15 +268,66 @@ describe("planRun 复用与 force", () => {
     const fp2 = fpOf({})
     expect((await planRun(g, ["voice"], "incremental", fp2, SPECS, cache)).toRun).toEqual(["voice"])
   })
-  test("content 模式节点：上游要跑 → unknown（并向下传播）；上游已就绪 → 正常判定", async () => {
+  test("上游还没产物：结构节点进 toRun；reference（content）在上游要跑时仍是 unknown", async () => {
     const g = graph([
-      node("kf", "keyframe", { params: { prompt: "p" } }),
+      node("kf", "keyframe", { params: { prompt: "p", model: "m" } }),
       node("tl", "timeline", { params: { order: ["kf"] }, inputs: { a: { from: "kf" } } }),
       node("ex", "export", { params: { preset: "landscape_169" }, inputs: { v: { from: "tl" } } }),
     ])
     const plan = await planRun(g, ["ex"], "incremental", fpOf({}), SPECS)
-    expect(plan.toRun).toEqual(["kf"])
-    expect(plan.unknown.sort()).toEqual(["ex", "tl"])
+    expect(plan.toRun.sort()).toEqual(["ex", "kf", "tl"])
+    expect(plan.reuse).toEqual([])
+    const g2 = graph([
+      node("kf", "keyframe", { params: { prompt: "p", model: "m" } }),
+      node("ref", "reference", { params: { source: "upload", artifactId: "art_0123456789abcdef" }, inputs: { i: { from: "kf" } } }),
+    ])
+    const plan2 = await planRun(g2, ["ref"], "incremental", fpOf({}), SPECS)
+    expect(plan2.toRun).toEqual(["kf"])
+    expect(plan2.unknown).toEqual(["ref"])
+  })
+  test("force 重跑上游换了产物 sha 后，下游 incremental 必须 toRun；无关支路仍 reuse", async () => {
+    const files: Record<string, string> = { a_k1: "sha_k1_old", a_c1: "sha_c1", a_k2: "sha_k2", a_c2: "sha_c2" }
+    const fp = fpOf(files)
+    const g = graph([
+      node("k1", "keyframe", { params: { prompt: "cat", model: "m", seed: 1 }, status: "done", outputs: [out("a_k1", "sha_k1_old")] }),
+      node("c1", "clip", { params: { prompt: "run", model: "v", seconds: 5, seed: 1 }, inputs: { first: { from: "k1" } }, status: "done", outputs: [out("a_c1", "sha_c1")] }),
+      node("k2", "keyframe", { params: { prompt: "dog", model: "m", seed: 1 }, status: "done", outputs: [out("a_k2", "sha_k2")] }),
+      node("c2", "clip", { params: { prompt: "sit", model: "v", seconds: 5, seed: 1 }, inputs: { first: { from: "k2" } }, status: "done", outputs: [out("a_c2", "sha_c2")] }),
+    ])
+    for (const id of ["k1", "c1", "k2", "c2"]) {
+      const r = await computeSignature(g, id, fp, SPECS)
+      if (!r.ok) throw new Error(r.reason)
+      g.nodes[id].lastRun = { runId: "r", at: T0, via: "executed", signature: r.signature, costCoins: 1, attempt: 0 }
+    }
+    const forced = await planRun(g, ["k1"], "force", fp, SPECS)
+    expect(forced.toRun).toContain("k1")
+    expect(forced.toRun).not.toContain("k2")
+    files.a_k1 = "sha_k1_new"
+    g.nodes.k1.outputs = [out("a_k1", "sha_k1_new")]
+    const r2 = await computeSignature(g, "k1", fp, SPECS)
+    if (!r2.ok) throw new Error(r2.reason)
+    g.nodes.k1.lastRun = { runId: "r2", at: T0, via: "executed", signature: r2.signature, costCoins: 1, attempt: 0 }
+    const inc = await planRun(g, undefined, "incremental", fp, SPECS)
+    expect(inc.toRun).toContain("c1")
+    expect(inc.reuse.sort()).toEqual(["c2", "k1", "k2"])
+  })
+  test("k1 产物文件缺失 → k1 与下游 c1 都 toRun，无关的 k2 仍 reuse", async () => {
+    const files: Record<string, string> = { a_k1: "sha_k1", a_c1: "sha_c1", a_k2: "sha_k2" }
+    const fp = fpOf(files)
+    const g = graph([
+      node("k1", "keyframe", { params: { prompt: "cat", model: "m", seed: 1 }, status: "done", outputs: [out("a_k1", "sha_k1")] }),
+      node("c1", "clip", { params: { prompt: "run", model: "v", seconds: 5, seed: 1 }, inputs: { first: { from: "k1" } }, status: "done", outputs: [out("a_c1", "sha_c1")] }),
+      node("k2", "keyframe", { params: { prompt: "dog", model: "m", seed: 1 }, status: "done", outputs: [out("a_k2", "sha_k2")] }),
+    ])
+    for (const id of ["k1", "c1", "k2"]) {
+      const r = await computeSignature(g, id, fp, SPECS)
+      if (!r.ok) throw new Error(r.reason)
+      g.nodes[id].lastRun = { runId: "r", at: T0, via: "executed", signature: r.signature, costCoins: 1, attempt: 0 }
+    }
+    delete files.a_k1
+    const plan = await planRun(g, undefined, "incremental", fp, SPECS)
+    expect(plan.toRun.sort()).toEqual(["c1", "k1"])
+    expect(plan.reuse).toEqual(["k2"])
   })
   test("依赖悬空 → blocked，并向下传播", async () => {
     const g = graph([
@@ -305,6 +346,27 @@ describe("planRun 复用与 force", () => {
     ])
     const plan = await planRun(g, ["kf"], "incremental", fpOf({}), SPECS)
     expect(plan.toRun.sort()).toEqual(["kf#a", "kf#b"])
+  })
+})
+
+describe("扇入", () => {
+  test("展开后，指着模板的输入按行序依赖实例；零实例仍依赖模板", () => {
+    const film = (rowIds: string[]) => graph([
+      node("shots", "shotlist", { params: { kind: "shots", rows: rowIds.map((id) => ({ id, action: "动作" })) } }),
+      node("clip", "clip", { forEach: { over: "shots", as: "shot" }, params: { prompt: "${row.action}" } }),
+      node("timeline", "timeline", { inputs: { clips: { from: "clip" } } }),
+    ])
+    const open = (rowIds: string[]) => {
+      const g = film(rowIds)
+      const r = expandGraph(g)
+      expect(r.ok).toBe(true)
+      return { ...g, nodes: r.nodes, order: r.order }
+    }
+    const two = open(["s2", "s10"])
+    // s10 按 id 会排到 s2 前面。期望是镜头表的行序，不含模板 clip。
+    expect(nodeDependencies(two, two.nodes.timeline)).toEqual(["clip#s2", "clip#s10"])
+    const none = open([])
+    expect(nodeDependencies(none, none.nodes.timeline)).toEqual(["clip"])
   })
 })
 

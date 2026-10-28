@@ -16,6 +16,7 @@ const { registerExecutor, clearExecutors } = await import("../executor-registry.
 const { ensureProject } = await import("../store.ts")
 const { runProject } = await import("../run.ts")
 const { exportExecutor } = await import("./export.ts")
+const { signedCriticVerdictOutput } = await import("./qc.ts")
 
 const SHOTS = ["shot_a", "shot_b"] as const
 
@@ -80,7 +81,19 @@ function installFakes(): void {
       return { ok: true, outputs: [{ ...out, port: "srt" }], costCoins: 0 }
     },
   } as never)
-  registerExecutor(exportExecutor)
+  registerExecutor({
+    type: "export",
+    specVersion: exportExecutor.specVersion,
+    estimate: (node, project, session) => exportExecutor.estimate(node, project, session),
+    async run(ctx) {
+      const groups = ctx.inputs as Record<string, { sha256?: string; mime?: string }[]>
+      const media = Object.values(groups).flat().find((o) => /^(video|image)\//.test(String(o?.mime)))
+      const inputs = media?.sha256
+        ? { ...ctx.inputs, verdict: [signedCriticVerdictOutput(scratch(ctx.sessionId), { parentSessionId: ctx.sessionId, artifactSha256: media.sha256 })] }
+        : ctx.inputs
+      return exportExecutor.run({ ...ctx, inputs })
+    },
+  })
 }
 
 beforeEach(() => {

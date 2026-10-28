@@ -1,14 +1,18 @@
 // S8c：qc 执行器（machine / critic）与 takes 选优评分。
 // machine：视频/图片走 film-qc.ts 的 analyzeFilm + ffprobe；纯音频交付（mp3 等）不跑读图滤镜，改走可量测代理
 //          （文件存在、ffprobe 可解码、时长对、有音频流、响度在阈内）。
-// critic：执行器不派发评审子代理（S16 接线）；判决由子代理经 applyCriticVerdict → patch 的 write_result 语义落盘。
+// critic：经 lanes.dispatchCriticRun 派独立 critic 席位；回执用 delivery-gate-critic.checkCriticReceipt 校验后签名落盘。
 // 评分表与扣分权重在 rubrics.ts；takes 的 select:"qc" 由 takes.ts 读取 Output.meta.qcScore。
 import { execFile } from "node:child_process"
-import { randomBytes } from "node:crypto"
+import { createHash, createHmac, randomBytes } from "node:crypto"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { checkCriticReceipt } from "../../delivery-gate-critic.ts"
+import type { CriticPassTarget } from "../../delivery-gate-types.ts"
 import { analyzeFilm, parseEbur128, type FilmQcReport } from "../../film-qc.ts"
 import type { ArtifactStore } from "../artifacts.ts"
+import { CRITIC_EXPERT, dispatchCriticRun, projectSeatOf, type CriticDispatchFn } from "../lanes.ts"
 import { applyPatch } from "../patch.ts"
 import { checkWriteValue } from "../patch-validate.ts"
 import {
@@ -308,16 +312,281 @@ async function persistVerdict(ctx: ExecContext, mediaPath: string, content: Json
 const failureMessage = (r: QcInspection) =>
   `qc 未通过（${r.score}/${r.minScore}）：${r.deficiencies.join("；") || "未给出缺陷说明"}`
 
-export async function runQc(ctx: ExecContext): Promise<ExecResult> {
-  const mode = typeof ctx.params.mode === "string" ? ctx.params.mode : ""
-  if (mode === "critic") {
-    return {
-      ok: false,
-      code: "bad_input",
-      message: "critic_dispatch_unwired: qc(mode=\"critic\") 的判决必须由评审子代理经 write_result 落盘（S16 接线，入口 applyCriticVerdict）；执行器不派发、不自判。",
-      retryable: false,
+// ---------------------------------------------------------------- critic 派发（复用 dispatchCriticRun + checkCriticReceipt）
+const VERDICT_KEY = randomBytes(32)
+const MEDIA_LOCATOR_EXT = /\.(png|jpe?g|webp|gif|mp4|mov|webm|mkv)(?:[?#].*)?$/i
+const criticRounds = new Set<string>()
+let criticDispatchForTest: CriticDispatchFn | null = null
+
+export function setQcCriticDispatchForTest(fn: CriticDispatchFn | null): void {
+  criticDispatchForTest = fn
+  criticRounds.clear()
+}
+
+export function criticSeat(): string {
+  return projectSeatOf(CRITIC_EXPERT, true)
+}
+
+export interface CriticItemResult {
+  id: string
+  pass: boolean
+  evidence: string
+}
+
+export interface SignedCriticVerdict {
+  schema: 1
+  mode: "critic"
+  rubric: string
+  score: number
+  pass: true
+  items: CriticItemResult[]
+  deficiencies: string[]
+  evidence: string[]
+  actor: { kind: "subagent"; seat: string; runId: string; lane: string[]; sessionId: string }
+  parentSessionId: string
+  artifactSha256: string
+  receiptCallIds: string[]
+  sig: string
+}
+
+function verdictCanonical(body: Omit<SignedCriticVerdict, "sig">): string {
+  return JSON.stringify({
+    schema: body.schema,
+    mode: body.mode,
+    rubric: body.rubric,
+    score: body.score,
+    pass: body.pass,
+    items: body.items,
+    deficiencies: body.deficiencies,
+    evidence: body.evidence,
+    actor: body.actor,
+    parentSessionId: body.parentSessionId,
+    artifactSha256: body.artifactSha256,
+    receiptCallIds: body.receiptCallIds,
+  })
+}
+
+function signVerdict(body: Omit<SignedCriticVerdict, "sig">): string {
+  return createHmac("sha256", VERDICT_KEY).update(verdictCanonical(body)).digest("hex")
+}
+
+export function verifySignedCriticVerdict(raw: unknown, parentSessionId: string): { ok: true; verdict: SignedCriticVerdict } | { ok: false; reason: string } {
+  if (!raw || typeof raw !== "object") return { ok: false, reason: "verdict 不是对象（只读 pass 不够）" }
+  const v = raw as Partial<SignedCriticVerdict>
+  if (v.schema !== 1 || v.mode !== "critic" || typeof v.sig !== "string" || !v.sig) {
+    return { ok: false, reason: "verdict 缺少 critic 签名" }
+  }
+  if (v.pass !== true) return { ok: false, reason: "verdict 未判过" }
+  if (typeof v.score !== "number" || !Number.isFinite(v.score) || v.score < 0 || v.score > 100) {
+    return { ok: false, reason: "verdict.score 必须是 0–100" }
+  }
+  if (!Array.isArray(v.items) || v.items.length === 0) return { ok: false, reason: "verdict 没有逐项 pass" }
+  for (const item of v.items) {
+    if (!item || typeof item.id !== "string" || item.pass !== true || typeof item.evidence !== "string" || !item.evidence) {
+      return { ok: false, reason: "verdict 有条目未过或没有证据" }
     }
   }
+  const actor = v.actor
+  if (!actor || actor.kind !== "subagent" || actor.seat !== criticSeat() || typeof actor.sessionId !== "string" || !actor.sessionId) {
+    return { ok: false, reason: "verdict 不是 critic lane 写入" }
+  }
+  if (actor.sessionId === parentSessionId) return { ok: false, reason: "critic 与父会话是同一个" }
+  if (!Array.isArray(actor.lane) || actor.lane.length === 0) return { ok: false, reason: "verdict 没有 critic lane" }
+  if (typeof v.artifactSha256 !== "string" || !/^[0-9a-f]{64}$/.test(v.artifactSha256)) {
+    return { ok: false, reason: "verdict 没有被评产物指纹" }
+  }
+  if (!Array.isArray(v.receiptCallIds) || v.receiptCallIds.length === 0) return { ok: false, reason: "verdict 没有感知回执" }
+  const body: Omit<SignedCriticVerdict, "sig"> = {
+    schema: 1,
+    mode: "critic",
+    rubric: String(v.rubric ?? ""),
+    score: v.score,
+    pass: true,
+    items: v.items.map((item) => ({ id: item.id, pass: true, evidence: item.evidence })),
+    deficiencies: Array.isArray(v.deficiencies) ? v.deficiencies.map((d) => String(d)) : [],
+    evidence: Array.isArray(v.evidence) ? v.evidence.map((d) => String(d)) : [],
+    actor: { kind: "subagent", seat: actor.seat, runId: String(actor.runId ?? ""), lane: actor.lane.map((id) => String(id)), sessionId: actor.sessionId },
+    parentSessionId: String(v.parentSessionId ?? ""),
+    artifactSha256: v.artifactSha256,
+    receiptCallIds: v.receiptCallIds.map((id) => String(id)),
+  }
+  if (body.parentSessionId !== parentSessionId) return { ok: false, reason: "verdict 不属于本会话" }
+  const expect = signVerdict(body)
+  if (expect !== v.sig) return { ok: false, reason: "verdict 签名对不上 critic lane" }
+  return { ok: true, verdict: { ...body, sig: v.sig } }
+}
+
+export function signedCriticVerdictOutput(dir: string, opts: { parentSessionId: string; artifactSha256: string; qcNodeId?: string }): Output {
+  const body: Omit<SignedCriticVerdict, "sig"> = {
+    schema: 1,
+    mode: "critic",
+    rubric: "image_default",
+    score: 90,
+    pass: true,
+    items: [{ id: "subject", pass: true, evidence: opts.artifactSha256 }],
+    deficiencies: [],
+    evidence: [opts.artifactSha256],
+    actor: { kind: "subagent", seat: criticSeat(), runId: "critic:fixture", lane: [opts.qcNodeId ?? "qc"], sessionId: `critic-child:${opts.parentSessionId}` },
+    parentSessionId: opts.parentSessionId,
+    artifactSha256: opts.artifactSha256,
+    receiptCallIds: ["call_fixture"],
+  }
+  const full: SignedCriticVerdict = { ...body, sig: signVerdict(body) }
+  const text = JSON.stringify(full)
+  const sha = createHash("sha256").update(text).digest("hex")
+  mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, `verdict-${sha.slice(0, 12)}.json`)
+  writeFileSync(file, text)
+  return {
+    port: "out",
+    artifactId: `art_${sha.slice(0, 16)}`,
+    sha256: sha,
+    path: file,
+    mime: "application/json",
+    bytes: Buffer.byteLength(text),
+    origin: "derived",
+  }
+}
+
+function reviewLocator(output: Output): string | null {
+  const url = output.url
+  if (typeof url === "string" && /^https?:\/\//i.test(url) && MEDIA_LOCATOR_EXT.test(url)) return url
+  const ext = path.extname(output.path || "").toLowerCase()
+  if (!MEDIA_LOCATOR_EXT.test(ext) || !/^[0-9a-f]{64}$/.test(output.sha256)) return null
+  return `http://project-artifact.local/${output.sha256}${ext}`
+}
+
+function asItemList(raw: unknown): CriticItemResult[] | null {
+  if (!Array.isArray(raw)) return null
+  const items: CriticItemResult[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== "object") return null
+    const r = row as { id?: unknown; pass?: unknown; evidence?: unknown }
+    if (typeof r.id !== "string" || !r.id || typeof r.pass !== "boolean") return null
+    items.push({ id: r.id, pass: r.pass, evidence: typeof r.evidence === "string" ? r.evidence : "" })
+  }
+  return items
+}
+
+async function runCritic(ctx: ExecContext): Promise<ExecResult> {
+  const key = `${ctx.node.id}:${ctx.runId}:${ctx.attempt}:${ctx.take}`
+  if (criticRounds.has(key)) {
+    return { ok: false, code: "bad_input", message: "critic_call_cap: 本节点本轮已经派发过一次 critic", retryable: false }
+  }
+  criticRounds.add(key)
+
+  const picked = pickMediaInput(ctx.inputs)
+  if (!picked) return { ok: false, code: "bad_input", message: "critic 没有可评的图或视频产物", retryable: false }
+  const locator = reviewLocator(picked)
+  if (!locator) return { ok: false, code: "bad_input", message: "critic 读不到被评产物的媒体地址", retryable: false }
+  const rubricId = typeof ctx.params.rubric === "string" ? ctx.params.rubric : ""
+  const rubric = rubricOf(rubricId)
+  if (!rubric) return { ok: false, code: "bad_input", message: `未知评分表 ${rubricId}`, retryable: false }
+  const required = rubric.items ?? []
+  if (required.length === 0) return { ok: false, code: "bad_input", message: `评分表 ${rubric.id} 没有可判定条目`, retryable: false }
+
+  const prompt = [
+    "你是独立 critic。只审不产。不得与生成方同一会话。",
+    `parentSession: ${ctx.sessionId}`,
+    `qcNode: ${ctx.node.id}`,
+    `rubric: ${rubric.id}`,
+    `minScore: ${rubric.minScore}`,
+    `artifact: ${locator}`,
+    `sha256: ${picked.sha256}`,
+    ...required.map((item) => `item ${item.id}: ${item.rule}`),
+    "用 read_image 或 vision_analyze 读取 artifact。视频先抽帧再感知。回执必须指向上面的 artifact。",
+  ].join("\n")
+
+  const dispatched = await dispatchCriticRun(
+    { sessionId: ctx.sessionId, qcNodeId: ctx.node.id, prompt, label: `评审 ${ctx.node.id}`, async: false },
+    criticDispatchForTest ?? undefined,
+  )
+  if (!dispatched.ok) {
+    return { ok: false, code: "bad_input", message: dispatched.error ?? "critic 派发失败", retryable: false }
+  }
+  if (dispatched.seat !== criticSeat()) {
+    return { ok: false, code: "bad_input", message: "critic 席位不是 critic", retryable: false }
+  }
+  const childSession = dispatched.sessionId ?? ""
+  if (!childSession || childSession === ctx.sessionId) {
+    return { ok: false, code: "bad_input", message: "critic 与生成方是同一会话", retryable: false }
+  }
+  if (dispatched.agent && dispatched.agent !== "critic" && dispatched.agent !== criticSeat()) {
+    return { ok: false, code: "bad_input", message: "派发回执的 agent 不是 critic", retryable: false }
+  }
+
+  const target: CriticPassTarget = {
+    agent: "author",
+    label: ctx.node.id,
+    runId: dispatched.subagentId ?? childSession,
+    text: locator,
+    artifacts: [locator],
+  }
+  const receipt = checkCriticReceipt([target], dispatched.messages)
+  if (!receipt.ok) {
+    return { ok: false, code: "qc_failed", message: `critic 没有读到被评产物：${receipt.missing.join("；") || "无感知回执"}`, retryable: false }
+  }
+
+  const rawVerdict = dispatched.verdict
+  if (!rawVerdict || typeof rawVerdict !== "object") {
+    return { ok: false, code: "bad_input", message: "critic_verdict_missing: 派发回执里没有 verdict", retryable: false }
+  }
+  const bag = rawVerdict as { score?: unknown; items?: unknown; deficiencies?: unknown; evidence?: unknown }
+  const items = asItemList(bag.items)
+  if (!items) return { ok: false, code: "bad_input", message: "critic verdict.items 不是逐项清单", retryable: false }
+  if (typeof bag.score !== "number" || !Number.isFinite(bag.score)) {
+    return { ok: false, code: "bad_input", message: "critic verdict.score 不是数字", retryable: false }
+  }
+  const byId = new Map(items.map((item) => [item.id, item]))
+  const deficiencies: string[] = []
+  for (const item of required) {
+    const got = byId.get(item.id)
+    if (!got) deficiencies.push(`${item.id} 缺判定`)
+    else if (!got.pass) deficiencies.push(`${item.id} 不过：${got.evidence || item.rule}`)
+    else if (!got.evidence) deficiencies.push(`${item.id} 没有证据`)
+  }
+  const score = Math.max(0, Math.min(100, Math.round(bag.score)))
+  if (score < rubric.minScore) deficiencies.push(`分数 ${score} 低于 ${rubric.minScore}`)
+  if (deficiencies.length > 0) {
+    return { ok: false, code: "qc_failed", message: `critic 未通过（${score}/${rubric.minScore}）：${deficiencies.join("；")}`, retryable: true, costCoins: 0 }
+  }
+
+  const body: Omit<SignedCriticVerdict, "sig"> = {
+    schema: 1,
+    mode: "critic",
+    rubric: rubric.id,
+    score,
+    pass: true,
+    items: required.map((item) => ({ id: item.id, pass: true, evidence: byId.get(item.id)!.evidence })),
+    deficiencies: [],
+    evidence: Array.isArray(bag.evidence) ? bag.evidence.map((e) => String(e)) : [picked.sha256],
+    actor: {
+      kind: "subagent",
+      seat: dispatched.seat,
+      runId: dispatched.subagentId ?? "critic",
+      lane: dispatched.lane,
+      sessionId: childSession,
+    },
+    parentSessionId: ctx.sessionId,
+    artifactSha256: picked.sha256,
+    receiptCallIds: receipt.checked.map((row) => row.callId),
+  }
+  const signed: SignedCriticVerdict = { ...body, sig: signVerdict(body) }
+  try {
+    const out = await persistVerdict(ctx, picked.path, signed as unknown as Json)
+    return {
+      ok: true,
+      outputs: [{ ...out, meta: { qcScore: score, qcPass: true, qcRubric: rubric.id, criticSeat: dispatched.seat, artifactSha256: picked.sha256 } }],
+      costCoins: 0,
+    }
+  } catch (e) {
+    return { ok: false, code: "bad_input", message: `critic 判过但判决写入失败：${errMsg(e)}`, retryable: true }
+  }
+}
+
+export async function runQc(ctx: ExecContext): Promise<ExecResult> {
+  const mode = typeof ctx.params.mode === "string" ? ctx.params.mode : ""
+  if (mode === "critic") return runCritic(ctx)
   if (mode !== "machine") {
     return { ok: false, code: "bad_input", message: `qc.mode 必须是 "machine" | "critic"（收到 ${JSON.stringify(ctx.params.mode)}）。`, retryable: false }
   }

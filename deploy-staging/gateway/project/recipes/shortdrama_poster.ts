@@ -1,14 +1,37 @@
 // 配方 shortdrama_poster —— 由旧模板 deploy-staging/gateway/workflow-templates/shortdrama_poster.ts（只读）改写。
 // 映射原则：docs/architecture/project-graph.md §6（电商族：shotlist(items) + keyframe#item → qc → export(image_pack)）。
-// 旧 role：5 支 *_gen config + 5 个 image 步 + iteration/delivery 两个 text。image 步化为行表 item 的 22 行；
+// 旧 role：5 支 *_gen config + 5 个 image 步 + iteration/delivery 两个 text。image 步仍是 22 张图，各自一个 keyframe；
 // 两个 text（回流报告 / 交付参数卡）分别并入 qc.intent 与 export.intent（不成节点）。
+// 旧封面链：key_art → main_poster → cp_pair → slice_cover → variant_pack。参考图上限 5，key art 先占 1 格。
 import type { Json, NewNode, ProjectDefaults, Recipe } from "../types"
-import { materializeDefaults } from "../specs"
+import { materializeDefaults, MAX_REFERENCE_IMAGES } from "../specs"
 
 const str = (v: Json | undefined, fallback: string): string => (typeof v === "string" && v.trim() !== "" ? v : fallback)
 
 type Row = { id: string; role: string; label: string; size: string; prompt: string; n?: number }
 const asRow = (r: Row): { [k: string]: Json } => ({ id: r.id, role: r.role, label: r.label, size: r.size, prompt: r.prompt, n: r.n ?? 1 })
+
+/** locks 先占格（key art），direct 是旧封面链的直接上游。合计不超过关键帧参考图上限。 */
+function imageRefs(locks: readonly string[], direct: readonly string[]): Record<string, { from: string }> {
+  const out: Record<string, { from: string }> = {}
+  for (const id of [...locks, ...direct]) {
+    if (Object.prototype.hasOwnProperty.call(out, id)) continue
+    if (Object.keys(out).length >= MAX_REFERENCE_IMAGES) break
+    out[id] = { from: id }
+  }
+  return out
+}
+
+function frame(id: string, row: Row, defaults: ProjectDefaults, inputs: Record<string, { from: string }>): NewNode {
+  return {
+    id, type: "keyframe",
+    intent: `旧 role ${row.role}：${row.label}。上游定稿图接在 inputs。`,
+    params: materializeDefaults("keyframe", id, {
+      title: row.label, prompt: row.prompt, role: row.role, size: row.size, n: row.n ?? 1,
+    }, defaults),
+    ...(Object.keys(inputs).length ? { inputs } : {}),
+  }
+}
 
 function buildRows(drama: string, actor: string): Row[] {
   const anchor = `短剧：${drama}。以 key art 与色彩情绪规范 JSON（主色 HEX×2 / 辅色×2 / 光效方向与强度 / 情绪词）为全链 sref 风格锚；主演：${actor}，以主演锁定卡 cref 保五官一致。全链竖版 9:16。`
@@ -94,23 +117,26 @@ export const shortdramaPosterRecipe: Recipe = {
       ...(typeof p.style === "string" && p.style ? { style: p.style } : {}),
     }
     const rows = buildRows(str(p.drama, "待定剧名"), str(p.actor, "待定主演"))
+    const ids = (role: string) => rows.filter((r) => r.role === role).map((r) => r.id)
+    const art = ids("key_art")
+    const poster = ids("main_poster")
+    const cp = ids("cp_pair")
+    const slice = ids("slice_cover")
+    const refsOf = (role: string): Record<string, { from: string }> => {
+      if (role === "key_art") return { catalog: { from: "items" } }
+      if (role === "main_poster") return imageRefs(art, [])
+      if (role === "cp_pair") return imageRefs(art, poster)
+      if (role === "slice_cover") return imageRefs(art, [...cp, ...poster])
+      return imageRefs(art, slice)
+    }
+    const pictures = Object.fromEntries(rows.map((r) => [r.id, { from: r.id }]))
     const nodes: NewNode[] = [
       {
         id: "items", type: "shotlist",
         intent: "旧 5 个 image 步的行表：key art / 主演海报 ×2 / CP 对戏 ×3 / 切片封面 ×8 / A/B 变体 ×8，共 22 行。",
         params: { kind: "items", rows: rows.map(asRow) },
       },
-      {
-        id: "keyframe", type: "keyframe", forEach: { over: "items", as: "item" },
-        intent: "旧 role key_art/main_poster/cp_pair/slice_cover/variant_pack 都由此节点按行产出；旧 5 支 *_gen config 的 model/size/count 并入每行 params 与 defaults。",
-        params: materializeDefaults("keyframe", "keyframe", {
-          title: "${row.label}",
-          prompt: "${row.prompt}",
-          role: "${row.role}",
-          size: "${row.size}",
-          n: "${row.n}",
-        }, defaults),
-      },
+      ...rows.map((r) => frame(r.id, r, defaults, refsOf(r.role))),
       {
         id: "qc", type: "qc",
         intent: "旧 role iteration：按单变量命名拆 CTR 贡献，赢家特征回写参数（winner_*），离群变体（低于组均值 50%）淘汰；风格根不动，只改参数层。",
@@ -122,29 +148,30 @@ export const shortdramaPosterRecipe: Recipe = {
             safeAreaPct: { top: 15, bottom: 20 }, textOverFace: "forbidden", seedSample: 3, colorDeltaE: 5, outlierCutPct: 50,
           },
         },
-        inputs: { image: { from: "keyframe" } },
+        inputs: pictures,
+        onFail: { action: "regenerate", max: 2 },
       },
       {
         id: "export", type: "export",
         intent: "旧 role delivery：全量物料按平台规格归档（9:16 主图 + 变体包 + 情绪标签对位表）+ styleLock 参数卡（sref/cref/seed/色板 JSON）；安全区与字效遮脸 100% 通过后出口。",
         params: { preset: "image_pack" },
-        inputs: { images: { from: "keyframe" }, verdict: { from: "qc" } },
+        inputs: { ...pictures, verdict: { from: "qc" } },
       },
     ]
     return { nodes, targets: { shots: rows.length, subtitles: false, audio: "none" }, defaults }
   },
   legacyRoleMap: {
-    tone_gen: { intentOf: "keyframe" }, // config 不成节点：model/size/count 已并入行 params 与 defaults
-    key_art: "keyframe#key_art",
-    poster_gen: { intentOf: "keyframe" },
-    main_poster: "keyframe", // 2 行（气场版/情绪版，各 3 候选）
-    cp_gen: { intentOf: "keyframe" },
-    cp_pair: "keyframe", // 3 行（对视/逼近/拉扯）
-    cover_gen: { intentOf: "keyframe" },
-    slice_cover: "keyframe", // 8 行（slice_cover_1..8）
-    variant_gen: { intentOf: "keyframe" },
-    variant_pack: "keyframe", // 8 行（钩子位 3 + 字效 3 + 大字报 2）
-    iteration: { intentOf: "qc" }, // text 回流报告 → qc(critic) 的 rubric/结论
-    delivery: { intentOf: "export" }, // text 交付参数卡 → export.intent
+    tone_gen: { intentOf: "key_art" },
+    key_art: "key_art",
+    poster_gen: { intentOf: "main_poster_1" },
+    main_poster: "main_poster_1",
+    cp_gen: { intentOf: "cp_pair_1" },
+    cp_pair: "cp_pair_1",
+    cover_gen: { intentOf: "slice_cover_1" },
+    slice_cover: "slice_cover_1",
+    variant_gen: { intentOf: "variant_hook_top" },
+    variant_pack: "variant_hook_top",
+    iteration: { intentOf: "qc" },
+    delivery: { intentOf: "export" },
   },
 }

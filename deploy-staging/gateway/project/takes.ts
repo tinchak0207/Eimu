@@ -38,12 +38,19 @@ export type FailDecision =
   | { do: "regenerate"; retryNo: number }   // retryNo=这是第几次重生成（1 起）
   | { do: "fail" } | { do: "skip" } | { do: "ask_user" }
 
-/** 失败后怎么办。retriesUsed=已经做过的重生成次数。未配置 onFail=失败即失败。 */
-export function decideOnFail(onFail: OnFail | undefined, failure: FailureKind, retriesUsed: number): FailDecision {
+export type FailFact = FailureKind | { kind: FailureKind; retryable?: boolean }
+
+/** 失败后怎么办。retriesUsed=已经做过的重生成次数。未配置 onFail=失败即失败。
+ * retryable===false（safety_blocked / bad_input / 授权类）不得重生：onFail 即使是 regenerate 也直接 fail。
+ * skip / ask_user 不是重生，仍按其动作走。retryable 不是 false 时沿用原规则。 */
+export function decideOnFail(onFail: OnFail | undefined, failure: FailFact, retriesUsed: number): FailDecision {
+  const kind: FailureKind = typeof failure === "string" ? failure : failure.kind
+  const retryable = typeof failure === "string" ? undefined : failure.retryable
   if (!onFail) return { do: "fail" }
+  if (retryable === false && onFail.action === "regenerate") return { do: "fail" }
   if (onFail.action !== "regenerate") return { do: onFail.action }
   const on = onFail.on ?? "any"
-  const matches = on === "any" || on === failure
+  const matches = on === "any" || on === kind
   if (matches && retriesUsed < onFail.max) return { do: "regenerate", retryNo: retriesUsed + 1 }
   return { do: onFail.then ?? "fail" }
 }

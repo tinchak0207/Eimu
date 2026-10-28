@@ -168,10 +168,11 @@ describe("beastAgentField：按锁存席位映射", () => {
     expect(Object.values(field)).not.toContain("orchestrator")
   })
 
-  test("seat=creator_legacy + 非 beast → {}（旧行为不变）", () => {
+  test("seat=creator_legacy + 非 beast → creator_legacy", () => {
     const key = "sk-push-legacy-plain"
     setBeast(key, false)
-    expect(beastAgentField(seatState(key, "creator_legacy"))).toEqual({})
+    // 独立依据：不带 agent 的 prompt 会被 opencode 落到 build，legacy 非 beast 必须显式 creator_legacy。
+    expect(beastAgentField(seatState(key, "creator_legacy"))).toEqual({ agent: "creator_legacy" })
   })
 
   test("state 无 seat 键 → 按 creator_legacy 处理", () => {
@@ -180,6 +181,7 @@ describe("beastAgentField：按锁存席位映射", () => {
     setBeast(beastKey, true)
     setBeast(plainKey, false)
     expect(beastAgentField(seatState(beastKey))).toEqual({ agent: "orchestrator_legacy" })
-    expect(beastAgentField(seatState(plainKey))).toEqual({})
+    // 独立依据：不带 agent 的 prompt 会被 opencode 落到 build，legacy 非 beast 必须显式 creator_legacy。
+    expect(beastAgentField(seatState(plainKey))).toEqual({ agent: "creator_legacy" })
   })
 })

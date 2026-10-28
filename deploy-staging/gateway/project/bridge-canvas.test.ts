@@ -27,6 +27,10 @@ const { storeCanvasState, getCanvasState, listTemplateOpenSlots, listTemplateGen
 const { workflowNodeId } = await import("../../../src/lib/workflow-dsl/compile.ts")
 // 读面真值：decompile 必须能把桥接后的画布反推回工程命名空间的 DSL 步骤（forEach 实例除外）。
 const { decompileWorkflow } = await import("../../../src/lib/workflow-dsl/decompile.ts")
+const { reopenSessionsDbForTest } = await import("../job-store.ts")
+reopenSessionsDbForTest()
+const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
+resetCatalogCacheForTest()
 
 afterAll(() => rmSync(SANDBOX_DIR, { recursive: true, force: true }))
 

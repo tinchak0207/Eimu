@@ -29,7 +29,7 @@ import { LIMITS } from "./constants.ts"
 import { projectContextResponse, type AgentMessage, type AgentPart } from "./context.ts"
 import { renderDigest, type DigestInputs } from "./digest.ts"
 import { createExecBridgeClient } from "./exec-bridge-client.ts"
-import { createLedgerWriter, createProjectBudget, gatewayProjectCapOf } from "./ledger.ts"
+import { accumulatedSpendCoins, bindSessionBudget, createLedgerWriter, createProjectBudget, gatewayProjectCapOf, graphCapCoins, type ProjectBudgetPort } from "./ledger.ts"
 import { emitDeliveryCards } from "./delivery.ts"
 import { getRecipe } from "./recipes/index.ts"
 import { recoverProject } from "./recovery.ts"
@@ -157,8 +157,23 @@ function isKnownChildSession(sessionId: string): boolean {
  */
 let defaultScoreTakeRef: RunDeps["scoreTake"] | undefined
 
-function productionDeps(state: SessionState): RunDeps & RecoveryDeps {
-  const budget = createProjectBudget({ capOf: gatewayProjectCapOf(state.sessionId) })
+function productionDeps(state: SessionState, store?: ProjectStore): RunDeps & RecoveryDeps {
+  let hold: Promise<void> = Promise.resolve()
+  const budget = createProjectBudget({
+    capOf: gatewayProjectCapOf(state.sessionId),
+    beforeReserve: () => hold,
+  })
+  bindSessionBudget(state.sessionId, budget)
+  if (store) {
+    hold = (async () => {
+      try {
+        const g = await store.read()
+        budget.noteCarry?.({ spentCoins: accumulatedSpendCoins(g), capCoins: graphCapCoins(g) })
+      } catch {
+        // 图读失败时预留仍走 gateway capOf：读不到就 fail-closed，不放行未知预算。
+      }
+    })()
+  }
   const ledger = createLedgerWriter(state)
   return {
     session: state,
@@ -176,7 +191,7 @@ const productionHost: ProjectRouteHost = {
   owned: (key, sessionId) => getOwnedSession(key, sessionId),
   state: (sessionId) => resolveSession(sessionId) ?? subagentParentState(sessionId),
   actor: defaultActor,
-  deps: (state) => productionDeps(state),
+  deps: (state, store) => productionDeps(state, store),
   confirm: (state) => projectConfirmPort(state),
   authorized: (state) => billingAutoApprovalEnabled(state),
 }
@@ -698,6 +713,8 @@ async function handleRunOp(store: ProjectStore, state: SessionState | undefined,
   }
 
   const deps = host.deps(state, store)
+  const budgetPort = deps.budget as ProjectBudgetPort | undefined
+  budgetPort?.noteCarry?.({ spentCoins: accumulatedSpendCoins(graph), capCoins: graphCapCoins(graph) })
   const confirm = host.confirm(state)
   const authorized = () => host.authorized(state)
   const plan = (await buildPlan({ store, deps, targets, mode })).plan

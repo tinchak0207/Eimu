@@ -102,10 +102,59 @@ async function ingestFiles(
   return outs
 }
 
+function inflightSigOf(node: { inflight?: object } | undefined): string | undefined {
+  const inf = node?.inflight
+  if (!inf || !("sig" in inf)) return undefined
+  const raw = (inf as { sig?: unknown }).sig
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined
+}
+
+/** 提交时记下的全部 take key。没有 keys 的旧记录只认 idemKey，不另造。 */
+function inflightKeysOf(node: { inflight?: object } | undefined): string[] {
+  const inf = node?.inflight as { idemKey?: unknown; keys?: unknown } | undefined
+  if (!inf) return []
+  const extra = Array.isArray(inf.keys) ? inf.keys.filter((k): k is string => typeof k === "string" && k.length > 0) : []
+  const idem = typeof inf.idemKey === "string" ? inf.idemKey : ""
+  const keys = [...extra]
+  if (idem && !keys.includes(idem)) keys.unshift(idem)
+  return keys
+}
+
+/** 提交时签名与图上当前签名不一致（或当前算不出）。没有记下 sig 的旧记录不判不一致。 */
+async function signatureMismatch(store: ProjectStore, nodeId: NodeId, submitted: string | undefined): Promise<boolean> {
+  if (!submitted) return false
+  const g = await store.read()
+  const cur = await computeSignature(g, nodeId, store.artifacts, NODE_SPECS_LITE)
+  return !cur.ok || cur.signature !== submitted
+}
+
+/** 产物入库，但节点保持 stale：不把 lastRun/缓存登记成当前签名。下一轮 planRun 判 toRun。 */
+async function finishStale(
+  store: ProjectStore, deps: RecoveryDeps, runId: string, nodeId: NodeId, outputs?: Output[],
+): Promise<void> {
+  const at = isoNow(deps)
+  await store.update((g) => {
+    const n = g.nodes[nodeId]
+    if (!n) return
+    n.status = "stale"
+    n.inflight = undefined
+    if (outputs) n.outputs = outputs
+    n.error = { code: "stale_input", message: "恢复时签名与提交时不一致：产物已保留，按新参数重跑", retryable: true, at }
+  })
+  await store.appendEvents([{
+    kind: "node_status", node: nodeId, run: runId,
+    data: { status: "stale", recovered: true, reason: "signature mismatch" },
+  }])
+}
+
 async function finishNode(
   store: ProjectStore, deps: RecoveryDeps, runId: string, nodeId: NodeId,
-  status: "done" | "failed", extra: { outputs?: Output[]; costCoins?: number; error?: { code: string; message: string; retryable: boolean } },
+  status: "done" | "failed", extra: { outputs?: Output[]; costCoins?: number; error?: { code: string; message: string; retryable: boolean }; submittedSig?: string },
 ): Promise<void> {
+  if (status === "done" && await signatureMismatch(store, nodeId, extra.submittedSig)) {
+    await finishStale(store, deps, runId, nodeId, extra.outputs)
+    return
+  }
   const at = (deps.now?.() ?? new Date()).toISOString()
   await store.update(async (g) => {
     const n = g.nodes[nodeId]
@@ -170,8 +219,9 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       const q = await query.query({ kind: kindOf(node.type), taskId: item.taskId!, apiKey: apiKeyOf(deps.session) })
       if (q.state === "done") {
         const outs = await ingestUrls(store, q.urls, deps)
-        await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: q.costCoins ?? 0 })
-        resumed.push({ node: item.node, action: item.action, result: "done" })
+        await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: q.costCoins ?? 0, submittedSig: inflightSigOf(node) })
+        const stale = (await store.read()).nodes[item.node]?.status === "stale"
+        resumed.push({ node: item.node, action: item.action, result: "done", ...(stale ? { reason: "signature mismatch" } : {}) })
       } else if (q.state === "failed") {
         await finishNode(store, deps, runId, item.node, "failed", { error: { code: "provider_error", message: q.message ?? "平台任务失败", retryable: true } })
         resumed.push({ node: item.node, action: item.action, result: "failed" })
@@ -183,6 +233,34 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
     }
 
     if (item.action === "confirm_unknown") {
+      const keys = inflightKeysOf(node)
+      const bridgeExec = NODE_SPECS[node.type]?.executor === "exec-bridge"
+      if (bridgeExec && keys.length > 1) {
+        const parts: { files: { path: string; mime: string; bytes: number; durationSec?: number }[]; cost: number }[] = []
+        let pending = false
+        for (const key of keys) {
+          const r = await deps.execBridge.result(key)
+          if (r.state !== "done" || !(r.files && r.files.length)) { pending = true; break }
+          parts.push({ files: r.files, cost: r.costCoins ?? 0 })
+        }
+        if (pending) {
+          await leaveRunning(store, deps, runId, item.node, "多 take 里仍有未确认的提交，整轮保持 running")
+          resumed.push({ node: item.node, action: item.action, result: "running" })
+        } else {
+          const outs = await ingestFiles(store, parts.flatMap((p) => p.files), deps)
+          if (!outs.length) {
+            await markManual(store, deps, runId, item.node, "exec-bridge 报 done 但没有文件；需人工确认")
+            manual.push(item.node)
+          } else {
+            const cost = parts.reduce((s, p) => s + p.cost, 0)
+            await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: cost, submittedSig: inflightSigOf(node) })
+            resumed.push({ node: item.node, action: item.action, result: "done" })
+          }
+        }
+        continue
+      }
+      // 多个 key、没有 task、又不是桥：落到下面的同 key 重投，把每个 take 都续上。单 key 仍走原来的确认。
+      if (!(keys.length > 1 && !item.taskId && !bridgeExec)) {
       if (NODE_SPECS[node.type]?.executor === "exec-bridge") {
         const r = await deps.execBridge.result(item.idemKey)
         if (r.state === "done") {
@@ -191,7 +269,7 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
             await markManual(store, deps, runId, item.node, "exec-bridge 报 done 但没有文件；需人工确认")
             manual.push(item.node)
           } else {
-            await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: r.costCoins ?? 0 })
+            await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: r.costCoins ?? 0, submittedSig: inflightSigOf(node) })
             resumed.push({ node: item.node, action: item.action, result: "done" })
           }
         } else if (r.state === "failed") {
@@ -207,7 +285,7 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
         const q = await query.query({ kind: kindOf(node.type), taskId: item.taskId, apiKey: apiKeyOf(deps.session) })
         if (q.state === "done") {
           const outs = await ingestUrls(store, q.urls, deps)
-          await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: q.costCoins ?? 0 })
+          await finishNode(store, deps, runId, item.node, "done", { outputs: outs, costCoins: q.costCoins ?? 0, submittedSig: inflightSigOf(node) })
           resumed.push({ node: item.node, action: item.action, result: "done" })
           continue
         }
@@ -221,9 +299,17 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       manual.push(item.node)
       resumed.push({ node: item.node, action: item.action, result: "manual" })
       continue
+      }
     }
 
-    // resubmit：只有 idemKey。先核对当前签名是否还能生成同一个 key —— 不同就绝不重投。
+    // resubmit：只有 idemKey。提交时签名与当前图不一致 → 不重投、产物不按当前签名登记，节点 stale，下一轮 toRun。
+    const submitted = inflightSigOf(node)
+    if (submitted && await signatureMismatch(store, item.node, submitted)) {
+      await finishStale(store, deps, runId, item.node)
+      resumed.push({ node: item.node, action: item.action, result: "done", reason: "signature mismatch" })
+      continue
+    }
+    // 没记下 sig 的旧记录：当前签名生成的 key 必须与 inflight 逐字相等，不同就绝不重投。
     const parsed = parseKey(item.idemKey)
     const sig = await computeSignature(graph, item.node, store.artifacts, NODE_SPECS_LITE)
     if (!parsed || !sig.ok) {
@@ -239,8 +325,22 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       resumed.push({ node: item.node, action: item.action, result: "manual" })
       continue
     }
+    const keys = inflightKeysOf(node)
+    let resumeTakes: number[] | undefined
+    if (keys.length > 1) {
+      const parsedKeys = keys.map((key) => ({ key, parsed: parseKey(key) }))
+      const sameAttempt = parsedKeys.every((k) => k.parsed && k.parsed.attempt === parsed.attempt)
+      const allMatch = sameAttempt && parsedKeys.every((k) => k.parsed && idempotencyKeyOf({ projectId: graph.id, signature: sig.signature, take: k.parsed.take, attempt: k.parsed.attempt }) === k.key)
+      if (!allMatch) {
+        await markManual(store, deps, runId, item.node, "多 take 的在途 key 与当前签名不一致；不换 key 重投，等人工确认")
+        manual.push(item.node)
+        resumed.push({ node: item.node, action: item.action, result: "manual" })
+        continue
+      }
+      resumeTakes = parsedKeys.map((k) => k.parsed!.take)
+    }
     const r = await executeNode(store, deps, runId, item.node, {
-      signature: sig.signature, attempt: parsed.attempt, take: parsed.take, noRegenerate: true,
+      signature: sig.signature, attempt: parsed.attempt, ...(resumeTakes ? { takes: resumeTakes } : { take: parsed.take }), noRegenerate: true,
     })
     if (r.status === "done" || r.status === "stale") resumed.push({ node: item.node, action: item.action, result: "done" })
     else if (r.status === "failed" || r.status === "skipped") resumed.push({ node: item.node, action: item.action, result: "failed" })

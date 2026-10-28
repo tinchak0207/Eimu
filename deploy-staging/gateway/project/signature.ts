@@ -2,6 +2,7 @@
 // 算法来自设计文档的描述性规范（类型+指纹+排序常量参数+祖先 DFS 序号展开，不含 node_id），独立重写；
 // 不含任何 ComfyUI(GPL)/n8n(SUL) 源码。原则：宁可多重跑，不可错用旧产物——任何拿不准的地方一律 unstable。
 import { createHash } from "node:crypto"
+import { upstreamOf } from "./expand"
 import type {
   FingerprintResolver, Json, NodeId, NodeSpecLite, NodeType, Output, ProjectGraph, ProjectNode, RunPlan, SignatureResult, Sha256,
 } from "./types"
@@ -54,10 +55,12 @@ function transformRefs(v: Json, graph: Readonly<ProjectGraph>, out: Dep[]): Json
   return v
 }
 
-// 节点的全部上游依赖（显式 inputs + params 引用），去重保序；planRun 与 DFS 共用。
+// 节点的全部上游依赖（显式 inputs 按扇入展开 + params 引用），去重保序；planRun 与 DFS 共用。
 export function nodeDependencies(graph: Readonly<ProjectGraph>, node: Readonly<ProjectNode>): NodeId[] {
   const ids: NodeId[] = []
-  for (const name of Object.keys(node.inputs).sort()) ids.push(node.inputs[name].from)
+  for (const name of Object.keys(node.inputs).sort()) {
+    for (const id of upstreamOf(graph, node.inputs[name].from)) ids.push(id)
+  }
   for (const k of Object.keys(node.params).sort()) {
     const deps: Dep[] = []
     transformRefs(node.params[k], graph, deps)
@@ -145,19 +148,30 @@ async function buildStatic(ctx: Ctx, id: NodeId, root: boolean): Promise<Static>
 
   const leaf = node.type === "reference"
   const inputNames = leaf ? [] : Object.keys(node.inputs).sort()
-  const children: Dep[] = inputNames.map((n) => ({ id: node.inputs[n].from, port: node.inputs[n].port ?? MAIN_PORT }))
+  const expanded = inputNames.map((n) => {
+    const port = node.inputs[n].port ?? MAIN_PORT
+    return { name: n, port, ids: upstreamOf(ctx.graph, node.inputs[n].from) }
+  })
+  const children: Dep[] = []
+  for (const e of expanded) for (const id of e.ids) children.push({ id, port: e.port })
 
-  // content 模式：签名还含各输入口上游产物的内容 sha（上游没产出→不稳定）。
+  // 有显式上游输入的节点，签名必须含各输入口当前产物的内容 sha。
+  // 不再看 fingerprintMode：那道闸会让结构签名看不见上游换图（force / 文件丢失）。
+  // 结构签名只留给没有这些输入的叶子。上游还没有产物 → 该口记 null（产物一出现签名就变）；
+  // 产物 id 在、文件读不到 → unstable，调用方必重跑。
+  // 指着模板时，children 与这里都按同一行序走实例，不哈希模板自己的空 outputs。
   let contentIn: Json = null
-  if (spec.fingerprintMode === "content" && !leaf) {
+  if (!leaf && expanded.length) {
     const arr: Json[] = []
-    for (const n of inputNames) {
-      const up = ctx.graph.nodes[node.inputs[n].from]
-      if (!up) throw unstable(`dangling reference: ${node.inputs[n].from}`)
-      const port = node.inputs[n].port ?? MAIN_PORT
-      const outs = up.outputs.filter((o) => o.port === port)
-      if (!outs.length) throw unstable(`upstream content missing: ${up.id}.${port}`)
-      arr.push([n, await shasOf(ctx, outs.map((o) => o.artifactId))])
+    for (const e of expanded) {
+      const artifactIds: string[] = []
+      for (const id of e.ids) {
+        const up = ctx.graph.nodes[id]
+        if (!up) throw unstable(`dangling reference: ${id}`)
+        for (const o of up.outputs) if (o.port === e.port) artifactIds.push(o.artifactId)
+      }
+      if (!artifactIds.length) arr.push([e.name, null])
+      else arr.push([e.name, await shasOf(ctx, artifactIds)])
     }
     contentIn = arr
   }
@@ -225,6 +239,12 @@ export async function findReusable(
 }
 async function reusableIn(ctx: Ctx, nodeId: NodeId, signature: string, cache?: CacheLookup): Promise<Output[] | null> {
   const node = ctx.graph.nodes[nodeId]
+  // stale：产物是启动时签名产的。只允许「查询签名 === lastRun 记下的产出签名」时复用自身产物。
+  // 当前签名对不上就直接拒绝，连缓存也不查——缓存键一旦被误写成事后签名，旧图会以新参数被复用。
+  if (node?.status === "stale") {
+    if (node.lastRun?.signature === signature && await outputsIntact(ctx, node.outputs)) return node.outputs as Output[]
+    return null
+  }
   if (node && node.status === "done" && node.lastRun?.signature === signature && await outputsIntact(ctx, node.outputs)) {
     return node.outputs as Output[]
   }

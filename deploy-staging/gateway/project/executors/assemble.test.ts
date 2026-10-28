@@ -57,6 +57,7 @@ const { timelineExecutor } = await import("./timeline")
 const { subtitleExecutor } = await import("./subtitle")
 const { mixExecutor } = await import("./mix")
 const { exportExecutor } = await import("./export")
+const { signedCriticVerdictOutput } = await import("./qc")
 const { assembleFilmNode, assembleFromClips } = await import("../../workflow-gw-assemble")
 
 const store = new ArtifactStore({ projectDir: PROJECT_DIR })
@@ -109,7 +110,15 @@ const makeCtx = (opts: {
     sessionId: SID,
     session: {} as never,
     params: opts.params,
-    inputs: opts.inputs,
+    inputs: opts.type === "export" && !opts.inputs.verdict
+      ? {
+          ...opts.inputs,
+          verdict: [signedCriticVerdictOutput(MEDIA, {
+            parentSessionId: SID,
+            artifactSha256: (Object.values(opts.inputs).flat().find((o) => /^(video|image)\//.test(o.mime)) ?? { sha256: "a".repeat(64) }).sha256,
+          })],
+        }
+      : opts.inputs,
     refs: [],
     signal: new AbortController().signal,
     ingest: (src, hint) => store.ingest(src, hint),

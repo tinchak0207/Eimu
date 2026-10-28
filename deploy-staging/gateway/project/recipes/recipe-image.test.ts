@@ -28,6 +28,63 @@ const EXEC_KINDS = new Set(["image", "video", "audio", "film"])
 // 新图里真正产出媒体/文本产物的节点类型（qc/export 是确定性包装，不计入"生成"数）
 const GEN_TYPES = new Set<NodeType>(["keyframe", "clip", "voice", "music", "render3d"])
 
+/** 旧 connections 穿透 config（config 只是参数）后留下的 image→image。名单按模板文件手算，用来核对穿透函数。 */
+const EXPECTED_IMAGE_EDGES: Record<string, [string, string][]> = {
+  single_image: [],
+  scene_setup: [],
+  character_sheet: [],
+  ecom_launch: [
+    ["aspect_matrix", "final_assets"],
+    ["detail_page", "aspect_matrix"],
+    ["kv_hero", "detail_page"],
+    ["model_shot", "kv_hero"],
+    ["product_card", "scene_pack"],
+    ["scene_pack", "model_shot"],
+  ],
+  ecom_model: [
+    ["detail_page", "distribution"],
+    ["garment_asset", "model_card"],
+    ["grid", "detail_page"],
+    ["model_card", "tryon"],
+    ["retouch", "grid"],
+    ["tryon", "retouch"],
+  ],
+  shortdrama_poster: [
+    ["cp_pair", "slice_cover"],
+    ["key_art", "main_poster"],
+    ["main_poster", "cp_pair"],
+    ["slice_cover", "variant_pack"],
+  ],
+}
+
+/** 从旧模板 connections 现算 image→image（只穿透 kind=config）。 */
+function collapsedImageEdges(template: WorkflowTemplate): [string, string][] {
+  const kind = new Map(template.nodes.map((n) => [n.role, n.kind]))
+  const images = template.nodes.filter((n) => n.kind === "image").map((n) => n.role)
+  const incoming = new Map<string, string[]>()
+  for (const c of template.connections) {
+    const arr = incoming.get(c.toRole) ?? []
+    arr.push(c.fromRole)
+    incoming.set(c.toRole, arr)
+  }
+  const imageParents = (role: string, seen: Set<string>): string[] => {
+    const found: string[] = []
+    for (const src of incoming.get(role) ?? []) {
+      if (seen.has(src)) continue
+      seen.add(src)
+      if (kind.get(src) === "image") found.push(src)
+      else if (kind.get(src) === "config") found.push(...imageParents(src, seen))
+    }
+    return found
+  }
+  const edges: [string, string][] = []
+  for (const role of images) {
+    for (const src of imageParents(role, new Set([role]))) edges.push([src, role])
+  }
+  edges.sort((a, b) => (a[0] + "\0" + a[1]).localeCompare(b[0] + "\0" + b[1]))
+  return edges
+}
+
 const PAIRS: { template: WorkflowTemplate; recipe: Recipe }[] = [
   { template: singleImageTemplate, recipe: singleImageRecipe },
   { template: characterSheetTemplate, recipe: characterSheetRecipe },
@@ -87,10 +144,11 @@ const targetOf = (g: ProjectGraph, allIds: Set<string>, to: string): ProjectNode
 describe("校验 oracle 负向对照（证明上面的零 error 不是空转）", () => {
   test("未知参数键在模板层报 BAD_PARAM；坏行值在展开后的实例层报 BAD_PARAM", () => {
     const g = graphOf(ecomLaunchRecipe.build({}))
-    g.nodes.keyframe.params.__bogus = 1
+    g.nodes.product_card.params.__bogus = 1
     expect(validateGraph(g).errors.some((e) => e.code === "BAD_PARAM")).toBe(true)
 
-    const g2 = graphOf(ecomLaunchRecipe.build({}))
+    // 行值要等扇出才变成关键帧参数。上市包的图已是独立关键帧，这一层用仍在扇出的角色四视图。
+    const g2 = graphOf(characterSheetRecipe.build({}))
     const tpl = Object.values(g2.nodes).find((n) => n.forEach)!
     const items = g2.nodes[tpl.forEach!.over]
     ;(items.params.rows as { [k: string]: Json }[])[0].size = "16:9" // keyframe.size 要像素尺寸，比例应被拒
@@ -199,6 +257,62 @@ describe("S11b 图片/电商族配方", () => {
           expect(Array.isArray(rows)).toBe(true)
           expect((rows as Json[]).length).toBeGreaterThan(0)
         }
+      })
+
+      test("旧模板穿透 config 后的图生图边，展开后仍接到对应 role", () => {
+        const edges = collapsedImageEdges(template)
+        expect(edges).toEqual(EXPECTED_IMAGE_EDGES[recipe.id])
+        const ex = expandGraph(graphOf(build()))
+        expect(ex.ok).toBe(true)
+        const byRole = new Map<string, ProjectNode[]>()
+        let genEdges = 0
+        for (const n of Object.values(ex.nodes)) {
+          if (n.type !== "keyframe" || n.forEach) continue
+          for (const input of Object.values(n.inputs)) {
+            const up = ex.nodes[input.from]
+            if (up?.type === "keyframe" && !up.forEach) genEdges++
+          }
+          const role = n.params.role
+          if (typeof role !== "string") continue
+          const arr = byRole.get(role) ?? []
+          arr.push(n)
+          byRole.set(role, arr)
+        }
+        console.log(`[${recipe.id}] nodes build ${build().nodes.length} expanded ${ex.order.length} | genEdges ${genEdges} | oldConnections ${template.connections.length}`)
+        if (template.connections.length >= 11) expect(genEdges).toBeGreaterThanOrEqual(template.connections.length)
+        for (const [fromRole, toRole] of edges) {
+          const ups = new Set((byRole.get(fromRole) ?? []).map((n) => n.id))
+          const downs = byRole.get(toRole) ?? []
+          expect(ups.size, fromRole).toBeGreaterThan(0)
+          expect(downs.length, toRole).toBeGreaterThan(0)
+          for (const down of downs) {
+            const hit = Object.values(down.inputs).filter((i) => ups.has(i.from))
+            expect(hit.length, `${fromRole} → ${toRole} @ ${down.id}`).toBeGreaterThan(0)
+          }
+        }
+        if (recipe.id === "character_sheet") {
+          const downstream = ["view2", "view3", "view4"]
+          for (const role of downstream) {
+            const to = recipe.legacyRoleMap[role]
+            expect(typeof to).toBe("string")
+            const n = ex.nodes[to as string]
+            expect(n, role).toBeDefined()
+            expect(Object.values(n.inputs).some((i) => i.from === "view_front"), role).toBe(true)
+          }
+          expect(genEdges).toBeGreaterThanOrEqual(downstream.length)
+        }
+        for (const n of Object.values(ex.nodes)) {
+          if (n.type !== "keyframe" || n.forEach) continue
+          const max = NODE_SPECS.keyframe.maxReferences?.(n) ?? 5
+          let imageIns = 0
+          for (const input of Object.values(n.inputs)) {
+            const up = ex.nodes[input.from]
+            if (up?.type === "keyframe") imageIns++
+          }
+          expect(imageIns, n.id).toBeLessThanOrEqual(max)
+        }
+        expect(ex.nodes.qc.onFail).toEqual({ action: "regenerate", max: 2 })
+        expect(ex.order.indexOf("qc")).toBeLessThan(ex.order.indexOf("export"))
       })
     })
   }

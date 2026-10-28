@@ -256,10 +256,15 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
   }
   // R8 修复片2（2026-09-10）：Expert agent 栏（prompt_async 吃 agent 栏；
   // POST /session 不支持，08-08 实锤）。带上 = 子会话挂对应 Expert agent
-  // （工具表裁剪到该域）；缺省 = default build 零变化。换模重试
-  // （retryWithNextModel）走本函数，agent 自然继承。
-  // fork 不带 agent/model：fork 端点已把父会话的 agent/model 复制进子会话（useExactTools）。
-  if (!run.isFork && run.agent) body.agent = run.agent
+  // （工具表裁剪到该域）。S2：缺省不再省略——省略会被 opencode 落到 build。
+  // 工程会话的通用子代理用 researcher（无生成工具）；旧会话用 creator_legacy，
+  // beast 用 orchestrator_legacy。已指定的席位（含 *_p）原样带上。换模重试走本函数，agent 继承。
+  // fork 的 agent 在上方 forkAgent 分支已写入；这里只补非 fork。
+  if (!run.isFork) {
+    const fallback = run.projectMode === true ? "researcher" : run.beastMode === true ? "orchestrator_legacy" : "creator_legacy"
+    body.agent = run.agent || fallback
+    if (!run.agent) run.agent = String(body.agent)
+  }
   const postPrompt = (payload: Record<string, unknown>) =>
     opencodeAdmissionFetch(`${deps!.openCodeUrl}/session/${childId}/prompt_async`, {
       method: "POST",

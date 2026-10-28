@@ -294,6 +294,9 @@ describe("takes / onFail 数据处理", () => {
     expect(decideOnFail(rg, "error", 2)).toEqual({ do: "skip" })
     expect(decideOnFail({ action: "regenerate", max: 2, on: "qc_fail" }, "error", 0)).toEqual({ do: "fail" })
     expect(decideOnFail({ action: "regenerate", max: 1, on: "error", then: "ask_user" }, "error", 1)).toEqual({ do: "ask_user" })
+    expect(decideOnFail({ action: "regenerate", max: 2, then: "skip" }, { kind: "error", retryable: false }, 0)).toEqual({ do: "fail" })
+    expect(decideOnFail({ action: "regenerate", max: 2 }, { kind: "error", retryable: true }, 0)).toEqual({ do: "regenerate", retryNo: 1 })
+    expect(decideOnFail({ action: "ask_user" }, { kind: "error", retryable: false }, 0)).toEqual({ do: "ask_user" })
   })
   test("effectiveSeed：take0 时重试 +1；takes×重试网格内互不相同", () => {
     expect(effectiveSeed(100, 0)).toBe(100)
