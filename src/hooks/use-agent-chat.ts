@@ -8,7 +8,7 @@
 // not_authenticated（登入失效）。除此之外断线就是重连，不往上抛。
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { refusalWhenNoOwner } from "@/hooks/use-agent-chat/logged-out-start";
+import { markClosedForLoggedOutOwner } from "@/hooks/use-agent-chat/logged-out-start";
 import { useAuth } from "@/hooks/use-auth";
 import { getStoredUser } from "@/lib/new-api-client";
 import { AGENT_STEER_QUEUE_TTL_MS, EMPTY_AGENT_CHAT_STATE } from "@/lib/agent-chat-types";
@@ -377,11 +377,12 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     const owner = ownerIdRef.current;
     const accountEpoch = accountEpochRef.current;
     const epoch = sessionEpochRef.current;
-    if (refusalWhenNoOwner(owner) === "auth") {
+    const loggedOut = markClosedForLoggedOutOwner(owner);
+    if (loggedOut) {
       // 未登录访客点了复刻卡或发送：建不了会话。按登入失效同一条路把原句留住，
       // send() 才会走 onSendBlockedByAuth，登录后补送的仍是这一句。
-      closedRef.current = true;
-      closedReasonRef.current = "auth";
+      closedRef.current = loggedOut.closed;
+      closedReasonRef.current = loggedOut.closedReason;
       setConnection("closed");
       return false;
     }
