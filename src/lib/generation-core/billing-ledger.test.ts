@@ -9,6 +9,7 @@ import {
   reserveGenerationBilling,
   retryStrandedRefundOperations,
 } from "./billing-ledger.ts";
+import { terminalReservedJobs } from "./billing-ledger/schema.ts";
 import { resolveReplayPolicy } from "./operation-registry.ts";
 import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
 import type { GenerationSql } from "./database.ts";
@@ -89,6 +90,20 @@ function mockSql(initialRefundStatus: string, claimed = true) {
     (cb) => cb(tagged);
   return { sql: tagged, calls };
 }
+
+test("terminal settlement asks only for reserved jobs that still have no commit", async () => {
+  const calls: string[] = [];
+  const tagged = (async (strings: TemplateStringsArray) => {
+    calls.push(strings.join(" "));
+    return [];
+  }) as unknown as GenerationSql;
+  assert.deepEqual(await terminalReservedJobs(50, tagged), []);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /NOT EXISTS/);
+  assert.match(calls[0], /settled\.operation = 'commit'/);
+  assert.match(calls[0], /settled\.amount > 0/);
+  assert.equal(calls[0].includes("LIMIT"), true);
+});
 
 test("only explicit client rejections or 429 are safe billing retries", () => {
   assert.equal(classifyBillingFailure(new ImageBillingGatewayError("rate limited", 429, "45")), "retry");
