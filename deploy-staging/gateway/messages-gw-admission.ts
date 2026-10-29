@@ -30,6 +30,7 @@ import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSe
 import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedConstraintsText, originalUserPromptText, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, installProjectIngressSink, type SystemPromptSection } from "./messages-gw-types.ts"
 import { acceptOriginalUserPrompt, readOriginalPin, restoreOriginalPin, systemWithoutOriginalGoalEcho } from "./project/goal-card.ts"
 import { acceptProjectIngress, persistUserBriefNow } from "./project/context.ts"
+import { kickFirstLook } from "./project/routes.ts"
 
 installProjectIngressSink((record) => acceptProjectIngress(record))
 
@@ -429,6 +430,8 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     } catch (e) {
       console.warn(`[gateway] project brief sync failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
     }
+    // 首句速出：首条消息由网关直接出一张图，不等模型规划（工程流程照常并行）。
+    if ((state.turnGen ?? 0) === 0) void kickFirstLook(state.sessionId, content)
   }
   rememberPinnedConstraints(state, content)
   // ── 契约 §4/§7 每回合召回前缀（2026-09-15 PRD P0-4）─────────────────────

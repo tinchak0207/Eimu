@@ -521,6 +521,40 @@ describe("子代理 Actor 与 lane（真 applyPatch，不 mock 引擎）", () =>
 })
 
 describe("RUN 准入与执行", () => {
+  test("首句速出：首条消息自建 first_look 并跑出图；再来一次不重跑；非工程会话不动", async () => {
+    const sid = nextSession("firstlook")
+    let runs = 0
+    let prompt = ""
+    fakeKeyframe(async (ctx) => {
+      runs += 1
+      prompt = String(ctx?.node?.params?.prompt ?? ctx?.params?.prompt ?? "")
+      return { ok: true, outputs: [{ ...OK_OUTPUT, url: "https://example.test/a.png" }], costCoins: 2 }
+    }, 2)
+    const restore = installHost(makeState(sid), { submits: [], ledger: [] })
+    try {
+      expect(await routes.kickFirstLook(sid, "赛博朋克雨夜的猫")).toBe("started")
+      for (let i = 0; i < 100 && runs === 0; i++) await new Promise((r) => setTimeout(r, 20))
+      await new Promise((r) => setTimeout(r, 50))
+      const { openProject } = await import("./store.ts")
+      const node = (await (await openProject(sid)).read()).nodes[routes.FIRST_LOOK_NODE]
+      expect(runs).toBe(1)
+      expect(node?.status).toBe("done")
+      expect(String(node?.params?.prompt)).toContain("赛博朋克雨夜的猫")
+      expect(await routes.kickFirstLook(sid, "再来一张")).toBe("skipped")
+      expect(runs).toBe(1)
+    } finally {
+      restore()
+    }
+    const sid2 = nextSession("firstlook-legacy")
+    const restore2 = installHost(makeState(sid2, { projectMode: false }), { submits: [], ledger: [] })
+    try {
+      expect(await routes.kickFirstLook(sid2, "赛博朋克雨夜的猫")).toBe("skipped")
+    } finally {
+      restore2()
+    }
+    expect(prompt === "" || prompt.includes("赛博朋克")).toBe(true)
+  })
+
   test("dry_run 只报价，不调执行器", async () => {
     const sid = nextSession("dryrun")
     await projectWithNodes(sid, [{ id: "k1", type: "keyframe", params: { prompt: "x" } }])
