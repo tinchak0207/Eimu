@@ -125,7 +125,28 @@ function pinRequested(p: ProjectDslStep["pinned"]): boolean {
 // ─────────────────────────── 编译主入口
 
 export function compileProjectDsl(sourceRaw: unknown, current: ProjectCompileInput): ProjectCompileResult {
-  const validated = validateProjectDsl(sourceRaw);
+  // 旧tool卡有执行义务，不能当注释吞掉。仅接与现有节点真正等价的生成入口。
+  const toolKinds: Record<string, NodeType> = { image_generate: "keyframe", video_generate: "clip", music_gen: "music", tts: "voice", blender_render: "render3d" };
+  const source = sourceRaw && typeof sourceRaw === "object" ? structuredClone(sourceRaw) as Record<string, any> : sourceRaw;
+  const compatibilityErrors: WorkflowValidationIssue[] = [];
+  if (source && typeof source === "object" && Array.isArray((source as Record<string, any>).steps)) {
+    for (const step of (source as Record<string, any>).steps) {
+      if (!step || typeof step !== "object") continue;
+      if (step.gate === true) compatibilityErrors.push({ step: step.id, field: "gate", message: `步骤 ${step.id} 的事前人工批准门尚无等价执行机制，未应用整份DSL；onFail/候选选择不是事前批准的替代品`, hint: "保留该义务，先接真实批准机制；不要删gate冒充完成" });
+      if (typeof step.tool === "string") {
+        const mapped = toolKinds[step.tool];
+        if (!mapped) compatibilityErrors.push({ step: step.id, field: "tool", message: `步骤 ${step.id} 的工具 ${step.tool} 尚未接入同工程执行，未应用整份DSL`, hint: "使用该工具已有路径完成实际义务；不得只把工具名改成说明文字" });
+        else {
+          const declared = PROJECT_KIND_ALIASES[step.kind] ?? step.kind;
+          if (declared && declared !== mapped && !(step.kind === "audio" && (mapped === "music" || mapped === "voice"))) compatibilityErrors.push({ step: step.id, field: "tool", message: `步骤 ${step.id} 的工具 ${step.tool} 对应${mapped}，与kind=${step.kind}不一致` });
+          else step.kind = mapped;
+          delete step.tool;
+        }
+      }
+    }
+  }
+  if (compatibilityErrors.length) return { ok: false, errors: compatibilityErrors, ops: [] };
+  const validated = validateProjectDsl(source);
   if (!validated.ok) return { ok: false, errors: validated.errors, ops: [] };
   const steps = validated.source.steps;
 
@@ -225,8 +246,6 @@ export function compileProjectDsl(sourceRaw: unknown, current: ProjectCompileInp
 
   for (const r of order) {
     const { step, existing } = r;
-    if (step.gate === true) warnings.push(`步骤 ${step.id} 的 gate 在工程图里没有对应概念（用 onFail:{action:"ask_user"} 或 takes.select:"user"），已忽略`);
-    if (step.tool !== undefined && step.tool !== null) warnings.push(`步骤 ${step.id} 的 tool 在 target:"project" 下无意义，已忽略`);
 
     if (!existing) {
       const node: NewNode = { id: step.id, type: r.type as NodeType };

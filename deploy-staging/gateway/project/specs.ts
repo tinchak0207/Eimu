@@ -132,6 +132,7 @@ export const NODE_SPECS: Readonly<Record<NodeType, NodeSpec>> = {
       size: S(16, "1024x1536", { pattern: /^\d{3,5}x\d{3,5}$/, hint: '像素尺寸 "宽x高"，如 "1024x1536"（图片不接受 16:9 这类比例）' }),
       seed: seedRule,
       role: S(32, "keyframe", { pattern: ID_RE, hint: "用途标识符（reference / keyframe / poster / detail_page …）" }),
+      toolSubmission: J({}), // 原工具预处理合同；全部字段进签名，同一runner提交
       n: N(1, { min: 1, max: 4, integer: true }),
       quality: E(["standard", "hd"]),
       styleLock: styleLockRule,
@@ -144,10 +145,12 @@ export const NODE_SPECS: Readonly<Record<NodeType, NodeSpec>> = {
     pinNote: "选定的片段可钉",
     params: {
       title: TITLE,
+      toolSubmission: J({}),
       prompt: S(16_000, "镜头缓推，雨滴落在伞面，人物回头", { min: 1, required: true }),
       model: modelRule("minimax-h3"),
       size: S(16, "16:9", { pattern: /^(\d{1,2}:\d{1,2}|\d{3,5}x\d{3,5})$/, hint: '画面比例（"16:9"）或像素（"1920x1080"）' }),
       seconds: N(5, { min: 5, max: 60, doc: "对应 image_generate.duration_seconds（平台硬规则：≥5 秒）" }),
+      n: N(1, { min: 1, max: 4, integer: true }), // videos/generations真实batch合同
       resolution: E(VIDEO_RESOLUTIONS),
       seed: seedRule,
       generateAudio: B(),
@@ -217,10 +220,11 @@ export const NODE_SPECS: Readonly<Record<NodeType, NodeSpec>> = {
     },
   }),
   export: mk({
-    type: "export", title: "导出", executor: "deterministic", primaryPort: "out", outputs: out("video"),
+    type: "export", title: "导出", executor: "deterministic", primaryPort: "out", outputs: [...out("video"), { name: "jianying", kind: "package" }, { name: "fcpxml", kind: "package" }],
     inputAccepts: ["video", "audio", "image", "json", "text", "file", "package"], takesAllowed: false, seeded: false, pinnable: false,
     pinNote: "唯一交付出口，交付前必须能重新检查，不可钉",
-    params: { title: TITLE, preset: E(EXPORT_PRESETS, { required: true }) },
+    specVersion: 2,
+    params: { title: TITLE, preset: E(EXPORT_PRESETS, { required: true }), stage: E(["candidate", "publish"]), goalRevision: S(64, "0".repeat(64), { pattern: /^[0-9a-f]{64}$/ }) },
   }),
   qc: mk({
     type: "qc", title: "质检", executor: "deterministic", primaryPort: "out", outputs: out("json"),
@@ -231,6 +235,7 @@ export const NODE_SPECS: Readonly<Record<NodeType, NodeSpec>> = {
       mode: E(["machine", "critic"], { required: true }),
       rubric: S(64, "film_default", { pattern: /^\S+$/ }),
       thresholds: J({ durationTolerance: 0.1 }),
+      briefLedgerRevision: S(64, "0".repeat(64), { pattern: /^[0-9a-f]{64}$/ }),
     },
   }),
   render3d: mk({

@@ -138,9 +138,9 @@ export function lockCovers(lock: "*" | string[], field: string): boolean {
   return lock.some((f) => f === field || field.startsWith(f + "."))
 }
 
-export function checkTargets(v: unknown): V<Omit<Targets, "setBy" | "at">> {
+export function checkTargets(v: unknown): V<Omit<Targets, "setBy" | "at" | "sources">> {
   if (!isPlainObject(v)) return bad("targets 必须是对象")
-  const out: Omit<Targets, "setBy" | "at"> = {}
+  const out: Omit<Targets, "setBy" | "at" | "sources"> = {}
   for (const [k, val] of Object.entries(v)) {
     if (k === "durationSec") {
       if (typeof val !== "number" || !(val > 0) || val > 3600) return bad("targets.durationSec 必须是 (0,3600] 的数字")

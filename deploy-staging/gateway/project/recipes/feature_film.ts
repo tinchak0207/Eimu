@@ -239,7 +239,7 @@ export const featureFilmRecipe: Recipe = {
     ]
 
     return {
-      nodes,
+      nodes: withReviewedCandidate(nodes),
       targets: { aspect, shots: rows.length, subtitles: true, audio: "both" as const, ...(durationSec !== undefined ? { durationSec } : {}) },
       defaults,
     }
@@ -262,3 +262,4 @@ export const featureFilmRecipe: Recipe = {
     final_cut: "export",
   },
 }
+import { withReviewedCandidate } from "./final-candidate.ts"

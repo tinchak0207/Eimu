@@ -11,6 +11,7 @@ import { stopSubagentsForParent } from "./subagent"
 import { setGenerationWorkCancelled } from "./job-store"
 // REQ-D2 停止优先：中止＝待投 steer 全数作废（steer-gw 不 import 本档，无循环）。
 import { dropPendingSteers } from "./steer-gw.ts"
+import { cancelSessionProject } from "./project/routes.ts"
 
 
 // Force-stop the in-flight assistant turn on the opencode side. This is a real
@@ -73,6 +74,10 @@ export async function handleAbortSession(key: string, id: string): Promise<Respo
   // 取消状态写失败不是拒绝停止的理由：abort 必须照常执行（否则停止按钮整体失效），
   // 回执把 future_submissions 如实标 unknown，绝不谎称 revoked。
   let cancelPersisted = true
+  try { await cancelSessionProject(state.sessionId) } catch (err) {
+    cancelPersisted = false
+    console.warn(`[gateway] user abort: project cancellation persist failed session=${state.sessionId}`, err)
+  }
   try {
     setGenerationWorkCancelled(state.sessionId, true, "用户停止当前工作")
   } catch (err) {

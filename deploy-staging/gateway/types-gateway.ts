@@ -12,7 +12,7 @@ export type GatewayPromptPart =
 
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
-  ledger?: { amount_coins: number; task_id?: string; model?: string }
+  ledger?: { amount_coins: number; task_id?: string; model?: string; input_signature?: string }
 }
 
 export interface PendingQuestion {
@@ -32,6 +32,9 @@ export interface PendingQuestion {
 export type ConfirmOutcome = "approved" | "denied" | "expired"
 
 export interface ResolvedConfirm {
+  amount_coins?: number
+  model?: string
+  input_signature?: string
   outcome: ConfirmOutcome
   resolvedAt: number
 }

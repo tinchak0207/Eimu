@@ -26,6 +26,14 @@ export function textParam(v: Json | undefined): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined
 }
 
+/** JSON参数的空物化默认{}不是一张工具订单。 */
+export function preparedSubmissionOf(value: Json | undefined): import("../types.ts").SubmitGenerationReq["prepared"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const v=value as Record<string,Json>
+  if (!v.payload || typeof v.payload!=="object" || Array.isArray(v.payload) || !v.identity || typeof v.identity!=="object" || Array.isArray(v.identity) || typeof v.identity.request_id!=="string") return undefined
+  return value as unknown as import("../types.ts").SubmitGenerationReq["prepared"]
+}
+
 /** 网关 SessionState 上执行器唯一需要的东西（契约 ExecContext.session 的约定）。 */
 export function apiKeyOf(session: unknown): string {
   const key = (session as { apiKey?: unknown } | null)?.apiKey
@@ -161,6 +169,7 @@ export const keyframeExecutor: NodeExecutor = {
     const quality = textParam(eff.quality)
 
     const res = await ctx.submitGeneration({
+      ...(preparedSubmissionOf(eff.toolSubmission) ? { prepared: preparedSubmissionOf(eff.toolSubmission) } : {}),
       kind: "image",
       model,
       prompt,

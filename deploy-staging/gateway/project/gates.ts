@@ -235,8 +235,12 @@ export function deliverablesFromExport(graph: Readonly<ProjectGraph>): Deliverab
     seen.add(id)
     const node = graph.nodes[id]
     if (!node || node.type !== "export") continue
+    if (node.params.stage === "candidate") continue
     if (node.status !== "done" || node.scratch) continue
-    for (const output of node.outputs ?? []) out.push({ nodeId: node.id, output })
+    for (const output of node.outputs ?? []) {
+      if (output.meta?.stage === "candidate") continue
+      out.push({ nodeId: node.id, output })
+    }
   }
   return out
 }

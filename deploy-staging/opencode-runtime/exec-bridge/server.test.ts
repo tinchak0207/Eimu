@@ -47,8 +47,10 @@ const key = (tag = "k") => `pg:p1:${"a".repeat(40)}:t1:a1:${tag}${++seq}`
 const body = (idemKey: string, params: Record<string, unknown> = { prompt: "lofi" }) => ({ sessionId: "sess1", projectId: "p1", nodeId: "music_1", signature: "s".repeat(64), idemKey, params })
 const post = (b: ReturnType<typeof createExecBridge>, route: string, payload: unknown, token = TOKEN) =>
   b.handle(new Request(`http://x/v1/exec/${route}`, { method: "POST", headers: { "x-internal-token": token, "content-type": "application/json" }, body: JSON.stringify(payload) }))
-const getResult = async (b: ReturnType<typeof createExecBridge>, k: string) =>
-  (await b.handle(new Request(`http://x/v1/exec/result/${encodeURIComponent(k)}`, { headers: { "x-internal-token": TOKEN } }))).json() as Promise<any>
+const getResult = async (b: ReturnType<typeof createExecBridge>, k: string) => {
+  const { sessionId, projectId, nodeId, signature } = body(k)
+  return (await b.handle(new Request(`http://x/v1/exec/result/${encodeURIComponent(k)}?${new URLSearchParams({ sessionId, projectId, nodeId, signature })}`, { headers: { "x-internal-token": TOKEN } }))).json() as Promise<any>
+}
 
 function mkBridge(over: { music?: ExecTool["execute"]; render?: ExecTool["execute"]; exec?: ExecTool["execute"]; timeoutMs?: any; concurrency?: any; now?: () => number } = {}) {
   const calls: Call[] = []
@@ -277,20 +279,21 @@ describe("result、崩溃遗留、保留期、内存", () => {
     expect(calls).toHaveLength(0)
     expect((await getResult(bridge, k)).state).toBe("unknown")
   })
-  test("保留 24h：23h 仍可取回；25h 后 result=unknown，sweep 删除索引与产物目录", async () => {
+  test("没有gateway耐久消费ACK时，24h不能删除已付费音乐文件或receipt", async () => {
     let t = 1_800_000_000_000
-    const { bridge } = mkBridge({ now: () => t })
+    const { bridge, calls } = mkBridge({ now: () => t })
     const k = key("ret")
     const r = await (await post(bridge, "music_gen", body(k))).json() as any
     const dir = path.dirname(r.files[0].path)
     t += 23 * 3600_000
     expect((await getResult(bridge, k)).state).toBe("done")
     t += 2 * 3600_000
-    expect((await getResult(bridge, k)).state).toBe("unknown")
     expect(existsSync(dir)).toBe(true)
-    expect(await bridge.sweep()).toBeGreaterThanOrEqual(1)
-    expect(existsSync(dir)).toBe(false)
-    expect(existsSync(path.join(WS, "exec-bridge", "results", `${k}.json`))).toBe(false)
+    await bridge.sweep()
+    expect(existsSync(dir)).toBe(true)
+    expect(JSON.parse(readFileSync(path.join(WS, "exec-bridge", "results", `${k}.json`), "utf8")).musicReceipt.url).toBe(`${base}/audio.mp3`)
+    expect((await getResult(bridge, k)).state).toBe("done")
+    expect(calls).toHaveLength(1) // 过期媒体只能从原回执回收，不能再次生成。
   })
   test("内存：40MB 产物流式落盘，RSS 增量 < 50MB", async () => {
     const out = JSON.stringify({ ok: true, url: `${base}/big.bin`, mime_type: "audio/mpeg", cost_coins: 1 })
@@ -303,4 +306,107 @@ describe("result、崩溃遗留、保留期、内存", () => {
     expect(r.files[0].bytes).toBe(40 * 1024 * 1024)
     expect(grown).toBeLessThan(50 * 1024 * 1024)
   })
+})
+
+// WATERLINE真实故障模式：出曲已成功，本地目录/回收失败后被误判provider失败。
+describe("付费产物回执保全与同操作回收", () => {
+  test("上游已回真实音频后scratch损坏：记录recoverable；修目录后同key只回收，不再次出曲", async () => {
+    let calls = 0
+    const k = key("recover_media")
+    const outDir = path.join(WS, "projects", "sess1", "tmp", k)
+    const { bridge } = mkBridge({ music: async () => {
+      calls++
+      // 真文件系统故障：原有目录变成普通文件，后续mkdir/下载不可能成功。
+      rmSync(outDir, { recursive: true, force: true })
+      writeFileSync(outDir, "broken local handoff")
+      return musicOk()
+    } })
+    const first = await (await post(bridge, "music_gen", body(k))).json() as any
+    expect(first).toMatchObject({ ok: false, code: "platform_fault", recoverable: true, retryable: false })
+    const receipt = JSON.parse(readFileSync(path.join(WS, "exec-bridge", "results", `${k}.json`), "utf8"))
+    expect(receipt.musicReceipt.url).toBe(`${base}/audio.mp3`)
+    expect(receipt.state).toBe("recoverable")
+    rmSync(outDir, { force: true })
+    // 模拟桥重启：只有磁盘回执，原进程内状态全部丢弃。
+    const restarted = mkBridge({ music: async () => { calls++; throw new Error("must not generate again") } }).bridge
+    const recovered = await getResult(restarted, k)
+    expect(recovered.state).toBe("done")
+    expect(readFileSync(recovered.files[0].path)).toEqual(AUDIO)
+    expect(recovered.files[0].sha256).toBe((await import("node:crypto")).createHash("sha256").update(AUDIO).digest("hex"))
+    expect(calls).toBe(1)
+  })
+
+  test("同key不同会话/工程/节点/参数拒绝缓存；result也核验完整归属", async () => {
+    const { bridge, calls } = mkBridge()
+    const k = key("ownership")
+    await post(bridge, "music_gen", body(k))
+    for (const changed of [{ sessionId: "other" }, { projectId: "other" }, { nodeId: "other" }, { params: { prompt: "another song" } }]) {
+      const res = await post(bridge, "music_gen", { ...body(k), ...changed })
+      expect(res.status).toBe(409)
+      expect(JSON.stringify(await res.json())).not.toContain("music-0.mp3")
+    }
+    const wrong = await bridge.handle(new Request(`http://x/v1/exec/result/${encodeURIComponent(k)}?sessionId=other`, { headers: { "x-internal-token": TOKEN } }))
+    expect(wrong.status).toBe(403)
+    expect(calls).toHaveLength(1)
+  })
+
+  test("scratch预检失败在工具调用之前：本地故障具名，不假称供应商失败", async () => {
+    const k = key("preflight")
+    const tmp = path.join(WS, "projects", "sess1", "tmp")
+    const outDir = path.join(tmp, k)
+    mkdirSync(tmp, { recursive: true })
+    writeFileSync(outDir, "not a directory")
+    const { bridge, calls } = mkBridge()
+    const result = await (await post(bridge, "music_gen", body(k))).json()
+    expect(result).toMatchObject({ ok: false, code: "platform_fault", retryable: false })
+    expect(calls).toHaveLength(0)
+    rmSync(outDir)
+    expect(await (await post(bridge, "music_gen", body(k))).json()).toMatchObject({ ok: true })
+    expect(calls).toHaveLength(1)
+  })
+})
+
+test("done缓存的媒体丢失/同字节数篡改时，从原回执重新取回，GET/POST都不重新出曲", async () => {
+  const { bridge, calls } = mkBridge()
+  const k = key("lost_done")
+  const first = await (await post(bridge, "music_gen", body(k))).json() as any
+  const file = first.files[0].path
+  rmSync(file)
+  expect((await getResult(bridge, k)).state).toBe("done")
+  expect(readFileSync(file)).toEqual(AUDIO)
+  writeFileSync(file, Buffer.alloc(AUDIO.length, 90))
+  const again = await (await post(bridge, "music_gen", body(k))).json() as any
+  expect(again.ok).toBe(true)
+  expect(readFileSync(again.files[0].path)).toEqual(AUDIO)
+  expect(calls).toHaveLength(1)
+})
+
+test("ingested ACK核真实接收副本：重发幂等/错身份旧run拒绝/ACK前TTL保留/ACK后仅清tmp", async () => {
+  let t = 1_800_000_000_000
+  const { bridge, calls } = mkBridge({ now: () => t })
+  const k = key("ingested")
+  const request = { ...body(k), runId: "original_run" }
+  const generated = await (await post(bridge, "music_gen", request)).json() as any
+  const source = generated.files[0]
+  const sha = (await import("node:crypto")).createHash("sha256").update(AUDIO).digest("hex")
+  const durable = path.join(WS, "projects", "sess1", "artifacts", `art_${sha.slice(0, 16)}.mp3`)
+  mkdirSync(path.dirname(durable), { recursive: true })
+  writeFileSync(durable, AUDIO)
+  const ack = { idemKey: k, sessionId: request.sessionId, projectId: request.projectId, nodeId: request.nodeId, signature: request.signature, runId: request.runId, artifacts: [{ sha256: sha, path: durable }] }
+  const send = (input: unknown) => bridge.handle(new Request("http://x/v1/exec/ingested", { method: "POST", headers: { "x-internal-token": TOKEN, "content-type": "application/json" }, body: JSON.stringify(input) }))
+  t += 25 * 3600_000
+  await bridge.sweep()
+  expect(existsSync(source.path)).toBe(true)
+  expect((await send({ ...ack, runId: "old_wrong_run" })).status).toBe(409)
+  expect((await send({ ...ack, sessionId: "other_owner" })).status).toBe(409)
+  writeFileSync(durable, "tampered durable file")
+  expect((await send(ack)).status).toBe(409)
+  writeFileSync(durable, AUDIO)
+  expect(await (await send(ack)).json()).toMatchObject({ ok: true, stage: "ingested" })
+  // 模拟HTTP成功响应丢失，原身份重发；不重复生成或丢消费事实。
+  expect(await (await send(ack)).json()).toMatchObject({ ok: true, already: true })
+  await bridge.sweep()
+  expect(existsSync(source.path)).toBe(false)
+  expect(readFileSync(durable)).toEqual(AUDIO)
+  expect(calls).toHaveLength(1)
 })

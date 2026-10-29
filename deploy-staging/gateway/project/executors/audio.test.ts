@@ -16,7 +16,9 @@ import path from "node:path"
 import { handleTts } from "../../media-internal-routes.ts"
 import { synthesizeSpeech, type SpeechDeps } from "../speech"
 import { createVoiceExecutor } from "./voice"
-import { createMusicExecutor, musicBridgeParams } from "./music"
+import { createMusicExecutor as createProductionMusicExecutor, musicBridgeParams, type MusicExecutorOptions } from "./music"
+// 音乐单元夹具不拥有ProjectStore；受控scratch的真实权限在store/bridge交接回归覆盖。
+const createMusicExecutor = (opts: MusicExecutorOptions = {}) => createProductionMusicExecutor({ prepareScratch: async () => {}, ...opts })
 import { NODE_SPECS } from "../specs"
 import { validateGraph } from "../validate"
 import type { ExecBridgeClient, ExecContext, Json, NodeExecutor, Output, ProjectGraph } from "../types"
@@ -90,6 +92,72 @@ const ttsRequest = (body: unknown): Request =>
   })
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex")
+
+// 真实共同SQLite端口；上游仍本地fixture，不用mock reserve次数代替账本金额。
+async function attachJournal(ctx: ExecContext, project: string, cap: number) {
+  const { Database } = await import("bun:sqlite")
+  const { loadGenerationJournal, sharedJournalOperation, sharedGenerationScope } = await import("../generation-journal.ts")
+  process.env.EIMU_TASK_JOURNAL_PATH = path.join(WS, "shared-journal", "journal.sqlite")
+  const journal = await loadGenerationJournal(path.resolve(import.meta.dir, "../../../opencode-runtime"))
+  ;(ctx as any).project = { ...ctx.project, id: project }
+  ctx.generationOperation = async req => sharedJournalOperation(journal, "verified-audio-owner", {
+    identity: { project: req.projectId, request_id: req.idemKey, session_id: req.sessionId, model: req.model, cost_coins: req.coins, input_signature: req.signature, graph_scope: sharedGenerationScope("verified-audio-owner", `graph:${project}`), graph_cap: cap }, payload: req.payload, lock: null,
+  })
+  return { journal, sharedJournalOperation, scope: sharedGenerationScope("verified-audio-owner", project), image: (cost: number) => sharedJournalOperation(journal, "verified-audio-owner", { identity: { project: "explicit-image-label", request_id: `image-${project}`, session_id: ctx.sessionId, model: "image", cost_coins: cost, graph_scope: sharedGenerationScope("verified-audio-owner", `graph:${project}`), graph_cap: cap }, payload: { prompt: "next image" }, lock: null }), database: () => new Database(process.env.EIMU_TASK_JOURNAL_PATH!, { readonly: true }) }
+}
+
+describe("音乐与配音共同journal的实际金额", () => {
+  test("音乐完成后影像可继续；同graph累计cap拦超限，旧完成不被重复扣费或矛盾失败退款", async () => {
+    const bridge = makeFakeBridge()
+    const { ctx, ledger } = makeContext({ nodeType: "music", params: { prompt: "original strings" }, execBridge: bridge.client })
+    const port = await attachJournal(ctx, "shared-music-image", 1.5)
+    const executor = createMusicExecutor()
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 1 })
+    expect(port.image(0.5).reserve().submitAllowed).toBe(true)
+    ctx.execBridge.call = async () => { throw new Error("已完成音乐不得再提交") }
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 0 })
+    expect(bridge.upstreamCalls).toBe(1)
+    expect(ledger.filter(r => r.event === "completed")).toHaveLength(1)
+    const db = port.database()
+    expect(db.query("SELECT state,reservation FROM tool_submission WHERE scope=?").get(port.scope)).toEqual({ state: "completed", reservation: 1 })
+    const next = port.sharedJournalOperation(port.journal, "verified-audio-owner", { identity: { project: "another-label", request_id: "cap-overflow", session_id: ctx.sessionId, model: "image", cost_coins: 0.1, graph_scope: (await import("../generation-journal.ts")).sharedGenerationScope("verified-audio-owner", "graph:shared-music-image"), graph_cap: 1.5 }, payload: {}, lock: null })
+    expect(() => next.reserve()).toThrow("task_budget_exceeded")
+    expect(db.query("SELECT sum(reservation) AS spent FROM tool_submission WHERE json_extract(metadata_json,'$.graph_scope')=?").get((await import("../generation-journal.ts")).sharedGenerationScope("verified-audio-owner", "graph:shared-music-image"))).toEqual({ spent: 1.5 })
+    db.close()
+  })
+
+  test("音乐提交未知保留1币；原bridge回执恢复后结算一次，不重新call", async () => {
+    let calls = 0
+    const file = path.join(WS, "unknown-original.mp3"); writeFileSync(file, MP3)
+    const bridge: ExecBridgeClient = { call: async () => { calls++; return { ok: false, code: "submit_unknown", message: "response lost", retryable: false } }, result: async () => ({ state: "done", files: [{ path: file, mime: "audio/mpeg", bytes: MP3.length, sha256: sha256(MP3) }], costCoins: 1, chargeRef: "original-paid-charge" }) }
+    const { ctx } = makeContext({ nodeType: "music", params: { prompt: "original piano" }, execBridge: bridge })
+    const port = await attachJournal(ctx, "shared-music-unknown", 1)
+    const executor = createMusicExecutor()
+    expect(await executor.run(ctx)).toMatchObject({ ok: false, submitUnknown: true })
+    expect(() => port.image(0.5).reserve()).toThrow("task_budget_exceeded")
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 1 })
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 0 })
+    expect(calls).toBe(1)
+    const db = port.database(); expect(db.query("SELECT state,reservation FROM tool_submission WHERE scope=?").get(port.scope)).toEqual({ state: "completed", reservation: 1 }); db.close()
+  })
+
+  test("配音完成回放0新增费用；断线未知保留字符费用且不重合成", async () => {
+    const executor = createVoiceExecutor({ speech: speechDeps() })
+    const { ctx } = makeContext({ nodeType: "voice", params: { text: "你好世界" } })
+    const port = await attachJournal(ctx, "shared-voice-completed", 1)
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 0.004 })
+    expect(await executor.run(ctx)).toMatchObject({ ok: true, costCoins: 0 })
+    expect(ttsCalls).toBe(1)
+    const unknown = makeContext({ nodeType: "voice", params: { text: "你好世界" } }).ctx
+    const other = await attachJournal(unknown, "shared-voice-unknown", 1)
+    ttsMode = "error"
+    expect(await executor.run(unknown)).toMatchObject({ ok: false, submitUnknown: true })
+    ttsMode = "ok"
+    expect(await executor.run(unknown)).toMatchObject({ ok: false, submitUnknown: true })
+    expect(ttsCalls).toBe(2)
+    const db = port.database(); expect(db.query("SELECT state,reservation FROM tool_submission WHERE scope=?").get(other.scope)).toEqual({ state: "submitting", reservation: 0.004 }); db.close()
+  })
+})
 
 describe("旧 /tts 路由逐字节不变（handleTts 薄包装）", () => {
   test("成功：状态码与 body 和 synthesizeSpeech 完全一致，上游请求体照旧", async () => {
@@ -535,5 +603,42 @@ describe("S8a 修订：music 参数表只留桥真正接受的控制", () => {
     expect(r.ok).toBe(false)
     expect(r.errors.some((e) => e.path === "params.seconds")).toBe(true)
     expect(r.errors.some((e) => e.message.includes("seconds"))).toBe(true)
+  })
+})
+
+// 已付费的音频不能因为工程ingest失败而被退款/重开新单。
+describe("音乐原操作回收边界", () => {
+  test("工程入库EACCES保留未知操作，原回执仍在；不退款、不假称供应商失败", async () => {
+    const bridge = makeFakeBridge()
+    const { ctx, ledger } = makeContext({ nodeType: "music", params: { prompt: "original ambient" }, execBridge: bridge.client })
+    ctx.ingest = async () => { throw Object.assign(new Error("EACCES artifact-store write"), { code: "EACCES" }) }
+    const result = await createMusicExecutor().run(ctx)
+    expect(result).toMatchObject({ ok: false, code: "platform_fault", submitUnknown: true, retryable: false })
+    expect(ledger.some((row) => row.event === "refunded")).toBe(false)
+    expect(bridge.upstreamCalls).toBe(1)
+    const recovered = makeContext({ nodeType: "music", params: { prompt: "original ambient" }, execBridge: bridge.client })
+    expect((await createMusicExecutor().run(recovered.ctx)).ok).toBe(true)
+    expect(bridge.upstreamCalls).toBe(1)
+  })
+
+  test("桥回执指纹不匹配实际文件时不采用素材、不丢原操作", async () => {
+    const bridge = makeFakeBridge()
+    const call = bridge.client.call.bind(bridge.client)
+    bridge.client.call = async (...args) => {
+      const result = await call(...args)
+      if (result.ok) for (const file of result.files) file.sha256 = "f".repeat(64)
+      return result
+    }
+    const { ctx } = makeContext({ nodeType: "music", params: { prompt: "original score" }, execBridge: bridge.client })
+    expect(await createMusicExecutor().run(ctx)).toMatchObject({ ok: false, code: "platform_fault", submitUnknown: true })
+    expect(bridge.upstreamCalls).toBe(1)
+  })
+
+  test("提交前scratch权限失败完全不调用桥", async () => {
+    const bridge = makeFakeBridge()
+    const { ctx } = makeContext({ nodeType: "music", params: { prompt: "original score" }, execBridge: bridge.client })
+    const result = await createMusicExecutor({ prepareScratch: async () => { throw Object.assign(new Error("ENOSPC mkdir"), { code: "ENOSPC" }) } }).run(ctx)
+    expect(result).toMatchObject({ ok: false, code: "platform_fault", retryable: false })
+    expect(bridge.calls).toHaveLength(0)
   })
 })

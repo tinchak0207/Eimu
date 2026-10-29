@@ -158,7 +158,7 @@ suite("S8c qc 执行器", () => {
     if (r.ok) return
     expect(r.code).toBe("qc_failed")
     expect(r.message).toContain("无音轨")
-    expect(r.message).toContain("55/60") // 100 - noAudio(45) = 55
+    expect(JSON.parse(r.message)).toMatchObject({ kind: "quality_rework", score: 55, minScore: 60 }) // 100 - noAudio(45) = 55
     const ins = await inspectMedia(outOf(NOAUDIO, "video/mp4"), { project: graphOf([qcNode()], targetsOf(5)) })
     expect(ins.score).toBe(55)
     expect(ins.deficiencies).toHaveLength(1)
@@ -171,7 +171,7 @@ suite("S8c qc 执行器", () => {
     if (r.ok) return
     expect(r.code).toBe("qc_failed")
     expect(r.message).toMatch(/时长 2\.00s 偏离目标 5s 达 60%/)
-    expect(r.message).toContain("55/60") // 100 - duration(45) = 55
+    expect(JSON.parse(r.message)).toMatchObject({ kind: "quality_rework", score: 55, minScore: 60 }) // 100 - duration(45) = 55
     const ins = await inspectMedia(outOf(SHORT, "video/mp4"), { project: graphOf([qcNode()], targetsOf(5)) })
     expect(ins.score).toBe(55)
     expect(ins.deficiencies).toHaveLength(1)
@@ -185,7 +185,7 @@ suite("S8c qc 执行器", () => {
     expect(r.code).toBe("qc_failed")
     expect(r.message).toContain("全黑")
     expect(r.message).toContain("冻结")
-    expect(r.message).toContain("5/60") // 100 - black(50) - freeze(45) = 5
+    expect(JSON.parse(r.message)).toMatchObject({ kind: "quality_rework", score: 5, minScore: 60 }) // 100 - black(50) - freeze(45) = 5
     const ins = await inspectMedia(outOf(BLACK, "video/mp4"), { project: graphOf([qcNode()], targetsOf(5)) })
     expect(ins.score).toBe(5)
     expect(ins.deficiencies.some((d) => d.includes("全黑"))).toBe(true)
@@ -199,7 +199,7 @@ suite("S8c qc 执行器", () => {
     expect(r.code).toBe("qc_failed")
     expect(r.message).toContain("响度")
     expect(r.message).toContain("真峰值")
-    expect(r.message).toContain("10/60") // 100 - loudness(45) - truePeak(45) = 10
+    expect(JSON.parse(r.message)).toMatchObject({ kind: "quality_rework", score: 10, minScore: 60 }) // 100 - loudness(45) - truePeak(45) = 10
     const ins = await inspectMedia(outOf(LOUD, "video/mp4"), { project: graphOf([qcNode()], targetsOf(5)) })
     expect(ins.score).toBe(10)
     expect(ins.deficiencies.some((d) => d.includes("响度"))).toBe(true)
@@ -313,8 +313,9 @@ suite("S8c qc 执行器", () => {
     expect(first.ok).toBe(false)
     if (first.ok) return
     expect(first.code).toBe("qc_failed")
-    expect(first.retryable).toBe(true)
-    expect(decideOnFail({ action: "regenerate", max: 2 }, { kind: "qc_fail", retryable: first.retryable }, 0)).toEqual({ do: "regenerate", retryNo: 1 })
+    expect(first.retryable).toBe(false)
+    expect(JSON.parse(first.message).kind).toBe("quality_rework")
+    expect(decideOnFail(undefined, { kind: "qc_fail", retryable: first.retryable }, 0)).toEqual({ do: "fail" })
     const again = await qcExecutor.run(ctxFor(IMAGE_GOOD, "image/png", { params, attempt: 1 }))
     expect(again.ok).toBe(false)
     if (again.ok) return
@@ -376,7 +377,7 @@ suite("S8c qc 执行器", () => {
     expect(rounds.every((r) => !r.ok)).toBe(true)
     const last = rounds[2]
     if (last.ok) return
-    expect(last.retryable).toBe(true)
+    expect(last.retryable).toBe(false)
     expect(decideOnFail({ action: "regenerate", max: 2 }, { kind: "qc_fail", retryable: true }, 2)).toEqual({ do: "fail" })
     expect(decideOnFail({ action: "regenerate", max: 2 }, { kind: "error", retryable: false }, 0)).toEqual({ do: "fail" })
     process.env.WORKSPACE_DIR = DIR
@@ -415,7 +416,8 @@ describe("S3 rubric 与配方 onFail", () => {
         const rubric = String(node.params?.rubric ?? "")
         referenced.add(rubric)
         expect(rubricOf(rubric)?.id).toBe(rubric)
-        expect(node.onFail).toEqual({ action: "regenerate", max: 2 })
+        if (["single_video", "feature_film", "novel_film", "shortdrama_visual"].includes(recipe.id)) expect(node.onFail).toBeUndefined()
+        else expect(node.onFail).toEqual({ action: "regenerate", max: 2 })
         if (node.params?.mode === "critic") expect((rubricOf(rubric)?.items ?? []).length).toBeGreaterThan(0)
       }
       if (["feature_film", "novel_film", "shortdrama_visual", "single_video"].includes(recipe.id)) {
@@ -426,7 +428,7 @@ describe("S3 rubric 与配方 onFail", () => {
       }
     }
     expect(referenced.has("film_default")).toBe(true)
-    expect(referenced.has("film_frame_critic")).toBe(true)
+    expect(referenced.has("film_final_critic")).toBe(true)
     for (const id of referenced) expect(RUBRICS[id]?.id).toBe(id)
   })
 })

@@ -4,6 +4,7 @@
 // 状态口径：引擎（S1/S6）才有真签名；这里只做「结构性」过期标记——改动节点及其下游（遇 pinned 止步并计入 drift）。
 // 宁可多标 stale、不可漏标；真正是否重跑由 planRun 按签名裁决。
 import { ArtifactStore } from "./artifacts.ts"
+import { createHash } from "node:crypto"
 import { expandGraph, readRows } from "./expand.ts"
 import type { EventDraft } from "./events.ts"
 import {
@@ -18,7 +19,7 @@ import { checkParams, materializeDefaults, resolvePort, specOf } from "./specs.t
 import { validateSet } from "./validate.ts"
 import { RESEARCH_AGENT_FORBIDDEN, RESEARCH_RECIPES, isResearchNode, researchNewNodes, researchNodeIds } from "./research.ts"
 import type {
-  Actor, Json, NodeId, NodeType, Output, PatchErrorCode, PatchOp, PatchReceipt, PatchRequest, ProjectGraph, ProjectNode, Recipe,
+  Actor, Json, NodeId, NodeType, Output, PatchErrorCode, PatchOp, PatchReceipt, PatchRequest, ProjectGraph, ProjectNode, Recipe, TargetField, TargetSource,
 } from "./types.ts"
 
 export const MAX_OPS_PER_BATCH = 1000
@@ -198,7 +199,7 @@ function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
       return fail("BAD_VALUE", "budget.capCoins 必须是非负有限数或 null")
     }
     if (!ctx.g.budget) ctx.g.budget = { capCoins: null, spentCoins: 0, savedCoins: 0 }
-    const next = value === null ? null : value
+    const next = typeof value === "number" ? value : null
     if (ctx.g.budget.capCoins === next) return
     ctx.g.budget.capCoins = next
     return
@@ -508,12 +509,64 @@ async function opWriteResult(ctx: Ctx, op: Extract<PatchOp, { op: "write_result"
   touch(ctx, node.id, "outputs")
 }
 
-function opSetTargets(ctx: Ctx, op: Extract<PatchOp, { op: "set_targets" }>): void {
+function opSetTargets(ctx: Ctx, op: Extract<PatchOp, { op: "set_targets" }>, sourceKind?: TargetSource["kind"]): void {
   const t = unwrap(checkTargets(op.targets))
-  if (ctx.g.targets?.setBy.kind === "user" && !isHuman(ctx.actor)) {
-    return fail("ACTOR_FORBIDDEN", "targets 由用户设定，代理不可覆盖")
+  const interpretation = op.interpretation
+  if (interpretation !== undefined) {
+    if (!isPlainObject(interpretation) || !Array.isArray(interpretation.sourceMessageIds) || !interpretation.sourceMessageIds.length ||
+      interpretation.sourceMessageIds.some((id) => typeof id !== "string" || !ctx.g.brief.some((b) => b.messageId === id)) ||
+      typeof interpretation.requirements !== "string" || !interpretation.requirements.trim() || interpretation.requirements.length > 12000 ||
+      (interpretation.statusOnly !== undefined && typeof interpretation.statusOnly !== "boolean") ||
+      (interpretation.supersedes !== undefined && (!Array.isArray(interpretation.supersedes) || interpretation.supersedes.some((id) => !ctx.g.goalInterpretations?.some((old) => old.id === id))))) {
+      return fail("BAD_VALUE", "interpretation 必须引用本工程真实原话与已有解释，requirements为1..12000字；只是解释候选，不授予权限")
+    }
+    if (interpretation.statusOnly === true && Object.keys(t).length) return fail("BAD_VALUE", "statusOnly 不能同时修改制作目标")
+    if (interpretation.statusOnly === true && interpretation.supersedes?.some((id) => ctx.g.goalInterpretations?.some((old) => old.id === id && !old.statusOnly))) {
+      return fail("BAD_VALUE", "状态询问不能撤销制作解释；确需修改请提交制作解释候选并由评审核对原话")
+    }
   }
-  ctx.g.targets = { ...t, setBy: ctx.actor, at: ctx.nowIso }
+  const source = op.sourceMessageId === undefined ? undefined : ctx.g.brief.find((b) => b.messageId === op.sourceMessageId)
+  if (op.sourceMessageId !== undefined && (typeof op.sourceMessageId !== "string" || !source)) {
+    return fail("BAD_VALUE", "sourceMessageId 必须引用本工程真实用户原话；引用不提升操作身份或授权")
+  }
+  const previous = ctx.g.targets
+  const sources = { ...(previous?.sources ?? {}) }
+  for (const field of ["durationSec", "aspect", "shots", "subtitles", "audio"] as TargetField[]) {
+    if (previous?.[field] === undefined || sources[field]) continue
+    sources[field] = {
+      kind: previous.setBy.kind === "user" ? "user" : previous.setBy.kind === "engine" ? "default" : "agent",
+      revision: `${field}:${previous.at}:${previous.setBy.kind}`,
+    }
+  }
+  const kind = sourceKind ?? (ctx.actor.kind === "user" ? "user" : ctx.actor.kind === "engine" ? "default" : "agent")
+  const accepted: Record<string, unknown> = {}
+  for (const field of Object.keys(t) as TargetField[]) {
+    const value = t[field]
+    const oldSource = sources[field]
+    if (kind === "default" && previous?.[field] !== undefined) continue // 配方只填空，不能替换用户或导演当前选择
+    if (oldSource?.kind === "user" && ctx.actor.kind !== "user" && previous?.[field] !== value) {
+      return fail("ACTOR_FORBIDDEN", `targets.${field} 由用户设定，代理不可覆盖`)
+    }
+    accepted[field] = value
+    if (oldSource?.kind === "user" && kind !== "user") { sources[field] = oldSource; continue }
+    sources[field] = {
+      kind, revision: createHash("sha256").update(JSON.stringify([field, value, kind, source?.messageId, oldSource?.revision, ctx.nowIso])).digest("hex"),
+      ...(source ? { messageId: source.messageId, evidence: source.text.slice(0, 500), interpretation: kind !== "user" } : {}),
+      ...(oldSource ? { supersedes: oldSource.revision } : {}),
+    }
+  }
+  if (Object.keys(accepted).length) ctx.g.targets = { ...previous, ...accepted, sources, setBy: kind === "default" ? { kind: "engine" } : ctx.actor, at: ctx.nowIso }
+  if (interpretation) {
+    const candidate = {
+      sourceMessageIds: [...new Set(interpretation.sourceMessageIds)],
+      requirements: interpretation.requirements,
+      supersedes: [...new Set(interpretation.supersedes ?? [])],
+      statusOnly: interpretation.statusOnly === true,
+    }
+    const id = createHash("sha256").update(JSON.stringify(candidate)).digest("hex")
+    ctx.g.goalInterpretations ??= []
+    if (!ctx.g.goalInterpretations.some((old) => old.id === id)) ctx.g.goalInterpretations.push({ ...candidate, id, actor: ctx.actor, at: ctx.nowIso })
+  }
 }
 
 function opSetDefaults(ctx: Ctx, op: Extract<PatchOp, { op: "set_defaults" }>): void {
@@ -558,7 +611,7 @@ function opApplyRecipe(ctx: Ctx, op: Extract<PatchOp, { op: "apply_recipe" }>): 
   if (built.defaults) opSetDefaults(trial, { op: "set_defaults", defaults: built.defaults })
   if (built.targets) {
     try {
-      opSetTargets(trial, { op: "set_targets", targets: built.targets })
+      opSetTargets(trial, { op: "set_targets", targets: built.targets }, "default")
     } catch (e) {
       if (!(e instanceof PatchError)) throw e
       trial.warnings.push(`配方 targets 未写入：${e.message}`)

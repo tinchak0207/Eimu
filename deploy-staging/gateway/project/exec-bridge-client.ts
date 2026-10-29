@@ -37,7 +37,7 @@ function errText(e: unknown): string {
 }
 
 const ERROR_CODES: readonly ExecErrorCode[] = [
-  "provider_error", "safety_blocked", "timeout", "submit_unknown", "price_unknown", "bad_input", "bridge_unavailable", "qc_failed", "cancelled",
+  "provider_error", "platform_fault", "safety_blocked", "timeout", "submit_unknown", "price_unknown", "bad_input", "bridge_unavailable", "qc_failed", "cancelled",
 ]
 
 export function createExecBridgeClient(opts: ExecBridgeClientOptions = {}): Omit<ExecBridgeClient, "call"> & { call(...a: Parameters<ExecBridgeClient["call"]>): Promise<CallResult> } {
@@ -67,7 +67,7 @@ export function createExecBridgeClient(opts: ExecBridgeClientOptions = {}): Omit
       return { ok: false, code: "submit_unknown", message: `${why}：桥可能已受理，用 result(${body.idemKey}) 确认`, retryable: false }
     }
     if (res.status === 403) return { ok: false, code: "bridge_unavailable", message: "exec-bridge 拒绝 token（403）", retryable: false }
-    if (res.status === 400 || res.status === 413) {
+    if (res.status === 400 || res.status === 409 || res.status === 413) {
       const m = await res.json().catch(() => ({}) as { message?: string })
       return { ok: false, code: "bad_input", message: String((m as { message?: string }).message ?? `桥拒绝请求 HTTP ${res.status}`).slice(0, 300), retryable: false }
     }
@@ -86,14 +86,15 @@ export function createExecBridgeClient(opts: ExecBridgeClientOptions = {}): Omit
     }
     if (data?.ok === false) {
       const code: ExecErrorCode = ERROR_CODES.includes(data.code) ? data.code : "provider_error"
-      return { ok: false, code, message: String(data.message ?? "").slice(0, 500), retryable: data.retryable === true }
+      return { ok: false, code, message: String(data.message ?? "").slice(0, 500), retryable: data.retryable === true, ...(data.recoverable === true ? { recoverable: true } : {}) }
     }
     return { ok: false, code: "submit_unknown", message: "exec-bridge 响应形状不符，执行状态未知", retryable: false }
   }
 
-  async function result(idemKey: string): Promise<ResultOut> {
+  async function result(idemKey: string, identity?: Parameters<ExecBridgeClient["result"]>[1]): Promise<ResultOut> {
     try {
-      const res = await doFetch(`${baseUrl()}/v1/exec/result/${encodeURIComponent(idemKey)}`, {
+      const query = identity ? `?${new URLSearchParams(identity).toString()}` : ""
+      const res = await doFetch(`${baseUrl()}/v1/exec/result/${encodeURIComponent(idemKey)}${query}`, {
         headers: { "x-internal-token": token() },
         signal: AbortSignal.timeout(10_000),
       })
@@ -111,6 +112,12 @@ export function createExecBridgeClient(opts: ExecBridgeClientOptions = {}): Omit
     }
   }
 
-  return { call, result }
+  async function ingested(identity: Parameters<NonNullable<ExecBridgeClient["ingested"]>>[0]): Promise<{ ok: boolean }> {
+    try {
+      const response = await doFetch(`${baseUrl()}/v1/exec/ingested`, { method: "POST", headers: { "content-type": "application/json", "x-internal-token": token() }, body: JSON.stringify(identity), signal: AbortSignal.timeout(10_000) })
+      const receipt = await response.json() as { ok?: boolean }
+      return { ok: response.ok && receipt.ok === true }
+    } catch { return { ok: false } }
+  }
+  return { call, result, ingested }
 }
-

@@ -5,12 +5,38 @@
 //   预算与授权 / 环境可用性（≤600B）/ 用户偏好（≤600B）/ 最近事件（≤10 行）
 // 超限时按段内优先级截断；失败与漂移段永不被截成空（至少保留全部节点 id）。
 import { LIMITS } from "./constants.ts"
+import { createHash } from "node:crypto"
 import type { NodeStatus, ProjectEvent, ProjectGraph, ProjectNode } from "./types.ts"
 
 const ENV_CAP_BYTES = 600
 const PREF_CAP_BYTES = 600
 const EVENTS_MAX_LINES = 10
 const NODE_MSG_CHARS = 120
+
+/** 原话账本版本只用于交付前核对，不进入制作签名，不因状态询问重渲媒体。 */
+export function briefLedgerRevision(graph: Readonly<ProjectGraph>): string {
+  return createHash("sha256").update(JSON.stringify(graph.brief.map((b) => ({ messageId: b.messageId, text: b.text, truncated: b.truncated === true })))).digest("hex")
+}
+
+export function activeGoalInterpretations(graph: Readonly<ProjectGraph>) {
+  const all = graph.goalInterpretations ?? []
+  const superseded = new Set(all.flatMap((i) => i.supersedes ?? []))
+  return all.filter((i) => !i.statusOnly && !superseded.has(i.id))
+}
+
+/** 生效制作版本：结构目标+实际用户决定+作者制作解释候选；解释需最终critic对照原话。 */
+export function effectiveGoalRevision(graph: Readonly<ProjectGraph>): string {
+  const targets = graph.targets ? {
+    durationSec: graph.targets.durationSec, aspect: graph.targets.aspect, shots: graph.targets.shots,
+    subtitles: graph.targets.subtitles, audio: graph.targets.audio, setBy: graph.targets.setBy,
+    sources: graph.targets.sources ? Object.fromEntries(Object.entries(graph.targets.sources).map(([field, source]) => [field, source ? { kind: source.kind, messageId: source.messageId, interpretation: source.interpretation } : null])) : undefined,
+  } : null
+  return createHash("sha256").update(JSON.stringify({
+    interpretations: activeGoalInterpretations(graph).map((i) => ({ sourceMessageIds: i.sourceMessageIds, requirements: i.requirements })),
+    targets,
+    decisions: graph.decisions.map((d) => ({ question: d.question, answer: d.answer, refs: d.refs })),
+  })).digest("hex")
+}
 
 export interface DigestInputs {
   /** 环境可用性（工具/模型/桥是否可用），≤600B 截断。 */
@@ -175,7 +201,8 @@ function budgetSection(graph: Readonly<ProjectGraph>, inputs: DigestInputs, leve
         `setBy=${t.setBy?.kind ?? "?"}`,
       ].filter(Boolean).join(" / ")
     : ""
-  return `${line}${targets ? `\n目标：${targets}` : ""}`
+  const sources = t?.sources ? Object.entries(t.sources).map(([field, s]) => `${field}=${s?.kind ?? "unknown"}${s?.interpretation ? "（解释候选）" : ""}${s?.messageId ? ` source=${oneLine(s.messageId, 80)}` : ""}${s?.supersedes ? ` supersedes=${oneLine(s.supersedes, 80)}` : ""}`).join(" / ") : ""
+  return `${line}${targets ? `\n目标：${targets}` : ""}${sources ? `\n目标字段来源：${sources}` : ""}`
 }
 
 function preferencesSection(graph: Readonly<ProjectGraph>, inputs: DigestInputs): string {

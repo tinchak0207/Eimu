@@ -8,16 +8,21 @@ import { createHash } from "node:crypto"
 import { PLATFORM_BASE } from "../constants-gateway.ts"
 import { catalogUnitCoins, catalogVideoPerSecondCoins, resolveVideoSubmissionOptions, videoNodeCoinsSync } from "../pricing-gateway.ts"
 import { hasEntityToken, resolveEntityTokens, sanitizeEntityReferences } from "../entity-resolve.ts"
-import { acknowledgeGeneration, completeGenerationReceipt, registerGenerationReceipt } from "../job-store.ts"
+import { acknowledgeGeneration, completeGenerationReceipt, registerGenerationReceipt, generationReceipt } from "../job-store.ts"
 import { QUEUE_SWITCH_MS, cancelPlatformJob, formatNodeFailure, pickSamePriceVideoAlternative, registerWorkflowTask, resolveActiveModel } from "../workflow-gw-submit.ts"
 import type { SessionState } from "../types-gateway.ts"
 import type { ExecErrorCode, LedgerEntryProjectFields, LedgerWriter, SubmitGenerationFn, SubmitGenerationReq, SubmitGenerationRes } from "./types.ts"
 import type { ProjectBudgetPort } from "./ledger.ts"
+import type { SharedJournalOperation } from "./generation-journal.ts"
 
 export interface SubmitGenerationDeps {
   session: Pick<SessionState, "sessionId" | "opencodeSessionId" | "apiKey"> & { sessionTasks?: SessionState["sessionTasks"] }
   ledger: LedgerWriter
   budget: ProjectBudgetPort
+  /** 组合根提供真实owner/profile/价目后的共享journal端口；只有这个端口预留，不再双reserve。 */
+  journalOperation?: (req: SubmitGenerationReq, payload: Record<string, unknown>, coins: number) => Promise<SharedJournalOperation>
+  /** 仅执行层从耐久完成态派生，不来自工具请求。 */
+  recoveredCostCoins?: number
   /** 轮询间隔，默认 3000ms（与 submitWorkflowNode 相同）。 */
   pollIntervalMs?: number
 }
@@ -139,7 +144,7 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
 
   // ---- 模型：F2 failover（原函数）----
   const fnode = { id: req.nodeId, kind, metadata: mem }
-  const resolved = await resolveActiveModel(model, kind, req.apiKey, fnode)
+  const resolved = req.prepared ? { exhausted: false, switched: false, model } : await resolveActiveModel(model, kind, req.apiKey, fnode)
   if (resolved.exhausted) return fail("provider_error", resolved.error!, false)
   if (resolved.switched) { model = resolved.model; mem.model = model; console.log(resolved.note) }
 
@@ -147,8 +152,8 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
   const size = req.size ?? (kind === "video" ? "16:9" : "1024x1024")
   const n = req.n ?? 1
   const maxRefs = kind === "video" && model === "minimax-h3" ? 9 : MAX_REFERENCE_IMAGES
-  const refs = (req.referenceImages ?? []).map((r) => (typeof r === "string" ? r.trim() : r))
-  if (refs.some((r) => typeof r !== "string" || !/^https?:\/\//i.test(r))) return bad("参考图必须是 http(s) URL；请先入库取公网地址。未提交。")
+  const refs = ((req.prepared?.payload.reference_images as string[] | undefined) ?? req.referenceImages ?? []).map((r) => (typeof r === "string" ? r.trim() : r))
+  if (refs.some((r) => typeof r !== "string" || (!/^https?:\/\//i.test(r) && !(req.prepared && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(r))))) return bad("参考图必须是http(s)或已校验的data:image；未提交。")
   if (refs.length > maxRefs) return bad(`模型 ${model} 最多接受 ${maxRefs} 张参考图，本次未提交且未扣费。`)
   if (kind === "video") {
     if (typeof req.seconds !== "number" || !(req.seconds > 0)) return bad("视频缺少时长（seconds）：按条统一计费，缺时长会被按默认秒数出片。未提交。")
@@ -172,35 +177,41 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
     generateAudio = options.generateAudio
     const coins = videoNodeCoinsSync({ id: req.nodeId, metadata: meta }, undefined, req.seconds!)
     if (coins === null) return fail("price_unknown", "目录没有本次完整提交档位的币值报价；未提交。", true)
-    cost = coins
+    cost = coins * n
   }
 
   // ---- 提示词：style_lock 前置 → 实体 tag → 视频动作兜底（image_generate.ts:461-494）----
   let finalPrompt = req.styleLock ? `${req.styleLock}\n${req.prompt}` : req.prompt
   let finalRefs = refs as string[]
-  if (hasEntityToken(finalPrompt)) {
+  if (!req.prepared && hasEntityToken(finalPrompt)) {
     const r = await resolveEntityTokens(finalPrompt, finalRefs, undefined, { apiKey: req.apiKey }) // fail-open：解析失败回原值
     finalPrompt = r.prompt
     finalRefs = kind === "video" ? [...finalRefs, ...r.reference_images.filter((u) => !finalRefs.includes(u))] : sanitizeEntityReferences([...r.reference_images, ...finalRefs])
     if (finalRefs.length > maxRefs) return bad(`角色卡补图后共 ${finalRefs.length} 张，超过 ${maxRefs} 张；未截断、未提交。`)
   }
-  if (kind === "video" && !hasMotionContract(finalPrompt)) finalPrompt = `${finalPrompt} ${VIDEO_MOTION_FALLBACK}`
+  if (!req.prepared && kind === "video" && !hasMotionContract(finalPrompt)) finalPrompt = `${finalPrompt} ${VIDEO_MOTION_FALLBACK}`
 
   // ---- 项目预算：任何生成 POST 之前先预留 ----
-  const reserved = await budget.reserve({ projectId: req.projectId, idemKey, coins: cost })
-  if (reserved.ok === false) return fail(reserved.code === "budget_exceeded" ? "bad_input" : "provider_error", reserved.message, reserved.code === "budget_unavailable")
 
   // ---- 载荷（字段集 = image_generate.ts:495-511）----
-  const referenceVersion = sha256Json(finalRefs)
-  const styleVersion = sha256Json(req.styleLock ?? "")
-  const payload: Record<string, unknown> =
+  const preparedMeta = (req.prepared?.payload.workflow as any)?.metadata ?? {}
+  const referenceVersion = typeof preparedMeta.reference_version === "string" ? preparedMeta.reference_version : sha256Json(finalRefs)
+  const styleVersion = typeof preparedMeta.style_version === "string" ? preparedMeta.style_version : sha256Json(req.styleLock ?? "")
+  let payload: Record<string, unknown> =
     kind === "video"
-      ? { prompt: finalPrompt, model, size, duration_seconds: req.seconds, generate_audio: generateAudio, ...(videoResolution ? { resolution: videoResolution } : {}), ...(finalRefs.length ? { reference_images: finalRefs } : {}) }
+      ? { prompt: finalPrompt, model, size, n, duration_seconds: req.seconds, generate_audio: generateAudio, ...(videoResolution ? { resolution: videoResolution } : {}), ...(finalRefs.length ? { reference_images: finalRefs } : {}) }
       : { prompt: finalPrompt, model, size, n, response_format: "url", ...(req.quality ? { quality: req.quality } : {}), ...(finalRefs.length ? { reference_images: finalRefs } : {}) }
+  if (req.prepared) {
+    const original = req.prepared.payload
+    if (original.model !== model || typeof original.prompt !== "string" || !original.prompt.trim() || original.size !== size || (kind === "image" && original.n !== n)) return bad("prepared载荷与节点实际规格不一致；未提交")
+    if (typeof original.cap_coins !== "number" || !Number.isFinite(original.cap_coins) || original.cap_coins < cost) return bad("本次权威报价已超过原操作批准的cap_coins；未提交，不静默换价或改规格")
+    payload = structuredClone(original)
+  }
   payload.workflow = {
     metadata: {
+      ...preparedMeta,
       // image_generate 的既有键（旧读者 trackedLegacySubmission 等按这些键取）
-      budget_version: reserved.version, session_id: session.sessionId, project: req.projectId, request_id: idemKey, size,
+      session_id: session.sessionId, project: req.projectId, request_id: idemKey, size,
       reference_version: referenceVersion, style_version: styleVersion, style_lock: req.styleLock ?? "",
       // 契约新增（§3 SubmitGenerationFn 注释）
       project_id: req.projectId, node_id: req.nodeId, signature: req.signature, run_id: req.runId, attempt: req.attempt, take: req.take,
@@ -209,9 +220,40 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
   }
   payload.cap_coins = cost // image_generate.ts:511：单次实扣不得高于预留；目录变价由平台拒绝而非穿透预算
 
+  let operation: SharedJournalOperation | undefined
+  if (deps.journalOperation) {
+    try {
+      operation = await deps.journalOperation(req, payload, cost)
+      const claim = operation.reserve()
+      if (!claim.submitAllowed) {
+        if (claim.row?.task_id) {
+          if (claim.row.state === "completed") {
+            // 已实扣旧单恢复不再向上游索取一次可反转终态的判断，更不能因矛盾failed释放原支出。
+            const receipt = generationReceipt(claim.row.task_id)
+            const urls = receipt?.artifacts?.map((a) => a.url).filter((url) => typeof url === "string" && /^https?:\/\//.test(url)) ?? []
+            if (receipt?.status !== "succeeded" || urls.length < n) return fail("submit_unknown", `已结算操作 ${idemKey} 的耐久媒体回执缺失或冲突；原费用保留，需对账，不能重生成或退款。`, false, { taskId: claim.row.task_id, submitUnknown: true })
+            return { ok: true, taskId: claim.row.task_id, urls, costCoins: 0, requestId: idemKey, executedModel: receipt.model ?? model, reusedOperation: true, originalCostCoins: claim.row.reservation }
+          }
+          acceptedTask.set(idemKey, claim.row.task_id); bound(acceptedTask)
+        }
+        else return fail("submit_unknown", `原操作 ${idemKey} 已有耐久提交意图但没有确认回执；保留原身份与预算，只能对账，不重复POST。`, false, { submitUnknown: true })
+      }
+      // 终态仍沿用原函数，但结算/退款只写同一journal，不再预留或释放第二份图余额。
+      deps = { ...deps, ...(claim.row?.state === "completed" ? { recoveredCostCoins: claim.row.reservation } : {}), budget: { ...budget, settle: (_key, actual) => operation!.settle(actual), release: () => operation!.refunded() } }
+    } catch (error) {
+      const message = (error as Error).message
+      return fail(message.startsWith("task_budget_exceeded") ? "bad_input" : "provider_error", `shared_journal_blocked: ${message}；未提交。`, message.startsWith("project_budget_unavailable"))
+    }
+  } else {
+    const reserved = await budget.reserve({ projectId: req.projectId, idemKey, coins: cost })
+    if (reserved.ok === false) return fail(reserved.code === "budget_exceeded" ? "bad_input" : "provider_error", reserved.message, reserved.code === "budget_unavailable")
+    ;(payload.workflow as { metadata: Record<string, unknown> }).metadata.budget_version = reserved.version
+  }
+
   const endpoint = kind === "video" ? "/videos/generations" : "/images/generations"
-  const release = () => budget.release(idemKey)
+  const release = () => operation ? operation.reject() : budget.release(idemKey)
   let taskId = acceptedTask.get(idemKey) ?? ""
+  let synchronous: { urls: string[]; actual: number } | undefined
 
   if (!taskId) {
     if (!submittedLogged.has(idemKey)) {
@@ -239,10 +281,12 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
         return fail("submit_unknown", `上游接受但未给完整 task_id；保留 Idempotency-Key=${idemKey} 与预算预留。`, false, { submitUnknown: true })
       taskId = id
     } else if (res.ok) {
-      // 同步回图兜底（submitWorkflowNode:641-643）：无 job 的同步产物，没有 task 可登记。
+      // 同步真实产物也登记稳定的本地收据身份；它不是可再次POST的空订单。
       const syncUrls = urlsOf(data)
-      if (syncUrls.length) return finishSuccess(deps, { common, model, kind, n, size, cost, idemKey, taskId: "", urls: syncUrls, actual: Number.isFinite(data?.cost_coins) ? Number(data.cost_coins) : cost, req, referenceVersion, styleVersion, registered: false })
-      return fail("submit_unknown", `上游 ${res.status} 未给 task_id 也无产物；保留 Idempotency-Key=${idemKey} 与预算预留。`, false, { submitUnknown: true })
+      if (!syncUrls.length) return fail("submit_unknown", `上游 ${res.status} 未给 task_id 也无产物；保留 Idempotency-Key=${idemKey} 与预算预留。`, false, { submitUnknown: true })
+      const h = sha256Json(["synchronous-provider-result", idemKey])
+      taskId = `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`
+      synchronous = { urls: syncUrls, actual: Number.isFinite(data?.cost_coins) ? Number(data.cost_coins) : cost }
     } else if (res.status >= 400 && res.status < 500) {
       // 明确拒收：没有订单，释放预留。
       release()
@@ -264,9 +308,21 @@ async function submitGeneration(deps: SubmitGenerationDeps, req: SubmitGeneratio
       model, cost_coins: cost, request_id: idemKey, requested_count: n, size, project: req.projectId,
       reference_version: referenceVersion, style_version: styleVersion,
       node_id: req.nodeId, signature: req.signature, run_id: req.runId, attempt: req.attempt, take: req.take,
+      ...(req.prepared ? { tool_request_id: req.prepared.identity.request_id, tool_project: req.prepared.identity.project } : {}),
     })
     registered = true
   } catch (e) { console.error(`[project] receipt register failed task=${taskId}: ${(e as Error).message}`) }
+  if (operation) {
+    if (!registered) return fail("submit_unknown", `任务 ${taskId} 已受理，但网关收据尚未耐久登记；保持原操作，不能再次生成。`, false, { taskId, submitUnknown: true })
+    try { operation.accept(taskId, { task_id: taskId, kind, model, request_id: idemKey, project: req.projectId, cost_coins: cost, requested_count: n, size }) }
+    catch { return fail("submit_unknown", `任务 ${taskId} 已受理但共享journal回执落盘失败；保留原操作核对。`, false, { taskId, submitUnknown: true }) }
+  }
+  if (req.onAccepted) {
+    if (!registered) return fail("submit_unknown", `任务 ${taskId} 已接受但收据登记未确认；保留原身份，不向外报告已耐久受理。`, false, { taskId, submitUnknown: true })
+    try { await req.onAccepted({ taskId, requestId: idemKey, model, costCoins: cost, status: "accepted" }) }
+    catch { return fail("submit_unknown", `任务 ${taskId} 已接受，工程受理回执尚未持久化；保留原订单。`, false, { taskId, submitUnknown: true }) }
+  }
+  if (synchronous) return finishSuccess(deps, { common, model, kind, n, size, cost, idemKey, taskId, urls: synchronous.urls, actual: synchronous.actual, req, referenceVersion, styleVersion, registered })
   if (session.sessionTasks) registerWorkflowTask(session, taskId, req.nodeId, "queued")
 
   // ---- 轮询（submitWorkflowNode:502-640，间隔可注入）----
@@ -359,7 +415,8 @@ async function finishSuccess(
   t: Terminal & { kind: "image" | "video"; n: number; size: string; urls: string[]; actual: number; referenceVersion: string; styleVersion: string },
 ): Promise<SubmitGenerationRes> {
   const { ledger, budget, session } = deps
-  budget.settle(t.idemKey, t.actual)
+  const recovered = typeof deps.recoveredCostCoins === "number"
+  if (!recovered) budget.settle(t.idemKey, t.actual)
   if (t.taskId && t.registered) {
     try {
       completeGenerationReceipt(t.taskId, "succeeded", t.urls.map((url) => ({ url })), { cost_coins: t.actual })
@@ -368,8 +425,10 @@ async function finishSuccess(
     } catch (e) { console.error(`[project] receipt complete failed task=${t.taskId}: ${(e as Error).message}`) }
   }
   if (t.taskId && session.sessionTasks) registerWorkflowTask(session, t.taskId, t.req.nodeId, "succeeded", t.urls[0])
-  await ledger.write({ ...t.common, event: "completed", model: t.model, cost_coins: t.actual, task_id: t.taskId || undefined, result_url: t.urls[0] })
-  return { ok: true, taskId: t.taskId, urls: t.urls, costCoins: t.actual, requestId: t.idemKey, executedModel: t.model }
+  if (!recovered) await ledger.write({ ...t.common, event: "completed", model: t.model, cost_coins: t.actual, task_id: t.taskId || undefined, result_url: t.urls[0] })
+  return { ok: true, taskId: t.taskId, urls: t.urls, costCoins: recovered ? 0 : t.actual, requestId: t.idemKey, executedModel: t.model,
+    ...(recovered ? { reusedOperation: true, originalCostCoins: deps.recoveredCostCoins } : {}),
+  }
 }
 
 async function failedTerminal(

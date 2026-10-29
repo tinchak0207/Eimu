@@ -14,7 +14,7 @@ import { idempotencyKeyOf } from "./submit-generation.ts"
 import { computeSignature } from "./signature.ts"
 import { NODE_SPECS, NODE_SPECS_LITE } from "./specs.ts"
 import { openProject, scanProjectRecoveries, type ProjectRecoveryItem, type ProjectStore } from "./store.ts"
-import { executeNode, type RunDeps } from "./scheduler.ts"
+import { acknowledgeBridgeOutputs, executeNode, type RunDeps } from "./scheduler.ts"
 import type { NodeId, Output } from "./types.ts"
 
 export interface PlatformTaskQuery {
@@ -27,6 +27,8 @@ export interface PlatformTaskQuery {
 }
 
 export interface RecoveryDeps extends RunDeps {
+  /** 恢复默认只对账。只有服务端真实持续授权仍有效时才能重提原操作。 */
+  authorizedRecovery?: () => Promise<boolean>
   /** 平台任务只读查询（poll_task / confirm_unknown 用）；缺省走 PLATFORM_BASE 的 GET。 */
   queryTask?: PlatformTaskQuery
 }
@@ -91,13 +93,15 @@ async function ingestUrls(store: ProjectStore, urls: string[], deps: RecoveryDep
 
 async function ingestFiles(
   store: ProjectStore,
-  files: { path: string; mime: string; bytes: number; durationSec?: number }[],
+  files: { path: string; mime: string; bytes: number; durationSec?: number; sha256?: string }[],
   deps: RecoveryDeps,
+  operation?: Record<string, string>,
 ): Promise<Output[]> {
   const outs: Output[] = []
   for (const f of files) {
     const out = await store.putArtifact({ path: f.path }, { port: "out", mime: f.mime, origin: "generated", signal: deps.signal })
-    outs.push({ ...out, port: "out", ...(typeof f.durationSec === "number" ? { durationSec: f.durationSec } : {}) })
+    if (f.sha256 && out.sha256 !== f.sha256) throw new Error("原操作回执指纹与实际媒体不符，未关联工程")
+    outs.push({ ...out, port: "out", ...(operation ? { meta: { bridgeOperation: operation } } : {}), ...(typeof f.durationSec === "number" ? { durationSec: f.durationSec } : {}) })
   }
   return outs
 }
@@ -135,7 +139,7 @@ async function finishStale(
   const at = isoNow(deps)
   await store.update((g) => {
     const n = g.nodes[nodeId]
-    if (!n) return
+    if (!n || deps.signal?.aborted || g.continuation?.cancelled) return
     n.status = "stale"
     n.inflight = undefined
     if (outputs) n.outputs = outputs
@@ -145,6 +149,7 @@ async function finishStale(
     kind: "node_status", node: nodeId, run: runId,
     data: { status: "stale", recovered: true, reason: "signature mismatch" },
   }])
+  if (outputs?.length) await acknowledgeBridgeOutputs(store, deps, runId, nodeId)
 }
 
 async function finishNode(
@@ -156,9 +161,9 @@ async function finishNode(
     return
   }
   const at = (deps.now?.() ?? new Date()).toISOString()
-  await store.update(async (g) => {
+  const committed = await store.update(async (g) => {
     const n = g.nodes[nodeId]
-    if (!n) return
+    if (!n || deps.signal?.aborted || g.continuation?.cancelled) return false
     n.status = status
     n.inflight = undefined
     n.error = extra.error ? { ...extra.error, at } : undefined
@@ -169,11 +174,18 @@ async function finishNode(
       n.signature = sig.ok ? sig.signature : null
       n.lastRun = { runId, at, via: "executed", signature: sig.ok ? sig.signature : "", costCoins: extra.costCoins ?? 0, attempt: 0 }
     }
+    return true
   })
+  if (!committed) return
   await store.appendEvents([{
     kind: "node_status", node: nodeId, run: runId,
     data: { status, recovered: true, ...(extra.error ? { error: extra.error.message } : {}) },
   }])
+  if (status === "done" && extra.outputs?.length) await store.appendEvents([{
+    kind: "node_output", node: nodeId, run: runId,
+    data: { recovered: true, artifact_ids: extra.outputs.map((out) => out.artifactId) },
+  }])
+  if (status === "done") await acknowledgeBridgeOutputs(store, deps, runId, nodeId)
 }
 
 async function leaveRunning(store: ProjectStore, deps: RecoveryDeps, runId: string, nodeId: NodeId, reason: string): Promise<void> {
@@ -203,13 +215,18 @@ function parseKey(key: string): { take: number; attempt: number } | null {
 export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): Promise<RecoveryOutcome> {
   const scan = await store.scanRecovery()
   const graph = await store.read()
-  const runId = graph.activeRun ?? "recovery"
+  const runId = graph.activeRun ?? graph.continuation?.runId ?? "recovery"
   const query = deps.queryTask ?? createPlatformTaskQuery()
   const resumed: RecoveryOutcome["resumed"] = []
   const manual: NodeId[] = []
   const rerun: NodeId[] = []
 
   for (const item of scan.resumable) {
+    if (deps.signal?.aborted || graph.continuation?.cancelled) {
+      manual.push(item.node)
+      resumed.push({ node: item.node, action: item.action, result: "manual", reason: "当前工程执行代已撤销，未继续执行" })
+      continue
+    }
     const node = graph.nodes[item.node]
     if (!node) {
       manual.push(item.node)
@@ -236,18 +253,18 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       const keys = inflightKeysOf(node)
       const bridgeExec = NODE_SPECS[node.type]?.executor === "exec-bridge"
       if (bridgeExec && keys.length > 1) {
-        const parts: { files: { path: string; mime: string; bytes: number; durationSec?: number }[]; cost: number }[] = []
+        const parts: { files: { path: string; mime: string; bytes: number; durationSec?: number; sha256?: string }[]; cost: number; key: string }[] = []
         let pending = false
         for (const key of keys) {
-          const r = await deps.execBridge.result(key)
+          const r = await deps.execBridge.result(key, { sessionId: store.sessionId, projectId: graph.id, nodeId: node.id, signature: inflightSigOf(node) ?? node.signature ?? "" })
           if (r.state !== "done" || !(r.files && r.files.length)) { pending = true; break }
-          parts.push({ files: r.files, cost: r.costCoins ?? 0 })
+          parts.push({ files: r.files, cost: r.costCoins ?? 0, key })
         }
         if (pending) {
           await leaveRunning(store, deps, runId, item.node, "多 take 里仍有未确认的提交，整轮保持 running")
           resumed.push({ node: item.node, action: item.action, result: "running" })
         } else {
-          const outs = await ingestFiles(store, parts.flatMap((p) => p.files), deps)
+          const outs = (await Promise.all(parts.map((part) => ingestFiles(store, part.files, deps, { idemKey: part.key, sessionId: store.sessionId, projectId: graph.id, nodeId: node.id, signature: inflightSigOf(node) ?? node.signature ?? "", runId })))).flat()
           if (!outs.length) {
             await markManual(store, deps, runId, item.node, "exec-bridge 报 done 但没有文件；需人工确认")
             manual.push(item.node)
@@ -262,9 +279,9 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       // 多个 key、没有 task、又不是桥：落到下面的同 key 重投，把每个 take 都续上。单 key 仍走原来的确认。
       if (!(keys.length > 1 && !item.taskId && !bridgeExec)) {
       if (NODE_SPECS[node.type]?.executor === "exec-bridge") {
-        const r = await deps.execBridge.result(item.idemKey)
+        const r = await deps.execBridge.result(item.idemKey, { sessionId: store.sessionId, projectId: graph.id, nodeId: node.id, signature: inflightSigOf(node) ?? node.signature ?? "" })
         if (r.state === "done") {
-          const outs = await ingestFiles(store, r.files ?? [], deps)
+          const outs = await ingestFiles(store, r.files ?? [], deps, { idemKey: item.idemKey, sessionId: store.sessionId, projectId: graph.id, nodeId: node.id, signature: inflightSigOf(node) ?? node.signature ?? "", runId })
           if (!outs.length) {
             await markManual(store, deps, runId, item.node, "exec-bridge 报 done 但没有文件；需人工确认")
             manual.push(item.node)
@@ -339,6 +356,13 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
       }
       resumeTakes = parsedKeys.map((k) => k.parsed!.take)
     }
+    if (item.action === "confirm_unknown" || !(await deps.authorizedRecovery?.())) {
+      const reason = item.action === "confirm_unknown" ? "上游结果未知，只能对账；不因多 take 换路重投" : "恢复重提缺少服务端持续授权；只保留原操作等待授权，不提交"
+      await markManual(store, deps, runId, item.node, reason)
+      manual.push(item.node)
+      resumed.push({ node: item.node, action: item.action, result: "manual", reason })
+      continue
+    }
     const r = await executeNode(store, deps, runId, item.node, {
       signature: sig.signature, attempt: parsed.attempt, ...(resumeTakes ? { takes: resumeTakes } : { take: parsed.take }), noRegenerate: true,
     })
@@ -350,6 +374,7 @@ export async function recoverProject(store: ProjectStore, deps: RecoveryDeps): P
   }
 
   for (const id of scan.lost) {
+    if (deps.signal?.aborted || graph.continuation?.cancelled) { manual.push(id); continue }
     await store.update((g) => {
       const n = g.nodes[id]
       if (!n) return

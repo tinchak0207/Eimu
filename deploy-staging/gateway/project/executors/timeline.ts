@@ -7,6 +7,7 @@ import path from "node:path"
 import { applyOps, type AudioClip, type AudioTrack, type Timeline, type TimelineClip, type TimelineOp } from "../../timeline.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output } from "../types"
 import { NODE_SPECS } from "../specs"
+import { workspaceDir } from "../store.ts"
 
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 
@@ -32,7 +33,7 @@ export const isJson = (o: Output): boolean => mimeOf(o).includes("json")
 /** 工程目录下本切片的暂存区（ctx.ingest 的 allowed roots 是项目目录）。 */
 export function projectScratchDir(sessionId: string, tag: string): string {
   const safe = (sessionId || "session").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "session"
-  return path.join(WORKSPACE_DIR, "projects", safe, "tmp", tag.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40))
+  return path.join(workspaceDir(), "projects", safe, "tmp", tag.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40))
 }
 
 export function safeNodeKey(...parts: string[]): string {

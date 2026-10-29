@@ -4,8 +4,6 @@ import { createHash } from "node:crypto"
 import {
   classifyError,
   confirmSpend,
-  dedupHash,
-  registerTask,
   platformFetch,
   siteFetch,
   loadCatalog,
@@ -18,9 +16,10 @@ import {
   ok,
   fail,
 } from "../lib/client"
+import { projectGenerate } from "../lib/project-client"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
 import { VIDEO_MOTION_FALLBACK, hasMotionContract } from "../lib/video-prompt-schema"
-import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash } from "../lib/image-journal"
+import { lockedProjectBudget, getSubmission, contentHash } from "../lib/image-journal"
 
 /**
  * 生图尺寸白名单（R9-C, 2026-09-30）：真源＝站点 GET /v1/openapi.json 的
@@ -280,6 +279,7 @@ export default tool({
     "异步提交图片或视频生成，返回完整task_id；完成由harness续接，不轮询。单图和已有分镜关键帧可直接调用；多镜制作沿用workflow工具。先用image_quote/video_quote核当前模型、尺寸、时长与价格。≤0.1币低成本草稿可直接执行；其它按本轮网关授权：full/auto直接提交，无持续或已有预算授权时确认。工具成功交付url或任务succeeded才证明产出；余额不足与模型不可用按原始错误区分。参考图支持URL/data URL/合法本地路径；可用角色卡tag或character_card_list维持一致性，图片参考不保证锁定视频首尾帧。返回task_id完整保留。",
   args: {
     prompt: tool.schema.string().describe("生成提示词"),
+    node_id: tool.schema.string().optional().describe("已有工程节点身份；专家通常由服务端按真实lane自动匹配，无需用户提供"),
     project: tool.schema.string().optional().describe("制作项目稳定ID；跨批次共享冻结模型、尺寸、参考版本与硬预算"),
     frame: tool.schema.number().int().min(1).optional().describe("项目帧号；逐帧制作必须n=1，150帧即150个独立task"),
     request_id: tool.schema.string().optional().describe("稳定提交ID；断线/429重试必须沿用，不产生无关联新job"),
@@ -343,18 +343,15 @@ export default tool({
       return fail("model_requires_video_kind", `模型 ${model} 是视频模型；请以 kind:"video" 重新提交。本次未提交、未扣费。`, { model, kind: "video" })
     if (mediaType && kind === "video" && mediaType !== "video")
       return fail("model_requires_image_kind", `模型 ${model} 是图片模型；请以 kind:"image" 重新提交。本次未提交、未扣费。`, { model, kind: "image" })
-    const request_id = args.request_id ?? (args.frame != null ? `frame:${args.project}:${args.frame}` : randomUUID())
+    const request_id = args.request_id ?? (args.retry_task_id ? `legacy:${args.retry_task_id}` : args.frame != null ? `frame:${args.project}:${args.frame}` : randomUUID())
     let scope:string
     try {scope=await productionScope(context.sessionID,args.project,context.abort)}
     catch {return fail("session_identity_unavailable","网关暂不能证明当前凭证归属；不使用共享key、不生成，原request_id可恢复。",{request_id,recoverable:true,new_generation:false})}
     if (args.retry_task_id) {
-      try {
-        const original = await platformFetch(`/${kind === "video" ? "videos" : "images"}/${encodeURIComponent(args.retry_task_id)}`, {method:"GET"}, context.sessionID, context.abort)
-        const body = await original.json().catch(() => ({}))
-        if (!original.ok) { const err = await classifyError(original, body); return fail(err.code, err.hint, { task_id:args.retry_task_id, request_id, recoverable:true }) }
-        const registration = await registerTask(args.retry_task_id, context.sessionID, kind, undefined, { model:body.model ?? model, request_id, project:args.project, frame:args.frame })
-        return ok({ task_id:args.retry_task_id, request_id, status:body.status ?? "unknown", resumed:true, new_generation:false, artifacts:body.data ?? [], registration, note:"只恢复原job；未创建新付费请求。终态失败需按原job与明确返工授权交中控恢复。" })
-      } catch { return fail("result_unknown", "原job状态暂不可确认；保留原task_id，不能创建无关联替代任务。", {task_id:args.retry_task_id,request_id,recoverable:true}) }
+      const resumed = await projectGenerate(context.sessionID, {request_id, kind, legacy_ref:{task_id:args.retry_task_id,kind,...(args.request_id ? {request_id:args.request_id} : {}),source:"retry_task_id"}})
+      const data = resumed.data as any
+      if (!resumed.ok || !data?.ok) return fail(data?.code ?? resumed.error?.code ?? "result_unknown", data?.message ?? resumed.error?.message ?? "原任务状态未知，不能另开替代请求。", {request_id,task_id:args.retry_task_id,recoverable:true,new_generation:false})
+      return ok({...data,request_id:data?.request_id ?? request_id,resumed:true,new_generation:false})
     }
     const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",resolution:args.resolution,duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
     let prior:any
@@ -362,8 +359,10 @@ export default tool({
     const priorIdentity = prior ? JSON.parse(prior.metadata_json) : null
     if(priorIdentity?.input_signature && priorIdentity.input_signature!==input_signature)return fail("idempotency_key_reused","同request_id的输入已改变；保留原job，不静默切模型、参考图或帧。",{task_id:prior?.task_id,request_id,new_generation:false})
     if (prior?.task_id) {
-      const reg = await registerTask(prior.task_id, prior.session_id, kind, undefined, JSON.parse(prior.metadata_json))
-      return ok({task_id:prior.task_id,request_id,status:"accepted",resumed:true,new_generation:false,registration:reg,note:"原提交已接受；使用image_get_result与image_result_download续接，不重生成。"})
+      const resumed = await projectGenerate(context.sessionID, {request_id, kind, legacy_ref:{task_id:prior.task_id,kind,request_id,source:"journal"}})
+      const data = resumed.data as any
+      if (!resumed.ok || !data?.ok) return fail(data?.code ?? resumed.error?.code ?? "result_unknown", data?.message ?? resumed.error?.message ?? "原任务尚未接回，保留原订单继续恢复。", {request_id,task_id:prior.task_id,recoverable:true,new_generation:false})
+      return ok({...data,request_id:data?.request_id ?? request_id,resumed:true,new_generation:false})
     }
 
     // 尺寸白名单前置校验（R9-C）：必须在报价/confirm.request 之前，非法尺寸不得让用户签字。
@@ -419,6 +418,7 @@ export default tool({
         ? video_price!.coins
         : Math.round(unit! * n * 1e6) / 1e6
 
+    if(kind === "video") cost_coins = Math.round(cost_coins * n * 1e6) / 1e6
     if(prior && prior.state!=="rejected")cost_coins=prior.reservation
 
     let budget: {cap?:number;version:string;source:string} | undefined
@@ -427,31 +427,7 @@ export default tool({
       catch(e:any){return fail(e.code??"project_budget_unknown",e.message,{request_id,new_generation:false,recoverable:true})}
     }
 
-    // 扣费闸门：≤0.1 币的草稿直接放行，其余需用户确认
-    if (cost_coins > 0.1 && (!prior || prior.state==="rejected")) {
-      const description =
-        kind === "video"
-          ? video_price
-            ? `生成 ${duration_seconds ?? 10} 秒视频（${model}，${video_price.resolution}、${video_price.billing_unit}），预估花费 ${cost_coins} 币`
-            : `生成 ${duration_seconds ?? 10} 秒视频（${model}），预估花费 ${cost_coins} 币（目录查无秒价，粗估待确认，实扣可能更高）`
-          : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
-      const approved = await confirmSpend(
-        { sessionID: context.sessionID, amount_coins: cost_coins, description, model, request_id },
-        context.abort,
-      )
-      if (!approved) {
-        return fail("user_declined", "用户未确认扣费，已取消。可以改用更便宜的模型或减少张数再试。", {
-          channel_verified: false,
-          note: CHANNEL_NOT_VERIFIED,
-        })
-      }
-    }
-
-    let poller_ok: boolean | undefined
-    let poller_error: string | undefined
-
     try {
-      const endpoint = kind === "video" ? "/videos/generations" : "/images/generations"
       // 参考图正规化（A1, 2026-09-25）：本机路径先上传平台取公网 URL；失败如实报错。
       const normalized_refs = await normalizeReferenceImages(args.reference_images, context.sessionID, context.abort, maxReferences)
       if (!normalized_refs.ok) return fail("upload_failed", normalized_refs.message)
@@ -494,7 +470,7 @@ export default tool({
       if (kind === "video" && !hasMotionContract(final_prompt)) final_prompt = `${final_prompt} ${VIDEO_MOTION_FALLBACK}`
       const payload: any =
       kind === "video"
-        ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(video_price?.resolution ? { resolution: video_price.resolution } : {}), ...(reference_images.length > 0 ? { reference_images } : {}) }
+        ? { prompt: final_prompt, model, size, n, duration_seconds, generate_audio, ...(video_price?.resolution ? { resolution: video_price.resolution } : {}), ...(reference_images.length > 0 ? { reference_images } : {}) }
           : {
               prompt: final_prompt,
               model,
@@ -509,78 +485,28 @@ export default tool({
       const identity = { scope, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
       payload.workflow = { metadata: { budget_version:budget?.version, session_id:context.sessionID,project:args.project,frame:args.frame,request_id,size,reference_version:identity.reference_version,style_version:identity.style_version,style_lock:args.style_lock ?? "" } }
       payload.cap_coins = Math.min(args.cap_coins ?? cost_coins, cost_coins)
-      // 单次权威实扣不得高于本地原子保留；目录变价应拒绝而非穿透项目上限。
-      // 在任何生成POST前原子预留项目硬预算和提交意图。网络不明时继续保留，不能盲目释放。
-      try {
-        prepareSubmission(identity, { ...payload, reference_images:args.reference_images ?? [], workflow:payload.workflow }, {model,size,quality:args.quality ?? "standard",reference_version:identity.reference_version,reference_hash:contentHash(fingerprints),style_version:identity.style_version,style_lock:args.style_lock ?? ""}, budget?.cap)
-      } catch (e:any) { return fail(String(e.message).split(":")[0], e.message, {request_id,new_generation:false}) }
-      const resp = await platformFetch(
-        endpoint,
-        { method: "POST", headers:{"Idempotency-Key":request_id}, body: JSON.stringify(payload) },
-        context.sessionID,
-        context.abort,
-      )
-      const data = await resp.json().catch(() => ({}))
-      const task_id = data?.task_id ?? data?.id ?? null
-
-      if (resp.status === 202 || (resp.ok && task_id)) {
-        if (typeof task_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(task_id)) return fail("submission_unknown", "上游接受但未给完整task_id；保留request_id与预算，按相同Idempotency-Key恢复。", {request_id,recoverable:true})
-        acceptTaskSubmission(scope,request_id,task_id,{task_id,session_id:context.sessionID,kind,model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size})
-        if (task_id) {
-          // 收据先SQLite落盘，再登记网关；失败保持可恢复接受态。
-          // dedup_hash 让 poller 能认出「同一个请求重送」直接回快取（0 币），
-          // cost_coins 让 poller 续接时发得出正确金额（平台轮询回应不含价格）。
-          // E2：杂凑用「解析后」的最终 prompt 与最终参考图——否则同一个请求重送会
-          // 误命中不同内容的快取。
-          const reg = await registerTask(task_id, context.sessionID, kind, context.abort, {
-            dedup_hash: dedupHash({ model, prompt: dedupKeyPrompt(final_prompt, reference_images), size, n }),
-            model,
-            cost_coins,
-            project:args.project,frame:args.frame,request_id,
-            reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,
-          })
-          poller_ok = reg.ok
-          poller_error = reg.error
-          if (!reg.durable) return fail("registration_pending", "上游已接受且本地耐久收据已保存，网关登记暂不可达；稍后按同一task_id/request_id恢复，禁止重复生成。", {task_id,request_id,status:"accepted",recoverable:true,new_generation:false})
-        }
-        return ok(
-          {
-            task_id: task_id ?? null,
-            request_id,project:args.project,frame:args.frame,reference_version:identity.reference_version,style_version:identity.style_version,
-            kind,
-            model,
-            estimated_cost_coins: cost_coins,
-            note:
-              "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。" +
-              (kind === "video"
-                ? "视频完成后用video_result_fetch读取，再video_fetch {task_id} 下载全部artifact、验证落盘并提交downloaded ACK；"
-                : "图完成后用image_get_result读取，再image_result_download验证落盘与ACK；") +
-              "Agent回合结束不撤销作业，不重生成。" +
-              (card_note ? `\n${card_note}` : ""),
-          },
-          { poller_ok, poller_error },
-        )
+      // 确认绑定最终实际制作输入；角色卡、参考图与动作补全均已确定。
+      const payload_signature = contentHash(Object.fromEntries(Object.entries(payload).filter(([key]) => !["workflow", "cap_coins"].includes(key))))
+      if (cost_coins > 0.1 && (!prior || prior.state === "rejected")) {
+        const description = kind === "video"
+          ? `生成 ${n} 条 ${duration_seconds} 秒视频（${model}，${video_price?.resolution ?? size}），预估花费 ${cost_coins} 币`
+          : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
+        if (!await confirmSpend({sessionID:context.sessionID,request_id,amount_coins:cost_coins,description,model,input_signature:payload_signature},context.abort))
+          return fail("needs_user", "尚未取得本次实际输入与金额的扣费授权；保留原request_id。", {request_id,new_generation:false,recoverable:true})
       }
-
-      // 同步产物没有平台job时建立明确来源的内部产物收据；不交poller查虚构平台ID。
-      if (resp.ok) {
-        const artifacts=Array.isArray(data.data)?data.data.filter((a:any)=>typeof a.url==="string"):data.result_url?[{url:data.result_url}]:data.url?[{url:data.url}]:[]
-        if(artifacts.length) {
-          const hex=contentHash({scope,request_id});const receiptID=`${hex.slice(0,8)}-${hex.slice(8,12)}-5${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`
-          const status=artifacts.length>=n?"succeeded":"failed"
-          const extra={model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,result_source:"synchronous_receipt",completion:{status,artifacts,cost_coins:data.cost_coins??cost_coins}}
-          acceptTaskSubmission(scope,request_id,receiptID,{task_id:receiptID,session_id:context.sessionID,kind,...extra})
-          const receipt=await registerTask(receiptID,context.sessionID,kind,context.abort,extra)
-          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),...(card_note?{note:card_note}:{})})
-        }
-      }
-
-      const err = await classifyError(resp, data)
-      if (resp.status >= 400 && resp.status < 500) finishSubmission(scope, request_id, "rejected")
-      return fail(err.code, err.hint, { request_id, recoverable:true, retry_after_ms: err.retry_after_ms, channel_verified: false, note: CHANNEL_NOT_VERIFIED })
+      const result = await projectGenerate(context.sessionID, {
+        request_id, kind, payload, identity:{...identity,payload_signature},
+        ...(args.node_id ? {node_id:args.node_id} : {}),
+        lock:{model,size,quality:args.quality ?? "standard",reference_version:identity.reference_version,reference_hash:contentHash(fingerprints),style_version:identity.style_version,style_lock:args.style_lock ?? ""},
+        ...(budget?.cap != null ? {project_budget_coins:budget.cap} : {}),
+      })
+      const data = result.data as any
+      if (!result.ok || !data?.ok) return fail(data?.code ?? (result.status === 0 ? "submission_unknown" : result.error?.code) ?? "submission_unknown", data?.message ?? result.error?.message ?? "工程提交状态待恢复；不得另建订单。", {...data,request_id,new_generation:false,recoverable:true})
+      return ok({...data,request_id,project:args.project,frame:args.frame,kind,model,estimated_cost_coins:cost_coins,reference_version:identity.reference_version,style_version:identity.style_version,
+        note:"已由同一工程执行器耐久登记；使用原task_id/request_id续接，不重生成。" + (card_note ? `\n${card_note}` : "")})
     } catch (e: any) {
       const err = await classifyError(null, e)
-      return fail("submission_unknown", "提交状态不确定；已保留request_id与预算，请使用相同Idempotency-Key恢复，不能创建无关联新job。", {request_id,recoverable:true,original_error:err.code,channel_verified:false})
+      return fail("submission_unknown", "本次未取得完整提交回执；提交与预算状态未知。保留原request_id恢复查询，不能创建无关联新job。", {request_id,recoverable:true,original_error:err.code,channel_verified:false})
     }
   },
 })

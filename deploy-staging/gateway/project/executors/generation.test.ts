@@ -83,7 +83,7 @@ pricing.resetCatalogCacheForTest()
 const { referenceExecutor } = await import("./reference.ts")
 const { scriptExecutor, shotlistExecutor } = await import("./authored.ts")
 const { keyframeExecutor } = await import("./keyframe.ts")
-const { clipExecutor } = await import("./clip.ts")
+const { clipExecutor, setClipSubjectCheckForTest } = await import("./clip.ts")
 
 beforeEach(() => { pricing.invalidateWorkflowPriceCatalog() })
 afterAll(() => {
@@ -117,7 +117,7 @@ function node(id: string, type: string, params: any = {}, extra: any = {}) {
 function graphOf(nodes: any[], defaults: any = {}) {
   return {
     schema: 1, id: "p1", sessionId: SESSION, version: 1, createdAt: "2026-10-28T00:00:00.000Z", updatedAt: "2026-10-28T00:00:00.000Z",
-    brief: [], decisions: [], targets: null, defaults, nodes: Object.fromEntries(nodes.map((n) => [n.id, n])), order: nodes.map((n) => n.id),
+    brief: [{messageId:"real-user-fixture",at:"2026-10-28T00:00:00.000Z",text:"请制作这些镜头，保留镜头动作与声音参数。"}], entry:{via:"session_api",messageId:"real-user-fixture"}, decisions: [], targets: null, defaults, nodes: Object.fromEntries(nodes.map((n) => [n.id, n])), order: nodes.map((n) => n.id),
     budget: { capCoins: null, spentCoins: 0, savedCoins: 0 }, activeRun: null, seq: 0,
   }
 }
@@ -391,6 +391,9 @@ describe("keyframe 执行器", () => {
 
 // ---------------------------------------------------------------- clip
 describe("clip 执行器", () => {
+  // 本文件测提交/入库/ACK契约；主体识别的正反例由clip-admission独立测试维护。
+  beforeEach(() => setClipSubjectCheckForTest(() => ({present:true})))
+  afterAll(() => setClipSubjectCheckForTest(null))
   test("只走注入的 submitGeneration；seconds/resolution/generateAudio 逐字段提交，产物入库", async () => {
     const n = node("clip", "clip", {
       prompt: "镜头缓推，雨滴落在伞面，人物回头", model: "vid-fast", seconds: 5,
@@ -403,10 +406,13 @@ describe("clip 执行器", () => {
     expect(res.ok).toBe(true)
     expect(submitCalls.length).toBe(1)
     expect(submitCalls[0]).toMatchObject({
-      kind: "video", model: "vid-fast", prompt: "镜头缓推，雨滴落在伞面，人物回头", seconds: 5,
+      kind: "video", model: "vid-fast", seconds: 5,
       resolution: "720p", generateAudio: false, size: "16:9", seed: 3, styleLock: "青橙调",
       projectId: "p1", nodeId: "clip", signature: "sig-1", runId: "run-1",
     })
+    expect(submitCalls[0].prompt).toContain("镜头缓推，雨滴落在伞面，人物回头")
+    expect(submitCalls[0].prompt).toContain("画面中不要出现任何文字")
+    expect(submitCalls[0].prepared).toBeUndefined() // 默认{}不是原工具订单
     expect(submitCalls[0].prompt).not.toContain("${")
     expect(ingestCalls.length).toBe(1)
     expect(res.outputs[0]).toMatchObject({ port: "out", sha256: MP4_SHA, artifactId: "art_" + MP4_SHA.slice(0, 16), url: urls[0], durationSec: 5 })

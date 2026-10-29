@@ -229,7 +229,7 @@ export const shortdramaVisualRecipe: Recipe = {
     ]
 
     return {
-      nodes,
+      nodes: withReviewedCandidate(nodes),
       targets: { aspect, shots: rows.length, subtitles: true, audio: "both" as const, ...(durationSec !== undefined ? { durationSec } : {}) },
       defaults,
     }
@@ -251,3 +251,4 @@ export const shortdramaVisualRecipe: Recipe = {
     promo: "promo",
   },
 }
+import { withReviewedCandidate } from "./final-candidate.ts"

@@ -212,7 +212,8 @@ describe("S6 电影族：旧模板的参考边和门禁", () => {
     const hook = Object.values(g.nodes).find((n) => n.takes?.select === "qc")
     expect(hook?.takes).toEqual({ n: 3, select: "qc", rubric: "film_frame_critic" })
     expect(Object.values(g.nodes).some((n) => n.intent.includes("unsupported"))).toBe(true)
-    expect(g.nodes.qc.onFail).toEqual({ action: "regenerate", max: 2 })
+    // 真实退回要改作品；重复执行 QC 本身不能当返工。
+    expect(g.nodes.qc.onFail).toBeUndefined()
     expect(g.order.indexOf("qc_look")).toBeLessThan(g.order.indexOf("export"))
   })
 
@@ -227,12 +228,12 @@ describe("S6 电影族：旧模板的参考边和门禁", () => {
     expect(ids).toContain(sceneId)
     expect(ids).toContain("style_anchor")
     expect(ids).toContain("sketch#s1")
-    expect(g.nodes.qc_look.params.rubric).toBe("film_frame_critic")
+    expect(g.nodes.qc_look.params.rubric).toBe("film_final_critic")
     const items = rubricOf("film_frame_critic")?.items?.map((i) => i.id) ?? []
     for (const id of ["style_unity_70", "shot_consistency", "av_sync_0_5s", "storyboard_qc_17"]) expect(items).toContain(id)
   })
 
-  test("shortdrama_visual：三视图是参考边，段≤15s 进机器阈值，正反打/轴线/切点在 film_frame_critic", () => {
+  test("shortdrama_visual：保留三视图参考；最终完整片不误用旧片段15秒上限", () => {
     const g = toGraph(shortdramaVisualRecipe)
     const ex = expandGraph(g)
     expect(ex.nodes.cast_sheet.forEach).toBeUndefined()
@@ -240,12 +241,13 @@ describe("S6 电影族：旧模板的参考边和门禁", () => {
     expect(ids).toContain("cast_sheet")
     expect(ids).toContain("scene_1")
     expect(ids).toContain("sketch#s1")
-    expect(g.nodes.qc.params.thresholds).toMatchObject({ maxDurationSec: 15 })
-    expect(g.nodes.qc_look.params.rubric).toBe("film_frame_critic")
+    expect(g.nodes.qc.params.thresholds.maxDurationSec).toBeUndefined()
+    expect(g.nodes.qc.inputs.final.from).toBe("candidate")
+    expect(g.nodes.qc_look.params.rubric).toBe("film_final_critic")
     const items = rubricOf("film_frame_critic")?.items?.map((i) => i.id) ?? []
     for (const id of ["segment_le_15s", "shot_reverse_pair", "axis_continuous", "cut_dialogue"]) expect(items).toContain(id)
-    expect(g.nodes.qc.onFail).toEqual({ action: "regenerate", max: 2 })
-    expect(g.nodes.qc_look.onFail).toEqual({ action: "regenerate", max: 2 })
+    expect(g.nodes.qc.onFail).toBeUndefined()
+    expect(g.nodes.qc_look.onFail).toBeUndefined()
   })
 
   test("single_video：参考图单独接到视频，不跟关键帧收成同一张", () => {

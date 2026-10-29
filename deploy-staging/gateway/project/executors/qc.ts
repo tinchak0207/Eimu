@@ -19,6 +19,7 @@ import {
   type MediaKind, type QcMetrics, type QcVerdict, type Rubric,
 } from "../rubrics.ts"
 import { NODE_SPECS } from "../specs.ts"
+import { effectiveGoalRevision, briefLedgerRevision } from "../digest.ts"
 import type { Actor, ExecContext, ExecResult, Json, NodeExecutor, NodeId, Output, PatchReceipt, ProjectGraph } from "../types.ts"
 
 // ---------------------------------------------------------------- 进程封装（与 film-qc.ts 的 run 同形；那边未导出）
@@ -311,6 +312,27 @@ async function persistVerdict(ctx: ExecContext, mediaPath: string, content: Json
 const failureMessage = (r: QcInspection) =>
   `qc 未通过（${r.score}/${r.minScore}）：${r.deficiencies.join("；") || "未给出缺陷说明"}`
 
+/** 失败指向需修改的作品，不让调度器把重审同一素材当作返工。 */
+async function qualityRework(ctx: ExecContext, picked: Output, deficiencies: string[], items?: Map<string, CriticItemResult>, scoring?: { score: number; minScore: number }): Promise<ExecResult> {
+  const report: Json = {
+    kind: "quality_rework",
+    ...(scoring ? { score: scoring.score, minScore: scoring.minScore } : {}),
+    qcNodeId: ctx.node.id,
+    artifactSha256: picked.sha256,
+    goalRevision: effectiveGoalRevision(ctx.project),
+    sourceNodes: Object.values(ctx.node.inputs).map((ref) => ref.from),
+    defects: deficiencies.map((description) => {
+      const observed = items ? [...items.values()].find((item) => description.startsWith(`${item.id} `)) : undefined
+      return { nodeId: observed?.nodeId ?? "unknown", timecode: observed?.timecode ?? "unknown",
+        sourceRequirement: observed?.sourceRequirement ?? (typeof ctx.params.rubric === "string" ? `rubric:${ctx.params.rubric}` : "unknown"), description }
+    }),
+    ...(items ? { observedItems: [...items.values()].map((item) => ({ id: item.id, pass: item.pass, evidence: item.evidence })) } : {}),
+  }
+  let reportArtifactId: string | null = null
+  try { reportArtifactId = (await persistVerdict(ctx, picked.path, report)).artifactId } catch { /* retain inline defects even if report persistence fails */ }
+  return { ok: false, code: "qc_failed", retryable: false, costCoins: 0, message: JSON.stringify({ ...report as Record<string, Json>, reportArtifactId }) }
+}
+
 // ---------------------------------------------------------------- critic 派发（复用 dispatchCriticRun + checkCriticReceipt）
 // 测试钥匙只在非生产使用。生产只认 EIMU_CRITIC_VERDICT_KEY；缺省或与测试钥匙相同则拒绝，不退回测试钥匙。
 export const CRITIC_VERDICT_TEST_KEY = "eimu-critic-verdict-test-key-v1"
@@ -331,6 +353,9 @@ export interface CriticItemResult {
   id: string
   pass: boolean
   evidence: string
+  nodeId?: string
+  timecode?: string
+  sourceRequirement?: string
 }
 
 export interface SignedCriticVerdict {
@@ -345,6 +370,8 @@ export interface SignedCriticVerdict {
   actor: { kind: "subagent"; seat: string; runId: string; lane: string[]; sessionId: string }
   parentSessionId: string
   artifactSha256: string
+  goalRevision?: string
+  briefLedgerRevision?: string
   receiptCallIds: string[]
   sig: string
 }
@@ -362,6 +389,8 @@ function verdictCanonical(body: Omit<SignedCriticVerdict, "sig">): string {
     actor: body.actor,
     parentSessionId: body.parentSessionId,
     artifactSha256: body.artifactSha256,
+    ...(body.goalRevision ? { goalRevision: body.goalRevision } : {}),
+    ...(body.briefLedgerRevision ? { briefLedgerRevision: body.briefLedgerRevision } : {}),
     receiptCallIds: body.receiptCallIds,
   })
 }
@@ -394,6 +423,7 @@ export function verifySignedCriticVerdict(
   raw: unknown,
   parentSessionId: string,
   mediaKind: "image" | "video",
+  expected?: { artifactSha256: string; goalRevision: string; briefLedgerRevision?: string },
 ): { ok: true; verdict: SignedCriticVerdict } | { ok: false; reason: string } {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "verdict 不是对象（只读 pass 不够）" }
   const v = raw as Partial<SignedCriticVerdict>
@@ -419,6 +449,10 @@ export function verifySignedCriticVerdict(
   if (typeof v.artifactSha256 !== "string" || !/^[0-9a-f]{64}$/.test(v.artifactSha256)) {
     return { ok: false, reason: "verdict 没有被评产物指纹" }
   }
+  if (expected && (v.artifactSha256 !== expected.artifactSha256 || v.goalRevision !== expected.goalRevision)) {
+    return { ok: false, reason: "verdict 与本次候选文件或有效目标版本不一致" }
+  }
+  if (expected?.briefLedgerRevision && v.briefLedgerRevision !== expected.briefLedgerRevision) return { ok: false, reason: "review_required: 原话账本有新增消息，需要独立核对修订；媒体候选保留，不重渲" }
   if (!Array.isArray(v.receiptCallIds) || v.receiptCallIds.length === 0) return { ok: false, reason: "verdict 没有感知回执" }
   const body: Omit<SignedCriticVerdict, "sig"> = {
     schema: 1,
@@ -432,12 +466,14 @@ export function verifySignedCriticVerdict(
     actor: { kind: "subagent", seat: actor.seat, runId: String(actor.runId ?? ""), lane: actor.lane.map((id) => String(id)), sessionId: actor.sessionId },
     parentSessionId: String(v.parentSessionId ?? ""),
     artifactSha256: v.artifactSha256,
+    ...(typeof v.goalRevision === "string" ? { goalRevision: v.goalRevision } : {}),
+    ...(typeof v.briefLedgerRevision === "string" ? { briefLedgerRevision: v.briefLedgerRevision } : {}),
     receiptCallIds: v.receiptCallIds.map((id) => String(id)),
   }
   if (body.parentSessionId !== parentSessionId) return { ok: false, reason: "verdict 不属于本会话" }
   if (mediaKind !== "image" && mediaKind !== "video") return { ok: false, reason: "交付媒体类型必须是 image 或 video" }
   const key = verdictKey()
-  if (!key.ok) return { ok: false, reason: key.reason }
+  if (key.ok === false) return { ok: false, reason: key.reason }
   const expect = createHmac("sha256", key.key).update(verdictCanonical(body)).digest("hex")
   const hmacOk = expect === v.sig
   const runFixture = body.actor.runId === "critic:fixture" || body.actor.runId.includes(":fixture")
@@ -471,9 +507,11 @@ function asItemList(raw: unknown): CriticItemResult[] | null {
   const items: CriticItemResult[] = []
   for (const row of raw) {
     if (!row || typeof row !== "object") return null
-    const r = row as { id?: unknown; pass?: unknown; evidence?: unknown }
+    const r = row as { id?: unknown; pass?: unknown; evidence?: unknown; nodeId?: unknown; timecode?: unknown; sourceRequirement?: unknown }
     if (typeof r.id !== "string" || !r.id || typeof r.pass !== "boolean") return null
-    items.push({ id: r.id, pass: r.pass, evidence: typeof r.evidence === "string" ? r.evidence : "" })
+    items.push({ id: r.id, pass: r.pass, evidence: typeof r.evidence === "string" ? r.evidence : "",
+      ...(typeof r.nodeId === "string" ? { nodeId: r.nodeId } : {}), ...(typeof r.timecode === "string" ? { timecode: r.timecode } : {}),
+      ...(typeof r.sourceRequirement === "string" ? { sourceRequirement: r.sourceRequirement } : {}) })
   }
   return items
 }
@@ -487,6 +525,8 @@ async function runCritic(ctx: ExecContext): Promise<ExecResult> {
 
   const picked = pickMediaInput(ctx.inputs)
   if (!picked) return { ok: false, code: "bad_input", message: "critic 没有可评的图或视频产物", retryable: false }
+  const goalRevision = effectiveGoalRevision(ctx.project)
+  if (picked.meta?.stage === "candidate" && picked.meta.goalRevision !== goalRevision) return { ok: false, code: "qc_failed", message: "候选目标版本已过期，先更新候选再审", retryable: false }
   const locator = reviewLocator(picked)
   if (!locator) return { ok: false, code: "bad_input", message: "critic 读不到被评产物的媒体地址", retryable: false }
   const rubricId = typeof ctx.params.rubric === "string" ? ctx.params.rubric : ""
@@ -503,8 +543,13 @@ async function runCritic(ctx: ExecContext): Promise<ExecResult> {
     `minScore: ${rubric.minScore}`,
     `artifact: ${locator}`,
     `sha256: ${picked.sha256}`,
+    `localPath: ${picked.path}`,
+    `goalRevision: ${goalRevision}`,
+    `用户原话（保留来源）: ${JSON.stringify(ctx.project.brief.map((b) => ({ messageId: b.messageId, text: b.text })))}`,
     ...required.map((item) => `item ${item.id}: ${item.rule}`),
     "用 read_image 或 vision_analyze 读取 artifact。视频先抽帧再感知。回执必须指向上面的 artifact。",
+    "视频必须检查实际动态、声音、字幕及开头/中段/结尾；静帧证据不代表动作与节奏通过。缺少感知能力就明确未覆盖，不得判过。",
+    "失败条目必须写 nodeId（可定位时）、timecode（实际观测时）、sourceRequirement（用户消息或评分表条目）与具体反例；未知位置写 unknown，不猜时间码。",
   ].join("\n")
 
   const dispatched = await dispatchCriticRun(
@@ -558,7 +603,7 @@ async function runCritic(ctx: ExecContext): Promise<ExecResult> {
   const score = Math.max(0, Math.min(100, Math.round(bag.score)))
   if (score < rubric.minScore) deficiencies.push(`分数 ${score} 低于 ${rubric.minScore}`)
   if (deficiencies.length > 0) {
-    return { ok: false, code: "qc_failed", message: `critic 未通过（${score}/${rubric.minScore}）：${deficiencies.join("；")}`, retryable: true, costCoins: 0 }
+    return qualityRework(ctx, picked, deficiencies, byId, { score, minScore: rubric.minScore })
   }
 
   const body: Omit<SignedCriticVerdict, "sig"> = {
@@ -579,6 +624,8 @@ async function runCritic(ctx: ExecContext): Promise<ExecResult> {
     },
     parentSessionId: ctx.sessionId,
     artifactSha256: picked.sha256,
+    goalRevision,
+    briefLedgerRevision: briefLedgerRevision(ctx.project),
     receiptCallIds: receipt.checked.map((row) => row.callId),
   }
   const sig = signVerdict(body)
@@ -606,6 +653,7 @@ export async function runQc(ctx: ExecContext): Promise<ExecResult> {
 
   const picked = pickMediaInput(ctx.inputs)
   if (!picked) return { ok: false, code: "bad_input", message: "qc 需要影音产物输入（video/audio/image），当前没有可检查的产物。", retryable: false }
+  if (picked.meta?.stage === "candidate" && picked.meta.goalRevision !== effectiveGoalRevision(ctx.project)) return { ok: false, code: "qc_failed", message: "候选目标版本已过期，先更新候选再审", retryable: false }
 
   let inspection: QcInspection
   try {
@@ -614,7 +662,7 @@ export async function runQc(ctx: ExecContext): Promise<ExecResult> {
     return { ok: false, code: "bad_input", message: `qc 未能执行：${errMsg(e)}`, retryable: true }
   }
 
-  if (!inspection.pass) return { ok: false, code: "qc_failed", message: failureMessage(inspection), retryable: false, costCoins: 0 }
+  if (!inspection.pass) return qualityRework(ctx, picked, inspection.deficiencies, undefined, inspection)
 
   const verdict: Json = {
     mode: "machine",
@@ -623,6 +671,8 @@ export async function runQc(ctx: ExecContext): Promise<ExecResult> {
     pass: true,
     deficiencies: [],
     metrics: inspection.metrics,
+    artifactSha256: picked.sha256,
+    goalRevision: effectiveGoalRevision(ctx.project),
   }
   try {
     const out = await persistVerdict(ctx, picked.path, verdict)

@@ -30,9 +30,11 @@ const TABLE: Record<NodeType, { signed: string[]; pinnable: boolean }> = {
 }
 // 表之外、为“不比 image_generate 少”而追加的签名参数（偏离已在回报中声明）：
 const ADDED: Partial<Record<NodeType, string[]>> = {
-  keyframe: ["quality"],               // image_generate.quality 改变产物与价格
-  clip: ["size", "styleLock"],         // 视频 size 比例、style_lock 对 video 同样生效（image_generate 不分 kind 拼接）
+  keyframe: ["quality", "toolSubmission"], // 原工具完整载荷与操作身份参与签名
+  clip: ["size", "styleLock", "n", "toolSubmission"], // 视频batch及原工具完整载荷
   music: ["durationHint"],             // music_gen 实际接受的是 duration_hint=full|clip30
+  export: ["stage", "goalRevision"], // 合成候选与发布不同职责；生效制作要求变化使候选失效。
+  qc: ["briefLedgerRevision"],       // 新原话只触发评审核对，不能使未变媒体重渲。
 }
 
 describe("NODE_SPECS 与 §3.5 表", () => {
@@ -81,13 +83,13 @@ describe("keyframe/clip 不比 image_generate 少", () => {
   const src = read("../../opencode-runtime/tools/image_generate.ts")
   const argsBlock = src.slice(src.indexOf("  args: {"), src.indexOf("async execute(args, context)"))
   const argKeys = [...argsBlock.matchAll(/^ {4}(\w+): tool\.schema/gm)].map((m) => m[1])
-  const PLUMBING = new Set(["project", "frame", "request_id", "retry_task_id", "cap_coins", "project_budget_coins", "reference_version", "style_version", "kind"])
+  const PLUMBING = new Set(["node_id", "project", "frame", "request_id", "retry_task_id", "cap_coins", "project_budget_coins", "reference_version", "style_version", "kind"])
   const MAP: Record<string, { type: NodeType; param?: string; refs?: true }[]> = {
     prompt: [{ type: "keyframe", param: "prompt" }, { type: "clip", param: "prompt" }],
     style_lock: [{ type: "keyframe", param: "styleLock" }, { type: "clip", param: "styleLock" }],
     model: [{ type: "keyframe", param: "model" }, { type: "clip", param: "model" }],
     size: [{ type: "keyframe", param: "size" }, { type: "clip", param: "size" }],
-    n: [{ type: "keyframe", param: "n" }],
+    n: [{ type: "keyframe", param: "n" }, { type: "clip", param: "n" }],
     quality: [{ type: "keyframe", param: "quality" }],
     duration_seconds: [{ type: "clip", param: "seconds" }],
     resolution: [{ type: "clip", param: "resolution" }],

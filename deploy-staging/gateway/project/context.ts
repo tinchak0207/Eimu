@@ -12,13 +12,61 @@
 import { LIMITS } from "./constants.ts"
 import { GOAL_CARD_TAG, appendBriefEntry, renderGoalCard } from "./brief.ts"
 import { visibleUserTextFromPart } from "./goal-card.ts"
-import { renderDigest } from "./digest.ts"
+import { renderDigest, effectiveGoalRevision, briefLedgerRevision, activeGoalInterpretations } from "./digest.ts"
 import type { DigestInputs } from "./digest.ts"
 import type { BriefEntry, ProjectGraph } from "./types.ts"
 
 export const DIGEST_TAG_OPEN = "<eimu-project-digest>"
 export const DIGEST_TAG_CLOSE = "</eimu-project-digest>"
 export const SYNTHETIC_PART_ID_PREFIX = "prt_eimuproject_"
+
+/** Legacy 席位保留整段历史与手艺，只追加工程事实；不运行 lean 的窗口裁剪。 */
+export function projectFactsResponse(graph: Readonly<ProjectGraph>, inputs: DigestInputs = {}) {
+  const lines = [
+    `工程 ${graph.id} · version=${graph.version} · cursor=${graph.seq} · updated=${graph.updatedAt} · goalRevision=${effectiveGoalRevision(graph)} · briefLedgerRevision=${briefLedgerRevision(graph)}`,
+    "以下是工程存储事实的投影，不替代用户原话、研究与创作历史；目标解释不构成授权。目标有冲突时核对原话来源，不自行降低要求。",
+    `用户原话来源：${graph.brief.length} 条，按收到顺序；后续修订须与前文一起解释，不把旧要求与新要求并列当现行授权。`,
+    ...[...new Map([...(graph.brief[0] ? [graph.brief[0]] : []), ...graph.brief.slice(-8)].map((b) => [b.messageId, b])).values()].map((b) => `- ${b.messageId} @ ${b.at}${b.truncated ? "（原文过长，存储已截断）" : ""}，project_get(view:"brief", message_id:"${b.messageId}") 可读原文`),
+    renderDigest(graph, inputs),
+    "## 在途与产物索引（只索引已登记事实；未登记不等于不存在）",
+  ]
+  const interpreted = new Set((graph.goalInterpretations ?? []).flatMap((i) => i.sourceMessageIds))
+  if (graph.legacyGenerationRefs?.length) lines.push(`旧订单只读引用（不代表新提交或新增费用）：${graph.legacyGenerationRefs.slice(-8).map(r => `${r.taskId} request=${r.requestId} evidence=${r.evidence}`).join("；")}`)
+  const pending = graph.brief.filter((b) => !interpreted.has(b.messageId))
+  const goals = activeGoalInterpretations(graph)
+  lines.push(`## 原话核对\n尚无解释候选 ${pending.length} 条：${pending.slice(-8).map((b) => b.messageId).join(",") || "无"}。可选 set_targets.interpretation 引用原话记录解释（targets可为空），也可直接交最终critic核对；不妨碍研究或执行。状态答复不触发制作；statusOnly不是免检，真正交付前critic须核对所有新增原话与解释。`)
+  let goalRoom = 2048
+  for (const i of goals) {
+    const row = `- ${i.id} source=${i.sourceMessageIds.join(",")} 解释候选：${i.requirements}`
+    const cost = Buffer.byteLength(row, "utf8")
+    if (cost > goalRoom) { lines.push("其余制作解释已折叠，读取原工程与原话，不推断为无要求。"); break }
+    lines.push(row)
+    goalRoom -= cost
+  }
+  // 索引只列稳定 id 与版本；不重复媒体正文/工具日志，不把 URL 或模型回报当成功证明。
+  const nodes = Object.values(graph.nodes)
+  const relevant = [...nodes.filter((n) => n.inflight), ...nodes.filter((n) => !n.inflight && (n.outputs.length || n.locked))]
+  let used = 0
+  let shown = 0
+  for (const n of relevant) {
+    const row = `- ${n.id} rev=${n.rev} ${n.type}/${n.status}${n.locked ? " locked" : ""}${n.pinned ? " pinned" : ""}${n.inflight ? ` operation=${JSON.stringify(n.inflight)}` : ""}${n.outputs.length ? ` artifacts=${n.outputs.map((o) => `${o.artifactId}@${o.sha256}`).join(",")}` : ""}`
+    if (used + Buffer.byteLength(row, "utf8") > 4096) break
+    lines.push(row)
+    used += Buffer.byteLength(row, "utf8")
+    shown++
+  }
+  lines.push(`索引显示 ${shown}/${relevant.length} 项；完整节点/工件用 project_get(view:"node", node:id) 读取，历史用 view:"events"。未显示项是折叠，不是空。`)
+  // 原话卡由 legacy 插件统一水合/渲染，此处只给来源索引，避免同一轮注入两份目标卡。
+  return {
+    project_mode: true as const,
+    context_mode: "append" as const,
+    project_state: "available" as const,
+    version: graph.version,
+    goal_card: renderGoalCard(graph.brief),
+    brief_count: graph.brief.length,
+    synthetic: `${DIGEST_TAG_OPEN}\n${lines.join("\n\n")}\n${DIGEST_TAG_CLOSE}`,
+  }
+}
 
 /** 固定系统提示硬上限（§3.7 第 1 点：≤8KB、不随轮次变化、保证前缀缓存稳定）。 */
 export const STATIC_SYSTEM_MAX_BYTES = 8192
@@ -618,7 +666,7 @@ export async function acceptProjectIngress(record: ProjectIngressLike): Promise<
   if (Object.keys(g.nodes).length > 0) return
   const outcome = await store.applyPatches(
     { ops: [{ op: "apply_recipe", recipe: record.recipe, params: {} }] },
-    { kind: "user" },
+    { kind: "engine" },
   )
   if (outcome.receipt.rejected.length > 0) {
     console.warn(

@@ -37,6 +37,15 @@ export function onProjectEvents(listener: ProjectEventsListener): () => void {
   return () => EVENT_LISTENERS.delete(listener)
 }
 
+/** 只能在 project.json 提交之后通知；未提交的事件不得触发外部工作。 */
+export function publishProjectEvents(file: string, events: readonly ProjectEvent[]): void {
+  for (const listener of EVENT_LISTENERS) {
+    try { listener(file, events) } catch (e) {
+      console.error(`[gateway] project events listener failed (${file}):`, (e as Error)?.message ?? e)
+    }
+  }
+}
+
 export class EventLog {
   constructor(readonly file: string) {}
 
@@ -45,13 +54,6 @@ export class EventLog {
     if (drafts.length === 0) return []
     const events = drafts.map((d, i): ProjectEvent => ({ seq: startSeq + i, at, ...d }))
     await appendFile(this.file, events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf-8")
-    for (const listener of EVENT_LISTENERS) {
-      try {
-        listener(this.file, events)
-      } catch (e) {
-        console.error(`[gateway] project events listener failed (${this.file}):`, (e as Error)?.message ?? e)
-      }
-    }
     return events
   }
 

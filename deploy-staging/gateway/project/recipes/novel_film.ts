@@ -239,7 +239,7 @@ export const novelFilmRecipe: Recipe = {
     ]
 
     return {
-      nodes,
+      nodes: withReviewedCandidate(nodes),
       targets: { aspect, shots: rows.length, subtitles: true, audio: "both" as const, ...(durationSec !== undefined ? { durationSec } : {}) },
       defaults,
     }
@@ -263,3 +263,4 @@ export const novelFilmRecipe: Recipe = {
     final_cut: "export",
   },
 }
+import { withReviewedCandidate } from "./final-candidate.ts"

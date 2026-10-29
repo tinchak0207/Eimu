@@ -11,6 +11,8 @@ import { idempotencyKeyOf } from "../submit-generation.ts"
 import type { ExecContext, ExecErrorCode, ExecResult, NodeExecutor, Output, ProjectNode } from "../types"
 import { NODE_SPECS } from "../specs"
 import { synthesizeSpeech, TTS_MODEL_ID, type SpeechDeps, type SynthesisErrorCode } from "../speech"
+import { restorePaidAudioOutputs } from "./music.ts"
+import type { SharedJournalOperation } from "../generation-journal.ts"
 
 /** ffprobe 实测音频时长（秒）；拿不到 → null（不阻断交付，旧路径也从未要求时长）。 */
 export type DurationProbe = (file: string) => Promise<number | null>
@@ -65,21 +67,41 @@ export function createVoiceExecutor(opts: VoiceExecutorOptions = {}): NodeExecut
       const voice = typeof ctx.params.voice === "string" ? ctx.params.voice : undefined
       const speed = typeof ctx.params.speed === "number" && Number.isFinite(ctx.params.speed) ? ctx.params.speed : undefined
       const apiKey = (ctx.session as { apiKey?: string } | null | undefined)?.apiKey
-      const common = {
-        project_id: ctx.project.id, node_id: ctx.node.id, signature: ctx.signature,
-        run_id: ctx.runId, attempt: ctx.attempt, take: ctx.take,
-      }
-
       const quoted = estimateTtsCoins(TTS_MODEL_ID, text.trim())
       const idemKey = idempotencyKeyOf({ projectId: ctx.project.id, signature: ctx.signature, take: ctx.take, attempt: ctx.attempt })
-      const reserved = await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: quoted })
+      const common = {
+        project_id: ctx.project.id, node_id: ctx.node.id, signature: ctx.signature,
+        run_id: ctx.runId, attempt: ctx.attempt, take: ctx.take, idem_key: idemKey,
+      }
+      let operation: SharedJournalOperation | undefined
+      let originalRow: any
+      let submitAllowed = true
+      try {
+        if (ctx.generationOperation) {
+          operation = await ctx.generationOperation({ kind: "voice", projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature, runId: ctx.runId, attempt: ctx.attempt, take: ctx.take, sessionId: ctx.sessionId, idemKey, model: TTS_MODEL_ID, payload: { text, ...(voice ? { voice } : {}), ...(speed !== undefined ? { speed } : {}) }, coins: quoted })
+          const reserved = operation.reserve()
+          originalRow = reserved.row
+          submitAllowed = reserved.submitAllowed
+          if (originalRow?.state === "completed") return { ok: true, outputs: await restorePaidAudioOutputs(ctx, originalRow), costCoins: 0 }
+        }
+      } catch (error) {
+        return { ok: false, code: "platform_fault", message: `配音共同账本/已付费回执不可用，未重投：${error instanceof Error ? error.message : String(error)}`, retryable: false, ...(originalRow ? { submitUnknown: true } : {}) }
+      }
+      const reserved = operation ? { ok: true as const, bound: submitAllowed } : await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: quoted })
       if (reserved.ok === false) return { ok: false, code: reserved.code, message: reserved.message, retryable: reserved.retryable }
       if (reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: TTS_MODEL_ID, cost_coins: quoted, idem_key: idemKey })
-      const r = await synthesizeSpeech({ text, voice, speed, apiKey, signal: ctx.signal }, opts.speech)
+      const recovered = !submitAllowed ? JSON.parse(originalRow?.registration_json ?? "null")?.rawSpeech : null
+      if (!submitAllowed && !recovered?.path) return { ok: false, code: "submit_unknown", message: "配音原提交结果未知；上游没有幂等恢复证明，保留原预留，不重新合成", retryable: false, submitUnknown: true }
+      const r: Awaited<ReturnType<typeof synthesizeSpeech>> = recovered ?? await synthesizeSpeech({ text, voice, speed, apiKey, signal: ctx.signal }, opts.speech)
       if (r.ok === false) {
         const mapped = ERROR_MAP[r.code]
+        if (operation && !["bad_request", "tts_unavailable"].includes(r.code)) {
+          operation.unknown()
+          return { ok: false, code: "submit_unknown", message: `配音提交后终态不明，保留原operation只对账：${r.message}`, retryable: false, submitUnknown: true }
+        }
         if (reserved.bound) {
-          releaseGenerationCharge(ctx.sessionId, idemKey)
+          if (operation) operation.reject()
+          else releaseGenerationCharge(ctx.sessionId, idemKey)
           await ctx.ledger.write({ ...common, event: "refunded", model: TTS_MODEL_ID, cost_coins: quoted, idem_key: idemKey })
         }
         if (mapped.ledgerFailure) {
@@ -88,10 +110,14 @@ export function createVoiceExecutor(opts: VoiceExecutorOptions = {}): NodeExecut
         return { ok: false, code: mapped.code, message: r.message, retryable: mapped.retryable }
       }
 
-      const ingested = await ctx.ingest(
+      operation?.accept(idemKey, { kind: "voice", rawSpeech: r, originalCostCoins: r.costCoins })
+      let ingested: Output
+      try { ingested = await ctx.ingest(
         { path: r.path },
         { port: "out", mime: "audio/mpeg", origin: "generated" },
-      )
+      ) } catch (error) {
+        return { ok: false, code: "platform_fault", message: `配音已合成，原文件回执保留，入库待恢复：${error instanceof Error ? error.message : String(error)}`, retryable: false, submitUnknown: true }
+      }
       const durationSec = await probeDuration(ingested.path)
       const output: Output = {
         port: "out",
@@ -107,11 +133,15 @@ export function createVoiceExecutor(opts: VoiceExecutorOptions = {}): NodeExecut
           executedModel: TTS_MODEL_ID,
           chars: r.chars,
           cost_coins: r.costCoins,
+          audioOperation: { kind: "voice", idemKey, sessionId: ctx.sessionId, projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature },
           ...(durationSec !== null ? { durationSec } : {}),
           ...(durationSec === null ? { durationProbe: "unavailable" } : {}),
         },
       }
-      settleGenerationCharge(ctx.sessionId, idemKey, r.costCoins)
+      if (operation) {
+        operation.accept(idemKey, { kind: "voice", outputs: [output], originalCostCoins: r.costCoins })
+        operation.settle(r.costCoins)
+      } else settleGenerationCharge(ctx.sessionId, idemKey, r.costCoins)
       if (!reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: TTS_MODEL_ID, cost_coins: r.costCoins })
       await ctx.ledger.write({ ...common, event: "completed", model: TTS_MODEL_ID, cost_coins: r.costCoins, artifact_sha256: ingested.sha256 })
       return { ok: true, outputs: [output], costCoins: r.costCoins }

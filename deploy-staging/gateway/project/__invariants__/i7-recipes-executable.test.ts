@@ -230,18 +230,21 @@ function preservationGaps(recipeId: string, graph: { nodes: Record<string, unkno
   const order = graph.order
 
   if (recipeId === "feature_film" || recipeId === "novel_film") {
-    for (const id of ["style_anchor", "sketch", "qc", "qc_look", "export"]) {
+    for (const id of ["style_anchor", "sketch", "candidate", "qc", "qc_look", "export"]) {
       if (!hasNodeId(nodes, id)) gaps.push(`${recipeId}: 缺节点 ${id}`)
     }
     if (!before(order, "qc", "export")) gaps.push(`${recipeId}: qc 不在 export 之前`)
     if (!before(order, "qc_look", "export")) gaps.push(`${recipeId}: qc_look 不在 export 之前`)
     const look = byId(nodes, "qc_look")
-    if (look?.params.rubric !== "film_frame_critic") gaps.push(`${recipeId}: qc_look 的 rubric 不是 film_frame_critic`)
-    if (!Object.prototype.hasOwnProperty.call(RUBRICS, "film_frame_critic")) gaps.push(`${recipeId}: rubrics 缺 film_frame_critic`)
+    // 批准的审片对象是完整最终candidate，失败必须交作者定向改素材，禁同素材自审循环。
+    if (look?.params.rubric !== "film_final_critic") gaps.push(`${recipeId}: qc_look 的 rubric 不是 film_final_critic`)
+    if (!Object.prototype.hasOwnProperty.call(RUBRICS, "film_final_critic")) gaps.push(`${recipeId}: rubrics 缺 film_final_critic`)
     for (const id of ["qc", "qc_look"]) {
       const n = byId(nodes, id)
-      if (n && (n.onFail?.action !== "regenerate" || n.onFail.max !== 2)) gaps.push(`${recipeId}: ${id} 的 onFail 不是 regenerate max 2`)
+      if (n?.onFail) gaps.push(`${recipeId}: ${id} 仍有本节点自动重审，缺陷应交作者返工`)
+      if (!froms(n).includes("candidate")) gaps.push(`${recipeId}: ${id} 没有检查最终candidate`)
     }
+    if (!before(order, "candidate", "qc") || !before(order, "candidate", "qc_look")) gaps.push(`${recipeId}: 审片发生在candidate前`)
     if (!declaresRender3dUnsupported(recipeId, nodes)) gaps.push(`${recipeId}: 文件头或关键帧 intent 没有 render3d unsupported`)
   }
 

@@ -2,6 +2,7 @@
 // 期望值独立于实现：16 种 op 的语义来自 §3 契约；错误码来自 contract-fixtures.json 的 (graph, op) 对；
 // pin 边界来自 §3.5 的 7 条规则；回执上限来自 LIMITS.PATCH_RECEIPT_BYTES。
 import { describe, expect, test } from "bun:test"
+import { effectiveGoalRevision, briefLedgerRevision } from "./digest.ts"
 import { createHash } from "node:crypto"
 import fixturesJson from "./contract-fixtures.json"
 import { applyPatch } from "./patch.ts"
@@ -264,7 +265,49 @@ describe("16 种 PatchOp 语义（§3 契约）", () => {
     const g = graph([])
     const r = await apply(g, [{ op: "set_targets", targets: { durationSec: 15, aspect: "16:9", audio: "both" } }])
     expect(r.receipt.ok).toBe(true)
-    expect(r.graph.targets).toEqual({ durationSec: 15, aspect: "16:9", audio: "both", setBy: AGENT, at: NOW.toISOString() })
+    expect(r.graph.targets).toMatchObject({ durationSec: 15, aspect: "16:9", audio: "both", setBy: AGENT, at: NOW.toISOString(), sources: { durationSec: { kind: "agent" }, aspect: { kind: "agent" } } })
+  })
+
+  test("WATERLINE 默认三镜不冒充用户锁；真实三镜锁不阻断其他字段规划", async () => {
+    const recipe = { id: "waterline", title: "MV", build: () => ({ nodes: [], targets: { shots: 3, durationSec: 60 } }), legacyRoleMap: {} }
+    const seeded = await apply(graph([]), [{ op: "apply_recipe", recipe: "waterline", params: {} }], USER, { recipes: () => recipe })
+    expect(seeded.graph.targets?.setBy.kind).toBe("engine")
+    expect(seeded.graph.targets?.sources?.shots?.kind).toBe("default")
+    const planned = await apply(seeded.graph, [{ op: "set_targets", targets: { shots: 8 } }])
+    expect(planned.receipt.ok).toBe(true)
+    expect(planned.graph.targets?.shots).toBe(8)
+    expect(planned.graph.targets?.durationSec).toBe(60)
+    const locked = await apply(planned.graph, [{ op: "set_targets", targets: { shots: 3 } }], USER)
+    expect(codeOf(await apply(locked.graph, [{ op: "set_targets", targets: { shots: 8 } }]))).toBe("ACTOR_FORBIDDEN")
+    const other = await apply(locked.graph, [{ op: "set_targets", targets: { aspect: "16:9" } }])
+    expect(other.receipt.ok).toBe(true)
+    expect(other.graph.targets?.shots).toBe(3)
+    expect(other.graph.targets?.sources?.shots?.kind).toBe("user")
+    const recipeAgain = await apply(locked.graph, [{ op: "apply_recipe", recipe: "waterline", params: {} }], AGENT, { recipes: () => recipe })
+    expect(recipeAgain.graph.targets?.sources?.shots?.kind).toBe("user")
+  })
+
+  test("真人60→90能修订并关联原话；agent引用同一原话不能降为30或冒充真人", async () => {
+    const g = graph([])
+    g.brief = [
+      { id: "b60", messageId: "u60", at: NOW.toISOString(), text: "时长60秒" },
+      { id: "b90", messageId: "u90", at: NOW.toISOString(), text: "不要60秒了，改成90秒" },
+    ]
+    const sixty = await apply(g, [{ op: "set_targets", targets: { durationSec: 60 }, sourceMessageId: "u60" }], USER)
+    const ninety = await apply(sixty.graph, [{ op: "set_targets", targets: { durationSec: 90 }, sourceMessageId: "u90" }], USER)
+    expect(ninety.receipt.ok).toBe(true)
+    expect(ninety.graph.targets?.durationSec).toBe(90)
+    expect(ninety.graph.targets?.sources?.durationSec).toMatchObject({ kind: "user", messageId: "u90", evidence: "不要60秒了，改成90秒", supersedes: sixty.graph.targets?.sources?.durationSec?.revision })
+    expect(ninety.graph.targets?.sources?.durationSec?.revision).not.toBe(sixty.graph.targets?.sources?.durationSec?.revision)
+    const forged = await apply(ninety.graph, [{ op: "set_targets", targets: { durationSec: 30 }, sourceMessageId: "u90" }])
+    expect(codeOf(forged)).toBe("ACTOR_FORBIDDEN")
+    const candidate = await apply(g, [{ op: "set_targets", targets: { durationSec: 90 }, sourceMessageId: "u90" }])
+    expect(candidate.graph.targets?.sources?.durationSec).toMatchObject({ kind: "agent", interpretation: true, messageId: "u90" })
+    expect(codeOf(await apply(g, [{ op: "set_targets", targets: { durationSec: 30 }, sourceMessageId: "forged-user" }]))).toBe("BAD_VALUE")
+    const oldUser = graph([], { targets: { durationSec: 60, shots: 3, setBy: USER, at: NOW.toISOString() } })
+    const addedAspect = await apply(oldUser, [{ op: "set_targets", targets: { aspect: "16:9" } }])
+    expect(addedAspect.receipt.ok).toBe(true)
+    expect(codeOf(await apply(addedAspect.graph, [{ op: "set_targets", targets: { durationSec: 30 } }]))).toBe("ACTOR_FORBIDDEN")
   })
 
   test("set_defaults：合并而非整份替换", async () => {
@@ -272,6 +315,32 @@ describe("16 种 PatchOp 语义（§3 契约）", () => {
     const r = await apply(g, [{ op: "set_defaults", defaults: { videoModel: "v1" } }])
     expect(r.receipt.ok).toBe(true)
     expect(r.graph.defaults).toEqual({ imageModel: "m1", style: "film", videoModel: "v1" })
+  })
+
+  test("原话账本与制作版本分开：状态询问不重渲，艺术解释替代可追溯且不冒充用户", async () => {
+    const g = graph([])
+    g.brief = [{ id: "original", messageId: "u1", at: NOW.toISOString(), text: "做一支动作MV，副歌别用静帧" }]
+    const production = effectiveGoalRevision(g)
+    const ledger = briefLedgerRevision(g)
+    g.brief.push({ id: "status", messageId: "u2", at: NOW.toISOString(), text: "进度怎么样？" })
+    expect(effectiveGoalRevision(g)).toBe(production)
+    expect(briefLedgerRevision(g)).not.toBe(ledger)
+    const status = await apply(g, [{ op: "set_targets", targets: {}, interpretation: { sourceMessageIds: ["u2"], requirements: "只询问进度，不修改制作要求", statusOnly: true } }])
+    expect(status.receipt.ok).toBe(true)
+    expect(effectiveGoalRevision(status.graph)).toBe(production)
+    const first = await apply(status.graph, [{ op: "set_targets", targets: {}, interpretation: { sourceMessageIds: ["u1"], requirements: "副歌保留真实连续动作，静帧不能算动作镜头" } }])
+    expect(first.receipt.ok).toBe(true)
+    expect(effectiveGoalRevision(first.graph)).not.toBe(production)
+    expect(first.graph.goalInterpretations?.[1]?.actor.kind).toBe("agent")
+    const prior = first.graph.goalInterpretations![1]!
+    const next = await apply(first.graph, [{ op: "set_targets", targets: {}, interpretation: { sourceMessageIds: ["u1"], requirements: "副歌的四段动作必须完整保留", supersedes: [prior.id] } }])
+    expect(next.receipt.ok).toBe(true)
+    expect(next.graph.goalInterpretations?.at(-1)?.supersedes).toEqual([prior.id])
+    expect(effectiveGoalRevision(next.graph)).not.toBe(effectiveGoalRevision(first.graph))
+    const fakeStatus = await apply(next.graph, [{ op: "set_targets", targets: {}, interpretation: { sourceMessageIds: ["u2"], requirements: "不再要动作", statusOnly: true, supersedes: [prior.id] } }])
+    expect(codeOf(fakeStatus)).toBe("BAD_VALUE")
+    const unknown = await apply(g, [{ op: "set_targets", targets: {}, interpretation: { sourceMessageIds: ["not-real"], requirements: "伪造授权" } }])
+    expect(codeOf(unknown)).toBe("BAD_VALUE")
   })
 
   test("apply_recipe：配方节点整批落图（任一失败整份丢弃），templateId 记录", async () => {

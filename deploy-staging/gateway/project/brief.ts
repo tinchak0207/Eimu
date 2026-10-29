@@ -3,7 +3,25 @@
 // brief[] 的唯一写入者是网关 ingress（收到真实用户消息时），模型没有写入口。
 // 本档的纯函数不读文件、不调模型、不落库。落盘在 context.ts persistUserBriefNow。
 import { LIMITS } from "./constants.ts"
-import type { BriefEntry } from "./types.ts"
+import type { BriefEntry, ProjectGraph } from "./types.ts"
+
+/** 耐久原话的按需读取。索引分页与单条正文分页都显式报告折叠/存储截断。 */
+export function projectBriefResponse(graph: Readonly<ProjectGraph>, args: { message_id?: unknown; offset?: unknown; limit?: unknown } = {}) {
+  const offset = typeof args.offset === "number" && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0
+  const metadata = (b: BriefEntry) => ({ message_id: b.messageId, at: b.at, stored_chars: [...b.text].length, storage_truncated: b.truncated === true })
+  if (typeof args.message_id !== "string" || !args.message_id) {
+    const limit = typeof args.limit === "number" ? Math.max(1, Math.min(16, Math.floor(args.limit))) : 8
+    const entries = graph.brief.slice(offset, offset + limit).map(metadata)
+    return { ok: true, view: "brief", version: graph.version, total: graph.brief.length, offset, next_offset: offset + entries.length, more: offset + entries.length < graph.brief.length, entries }
+  }
+  const entry = graph.brief.find((b) => b.messageId === args.message_id)
+  if (!entry) return { ok: false, error: { code: "brief_not_found", message: "该message_id不在本工程真实用户原话中" } }
+  const limit = typeof args.limit === "number" ? Math.max(1, Math.min(1200, Math.floor(args.limit))) : 1200
+  const chars = [...entry.text]
+  const text = chars.slice(offset, offset + limit).join("")
+  const next = offset + [...text].length
+  return { ok: true, view: "brief", version: graph.version, ...metadata(entry), offset, next_offset: next, more: next < chars.length, text, note: entry.truncated ? "存储原文已截断，未保存部分未知；不能声称完整逐字恢复" : "真实用户原话，解释不构成权限" }
+}
 import {
   GOAL_CARD_TAG,
   GOAL_CARD_MAX_TOKENS,

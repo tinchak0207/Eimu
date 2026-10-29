@@ -5,6 +5,8 @@
 // 所有产物经 ctx.ingest 入库（sha256 由 artifact-store 现算）。
 import { createHash } from "node:crypto"
 import { createReadStream, readFileSync } from "node:fs"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { MASTER_PRESETS, type MasterPresetId } from "../../master.ts"
@@ -17,7 +19,7 @@ import { isPublishFailure, publishProjectArtifact } from "../publish.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output } from "../types"
 import { appendInterchangeOutputs, type InterchangeClip } from "./interchange"
 import { countsTowardCompletion } from "../completion-admission"
-import { evaluateSentenceConstraints, parseSentenceConstraints } from "./sentence-constraints"
+import { effectiveGoalRevision, briefLedgerRevision } from "../digest.ts"
 import { flattenInputs, isAudio, isJson, isObj, isVideo, mimeOf, projectScratchDir, readJsonOutput } from "./timeline"
 
 async function sha256File(file: string): Promise<{ sha: string; bytes: number }> {
@@ -28,6 +30,34 @@ async function sha256File(file: string): Promise<{ sha: string; bytes: number }>
     bytes += (chunk as Buffer).length
   }
   return { sha: h.digest("hex"), bytes }
+}
+
+const execFileAsync = promisify(execFile)
+/** 工程包验证自己的契约：完整ZIP、指纹和包内素材引用，不送媒体解码器。 */
+async function checkEditablePackage(output: Output): Promise<string | null> {
+  const actual = await sha256File(output.path).catch(() => null)
+  if (!actual || actual.sha !== output.sha256 || actual.bytes !== output.bytes) return "工程包字节或指纹不符"
+  // 与既有工程包验收共用系统unzip，避免用户PATH中的交互式同名包装器。
+  const readZip = async (...args: string[]) => (await execFileAsync("/usr/bin/unzip", args, { timeout: 30_000, maxBuffer: 8 * 1024 * 1024 })).stdout
+  try {
+    await readZip("-tqq", output.path)
+    const names = new Set((await readZip("-Z1", output.path)).split(/\r?\n/).filter(Boolean))
+    if ([...names].some((name) => name.startsWith("/") || name.split("/").includes(".."))) return "工程包含不安全路径"
+    let media: string[]
+    if (output.port === "jianying") {
+      const draft = JSON.parse(await readZip("-p", output.path, "draft_content.json"))
+      const meta = JSON.parse(await readZip("-p", output.path, "draft_meta_info.json"))
+      if (!Array.isArray(draft.tracks) || !draft.tracks.some((t: { type?: string; segments?: unknown[] }) => t.type === "video" && t.segments?.length) || !meta.draft_id) return "剪映工程缺少实际视频轨道或工程身份"
+      media = [...(draft.materials?.videos ?? []), ...(draft.materials?.audios ?? [])].map((m: { path?: unknown }) => m.path).filter((p: unknown): p is string => typeof p === "string" && p.length > 0)
+    } else {
+      const xml = await readZip("-p", output.path, "export.fcpxml")
+      if (!xml.includes("<fcpxml") || !xml.includes("<spine>")) return "FCPXML缺少真实工程或时间线"
+      media = [...xml.matchAll(/\bsrc="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"'))
+    }
+    const mediaRoot = output.port === "jianying" ? "materials/" : "media/"
+    if (!media.length || media.some((p) => !p.startsWith(mediaRoot) || !names.has(p))) return "工程素材引用不在包内或缺失"
+    return null
+  } catch (error) { return `工程包不可读：${String((error as Error).message).slice(0, 160)}` }
 }
 
 interface ProbeResult { width: number; height: number; durationSec: number; hasVideo: boolean; hasAudio: boolean | null }
@@ -75,8 +105,6 @@ async function stripAudioTrack(src: string, dest: string): Promise<{ ok: true } 
 
 function wantsDeliveredSilence(ctx: ExecContext, separateAudioCount: number): boolean {
   if (ctx.project.targets?.audio === "none") return true
-  const text = ctx.project.brief[0]?.text
-  if (typeof text === "string" && parseSentenceConstraints(text).mute) return true
   const targetsAudio = ctx.project.targets?.audio
   const targetsWantSound = targetsAudio === "voice" || targetsAudio === "music" || targetsAudio === "both"
   if (targetsWantSound || separateAudioCount > 0) return false
@@ -98,7 +126,7 @@ function binaryItems(entries: ReturnType<typeof flattenInputs>): ReturnType<type
   return out
 }
 
-function rejectUnsignedVerdict(ctx: ExecContext): ExecResult | null {
+function rejectUnsignedVerdict(ctx: ExecContext, expected?: { artifactSha256: string; goalRevision: string; briefLedgerRevision?: string }): ExecResult | null {
   const list = ctx.inputs?.verdict
   if (!list || list.length === 0) {
     return { ok: false, code: "qc_failed", message: "export 缺少 critic 签名 verdict，拒绝放行", retryable: false }
@@ -111,9 +139,41 @@ function rejectUnsignedVerdict(ctx: ExecContext): ExecResult | null {
   }
   const preset = typeof ctx.params?.preset === "string" ? ctx.params.preset : ""
   const mediaKind = preset === "image_pack" ? "image" : "video"
-  const checked = verifySignedCriticVerdict(parsed, ctx.sessionId, mediaKind)
-  if (!checked.ok) return { ok: false, code: "qc_failed", message: `export 拒绝放行：${checked.reason}`, retryable: false }
+  const checked = verifySignedCriticVerdict(parsed, ctx.sessionId, mediaKind, expected)
+  if (checked.ok === false) return { ok: false, code: "qc_failed", message: `export 拒绝放行：${checked.reason}`, retryable: false }
   return null
+}
+
+/** 发布已审候选：不重剪、不混音、不烧字幕，交付与评审同一份字节。 */
+async function publishReviewedCandidate(ctx: ExecContext): Promise<ExecResult> {
+  const candidate = ctx.inputs.candidate?.find((o) => isVideo(o))
+  if (!candidate) return { ok: false, code: "bad_input", message: "publish 需要 candidate 视频输入", retryable: false }
+  const goalRevision = effectiveGoalRevision(ctx.project)
+  const actual = await sha256File(candidate.path).catch(() => null)
+  if (!actual || actual.sha !== candidate.sha256) return { ok: false, code: "qc_failed", message: "candidate 文件指纹变化或不可读，必须重新审片", retryable: false }
+  if (candidate.meta?.goalRevision !== goalRevision) return { ok: false, code: "qc_failed", message: "candidate 对应的目标已改变，必须重新合成与审片", retryable: false }
+  const rejected = rejectUnsignedVerdict(ctx, { artifactSha256: actual.sha, goalRevision, briefLedgerRevision: briefLedgerRevision(ctx.project) })
+  if (rejected) return rejected
+  const machine = ctx.inputs.machine?.[0]
+  let checked: Record<string, unknown> | null = null
+  try { checked = machine ? JSON.parse(readFileSync(machine.path, "utf8")) : null } catch { /* fail closed */ }
+  if (!checked || checked.mode !== "machine" || checked.pass !== true || checked.artifactSha256 !== actual.sha || checked.goalRevision !== goalRevision) {
+    return { ok: false, code: "qc_failed", message: "缺少同一候选与目标版本的机器质检", retryable: false }
+  }
+  const reviewedOutputs = [...(ctx.inputs.candidate ?? []), ...(ctx.inputs.jianying ?? []), ...(ctx.inputs.fcpxml ?? [])]
+  const outputs: Output[] = [...new Map(reviewedOutputs.map((o) => [o.artifactId, o])).values()].map((o) => ({ ...o, meta: { ...o.meta, stage: "publish", reviewedSha256: actual.sha, goalRevision } }))
+  const gate = await checkExportArtifacts(outputs.filter((o) => /^(video|audio|image)\//.test(o.mime)), { targets: ctx.project.targets })
+  if (!gate.ok) return { ok: false, code: "qc_failed", message: "交付检查未过：" + gate.deficiencies.join("；"), retryable: false }
+  for (const output of outputs.filter((o) => o.port === "jianying" || o.port === "fcpxml")) {
+    const problem = await checkEditablePackage(output)
+    if (problem) return { ok: false, code: "qc_failed", message: `${output.port}: ${problem}；有效影片与候选保留，修复工程附件后续交付`, retryable: false }
+  }
+  for (const output of outputs) {
+    const published = await publishProjectArtifact(output.path, { sessionId: ctx.sessionId, artifactId: output.artifactId, mime: output.mime })
+    if (isPublishFailure(published)) output.meta!.publishError = String(published.reason).slice(0, 200)
+    else output.url = published.url
+  }
+  return { ok: true, costCoins: 0, outputs }
 }
 
 export const exportExecutor: NodeExecutor = {
@@ -125,7 +185,9 @@ export const exportExecutor: NodeExecutor = {
     if (!(EXPORT_PRESETS as readonly string[]).includes(preset)) {
       return { ok: false, code: "bad_input", message: `未知导出预设 ${preset || "(空)"}：可选 ${EXPORT_PRESETS.join(" / ")}`, retryable: false }
     }
-    const verdictBlock = rejectUnsignedVerdict(ctx)
+    if (ctx.params.stage === "publish") return publishReviewedCandidate(ctx)
+    const candidateStage = preset !== "image_pack"
+    const verdictBlock = candidateStage ? null : rejectUnsignedVerdict(ctx)
     if (verdictBlock) return verdictBlock
     const entries = flattenInputs(ctx)
     const scratch = projectScratchDir(ctx.sessionId, `export-${ctx.node.id}`)
@@ -267,7 +329,7 @@ export const exportExecutor: NodeExecutor = {
     if (silence) {
       const strippedPath = path.join(scratch, `master_${preset}_silent.mp4`)
       const stripped = await stripAudioTrack(res.path, strippedPath)
-      if (!stripped.ok) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
+      if (stripped.ok === false) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
       deliverPath = strippedPath
     }
 
@@ -278,6 +340,8 @@ export const exportExecutor: NodeExecutor = {
     }
     const meta: Record<string, Json> = {
       preset,
+      stage: candidateStage ? "candidate" : "publish",
+      goalRevision: effectiveGoalRevision(ctx.project),
       presetLabel: presetMeta.label,
       aspect: presetMeta.aspect,
       resolution,
@@ -319,13 +383,14 @@ export const exportExecutor: NodeExecutor = {
       }
     }
     // S20 接线 2：产物公网化。失败不抛、不阻断交付，只记 meta.publishError（≤200 字）。
+    // critic 的既有媒体感知入口需要真实可读 URL；候选只提供审阅地址，交付面按 stage 排除。
     const published = await publishProjectArtifact(outputs[0].path, {
       sessionId: ctx.sessionId,
       artifactId: outputs[0].artifactId,
       mime: outputs[0].mime,
     })
-    if (isPublishFailure(published)) meta.publishError = String(published.reason).slice(0, 200)
-    else outputs[0].url = published.url
+    if (published && isPublishFailure(published)) meta.publishError = String(published.reason).slice(0, 200)
+    else if (published) outputs[0].url = published.url
     const interchangeClips: InterchangeClip[] = []
     for (let i = 0; i < clips.length; i++) {
       const c = clips[i]
@@ -335,7 +400,7 @@ export const exportExecutor: NodeExecutor = {
       if (silence) {
         const dest = path.join(scratch, `silent-src-${i}.mp4`)
         const stripped = await stripAudioTrack(c.path, dest)
-        if (!stripped.ok) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
+        if (stripped.ok === false) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
         mediaPath = dest
         hasAudio = false
       }
@@ -361,20 +426,8 @@ export const exportExecutor: NodeExecutor = {
       subtitleFiles,
       timelineSubtitles: timelineValue?.subtitles,
     }))
-    const briefText = ctx.project.brief[0]?.text
-    if (typeof briefText === "string" && briefText.length > 0) {
-      const problem = await evaluateSentenceConstraints({
-        text: briefText,
-        videoPath: outputs[0].path,
-        durationSec: probed.durationSec,
-        subtitleBurnIn: Boolean(assEntry),
-        subtitleFiles,
-        timelineSubtitles: timelineValue?.subtitles,
-        fcpxmlZipPath: outputs.find((o) => o.port === "fcpxml")?.path,
-        jianyingZipPath: outputs.find((o) => o.port === "jianying")?.path,
-      })
-      if (problem) return { ok: false, code: "qc_failed", message: problem, retryable: false }
-    }
+    // 技术闸由当前targets裁定；全部原话与修改出处交独立critic语义核对。
+    // 不能再用brief[0]的旧时长/静音要求覆盖后来用户修订。
     return { ok: true, costCoins: 0, outputs }
   },
 }

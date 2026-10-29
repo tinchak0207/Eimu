@@ -139,6 +139,12 @@ export const RUBRICS: Readonly<Record<string, Rubric>> = {
     pf("composition_unique", "任意两张的景别、视点、负形三项不完全相同；完全相同即不过"),
     pf("theme_not_copy", "题材没有复刻单一代表作；复刻即不过"),
   ]),
+  film_final_critic: criticRubric("film_final_critic", "最终影片独立评审", 70, "video", [
+    pf("requested_content", "按用户当前生效要求核对整片，不能以规格正确替代要求的动作、故事或内容；阻断须注明原话来源与实际反例"),
+    pf("motion_and_rhythm", "实际观看开头、中段、尾部与关键动作；检查动态、切点、转场与情绪因果；不能仅凭抽帧/帧差判动态通过；缺陷附时间码，无法观看标未覆盖"),
+    pf("audiovisual_delivery", "核对用户要求的声音、静音、字幕及音画关系；仅对已要求的内容阻断，不凭空要求配音/字幕；缺陷附实际时间码与要求出处"),
+    pf("coherent_candidate", "按本次候选实际画面和声音检查人物、场景、叙事连续性；不强加镜头时长、总长15秒、正反打等未委托限制；问题定位镜头或时间码"),
+  ]),
   film_frame_critic: criticRubric("film_frame_critic", "电影族抽帧评审", 70, "video", [
     sc("style_unity_70", "风格统一审计 ≥ 70：色彩方差、质感一致性、风格关键词命中都要有可复算证据；低于 70 即不过"),
     pf("shot_consistency", "逐镜关键帧与角色三视图比对脸部、服装、配色；任一镜不一致即不过"),

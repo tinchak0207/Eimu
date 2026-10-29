@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { ok, fail, platformFetch } from "../lib/client"
 import { gatewayReadSnapshot, gatewayDispatchOps } from "../lib/canvas-flow"
+import { expandProjectDsl, projectNodes, projectPatch } from "../lib/project-client"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
@@ -12,6 +13,7 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 // 本工具只做三件事：读当前图 → 交编译 → 把编译出的 ops 原样下发。
 export default tool({
   description:
+    "工程模式下本工具直接修改实际runner读取的ProjectGraph：source里的id就是同一工程节点，保留baseVersion、锁和已完成素材，改完用project_run按targets局部执行。dry_run只编译不写工程。只有非工程画布才采用下述旧画布编译说明。\n\n" +
     "把整份工作流声明（DSL）编译成画布操作并原子落图——「像改代码一样改工作流」的写入口。用法：先 canvas_get_state 读当前 dsl（工作流的可逆声明），按需增删改 steps，整份 source 交回本工具。\n\n" +
     "**冷启动／收编（`dsl` 与画布现状的关系）**：①`dsl` 非空 ⇒ 骨架**已自动收编**存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），**直接改 `steps` 整份交回即可，每步的 `meta._origin_node_id` 原样带回、不要自己发明**；②`dsl` 为空 ⇒ 两种原因（画布上确实没有任何产线节点；或画布太大、骨架超出快照预算，摘要带 `dsl_omitted: \"budget\"`，**不代表没有产线**），此时按画布现状写 steps 收编（**每步对应一颗现有节点，`meta._origin_node_id` 指原节点 id**；交回后编译器把现有节点收编进 DSL 管理，幂等更新+键回填，不建平行节点）或按用户意图整份新建产线 source。\n\n" +
     "source 形状：{ workflow: \"<小写字母开头 [a-z0-9_-]>\"， title?: string， steps: [ { id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? } ] }。\n" +
@@ -23,6 +25,7 @@ export default tool({
     "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③从 source 里移除步骤不会删画布节点（v0 只回 `warnings`）；**族4 节点在首次收编前**被移除时不会回 warning，下一步读面仍会看到它——要真移除节点用 `canvas_apply_ops`。\n\n" +
     "**改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**`dsl` 已自动覆盖存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），每步的 `meta._origin_node_id` 由读面自动填好——原样带回即可，不要自己发明。**改提示词要改「生成步」（kind=image/video 的那一步）的 `prompt`**——生成面板与重跑读的是生成节点自身的 `metadata.prompt`；若上游另有「提示词节点步」持有同一段提示词（画布把提示词存了两份），把两处改成同一段：只改提示词步不会改变生成输入。节点不在 `dsl` 里，或要动 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`（`update_node`／`connect_nodes`／`delete_connections`）。**铺新产线＝有意动作**：交回会新建节点的 source 时，若 `source.workflow` 不在当前画布 `dsl` 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），工具先回 `confirm_new_line` 要你确认——确认前画布不动。确为有意（用户要铺这条线／你在规划另一张画布）就带 `confirm_new_line: true` 重交同一份 source；若它只是记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（`created_node_ids`）必须如实转述，不得声称「无新建」。** **禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。**",
   args: {
+    baseVersion: tool.schema.number().int().optional().describe("canvas_get_state返回的工程版本；冲突即拒绝，不盲覆盖"),
     source: tool.schema
       .object({
         workflow: tool.schema.string().describe("工作流命名空间，小写字母开头，[a-z0-9_-]{1,48}"),
@@ -42,6 +45,22 @@ export default tool({
       .describe("确认这是有意在当前画布铺一条新产线。交回会新建节点的 source 时，若 source.workflow 不在当前画布 dsl 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），不传本参数工具会先回 confirm_new_line 拒绝落图（画布不动）；只有确认这是有意动作（用户要求铺这条线／你在规划另一张画布或另一条线）才传 true 重交同一份 source。"),
   },
   async execute(args, context) {
+    const project = await projectNodes(context.sessionID)
+    if (!project.ok) return fail(project.error?.code ?? "project_read_unknown", project.error?.message ?? "工程状态读取未知，未改写画布或工程")
+    if (project.data?.project_mode === true) {
+      const expanded = await expandProjectDsl(args.source, context.sessionID, context.abort)
+      if (!expanded.ok) return fail("workflow_dsl_invalid", (expanded.errors ?? ["工程DSL编译失败"]).join("；"))
+      const sourceVersion = (args.source as Record<string, unknown>).baseVersion
+      const baseVersion = args.baseVersion ?? (typeof sourceVersion === "number" ? sourceVersion : expanded.baseVersion)
+      if (!Number.isInteger(baseVersion)) return fail("project_version_unknown", "没有可信工程版本，未写入；请读取当前工程再修改")
+      if (args.dry_run) return ok({ target: "project", dry_run: true, baseVersion, ops: expanded.ops ?? [], warnings: expanded.warnings ?? [] })
+      if (!expanded.ops?.length) return ok({ target: "project", applied: 0, baseVersion, warnings: expanded.warnings ?? [], note: "工程输入一致，无需改动" })
+      const result = await projectPatch(context.sessionID, { ops: expanded.ops, baseVersion, atomic: true })
+      if (!result.ok) return fail(result.error?.code ?? "project_patch_failed", result.error?.message ?? "工程写入失败")
+      if (result.data?.ok === false) return fail("project_patch_rejected", "工程版本、字段锁或节点权限拒绝本次修改，未覆盖当前工程", result.data)
+      return ok({ ...result.data, target: "project", warnings: expanded.warnings ?? [], note: "实际工程输入已修改；现有事件投影画布。需要生成时用project_run指定受影响targets，原有素材按签名复用。" })
+    }
+    if (project.data?.project_mode !== false) return fail("project_mode_unknown", "网关未返回可核验的工程模式，未猜测写入旧画布")
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
     // F1：无画布上报视为空画布，照样编译落盘（网关写穿 canvasStates／queued），禁止甩锅「请打开画布」。
     const s = (snap.has_state && snap.state ? snap.state : {}) as Record<string, unknown>

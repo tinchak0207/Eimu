@@ -17,6 +17,7 @@ let mode: "ok" | "hang" | "nocharge" = "ok"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const req = (idemKey: string) => ({ sessionId: "s1", projectId: "p1", nodeId: "music_1", signature: "z".repeat(64), idemKey, params: { prompt: "ambient" } })
+const identity = { sessionId: "s1", projectId: "p1", nodeId: "music_1", signature: "z".repeat(64) }
 
 beforeAll(() => {
   fileServer = Bun.serve({ port: 0, fetch: () => new Response("AUDIO", { headers: { "content-type": "audio/mpeg" } }) })
@@ -57,7 +58,7 @@ describe("exec-bridge 客户端", () => {
     expect(r.provider).toBe("yue2_modal")
     expect(r.files[0]).toMatchObject({ mime: "audio/mpeg", bytes: 5, durationSec: 3 })
     expect(r.files[0].path).toContain(path.join("projects", "s1", "tmp", "pg:p1:ok1"))
-    expect(await c.result("pg:p1:ok1")).toMatchObject({ state: "done", costCoins: 1, chargeRef: "music:s1:pg:p1:ok1" })
+    expect(await c.result("pg:p1:ok1", identity)).toMatchObject({ state: "done", costCoins: 1, chargeRef: "music:s1:pg:p1:ok1" })
   })
   test("扣费未确认（cost_coins=null）→ 客户端结果带 chargeError，costCoins===0，无 chargeRef", async () => {
     mode = "nocharge"
@@ -80,10 +81,10 @@ describe("exec-bridge 客户端", () => {
     const c = client()
     const r = await c.call("music_gen", req("pg:p1:slow1"), { timeoutMs: 150, signal: new AbortController().signal })
     expect(r).toMatchObject({ ok: false, code: "submit_unknown", retryable: false })
-    expect((await c.result("pg:p1:slow1")).state).toBe("running")
+    expect((await c.result("pg:p1:slow1", identity)).state).toBe("running")
     release()
     await sleep(150)
-    const done = await c.result("pg:p1:slow1")
+    const done = await c.result("pg:p1:slow1", identity)
     expect(done.state).toBe("done")
     expect(done.costCoins).toBe(1)
     expect(musicCalls).toBe(1)
@@ -120,4 +121,20 @@ describe("exec-bridge 客户端", () => {
     const r = await client().call("music_gen", { ...req("../evil"), idemKey: "../evil" }, { timeoutMs: 2000, signal: new AbortController().signal })
     expect(r).toMatchObject({ ok: false, code: "bad_input", retryable: false })
   })
+})
+
+test("真实HTTP ingested ACK须持久artifact副本，重复同身份可确认", async () => {
+  mode = "ok"
+  const c = client()
+  const request = { ...req("pg:p1:ack1"), runId: "original_gateway_run" }
+  const generated = await c.call("music_gen", request, { timeoutMs: 4000, signal: new AbortController().signal })
+  expect(generated.ok).toBe(true)
+  if (!generated.ok) return
+  const { mkdirSync, copyFileSync } = await import("node:fs")
+  const durable = path.join(WS, "projects", "s1", "artifacts", "durable.mp3")
+  mkdirSync(path.dirname(durable), { recursive: true }); copyFileSync(generated.files[0].path, durable)
+  const receipt = { ...identity, idemKey: request.idemKey, runId: request.runId, artifacts: [{ path: durable, sha256: generated.files[0].sha256! }] }
+  expect(await c.ingested!({ ...receipt, runId: "wrong_run" })).toEqual({ ok: false })
+  expect(await c.ingested!(receipt)).toEqual({ ok: true })
+  expect(await c.ingested!(receipt)).toEqual({ ok: true })
 })

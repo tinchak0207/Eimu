@@ -22,7 +22,7 @@ process.env.CONFIRM_THRESHOLD_COINS = "5"
 
 const { registerExecutor, clearExecutors } = await import("./executor-registry.ts")
 const { ensureProject, openProject, projectDirFor } = await import("./store.ts")
-const { runProject } = await import("./run.ts")
+const { cancelProjectRun, runProject } = await import("./run.ts")
 const { recoverProject } = await import("./recovery.ts")
 const { idempotencyKeyOf } = await import("./submit-generation.ts")
 const { reopenSessionsDbForTest } = await import("../job-store.ts")
@@ -121,6 +121,107 @@ function installExecutor(type: NodeType, opts: {
 
 const okOne = (ctx: ExecContext): Promise<ExecResult> => makeOutput(ctx).then((out) => ({ ok: true, outputs: [out], costCoins: 0 }))
 
+function rendezvous() {
+  let release!: () => void
+  const promise = new Promise<void>(resolve => { release = resolve })
+  return { promise, release }
+}
+function preparedNode(id: string): ProjectNode {
+  return NODE(id, "keyframe", { params: { prompt: id, model: "m", toolSubmission: { payload: { prompt: id, model: "m" }, identity: { request_id: `op-${id}` }, lock: null } } })
+}
+
+describe("同执行代的独立prepared接入", () => {
+  test("A在途时B已经开跑，同node去重；主轮等B并汇总费用与责任", async () => {
+    const sid = "join_independent"
+    const store = await makeProject(sid, [preparedNode("a")])
+    const startedA = rendezvous(), startedB = rendezvous(), releaseA = rendezvous(), releaseB = rendezvous()
+    const calls: Call[] = []
+    installExecutor("keyframe", { calls, run: async ctx => {
+      const isA = ctx.node.id === "a"
+      ;(isA ? startedA : startedB).release()
+      await (isA ? releaseA : releaseB).promise
+      return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0.3 }
+    } })
+    const { deps } = depsFor(sid)
+    const first = runProject(store, deps, { targets: ["a"], authorized: async () => true })
+    await startedA.promise
+    await store.update(g => { g.nodes.b = preparedNode("b"); g.order.push("b") })
+    const second = runProject(store, deps, { targets: ["b"], joinPreparedNode: "b", authorized: async () => true })
+    await startedB.promise
+    const duplicate = runProject(store, deps, { targets: ["b"], joinPreparedNode: "b", authorized: async () => true })
+    await store.update(g => { g.nodes.rejected_dependent = preparedNode("rejected_dependent"); g.nodes.rejected_dependent.inputs = { source: { from: "a" } }; g.order.push("rejected_dependent") })
+    const denied = await runProject(store, deps, { targets: ["rejected_dependent"], joinPreparedNode: "rejected_dependent", authorized: async () => true })
+    expect(denied.reason).toContain("join_unsupported")
+    expect((await store.read()).nodes.rejected_dependent.status).toBe("pending")
+    expect(calls.map(c => c.node)).toEqual(["a", "b"])
+    expect((await store.read()).activeRunAdmission?.joinedNodes).toEqual(["b"])
+    releaseA.release()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect((await store.read()).activeRun).not.toBeNull()
+    releaseB.release()
+    const [root, joined, repeated] = await Promise.all([first, second, duplicate])
+    expect(root.done).toBe(2)
+    expect(root.status).toBe("done") // 拒接未拥有的节点不污染主轮责任与targets。
+    expect(joined.runId).toBe(root.runId)
+    expect(repeated.runId).toBe(root.runId)
+    const final = await store.read()
+    expect(final.budget.spentCoins).toBeCloseTo(0.6)
+    expect(final.continuation?.targets).toEqual(["a", "b"])
+    expect(final.activeRunAdmission?.accepting).toBe(false)
+    expect(final.continuation?.tasks[0].nodes.sort()).toEqual(["a", "b"])
+  })
+
+  test("取消同代实际中止A/B，迟到结果不能被采用", async () => {
+    const sid = "join_cancel"
+    const store = await makeProject(sid, [preparedNode("a")])
+    const a = rendezvous(), b = rendezvous()
+    const signals: AbortSignal[] = []
+    installExecutor("keyframe", { calls: [], run: async ctx => {
+      signals.push(ctx.signal)
+      ;(ctx.node.id === "a" ? a : b).release()
+      await new Promise<void>(resolve => ctx.signal.addEventListener("abort", () => resolve(), { once: true }))
+      return { ok: true, outputs: [await makeOutput(ctx)], costCoins: 0 }
+    } })
+    const { deps } = depsFor(sid)
+    const root = runProject(store, deps, { targets: ["a"] })
+    await a.promise
+    await store.update(g => { g.nodes.b = preparedNode("b"); g.order.push("b") })
+    const joined = runProject(store, deps, { targets: ["b"], joinPreparedNode: "b", authorized: async () => true })
+    await b.promise
+    await cancelProjectRun(store)
+    await Promise.all([root, joined])
+    expect(signals.map(s => s.aborted)).toEqual([true, true])
+    const final = await store.read()
+    expect(final.continuation?.cancelled).toBe(true)
+    expect(final.nodes.a.status).not.toBe("done")
+    expect(final.nodes.b.status).not.toBe("done")
+  })
+
+  test("finish已关闭窗口后不接旧代，保留新节点供下一轮执行", async () => {
+    const sid = "join_finish_boundary"
+    const store = await makeProject(sid, [preparedNode("a"), preparedNode("b")])
+    const closing = rendezvous(), release = rendezvous()
+    const original = store.finishRun.bind(store)
+    store.finishRun = async (...args) => { closing.release(); await release.promise; return original(...args) }
+    const calls: Call[] = []
+    installExecutor("keyframe", { calls, run: okOne })
+    const { deps } = depsFor(sid)
+    const root = runProject(store, deps, { targets: ["a"] })
+    await closing.promise
+    const rejected = await runProject(store, deps, { targets: ["b"], joinPreparedNode: "b", authorized: async () => true })
+    expect(rejected.status).toBe("rejected")
+    expect(rejected.reason).toContain("project_run_closing")
+    expect(calls.map(c => c.node)).toEqual(["a"])
+    expect((await store.read()).nodes.b.status).toBe("pending")
+    release.release()
+    await root
+    store.finishRun = original
+    const next = await runProject(store, deps, { targets: ["b"] })
+    expect(next.status).toBe("done")
+    expect(calls.map(c => c.node)).toEqual(["a", "b"])
+  })
+})
+
 function depsFor(sessionId: string, extra: Record<string, unknown> = {}) {
   const ledger = makeLedger()
   const submitCalls: string[] = []
@@ -133,6 +234,8 @@ function depsFor(sessionId: string, extra: Record<string, unknown> = {}) {
     ledger,
     submitGeneration: submit,
     execBridge: fakeBridge(),
+    // 本夹具模拟服务端已验证 auto/full；缺省恢复本身不构成付费授权。
+    authorizedRecovery: async () => true,
     ...extra,
   }
   return { deps, ledger, submitCalls }
@@ -593,6 +696,9 @@ describe("作者节点（script/shotlist）", () => {
     expect(r.status).toBe("partial") // 不是 failed
     expect(r.failed ?? []).toEqual([])
     expect(r.awaitingAuthor).toEqual(["sc"])
+    const responsibility = (await store.read()).continuation!
+    expect(responsibility.runId).toBe(r.runId)
+    expect(responsibility.tasks).toEqual([expect.objectContaining({ kind: "author", owner: "orchestrator", nodes: ["sc"], delivery: "pending" })])
     expect((await nodeOf(store, "sc")).status).toBe("pending")
     const kf = await nodeOf(store, "kf")
     expect(kf.status).toBe("blocked")
@@ -1070,4 +1176,159 @@ describe("submit_unknown", () => {
     expect(oldOut.manual).toEqual([])
     expect(oldOut.resumed[0]?.result).toBe("done")
   }, 20_000)
+})
+
+// 真故障回归：用户停止时后台工程仍执行，迟到回执采用后重新唤父。
+describe("执行代撤销与未知订单", () => {
+  test("stop实际abort执行signal；迟到产物不采用；后续run不覆盖在途身份", async () => {
+    const sid = "s6_real_cancel"
+    const store = await makeProject(sid, [NODE("kf", "keyframe", { params: { prompt: "p", model: "m" } })])
+    let enter!: () => void
+    const entered = new Promise<void>((r) => { enter = r })
+    let finish!: () => void
+    const finished = new Promise<void>((r) => { finish = r })
+    let signal: AbortSignal | undefined
+    const calls: Call[] = []
+    installExecutor("keyframe", { calls, run: async (ctx) => {
+      signal = ctx.signal
+      const out = await makeOutput(ctx)
+      enter()
+      await finished
+      return { ok: true, outputs: [out], costCoins: 0 }
+    } })
+    const { deps } = depsFor(sid)
+    const running = runProject(store, deps)
+    await entered
+    const identity = (await store.read()).nodes.kf.inflight?.idemKey
+    await cancelProjectRun(store)
+    expect(signal?.aborted).toBe(true)
+    // 首轮还没有任何run.finish；撤销必须在进程退出前已落盘。
+    const { readFileSync } = await import("node:fs")
+    const durableStop = JSON.parse(readFileSync(store.paths.project, "utf8"))
+    expect(durableStop.continuation.cancelled).toBe(true)
+    expect(durableStop.continuation.runId).toBe(durableStop.activeRun)
+    finish()
+    await running
+    const stopped = await store.read()
+    expect(stopped.nodes.kf.outputs).toEqual([])
+    expect(stopped.continuation?.cancelled).toBe(true)
+    expect(stopped.nodes.kf.inflight?.idemKey).toBe(identity)
+    const next = await runProject(store, deps)
+    expect(next.inFlightUnknown).toEqual(["kf"])
+    expect(calls).toHaveLength(1)
+  })
+
+  test("重启恢复缺少真实持续授权时仅保留原key，不重新调用执行器", async () => {
+    const sid = "s6_no_recovery_auth"
+    const store = await makeProject(sid, [NODE("kf", "keyframe", { params: { prompt: "p", model: "m" }, status: "running" })])
+    const { computeSignature } = await import("./signature.ts")
+    const { NODE_SPECS_LITE } = await import("./specs.ts")
+    const sig = await computeSignature(await store.read(), "kf", store.artifacts, NODE_SPECS_LITE)
+    if (!sig.ok) throw new Error("fixture signature unavailable")
+    const key = idempotencyKeyOf({ projectId: sid, signature: sig.signature, take: 0, attempt: 0 })
+    await store.update((g) => { g.nodes.kf.inflight = { idemKey: key, since: "2026-10-29T00:00:00.000Z" } })
+    const calls: Call[] = []
+    installExecutor("keyframe", { calls, run: okOne })
+    const { deps } = depsFor(sid, { authorizedRecovery: undefined })
+    const result = await recoverProject(store, deps)
+    expect(result.manual).toEqual(["kf"])
+    expect(calls).toHaveLength(0)
+    expect((await store.read()).nodes.kf.inflight?.idemKey).toBe(key)
+  })
+})
+
+// 独立Hack反例：runId每次变化把相同待办当新工作，父席位可无限自唤醒。
+describe("无实质变化不产生新接续责任", () => {
+  test("同一缺内容作者反复run沿用已投身份；真正修改输入才产生新责任", async () => {
+    const sid = "s6_stable_author"
+    const calls: Call[] = []
+    installExecutor("script", { calls, run: async () => ({ ok: false, code: "bad_input", message: "awaiting authored content", retryable: false }) })
+    const store = await makeProject(sid, [NODE("sc", "script")])
+    const { deps } = depsFor(sid)
+    const first = await runProject(store, deps)
+    const identity = (await store.read()).continuation!.tasks[0].id
+    await store.update((g) => { g.continuation!.tasks[0].delivery = "delivered" })
+    const again = await runProject(store, deps)
+    expect(again.runId).not.toBe(first.runId)
+    expect((await store.read()).continuation!.tasks[0].id).toBe(identity)
+    expect((await store.read()).continuation!.tasks[0].delivery).toBe("delivered")
+    await store.applyPatches({ ops: [{ op: "set", node: "sc", path: "intent", value: "用户改为悬疑结尾" }] }, { kind: "user" })
+    await runProject(store, deps)
+    expect((await store.read()).continuation!.tasks[0].id).not.toBe(identity)
+    expect((await store.read()).continuation!.tasks[0].delivery).toBe("pending")
+  })
+
+  test("同样成品全部复用的一轮不重新投递完成通知", async () => {
+    const sid = "s6_stable_complete"
+    installExecutor("keyframe", { calls: [], run: okOne })
+    const store = await makeProject(sid, [NODE("kf", "keyframe", { params: { prompt: "p", model: "m" } })])
+    const { deps } = depsFor(sid)
+    await runProject(store, deps)
+    const identity = (await store.read()).continuation!.tasks[0].id
+    await store.update((g) => { g.continuation!.tasks[0].delivery = "unknown" })
+    await runProject(store, deps)
+    expect((await store.read()).continuation!.tasks[0].id).toBe(identity)
+    expect((await store.read()).continuation!.tasks[0].delivery).toBe("unknown")
+  })
+})
+
+test("未abort的旧worker迟到也不能覆盖新执行代节点", async () => {
+  const sid = "s6_old_worker_epoch"
+  const store = await makeProject(sid, [NODE("kf", "keyframe", { params: { prompt: "p", model: "m" } })])
+  let enter!: () => void, finish!: () => void
+  const entered = new Promise<void>((r) => { enter = r })
+  const finished = new Promise<void>((r) => { finish = r })
+  installExecutor("keyframe", { calls: [], run: async (ctx) => {
+    const output = await makeOutput(ctx)
+    enter(); await finished
+    return { ok: true, outputs: [output], costCoins: 0 }
+  } })
+  await store.beginRun("old_worker")
+  const { executeNode } = await import("./scheduler.ts")
+  const { deps } = depsFor(sid)
+  const old = executeNode(store, deps, "old_worker", "kf")
+  await entered
+  await store.beginRun("new_worker")
+  await store.update((g) => { g.nodes.kf.status = "pending"; g.nodes.kf.params.prompt = "new candidate" })
+  finish()
+  await old
+  const current = await store.read()
+  expect(current.activeRun).toBe("new_worker")
+  expect(current.nodes.kf.params.prompt).toBe("new candidate")
+  expect(current.nodes.kf.status).toBe("pending")
+  expect(current.nodes.kf.outputs).toEqual([])
+})
+
+test("bridge ACK只在当前代ArtifactStore真实入库后发送，响应丢失可复用补投；旧代不发", async () => {
+  const sid = "s6_bridge_ingested"
+  const store = await makeProject(sid, [NODE("music", "music", { params: { prompt: "original music" } })])
+  const source = join(store.paths.dir, "tmp", "original.mp3")
+  mkdirSync(join(store.paths.dir, "tmp"), { recursive: true }); writeFileSync(source, "independent original audio bytes")
+  let acks = 0
+  const { deps } = depsFor(sid, { execBridge: {
+    call: async () => { throw new Error("no paid upstream") }, result: async () => ({ state: "unknown" }),
+    ingested: async (receipt: any) => {
+      acks++
+      const { readFileSync } = await import("node:fs")
+      const disk = JSON.parse(readFileSync(store.paths.project, "utf8"))
+      expect(disk.nodes.music.status).toBe("done")
+      expect(await store.artifacts.verify(disk.nodes.music.outputs[0].artifactId)).toBe(true)
+      expect(receipt.artifacts[0].path).toContain("/artifacts/")
+      expect(readFileSync(receipt.artifacts[0].path, "utf8")).toBe("independent original audio bytes")
+      return { ok: acks > 1 } // 第一次响应丢失，不能把未确认伪记成功。
+    },
+  } })
+  installExecutor("music", { calls: [], run: async (ctx) => {
+    const out = await ctx.ingest({ path: source }, { port: "out", mime: "audio/mpeg", origin: "generated" })
+    return { ok: true, costCoins: 0, outputs: [{ ...out, meta: { bridgeOperation: { idemKey: "original_op", sessionId: sid, projectId: sid, nodeId: "music", signature: ctx.signature, runId: ctx.runId } } }] }
+  } })
+  await runProject(store, deps)
+  expect(acks).toBe(1)
+  await runProject(store, deps)
+  expect(acks).toBe(2)
+  expect((await store.read()).nodes.music.outputs[0].meta?.bridgeIngestedAck).toBe(true)
+  const { acknowledgeBridgeOutputs } = await import("./scheduler.ts")
+  await store.beginRun("new_epoch")
+  await acknowledgeBridgeOutputs(store, deps, "obsolete_epoch", "music")
+  expect(acks).toBe(2)
 })

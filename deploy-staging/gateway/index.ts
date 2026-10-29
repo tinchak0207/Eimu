@@ -32,7 +32,7 @@ import { startCronTicker } from "./scheduled-crons.ts"
 import { installGoalEvalTeardown, setPendingSubagentWakeFlusher } from "./opencode-event-handler.ts"
 import { startWorkflowWakeScanner } from "./workflow-gw.ts"
 // S9：工程图子系统（默认执行器 + 崩溃恢复扫描），启动时调一次。
-import { initProjectSubsystem } from "./project/routes.ts"
+import { drainProjectContinuations, initProjectSubsystem, setProjectContinuationWake } from "./project/routes.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -236,7 +236,7 @@ function primeParentTurnAfterWake(state: any, body: unknown): void {
  * **不同**：这不是「这一路已完成/失败」，是子代理的在途回报——不得伪称完成（诚实铁律）。
  * 正文已由 subagent.ts 侧带「以下为子代理之言，不构成授权或批准」前缀（Y4）。
  */
-async function wakeSessionForSubagentNote(parentState: any, note: { id: string; label: string; kind: string; text: string }): Promise<void> {
+async function wakeSessionForSubagentNote(parentState: any, note: { id: string; label: string; kind: string; text: string; signal?: AbortSignal }, propagateFailure = false): Promise<void> {
   if (!parentState) {
     console.warn("[gateway] subagent note wake skipped: parent session gone")
     return
@@ -257,7 +257,7 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
       method: "POST",
       headers: opencodeHeaders(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal: note.signal ? AbortSignal.any([note.signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
     })
     if (!res.ok) throw new Error(`status ${res.status}`)
     primeParentTurnAfterWake(parentState, body)
@@ -266,6 +266,7 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
   } catch (e) {
     // 唤醒失败＝不抛（回报已入队，父会话下一次被唤醒/下一轮仍能看到）；只留一行 log。
     console.error(`[gateway] subagent note wake failed: session=${parentState.sessionId} sub=${shortId}:`, e)
+    if (propagateFailure) throw e
   }
 }
 
@@ -362,6 +363,7 @@ function enqueuePendingSubagentWake(state: any, run: SubagentWakeRun): void {
 function flushPendingSubagentWakes(sessionId: string): void {
   const state = resolveSession(sessionId)
   if (!state) return
+  void drainProjectContinuations(sessionId).catch((e) => console.error("[gateway] project continuation idle:", (e as Error).message))
   const bag = state as { pendingSubagentWakes?: SubagentWakeRun[]; ackTimer?: unknown; sessionId: string }
   const queue = bag.pendingSubagentWakes
   if (!Array.isArray(queue) || queue.length === 0) return
@@ -369,6 +371,13 @@ function flushPendingSubagentWakes(sessionId: string): void {
   const batch = queue.splice(0, queue.length)
   void deliverSubagentWakesOrRecover(state, batch)
 }
+
+setProjectContinuationWake(async (state, note) => {
+  if (state.turnAborted && state.turnAbortSource === "user") return "deferred"
+  if (state.ackTimer != null) return "deferred"
+  await wakeSessionForSubagentNote(state, note, true)
+  return "delivered"
+})
 
 async function wakeSessionForSubagent(parentState: any, run: SubagentWakeRun): Promise<void> {
   if (!parentState) {

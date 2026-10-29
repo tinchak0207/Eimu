@@ -28,6 +28,7 @@ const { ArtifactStore } = await import("./artifacts")
 const { exportExecutor } = await import("./executors/export")
 const { verifySignedCriticVerdict, CRITIC_VERDICT_TEST_KEY } = await import("./executors/qc")
 const { signedCriticVerdictOutput, signedTestCriticVerdictOutput } = await import("./executors/qc.fixture")
+const { effectiveGoalRevision } = await import("./digest")
 
 const store = new ArtifactStore({ projectDir: PROJECT_DIR })
 const sha256 = (buf: Uint8Array) => createHash("sha256").update(buf).digest("hex")
@@ -94,8 +95,8 @@ function makeCtx(targets: Targets | null, inputs: Record<string, Output[]>, node
     take: 1,
     sessionId: SID,
     session: {} as never,
-    params: { preset: "cinema_239" } as Record<string, Json>,
-    inputs: next,
+    params: { preset: "cinema_239", ...(verdict === "signed" ? {} : { stage: "publish" }) } as Record<string, Json>,
+    inputs: verdict === "signed" ? next : { ...next, candidate: [ { ...Object.values(inputs).flat().find((o) => o.mime.startsWith("video/"))!, meta: { goalRevision: effectiveGoalRevision(project) } } ] },
     refs: [],
     signal: new AbortController().signal,
     ingest: (src, hint) => store.ingest(src, hint),

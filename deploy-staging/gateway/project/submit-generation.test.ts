@@ -5,10 +5,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Database } from "bun:sqlite"
+import { fileURLToPath } from "node:url"
 
 const SANDBOX = mkdtempSync(join(tmpdir(), "s5-submit-"))
 process.env.SESSIONS_DB_PATH = join(SANDBOX, "sessions.db")
 process.env.LEDGER_PATH = join(SANDBOX, "ledger.jsonl")
+process.env.EIMU_TASK_JOURNAL_PATH = join(SANDBOX, "tool-journal.sqlite")
+process.env.EIMU_RUNTIME_DIR = fileURLToPath(new URL("../../opencode-runtime/", import.meta.url))
 
 type Post = { path: string; key: string | null; auth: string | null; body: any }
 const posts: Post[] = []
@@ -17,7 +21,7 @@ const tasksByKey = new Map<string, string>()
 const taskKinds = new Map<string, "image" | "video">()
 const taskN = new Map<string, number>()
 const polls = new Map<string, number>()
-let postMode: "ok" | "reject400" | "no_task_id" | "http502" = "ok"
+let postMode: "ok" | "reject400" | "no_task_id" | "http502" | "sync" = "ok"
 let taskOutcome: "succeed" | "fail" | "hang" = "succeed"
 
 const CATALOG = {
@@ -52,6 +56,7 @@ const server = Bun.serve({
       if (postMode === "reject400") return j({ error: { message: "bad size" } }, 400)
       if (postMode === "http502") return j({}, 502)
       if (postMode === "no_task_id") return j({ ok: true })
+      if (postMode === "sync") return j({data:[{url:"https://cdn.test/synchronous.png"}],cost_coins:0.5})
       let id = key ? tasksByKey.get(key) : undefined // 平台契约：同 Idempotency-Key 回同一任务
       if (!id) {
         id = crypto.randomUUID()
@@ -83,6 +88,21 @@ const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
 resetCatalogCacheForTest()
 const { accumulatedSpendCoins, createLedgerWriter, createProjectBudget } = await import("./ledger.ts")
 type Req = import("./types.ts").SubmitGenerationReq
+const { loadGenerationJournal, sharedJournalOperation, sharedGenerationScope, reconcileJournalOperations } = await import("./generation-journal.ts")
+const journal = await loadGenerationJournal(process.env.EIMU_RUNTIME_DIR)
+journal.getSubmission("fixture-init", "none")
+const journalDb = new Database(process.env.EIMU_TASK_JOURNAL_PATH)
+let graphCap: number | null = null
+function journalFactory() {
+  return async (r: Req, payload: Record<string, unknown>, coins: number) => {
+    const canonical = structuredClone(payload)
+    delete (canonical.workflow as any)?.metadata?.run_id // 运行轮次不是新付费订单或制作输入
+    return sharedJournalOperation(journal, "verified-s5-owner", {
+    identity: { project: r.projectId, request_id: idempotencyKeyOf(r), session_id: r.sessionId, model: r.model, cost_coins: coins, input_signature: r.signature },
+    payload:canonical, lock: null, cap: cap === null ? graphCap ?? undefined : graphCap === null ? cap : Math.min(cap, graphCap),
+  })
+  }
+}
 
 const SIG = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
 const session = { sessionId: "gw-s5", opencodeSessionId: "ses_oc5", apiKey: "sk-test" }
@@ -105,11 +125,23 @@ beforeEach(() => {
   posts.length = 0; deletes.length = 0; tasksByKey.clear(); polls.clear(); ledgerRows = []
   postMode = "ok"; taskOutcome = "succeed"; cap = null
   __resetSubmitGenerationMemory()
+  journalDb.exec("DELETE FROM tool_submission; DELETE FROM tool_project; DELETE FROM tool_artifact;")
+  graphCap = null
   budget = createProjectBudget({ capOf: async () => cap })
+  budget.reserve = async () => { throw new Error("本夹具不允许第二份图预算预留；必须使用真实共享journal") }
+  budget.noteCarry = (carry) => { graphCap = carry.capCoins }
+  budget.snapshot = (project) => {
+    const rows = journalDb.query("SELECT state,reservation FROM tool_submission WHERE scope=?").all(sharedGenerationScope("verified-s5-owner", project)) as any[]
+    return {
+      reserved: rows.filter((r) => r.state === "submitting" || r.state === "accepted").reduce((n, r) => n + r.reservation, 0),
+      spent: rows.filter((r) => r.state === "completed").reduce((n, r) => n + r.reservation, 0),
+    }
+  }
   submit = createSubmitGeneration({
     session,
     ledger: createLedgerWriter(session, async (_s, o) => { ledgerRows.push(o) }),
     budget,
+    journalOperation: journalFactory(),
     pollIntervalMs: 5,
   })
 })
@@ -185,18 +217,21 @@ describe("图片：载荷、Idempotency-Key、metadata、收据、账本", () =>
     expect(budget.snapshot("p1").spent).toBeCloseTo(0.9, 6)
   })
 
-  test("同 key 重入不产生第二个任务；进程内记忆丢失后重投也回同一任务", async () => {
+  test("同 key 重入/进程内记忆丢失后从真实journal恢复，完全不再次POST", async () => {
     const r = req()
     const a = await submit(r)
     const b = await submit(r)
     expect(posts).toHaveLength(1) // 已受理 → 第二次直接续轮询
     __resetSubmitGenerationMemory()
     const c = await submit(r)
-    expect(posts).toHaveLength(2)
-    expect(posts[1].key).toBe(posts[0].key)
+    expect(posts).toHaveLength(1)
     expect(tasksByKey.size).toBe(1) // 平台侧只有一个任务
     if (a.ok === false || b.ok === false || c.ok === false) throw new Error("unexpected failure")
     expect(new Set([a.taskId, b.taskId, c.taskId]).size).toBe(1)
+    expect(a.costCoins).toBe(0.9)
+    expect(b).toMatchObject({ reusedOperation: true, costCoins: 0, originalCostCoins: 0.9 })
+    expect(c).toMatchObject({ reusedOperation: true, costCoins: 0, originalCostCoins: 0.9 })
+    expect(ledgerRows.filter((row) => row.event === "completed")).toHaveLength(1)
   })
 
   test("上游任务失败：写 failed+refunded 行（带 node_id），预算释放，收据 failed", async () => {
@@ -209,6 +244,73 @@ describe("图片：载荷、Idempotency-Key、metadata、收据、账本", () =>
     expect(budget.snapshot("p1")).toEqual({ reserved: 0, spent: 0 })
     if (res.ok === false) expect(store.generationReceipt(res.taskId!)!.status).toBe("failed")
   })
+
+  test("显式新take同参数允许一笔新POST；旧完成operation恢复不重复完成账或新增费用", async () => {
+    const original = req({ take: 0 })
+    const first = await submit(original)
+    const newTake = { ...original, take: 1 }
+    const second = await submit(newTake)
+    const restored = await submit(original)
+    expect(first.ok && second.ok && restored.ok).toBe(true)
+    expect(posts.map((p) => p.key)).toEqual([idempotencyKeyOf(original), idempotencyKeyOf(newTake)])
+    if (!first.ok || !second.ok || !restored.ok) throw new Error("expected accepted generations")
+    expect(first.taskId).not.toBe(second.taskId)
+    expect(restored.taskId).toBe(first.taskId)
+    expect(restored).toMatchObject({ costCoins: 0, originalCostCoins: 0.9, reusedOperation: true })
+    expect(ledgerRows.filter((row) => row.event === "completed")).toHaveLength(2)
+    expect(budget.snapshot("p1").spent).toBe(1.8)
+  })
+
+  test("真实故障反例：已结算旧单恢复不得因上游后来矛盾failed释放原费用", async () => {
+    const r = req()
+    const first = await submit(r)
+    expect(first.ok).toBe(true)
+    __resetSubmitGenerationMemory()
+    taskOutcome = "fail"
+    const resumed = await submit(r)
+    expect(resumed).toMatchObject({ ok: true, reusedOperation: true, costCoins: 0, originalCostCoins: 0.9 })
+    expect(posts).toHaveLength(1)
+    expect(ledgerRows.filter((row) => row.event === "refunded")).toHaveLength(0)
+    expect(budget.snapshot("p1").spent).toBe(0.9)
+  })
+
+  test("真实旧S5 ledger+receipt可幂等导入同journal，旧单恢复不重付且新take继续", async () => {
+    const old = req()
+    const paid = await submit(old)
+    expect(paid.ok).toBe(true)
+    const key = idempotencyKeyOf(old)
+    const completed = ledgerRows.find((row) => row.event === "completed")
+    const submitted = ledgerRows.find((row) => row.event === "submitted")
+    // 模拟旧graph已付费但尚无共享journal关联；实际上游收据、实际完成账保持原样。
+    journalDb.query("DELETE FROM tool_submission WHERE request_id=?").run(key)
+    const graph: any = { id: "p1", sessionId: session.sessionId, nodes: { [old.nodeId]: {} }, budget: { spentCoins: 0.9 } }
+    const operations = [{ key, submitted: { ...submitted, session_id: session.sessionId }, completed: { ...completed, session_id: session.sessionId } }]
+    const receipts = store.generationReceipts(session.sessionId)
+    reconcileJournalOperations(journal, "verified-s5-owner", graph, operations, receipts)
+    reconcileJournalOperations(journal, "verified-s5-owner", graph, operations, receipts)
+    expect(budget.snapshot("p1").spent).toBe(0.9)
+    __resetSubmitGenerationMemory()
+    expect(await submit(old)).toMatchObject({ ok: true, reusedOperation: true, costCoins: 0, originalCostCoins: 0.9 })
+    expect(posts).toHaveLength(1)
+    expect(await submit({ ...old, take: 1 })).toMatchObject({ ok: true, costCoins: 0.9 })
+    expect(posts).toHaveLength(2)
+    expect(budget.snapshot("p1").spent).toBe(1.8)
+  })
+})
+
+test("同步真实产物取得稳定耐久receipt，恢复不轮询虚构provider任务或再次扣费", async () => {
+  postMode="sync"
+  const r=req()
+  const result=await submit(r)
+  expect(result.ok).toBe(true)
+  if(!result.ok)throw new Error(result.message)
+  expect(result.taskId).toMatch(/^[a-f0-9-]{36}$/)
+  expect(store.generationReceipt(result.taskId)?.status).toBe("succeeded")
+  __resetSubmitGenerationMemory()
+  const restored=await submit({...r,runId:"later"})
+  expect(restored).toMatchObject({ok:true,taskId:result.taskId,costCoins:0,originalCostCoins:0.5})
+  expect(posts.length).toBe(1)
+  expect(polls.size).toBe(0)
 })
 
 describe("视频载荷", () => {
@@ -218,7 +320,7 @@ describe("视频载荷", () => {
     if (res.ok === false) throw new Error(res.message)
     const p = posts[0]
     expect(p.path).toBe("/v1/videos/generations")
-    expect(Object.keys(p.body).sort()).toEqual(["cap_coins", "duration_seconds", "generate_audio", "model", "prompt", "reference_images", "resolution", "size", "workflow"])
+    expect(Object.keys(p.body).sort()).toEqual(["cap_coins", "duration_seconds", "generate_audio", "model", "n", "prompt", "reference_images", "resolution", "size", "workflow"])
     expect(p.body).toMatchObject({ duration_seconds: 5, generate_audio: true, resolution: "720p", size: "9:16", cap_coins: 2 })
     expect(p.body.prompt.startsWith("a red fox ")).toBe(true)
     expect(p.body.prompt).toContain("Continuous physical action")
@@ -236,6 +338,9 @@ describe("视频载荷", () => {
 
 describe("预算与 submit_unknown", () => {
   test("跨轮已花费 + 本次报价超过图上 capCoins：不发 POST", async () => {
+    // 旧消耗来自独立已存在操作，不把总额凭空写入新订单。
+    const prior = sharedJournalOperation(journal, "verified-s5-owner", { identity: { project: "p1", request_id: "prior-operation", session_id: session.sessionId, model: "img-m", cost_coins: 0.4 }, payload: { prior: true }, lock: null })
+    prior.reserve(); prior.settle(0.4)
     budget.noteCarry?.({ spentCoins: 0.4, capCoins: 0.6 })
     const res = await submit(req())
     expect(res.ok).toBe(false)
@@ -252,10 +357,13 @@ describe("预算与 submit_unknown", () => {
     __resetSubmitGenerationMemory()
     const underBudget = createProjectBudget({ capOf: async () => null })
     underBudget.noteCarry?.({ spentCoins: 0.2, capCoins: 1 })
+    graphCap = 1
+    const known = sharedJournalOperation(journal, "verified-s5-owner", { identity: { project: "under-cap-project", request_id: "known-prior", session_id: session.sessionId, model: "img-m", cost_coins: 0.2 }, payload: { prior: true }, lock: null, cap: 1 })
+    known.reserve(); known.settle(0.2)
     const underSubmit = createSubmitGeneration({
-      session, ledger: createLedgerWriter(session, async () => {}), budget: underBudget, pollIntervalMs: 5,
+      session, ledger: createLedgerWriter(session, async () => {}), budget: underBudget, pollIntervalMs: 5, journalOperation: journalFactory(),
     })
-    const under = await underSubmit(req())
+    const under = await underSubmit(req({ projectId: "under-cap-project" }))
     expect(under.ok).toBe(true)
     expect(posts).toHaveLength(1)
     expect(posts[0].body.cap_coins).toBe(0.5)
@@ -284,7 +392,7 @@ describe("预算与 submit_unknown", () => {
 
   test("预算读取失败 → fail-closed 不提交", async () => {
     const b2 = createProjectBudget({ capOf: async () => { throw new Error("owner unavailable") } })
-    const s2 = createSubmitGeneration({ session, ledger: createLedgerWriter(session, async () => {}), budget: b2, pollIntervalMs: 5 })
+    const s2 = createSubmitGeneration({ session, ledger: createLedgerWriter(session, async () => {}), budget: b2, pollIntervalMs: 5, journalOperation: async () => { throw new Error("project_budget_unavailable: owner unavailable") } })
     expect(await s2(req())).toMatchObject({ ok: false, code: "provider_error", retryable: true })
     expect(posts).toHaveLength(0)
   })
@@ -307,10 +415,10 @@ describe("预算与 submit_unknown", () => {
       expect(ledgerRows.map((x) => x.event)).toEqual(["submitted"]) // 订单可能存在：账本留 submitted，不假装失败
       postMode = "ok"
       const again = await submit(r)
-      expect(again.ok).toBe(true)
-      expect(posts.map((p) => p.key)).toEqual([idempotencyKeyOf(r), idempotencyKeyOf(r)])
+      expect(again).toMatchObject({ ok: false, code: "submit_unknown", submitUnknown: true })
+      expect(posts.map((p) => p.key)).toEqual([idempotencyKeyOf(r)])
       expect(ledgerRows.filter((x) => x.event === "submitted")).toHaveLength(1) // 不重复记 submitted
-      expect(budget.snapshot("p1").reserved).toBe(0)
+      expect(budget.snapshot("p1").reserved).toBe(0.5)
     })
   }
 

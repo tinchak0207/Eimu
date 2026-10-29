@@ -33,7 +33,7 @@ function summaryMsg(id: string, text: string, opts: { error?: boolean; finish?: 
   }
 }
 
-async function hooksWith(history: Msg[] | undefined) {
+async function hooksWith(history: Msg[] | undefined, projection?: unknown | Error) {
   const client = {
     session: {
       get: async () => ({ data: {} }),
@@ -43,13 +43,76 @@ async function hooksWith(history: Msg[] | undefined) {
       },
     },
   }
-  return await (EimuGuard as unknown as (ctx: { client: unknown }) => Promise<Record<string, any>>)({ client })
+  const hooks = await (EimuGuard as unknown as (ctx: { client: unknown }) => Promise<Record<string, any>>)({ client })
+  const transform = hooks["experimental.chat.messages.transform"]
+  hooks["experimental.chat.messages.transform"] = async (...args: unknown[]) => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      if (projection instanceof Error) throw projection
+      return Response.json(projection ?? { project_mode: false })
+    }) as typeof fetch
+    try { return await transform(...args) } finally { globalThis.fetch = originalFetch }
+  }
+  return hooks
 }
 
 const FIRST = "帮我做一支 30 秒的国风茶饮广告，竖屏 9:16，女主是穿汉服的年轻姑娘，全程不要出现任何文字水印。"
 const CORRECTION = "不对，BGM 不要古筝，改成轻电子，而且禁止用真人脸，只用我上传的那个角色卡。"
 const AUTH = "预算 20 币以内，你可以直接生成，不用再问我。"
 const LATEST = "最后一个镜头的茶汤要冒热气，别忘了。"
+
+test("legacy NIGHTBLOOM 投影只追加，不删除历史、工具、附件或技能手艺；重复步骤更新旧投影", async () => {
+  const h = await hooksWith([], {
+    project_mode: true, context_mode: "append", project_state: "available",
+    synthetic: "<eimu-project-digest>工程 NIGHTBLOOM v12，music 提交未知</eimu-project-digest>",
+    // 即使错误服务端下发裁剪计划，append 模式也不得采纳。
+    keep_ids: [], replacements: [], drop_parts: [],
+  })
+  const original = user("night-first", "做一支 Billboard 水准 MV", 1)
+  original.parts.push({ type: "file", url: "file:///reference.png", mime: "image/png" })
+  const history: Msg[] = [original, { info: { id: "tool-history", sessionID: SID, role: "assistant" }, parts: [{ type: "tool", tool: "skill", state: { status: "completed", output: "研究、并发和独立评审方法" } }] }, user("night-next", "保留副歌，别降级静帧", 2)]
+  const expected = structuredClone(history)
+  const out = { messages: history }
+  await h["experimental.chat.messages.transform"]({}, out)
+  expect(out.messages.map((m) => m.info.id)).toEqual(expected.map((m) => m.info.id))
+  expect(out.messages[0]).toEqual(expected[0])
+  expect(out.messages[1]).toEqual(expected[1])
+  expect(out.messages[2].parts[0]).toEqual(expected[2].parts[0])
+  expect(out.messages[2].parts.some((p) => String(p.text).includes("NIGHTBLOOM v12"))).toBe(true)
+  await h["experimental.chat.messages.transform"]({}, out)
+  expect(out.messages[2].parts.filter((p) => String(p.text).includes("NIGHTBLOOM v12"))).toHaveLength(1)
+  const cards = out.messages.flatMap((m) => m.parts).filter((p) => typeof p.text === "string" && p.text.startsWith("<eimu-goal-card>"))
+  // 独立用户原话仍在同一份卡里，而非工程摘要和插件各复制一份。
+  expect(cards).toHaveLength(1)
+  expect(cards[0].text).toContain("做一支 Billboard 水准 MV")
+  expect(cards[0].text).toContain("保留副歌，别降级静帧")
+})
+
+test("投影读取失败保留原文附件但明确工程未知，不能沿用旧状态为成功", async () => {
+  const h = await hooksWith([], new Error("gateway timeout"))
+  const messages = [user("u-unknown", "成片出来之前继续，不要重投音乐。", 1)]
+  messages[0].parts.push({ type: "file", url: "file:///music.wav" })
+  const original = structuredClone(messages[0].parts)
+  await h["experimental.chat.messages.transform"]({}, { messages })
+  expect(messages[0].parts.slice(0, 2)).toEqual(original)
+  expect(messages[0].parts.some((p) => String(p.text).includes("工程状态未知"))).toBe(true)
+})
+
+test("冷启动历史不可读时从耐久brief兜底唯一目标卡，原始委托与最新修订可见", async () => {
+  const goal = "<eimu-goal-card>用户原话：做60秒静音MV；最新修订：改90秒有声，保留副歌动作</eimu-goal-card>"
+  const h = await hooksWith(undefined, {
+    project_mode: true, context_mode: "append", project_state: "available", brief_count: 2,
+    goal_card: goal, synthetic: "<eimu-project-digest>brief按source-original/source-new可读取，未保存部分未知</eimu-project-digest>",
+  })
+  const visible: Msg[] = [{ info: { id: "cold-summary", sessionID: "ses_cold_real_brief", role: "assistant", summary: true }, parts: [{ type: "text", text: "旧摘要缺原话" }] },
+    { info: { id: "cold-user", sessionID: "ses_cold_real_brief", role: "user" }, parts: [{ type: "text", text: "继续制作" }] }]
+  await h["experimental.chat.messages.transform"]({}, { messages: visible })
+  await h["experimental.chat.messages.transform"]({}, { messages: visible })
+  const cards = visible.flatMap((m) => m.parts).filter((p) => typeof p.text === "string" && p.text.startsWith("<eimu-goal-card>"))
+  expect(cards).toHaveLength(1)
+  expect(cards[0].text).toContain("做60秒静音MV")
+  expect(cards[0].text).toContain("改90秒有声，保留副歌动作")
+})
 
 function manyUsers(): Msg[] {
   const out: Msg[] = [user("m001", FIRST, 1)]

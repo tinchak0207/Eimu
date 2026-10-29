@@ -3,6 +3,8 @@
 // 涵盖 index.ts 原行区：7636–7908（canvas/media handlers）、7910–8036（TTS）、
 // 8165–8285（confirm）、8410–8483（emitImageFailed/emitVideoFailed/emitAudioFailed＋handleInternalEmit）。
 import path from "node:path"
+import { createHash } from "node:crypto"
+import { db } from "./persistence-schema.ts"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
@@ -306,10 +308,26 @@ export async function handleTts(key: string, req: Request, deps?: SpeechDeps): P
   return Response.json({ ok: true, url: r.url, chars: r.chars, cost_coins: r.costCoins, format: r.format })
 }
 
+/** Same session/request identity survives gateway restart; no model assertion grants approval. */
+function confirmDb() {
+  if (!db) return null
+  db.exec(`CREATE TABLE IF NOT EXISTS generation_confirmations (session_id TEXT NOT NULL, request_id TEXT NOT NULL, amount_coins REAL NOT NULL, model TEXT, input_signature TEXT, owner_hash TEXT, outcome TEXT NOT NULL, created_at INTEGER NOT NULL, resolved_at INTEGER, PRIMARY KEY(session_id,request_id))`)
+  if (!(db.query("PRAGMA table_info(generation_confirmations)").all() as any[]).some(column => column.name === "owner_hash")) db.exec("ALTER TABLE generation_confirmations ADD COLUMN owner_hash TEXT")
+  return db
+}
+function confirmationOwner(state: SessionState): string { return createHash("sha256").update(state.apiKey).digest("hex") }
+export function readSpendConfirmation(state: SessionState, requestId: string): {outcome:string; amount_coins?:number; model?:string; input_signature?:string; resolvedAt?:number} | undefined {
+  const row = confirmDb()?.query("SELECT * FROM generation_confirmations WHERE session_id=? AND request_id=?").get(state.sessionId,requestId) as any
+  if (row && row.owner_hash !== confirmationOwner(state)) throw new Error("confirmation_owner_changed")
+  if (row) return {outcome:row.outcome === "pending" && Date.now()-row.created_at >= CONFIRM_TIMEOUT_MS ? "expired" : row.outcome, amount_coins:row.amount_coins,model:row.model ?? undefined,input_signature:row.input_signature ?? undefined,resolvedAt:row.resolved_at}
+  return state.resolvedConfirms.get(requestId)
+}
+
 export async function handleConfirmRequest(req: Request): Promise<Response> {  let body: {
     session_id?: string
     request_id?: string
     amount_coins?: number
+    input_signature?: string
     description?: string
     model?: string
     task_id?: string
@@ -319,6 +337,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
       session_id?: string
       request_id?: string
       amount_coins?: number
+      input_signature?: string
       description?: string
       model?: string
       task_id?: string
@@ -333,20 +352,27 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
 
-  // Idempotent by request_id. A re-post of a live request must NOT supersede it:
-  // superseding used to resolve the earlier waiter to false, which with a polling
-  // caller would read as "user denied" even though nobody had answered yet.
-  const settled = state.resolvedConfirms.get(request_id)
-  if (settled) return Response.json({ status: settled.outcome, request_id })
-  if (state.pendingConfirms.has(request_id)) {
-    await approvePendingCharge(state, request_id)
-    const resolved = state.resolvedConfirms.get(request_id)
-    if (resolved) return Response.json({ status: resolved.outcome, request_id })
-    return Response.json({ status: "pending", request_id }, { status: 202 })
-  }
-
   const amount = typeof body.amount_coins === "number" ? body.amount_coins : 0
+  if (!Number.isFinite(amount) || amount < 0 || (body.input_signature != null && !/^[a-f0-9]{64}$/.test(body.input_signature)))
+    return jsonError(400,"invalid confirmation amount/signature","bad_request","bad_request")
   const description = typeof body.description === "string" ? body.description : ""
+  let receipt: ReturnType<typeof readSpendConfirmation>
+  try {
+    if (body.input_signature && !confirmDb()) return jsonError(503,"confirmation persistence unavailable","confirmation_unavailable","confirmation_unavailable")
+    receipt = readSpendConfirmation(state,request_id)
+  } catch { return jsonError(503,"confirmation persistence unavailable","confirmation_unavailable","confirmation_unavailable") }
+  const pending = state.pendingConfirms.get(request_id)
+  const existing = receipt ?? (pending?.ledger ? {...pending.ledger,outcome:"pending"} : undefined)
+  if (existing && (existing.amount_coins !== amount || existing.model !== body.model || existing.input_signature !== body.input_signature))
+    return jsonError(409,"request_id approval belongs to different input/model/amount","confirmation_conflict","confirmation_conflict")
+  if (existing && existing.outcome !== "pending") return Response.json({status:existing.outcome,request_id})
+  if (pending) {
+    await approvePendingCharge(state,request_id)
+    return Response.json({status:state.resolvedConfirms.get(request_id)?.outcome ?? "pending",request_id},{status:state.resolvedConfirms.has(request_id)?200:202})
+  }
+  // Restored pending receipts retain the same request and authority; recreate only the waiter.
+  try { confirmDb()?.query("INSERT OR IGNORE INTO generation_confirmations(session_id,request_id,amount_coins,model,input_signature,owner_hash,outcome,created_at) VALUES(?,?,?,?,?,?,'pending',?)").run(state.sessionId,request_id,amount,body.model ?? null,body.input_signature ?? null,confirmationOwner(state),Date.now()) }
+  catch { return jsonError(503,"confirmation persistence unavailable","confirmation_unavailable","confirmation_unavailable") }
 
   // 互动模式=auto：扣费确认不经用户，注册即批准（settleConfirm 内部落账+emit
   // confirm.resolved；工具下一次轮询 /internal/confirm-status 直接拿到 approved）。
@@ -368,10 +394,10 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   if (autoApproved) {
     state.pendingConfirms.set(request_id, {
       timer: setTimeout(() => {}, 0),
-      ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
+      ledger: { amount_coins: amount, task_id: body.task_id, model: body.model, input_signature:body.input_signature },
     })
-    settleConfirm(state, request_id, "approved", { auto: true })
-    return Response.json({ status: "approved", request_id })
+    if (!settleConfirm(state, request_id, "approved", { auto: true })) return jsonError(503,"confirmation persistence unavailable","confirmation_unavailable","confirmation_unavailable")
+    return Response.json({ status: state.resolvedConfirms.get(request_id)?.outcome ?? "pending", request_id })
   }
 
   const timer = setTimeout(() => {
@@ -382,7 +408,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   }, CONFIRM_TIMEOUT_MS)
   state.pendingConfirms.set(request_id, {
     timer,
-    ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
+    ledger: { amount_coins: amount, task_id: body.task_id, model: body.model, input_signature:body.input_signature },
   })
 
   // Surface the billing request to the frontend, then return immediately.
@@ -423,10 +449,14 @@ export function settleConfirm(
 ): boolean {
   const pending = state.pendingConfirms.get(requestId)
   if (!pending) return false
+  try { if (outcome === "approved" && readSpendConfirmation(state,requestId)?.outcome === "expired") outcome = "expired" } catch { return false }
+  // Persist approval before exposing it or waking any spender.
+  try { confirmDb()?.query("UPDATE generation_confirmations SET outcome=?,resolved_at=? WHERE session_id=? AND request_id=?").run(outcome,Date.now(),state.sessionId,requestId) }
+  catch { return false }
   clearTimeout(pending.timer)
   state.pendingConfirms.delete(requestId)
 
-  state.resolvedConfirms.set(requestId, { outcome, resolvedAt: Date.now() })
+  state.resolvedConfirms.set(requestId, { outcome, resolvedAt: Date.now(), ...pending.ledger })
   if (state.resolvedConfirms.size > CONFIRM_RESOLVED_CAP) {
     const oldest = state.resolvedConfirms.keys().next()
     if (!oldest.done) state.resolvedConfirms.delete(oldest.value)

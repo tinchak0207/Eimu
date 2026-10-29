@@ -103,9 +103,29 @@ export interface ProjectNode {
 
 export interface BriefEntry { id: string; at: Iso; messageId: string; text: string; truncated?: boolean } // 用户原话逐字，单条≤12000 字
 export interface Decision { id: string; at: Iso; question: string; answer: string; refs?: NodeId[] }       // answer 是用户原话
-export interface Targets { durationSec?: number; aspect?: string; shots?: number; subtitles?: boolean; audio?: "voice" | "music" | "both" | "none"; setBy: Actor; at: Iso }
+export type TargetField = "durationSec" | "aspect" | "shots" | "subtitles" | "audio"
+export interface TargetSource { kind: "default" | "agent" | "user"; messageId?: string; evidence?: string; interpretation?: boolean; revision: string; supersedes?: string }
+export interface GoalInterpretationInput { sourceMessageIds: string[]; requirements: string; supersedes?: string[]; statusOnly?: boolean }
+export interface GoalInterpretation extends GoalInterpretationInput { id: string; actor: Actor; at: Iso }
+export interface Targets { durationSec?: number; aspect?: string; shots?: number; subtitles?: boolean; audio?: "voice" | "music" | "both" | "none"; setBy: Actor; at: Iso; sources?: Partial<Record<TargetField, TargetSource>> }
 export interface ProjectDefaults { videoModel?: string; imageModel?: string; imageSize?: string; voice?: string; style?: string }
 export interface Budget { capCoins: number | null; spentCoins: number; savedCoins: number /*复用省下*/ }
+
+/** 执行层写入的接续责任；投递状态不等于作者完成或作品交付。 */
+export interface ProjectContinuationTask {
+  id: string
+  kind: "author" | "continue" | "provider_unknown" | "user" | "platform_fault" | "qc_rework"
+  owner: "orchestrator" | "reconciler" | "user" | "operator"
+  nodes: NodeId[]
+  reason: string
+  delivery: "pending" | "delivering" | "delivered" | "unknown" | "completed" | "cancelled"
+}
+export interface ProjectContinuation {
+  runId: RunId
+  targets?: NodeId[]
+  cancelled?: boolean
+  tasks: ProjectContinuationTask[]
+}
 
 export interface ProjectGraph {
   schema: typeof PROJECT_SCHEMA_VERSION
@@ -115,12 +135,16 @@ export interface ProjectGraph {
   templateId?: string                // 来源配方
   brief: BriefEntry[]                // 仅网关在收到真实用户消息时追加；模型不能写
   decisions: Decision[]              // 仅网关在用户回答 question 时追加
+  goalInterpretations?: GoalInterpretation[] // 作者对原话的解释候选；不是授权，也不是用户已确认事实
   targets: Targets | null
   defaults: ProjectDefaults
   nodes: Record<NodeId, ProjectNode>
   order: NodeId[]                    // 创建序，展示用
   budget: Budget
   activeRun: RunId | null
+  activeRunAdmission?: { runId: RunId; accepting: boolean; joinedNodes: NodeId[] }
+  continuation?: ProjectContinuation
+  legacyGenerationRefs?: { taskId: string; requestId: string; kind: string; evidence: string; nodes?: NodeId[]; at: Iso }[] // 旧订单只读关联；不授权新提交或补造扣费
   seq: number                        // 事件序号高水位
   entry?: { via: "session_api"; messageId: string } // 只有 persistUserBriefNow 成功时写；补丁不能写
 }
@@ -140,7 +164,7 @@ export type PatchOp =
   | { op: "select_take"; node: NodeId; take: number }
   | { op: "reroll"; node: NodeId }                                   // 只改 params.seed
   | { op: "write_result"; node: NodeId; value: Json }                // script/shotlist/qc(critic)；子代理在 lane 内可用
-  | { op: "set_targets"; targets: Omit<Targets, "setBy" | "at"> }
+  | { op: "set_targets"; targets: Omit<Targets, "setBy" | "at" | "sources">; sourceMessageId?: string; interpretation?: GoalInterpretationInput }
   | { op: "set_defaults"; defaults: ProjectDefaults }
   | { op: "apply_recipe"; recipe: string; params: Record<string, Json> }
 export type NewNode = Pick<ProjectNode, "id" | "type"> & Partial<Pick<ProjectNode, "intent" | "params" | "inputs" | "refs" | "forEach" | "takes" | "onFail">>
@@ -190,6 +214,7 @@ export interface NodeSpecLite { type: NodeType; specVersion: number; signedParam
 
 // ===== 执行器 =====
 export interface ExecContext {
+  generationOperation?: (req: GenerationOperationReq) => Promise<import("./generation-journal.ts").SharedJournalOperation>
   project: Readonly<ProjectGraph>; node: Readonly<ProjectNode>
   signature: string; runId: RunId; attempt: number; take: number
   sessionId: string; session: unknown                      // 网关 SessionState，只供执行器取 apiKey/用户设置
@@ -202,7 +227,7 @@ export interface ExecContext {
   submitGeneration: SubmitGenerationFn
   execBridge: ExecBridgeClient
 }
-export type ExecErrorCode = "provider_error" | "safety_blocked" | "timeout" | "submit_unknown" | "price_unknown" | "bad_input" | "bridge_unavailable" | "qc_failed" | "cancelled"
+export type ExecErrorCode = "provider_error" | "platform_fault" | "safety_blocked" | "timeout" | "submit_unknown" | "price_unknown" | "bad_input" | "bridge_unavailable" | "qc_failed" | "cancelled"
 export type ExecResult =
   | { ok: true; outputs: Output[]; pool?: Output[]; costCoins: number }
   | { ok: false; code: ExecErrorCode; message: string; retryable: boolean; submitUnknown?: boolean; costCoins?: number }
@@ -213,23 +238,31 @@ export interface NodeExecutor {
 }
 
 export interface SubmitGenerationReq {
+  prepared?: { payload: Record<string, Json>; identity: Record<string, Json>; lock: Record<string, Json> }
+  onAccepted?: (notice: { taskId: string; requestId: string; model: string; costCoins: number; status: "accepted" | "succeeded" }) => Promise<void>
   kind: "image" | "video"; model: string; prompt: string
   size?: string; n?: number; seconds?: number; resolution?: string; quality?: string; seed?: number
   referenceImages?: string[]; generateAudio?: boolean; styleLock?: string
   projectId: ProjectId; nodeId: NodeId; signature: string; runId: RunId; attempt: number; take: number
   apiKey: string; sessionId: string; signal: AbortSignal
 }
+
+export interface GenerationOperationReq {
+  kind: "music" | "voice"; projectId: string; nodeId: string; signature: string; runId: string; attempt: number; take: number; sessionId: string
+  idemKey: string; model: string; payload: Record<string, Json>; coins: number
+}
 export type SubmitGenerationRes =
-  | { ok: true; taskId: string; urls: string[]; costCoins: number; requestId: string; executedModel: string }
+  | { ok: true; taskId: string; urls: string[]; costCoins: number; requestId: string; executedModel: string; reusedOperation?: boolean; originalCostCoins?: number }
   | { ok: false; code: ExecErrorCode; message: string; taskId?: string; submitUnknown?: boolean; retryable: boolean }
 export type SubmitGenerationFn = (req: SubmitGenerationReq) => Promise<SubmitGenerationRes>
 // Idempotency-Key = `pg:${projectId}:${signature.slice(0,40)}:t${take}:a${attempt}`；payload.workflow.metadata 必带 {project_id,node_id,signature,run_id,attempt,take}
 
 export interface ExecBridgeClient {
-  call(route: "music_gen" | "blender_render", body: { sessionId: string; projectId: ProjectId; nodeId: NodeId; signature: string; idemKey: string; params: Record<string, Json> }, opts: { timeoutMs: number; signal: AbortSignal }): Promise<
-    | { ok: true; files: { path: string; mime: string; bytes: number; durationSec?: number }[]; costCoins: number; chargeRef?: string; provider?: string }
-    | { ok: false; code: ExecErrorCode; message: string; retryable: boolean }>
-  result(idemKey: string): Promise<{ state: "unknown" | "running" | "done" | "failed"; files?: { path: string; mime: string; bytes: number }[]; costCoins?: number; chargeRef?: string }>
+  call(route: "music_gen" | "blender_render", body: { sessionId: string; projectId: ProjectId; nodeId: NodeId; signature: string; idemKey: string; runId?: string; params: Record<string, Json> }, opts: { timeoutMs: number; signal: AbortSignal }): Promise<
+    | { ok: true; files: { path: string; mime: string; bytes: number; durationSec?: number; sha256?: string }[]; costCoins: number; chargeRef?: string; provider?: string }
+    | { ok: false; code: ExecErrorCode; message: string; retryable: boolean; recoverable?: boolean }>
+  result(idemKey: string, identity?: { sessionId: string; projectId: string; nodeId: string; signature: string }): Promise<{ state: "unknown" | "running" | "done" | "failed"; files?: { path: string; mime: string; bytes: number; sha256?: string }[]; costCoins?: number; chargeRef?: string }>
+  ingested?(identity: { idemKey: string; sessionId: string; projectId: string; nodeId: string; signature: string; runId: string; artifacts: { sha256: string; path: string }[] }): Promise<{ ok: boolean }>
 }
 
 // ===== 账本新字段（追加在 quota-ledger.ts 的 LedgerEntry 上，全部可选）=====

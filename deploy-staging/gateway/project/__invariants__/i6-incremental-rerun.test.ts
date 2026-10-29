@@ -69,7 +69,8 @@ function makeDeps(sessionId: string) {
 }
 
 /** 3 镜图：改 kf2 的 prompt 期望重跑集合 = 手写的 7 个节点。 */
-const EXPECTED_RERUN = ["clip2", "export", "kf2", "mix", "qc", "subtitle", "timeline"].sort()
+// 批准的最终交付链增加candidate/机器/独立critic；原三镜与后处理保全。
+const EXPECTED_RERUN = ["candidate", "clip2", "export", "export_critic", "export_machine", "kf2", "mix", "qc", "subtitle", "timeline"].sort()
 /** 其余未 pinned 节点必须 reused。 */
 const EXPECTED_REUSE = ["clip3", "kf1", "kf3", "music", "shotlist"].sort()
 
@@ -100,14 +101,14 @@ async function makeThreeShotProject(sessionId: string) {
 }
 
 describe("I6 增量重跑与 pinned", () => {
-  test("改 kf2：只重跑手写的 7 个节点；其余 5 个 reused 事件与账本行齐全", async () => {
+  test("改 kf2：只重跑手写的10个必要节点；其余5个复用、第一镜pinned", async () => {
     const sessionId = "s18_i6_three_shot"
     const store = await makeThreeShotProject(sessionId)
     const { deps, ledger } = makeDeps(sessionId)
 
     const first = await runProject(store, deps)
     expect(first.status).toBe("done")
-    expect(new Set(calls.map((c) => c.node)).size).toBe(13)
+    expect(new Set(calls.map((c) => c.node)).size).toBe(16)
 
     // 人手钉住 shot1 的片段。
     const pinned = await store.applyPatches({ ops: [{ op: "pin", node: "clip1", reason: "用户钉住第一镜" }] as never }, { kind: "user" })
@@ -140,8 +141,8 @@ describe("I6 增量重跑与 pinned", () => {
     const reusedRows = ledger.filter((r) => r.event === "reused")
     expect(reusedRows.map((r) => r.node_id).sort()).toEqual(EXPECTED_REUSE)
     for (const row of reusedRows) expect(row.cost_coins).toBe(0)
-    // 13 节点 = 7 重跑 + 5 复用 + 1 pinned。
-    expect(EXPECTED_RERUN.length + EXPECTED_REUSE.length + 1).toBe(13)
+    // 16节点=10必要重跑+5复用+1pinned；新增评审不替换任何制作内容。
+    expect(EXPECTED_RERUN.length + EXPECTED_REUSE.length + 1).toBe(16)
   }, 30_000)
 
   test("pinned clip1 在上游 kf1 变化后不重跑、并出现在 drift", async () => {

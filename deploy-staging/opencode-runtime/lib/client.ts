@@ -331,7 +331,11 @@ async function trackedLegacySubmission(path:string,init:RequestInit,sessionID:st
   }
   payload.workflow.metadata.actual_reference_sha256=referenceHash
   const identity={scope,session_id:sessionID,project,request_id:requestID,model:payload.model,cost_coins:cost,budget_version:budget.version,budget_source:budget.source,submitted_image:payload.image,reference_fingerprints:[referenceHash],reference_version:referenceHash,input_signature:metadata.input_signature}
-  prepareSubmission(identity,payload,null,budget.cap)
+  const permit = prepareSubmission(identity,payload,null,budget.cap)
+  if (!permit.created) {
+    const existing = getSubmission(scope,requestID)
+    return Response.json({error:{code:"submission_unknown",message:"原操作已登记；本调用未取得首次提交许可，只能沿原request_id/task_id恢复。"},request_id:requestID,...(existing?.task_id?{task_id:existing.task_id}:{}),recoverable:true,new_generation:false},{status:409})
+  }
   let response:Response
   try {response=await fetchWithBase(API_BASE,path,{...init,headers,body:JSON.stringify(payload)},sessionID,signal)}catch(e){finishSubmission(scope,requestID,"submitting");throw e}
   const body=await response.clone().json().catch(()=>({}))
@@ -445,6 +449,7 @@ export async function classifyError(
 }
 
 export interface ConfirmSpendInput {
+  input_signature?: string
   sessionID: string
   amount_coins: number
   description: string
@@ -478,6 +483,7 @@ export async function confirmSpend(
       session_id: input.sessionID,
       request_id,
       amount_coins: input.amount_coins,
+      ...(input.input_signature ? { input_signature: input.input_signature } : {}),
       description: input.description,
       ...(input.model ? { model: input.model } : {}),
       ...(input.task_id ? { task_id: input.task_id } : {}),

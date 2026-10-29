@@ -343,3 +343,44 @@ describe("产物入库允许根：uploads / tts-audio / 调用方额外 root（S
       .toMatchObject({ sha256: shaOf(Buffer.from("u2")) })
   })
 })
+
+// 曾经先 append 便通知：消费者可读到旧graph，甚至对未提交批次唤醒。
+test("事件订阅只见已提交图；rename失败的批次不通知外部消费者", async () => {
+  let fail = false
+  const { store } = await ensureProject("ses_commit_before_notify", { crashBeforeRename: () => { if (fail) { fail = false; throw new Error("atomic commit failed") } } })
+  const { onProjectEvents } = await import("./events.ts")
+  const observed: number[] = []
+  const off = onProjectEvents((file, events) => {
+    if (file !== store.log.file) return
+    const disk = JSON.parse(readFileSync(store.paths.project, "utf8"))
+    expect(disk.seq).toBeGreaterThanOrEqual(events.at(-1)!.seq)
+    observed.push(events.at(-1)!.seq)
+  })
+  try {
+    await store.beginRun("accepted")
+    expect(observed).toHaveLength(1)
+    fail = true
+    await expect(store.finishRun("accepted")).rejects.toThrow("atomic commit failed")
+    expect(observed).toHaveLength(1)
+    expect((await store.read()).activeRun).toBe("accepted")
+    await store.finishRun("accepted")
+    expect(observed).toHaveLength(2)
+  } finally { off() }
+})
+
+test("工程共享scratch抵消0022但只修改tmp；不改用户文件或跟随symlink", async () => {
+  const { chmodSync, statSync, symlinkSync } = await import("node:fs")
+  const { store } = await ensureProject("ses_shared_scratch")
+  const userFile = join(store.paths.dir, "user-private.txt")
+  writeFileSync(userFile, "keep private", { mode: 0o600 })
+  const scratch = await store.prepareScratch()
+  expect(statSync(scratch).mode & 0o2777).toBe(0o2770)
+  expect(statSync(userFile).mode & 0o777).toBe(0o600)
+  chmodSync(scratch, 0o2755)
+  await store.prepareScratch()
+  expect(statSync(scratch).mode & 0o2777).toBe(0o2770)
+  rmSync(scratch, { recursive: true })
+  symlinkSync(SANDBOX, scratch)
+  await expect(store.prepareScratch()).rejects.toThrow("scratch")
+  expect(statSync(userFile).mode & 0o777).toBe(0o600)
+})

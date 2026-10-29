@@ -10,18 +10,71 @@ import {
   groupSteps,
   measureRequest,
   projectContextResponse,
+  projectFactsResponse,
   pruneToolParts,
   userTextOfMessage,
 } from "./context"
 import type { AgentMessage, AgentPart } from "./context"
-import { GOAL_CARD_TAG, GOAL_CARD_MAX_TOKENS, appendBriefEntry, renderGoalCard } from "./brief"
-import { renderDigest } from "./digest"
+import { GOAL_CARD_TAG, GOAL_CARD_MAX_TOKENS, appendBriefEntry, renderGoalCard, projectBriefResponse } from "./brief"
+import { renderDigest, effectiveGoalRevision, briefLedgerRevision } from "./digest"
 import type { DigestInputs } from "./digest"
 import { LIMITS } from "./constants"
 import type { BriefEntry, ProjectGraph, ProjectNode } from "./types"
 
 const T0 = Date.parse("2026-10-28T00:00:00.000Z")
 const iso = (ms: number) => new Date(ms).toISOString()
+
+test("legacy 事实投影保留 WATERLINE 原话修订、在途未知与产物索引，目标版本不随执行变动", () => {
+  const g = makeGraph(iso(T0))
+  appendBriefEntry(g.brief, { messageId: "waterline-original", at: iso(T0), text: "做一支 Billboard 水准 MV，使用完整成曲。" })
+  appendBriefEntry(g.brief, { messageId: "waterline-correction", at: iso(T0 + 1), text: "不要三镜默认方案，要保留副歌的动作和完整尾音。" })
+  g.nodes.music = node("music", { type: "music", inflight: { idemKey: "op-waterline", since: iso(T0), submitUnknown: true } })
+  g.nodes.selected = node("selected", { status: "done", outputs: [{ artifactId: "art_waterline", sha256: "a".repeat(64), port: "out", path: "/artifacts/selected.mp4", mime: "video/mp4", bytes: 100, origin: "generated" }] })
+  const rev = effectiveGoalRevision(g)
+  const briefRev = briefLedgerRevision(g)
+  const facts = projectFactsResponse(g, { authorization: "逐次确认" })
+  expect(facts.context_mode).toBe("append")
+  expect(facts.synthetic).toContain("waterline-original")
+  expect(facts.synthetic).toContain("waterline-correction")
+  expect(facts.synthetic).not.toContain(GOAL_CARD_TAG)
+  expect(facts.goal_card).toContain("做一支 Billboard 水准 MV，使用完整成曲。")
+  expect(facts.goal_card).toContain("不要三镜默认方案，要保留副歌的动作和完整尾音。")
+  expect(facts.synthetic).toContain("op-waterline")
+  expect(facts.synthetic).toContain('"submitUnknown":true')
+  expect(facts.synthetic).toContain("art_waterline")
+  expect(facts.synthetic).toContain("授权 逐次确认")
+  g.seq++; g.version++; g.nodes.music.status = "running"
+  expect(effectiveGoalRevision(g)).toBe(rev)
+  appendBriefEntry(g.brief, { messageId: "new-goal", at: iso(T0 + 2), text: "改为没有字幕。" })
+  expect(effectiveGoalRevision(g)).toBe(rev) // 新原话不是制作patch，不得因此重渲
+  expect(briefLedgerRevision(g)).not.toBe(briefRev)
+  expect(projectFactsResponse(g).synthetic).toContain("尚无解释候选 3 条")
+})
+
+test("冷启动可从耐久brief按真实ID分页读回原文，不依赖OpenCode历史或只读首句", () => {
+  const g = makeGraph(iso(T0))
+  const original = "原始委托：" + "动作🎬".repeat(800)
+  appendBriefEntry(g.brief, { messageId: "source-original", at: iso(T0), text: original })
+  appendBriefEntry(g.brief, { messageId: "source-revision", at: iso(T0 + 1), text: "60秒改为90秒，静音改有声" })
+  const index = projectBriefResponse(g, { limit: 1 }) as any
+  expect(index.entries[0].message_id).toBe("source-original")
+  expect(index.more).toBe(true)
+  let offset = 0; let recovered = ""
+  for (;;) {
+    const page = projectBriefResponse(g, { message_id: "source-original", offset, limit: 700 }) as any
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(6144)
+    recovered += page.text
+    if (!page.more) break
+    offset = page.next_offset
+  }
+  expect(recovered).toBe(original)
+  expect((projectBriefResponse(g, { message_id: "source-revision" }) as any).text).toBe("60秒改为90秒，静音改有声")
+  expect(projectBriefResponse(g, { message_id: "fabricated" }).ok).toBe(false)
+  g.brief[0].truncated = true
+  const incomplete = projectBriefResponse(g, { message_id: "source-original" }) as any
+  expect(incomplete.storage_truncated).toBe(true)
+  expect(incomplete.note).toContain("未知")
+})
 
 // ── 图：含 failed/blocked/pinned/drift 与预算 ────────────────────────────────
 function node(id: string, o: Partial<ProjectNode> = {}): ProjectNode {

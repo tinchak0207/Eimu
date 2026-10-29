@@ -17,6 +17,9 @@ const { ensureProject } = await import("../store.ts")
 const { runProject } = await import("../run.ts")
 const { exportExecutor } = await import("./export.ts")
 const { signedTestCriticVerdictOutput } = await import("./qc.fixture.ts")
+const { effectiveGoalRevision, briefLedgerRevision } = await import("../digest.ts")
+const { qcExecutor, setQcCriticDispatchForTest } = await import("./qc.ts")
+const routes = await import("../routes.ts")
 
 const SHOTS = ["shot_a", "shot_b"] as const
 
@@ -45,18 +48,19 @@ function rawNode(id: string, type: string, params: Record<string, unknown>, inpu
   }
 }
 
-function installFakes(): void {
+function installFakes(options?: { clips: string[]; realCritic: boolean }): void {
   clearExecutors()
   registerExecutor({
     type: "clip",
     specVersion: 1,
     async estimate() { return 0 },
     async run(ctx: any) {
-      const color = ctx.node.id === "shot_a" ? "red" : "blue"
+      options?.clips.push(ctx.node.id)
+      const color = ctx.node.id === "shot_a" ? "red" : ctx.params.prompt === "第二镜改绿" ? "green" : "blue"
       const file = join(scratch(ctx.sessionId), `${ctx.node.id}.mp4`)
       ffmpeg(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `color=c=${color}:s=160x120:d=1`, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-t", "1", file])
       const out = await ctx.ingest({ path: file }, { port: "out", mime: "video/mp4", origin: "generated" })
-      return { ok: true, outputs: [{ ...out, port: "out", durationSec: 1 }], costCoins: 0 }
+      return { ok: true, outputs: [{ ...out, port: "out", durationSec: 1 }], costCoins: options ? 0.2 : 0 }
     },
   } as never)
   registerExecutor({
@@ -85,13 +89,22 @@ function installFakes(): void {
     type: "export",
     specVersion: exportExecutor.specVersion,
     estimate: (node, project, session) => exportExecutor.estimate(node, project, session),
+    run: (ctx) => exportExecutor.run(ctx),
+  })
+  // 本例只验真实合成/可编辑工程；独立感知另测。夹具判决也必须绑定实际候选。
+  registerExecutor({
+    type: "qc", specVersion: 1, async estimate() { return 0 },
     async run(ctx) {
-      const groups = ctx.inputs as Record<string, { sha256?: string; mime?: string }[]>
-      const media = Object.values(groups).flat().find((o) => /^(video|image)\//.test(String(o?.mime)))
-      const inputs = media?.sha256
-        ? { ...ctx.inputs, verdict: [signedTestCriticVerdictOutput(scratch(ctx.sessionId), { parentSessionId: ctx.sessionId, artifactSha256: media.sha256, rubric: "film_frame_critic" })] }
-        : ctx.inputs
-      return exportExecutor.run({ ...ctx, inputs })
+      if (options?.realCritic && ctx.params.mode === "critic") return qcExecutor.run(ctx)
+      const candidate = Object.values(ctx.inputs).flat().find((o) => o.mime.startsWith("video/"))!
+      const goalRevision = effectiveGoalRevision(ctx.project)
+      if (ctx.params.mode === "critic") {
+        const verdict = signedTestCriticVerdictOutput(scratch(ctx.sessionId), { parentSessionId: ctx.sessionId, artifactSha256: candidate.sha256, goalRevision, briefLedgerRevision: briefLedgerRevision(ctx.project), rubric: "film_final_critic" })
+        return { ok: true, costCoins: 0, outputs: [await ctx.ingest({ path: verdict.path }, { port: "out", mime: "application/json", origin: "derived" })] }
+      }
+      const file = join(scratch(ctx.sessionId), "machine.json")
+      writeFileSync(file, JSON.stringify({ mode: "machine", pass: true, artifactSha256: candidate.sha256, goalRevision }))
+      return { ok: true, costCoins: 0, outputs: [await ctx.ingest({ path: file }, { port: "out", mime: "application/json", origin: "derived" })] }
     },
   })
 }
@@ -115,6 +128,66 @@ function makeDeps(sessionId: string) {
 }
 
 describe("E3 色条成片", () => {
+  test("最终审片缺陷经父席位交给第二镜，首镜不重做，复审发布同一候选字节", async () => {
+    const clips: string[] = []
+    installFakes({ clips, realCritic: true })
+    const sessionId = "e3_qc_directed_rework"
+    const { store } = await ensureProject(sessionId)
+    await store.update((g: any) => {
+      g.brief = [{ id: "b1", messageId: "user-shot-2", at: new Date().toISOString(), text: "第一镜红色保持不动，第二镜必须绿色，交付可修改的两镜影片。" }]
+      g.targets = { durationSec: 2, audio: "none", setBy: { kind: "user" }, at: new Date().toISOString() }
+      const nodes = [rawNode("shot_a", "clip", { prompt: "第一镜红", model: "local", seconds: 5 }, {}), rawNode("shot_b", "clip", { prompt: "第二镜蓝", model: "local", seconds: 5 }, {}), rawNode("export", "export", { preset: "landscape_169" }, { v1: { from: "shot_a" }, v2: { from: "shot_b" } })]
+      for (const node of nodes) { g.nodes[node.id] = node; g.order.push(node.id) }
+    })
+    let reviews = 0
+    setQcCriticDispatchForTest(async (req) => {
+      reviews++
+      const artifact = req.prompt.match(/artifact: (\S+)/)?.[1] ?? ""
+      const sha = req.prompt.match(/sha256: (\S+)/)?.[1] ?? ""
+      const items = [...req.prompt.matchAll(/^item ([A-Za-z0-9_]+):/gm)].map((m, index) => ({ id: m[1], pass: reviews > 1 || index > 0, evidence: reviews > 1 ? sha : "第二镜仍为蓝色，违反用户指定的绿色", nodeId: "shot_b", timecode: "00:01-00:02", sourceRequirement: "user-shot-2" }))
+      // 明确的critic感知回执夹具；这条回归不冒充真实视觉模型审片。
+      const frameBoard = `/tmp/critic-fixture-${reviews}.png`
+      const receipt = (tool: string, callID: string, input: unknown, output: unknown) => ({ type: "tool", callID, tool, state: { status: "completed", input, output: JSON.stringify(output) } })
+      const parts = [
+        receipt("video_evidence", `probe-${reviews}`, { source: artifact, action: "probe" }, { ok: true, action: "probe", hasVideo: true, duration: 2, frameRate: 25 }),
+        receipt("video_evidence", `frames-${reviews}`, { source: artifact, action: "tile" }, { ok: true, action: "tile", path: frameBoard, frames: [0, 0.04, 0.5, 1, 1.5, 1.9].map((at) => ({ at })) }),
+        receipt("read_image", `review-${reviews}`, { image_path: frameBoard }, { ok: true, attached: true, bytes: 32, mime: "image/png" }),
+      ]
+      return { ok: true, subagent_id: `critic:rework-${reviews}`, session_id: "critic-rework-child", agent: "critic_p", messages: [{ info: { role: "assistant" }, parts }], verdict: { score: 90, items, evidence: [sha] } }
+    })
+    const notes: any[] = []
+    const state: any = { sessionId, opencodeSessionId: `oc-${sessionId}`, projectMode: true, eventCounter: 0, replayBuffer: [], clients: new Set() }
+    const restore = routes.configureProjectRoutes({ state: (id) => id === sessionId ? state : undefined, wakeContinuation: async (_state, note) => { notes.push(note); return "delivered" } })
+    try {
+      const deps = makeDeps(sessionId)
+      await runProject(store, deps)
+      const failed = await store.read()
+      expect(failed.nodes.export.status).not.toBe("done")
+      const task = failed.continuation?.tasks.find((t) => t.kind === "qc_rework")
+      expect(task?.reason).toContain("quality_rework")
+      expect(task?.reason).toContain("shot_b")
+      expect(task?.reason).toContain("user-shot-2")
+      const originalSha = failed.nodes.shot_a.outputs[0].sha256
+      const candidateSha = failed.nodes.candidate.outputs[0].sha256
+      expect(failed.budget.spentCoins).toBeCloseTo(0.4)
+      await routes.drainProjectContinuations(sessionId)
+      await routes.drainProjectContinuations(sessionId)
+      expect(notes.filter((n) => n.kind === "qc_rework")).toHaveLength(1)
+      expect(notes[0].text).toContain("00:01-00:02")
+      const patch = await store.applyPatches({ baseVersion: (await store.read()).version, ops: [{ op: "set", node: "shot_b", path: "params.prompt", value: "第二镜改绿" }] }, { kind: "agent" })
+      expect(patch.receipt.ok).toBe(true)
+      await runProject(store, deps)
+      const final = await store.read()
+      expect(final.nodes.export.status, JSON.stringify(final.nodes.export.error)).toBe("done")
+      expect(clips).toEqual(["shot_a", "shot_b", "shot_b"])
+      expect(final.nodes.shot_a.outputs[0].sha256).toBe(originalSha)
+      expect(final.budget.spentCoins).toBeCloseTo(0.6)
+      expect(final.nodes.candidate.outputs[0].sha256).not.toBe(candidateSha)
+      expect(final.nodes.export.outputs[0].sha256).toBe(final.nodes.candidate.outputs[0].sha256)
+      expect(reviews).toBe(2)
+    } finally { await routes.drainProjectContinuations(sessionId); restore(); setQcCriticDispatchForTest(null) }
+  }, 180_000)
+
   test("两条色条、一条正弦、字幕第三镜：mp4 可解码，剪映 zip 与 FCPXML 都在", async () => {
     requireBin("ffmpeg")
     requireBin("ffprobe")

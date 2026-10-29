@@ -51,6 +51,7 @@ export function concurrencyLimit(override?: number): number {
 }
 
 export interface RunDeps {
+  generationOperation?: ExecContext["generationOperation"]
   /** 网关 SessionState（执行器只取 apiKey/用户设置，Deps 原样透传）。 */
   session: unknown
   ledger: LedgerWriter
@@ -269,6 +270,7 @@ async function buildContext(
     ingest: (src, hint) => store.putArtifact(src, { ...hint, signal }),
     ledger: deps.ledger,
     submitGeneration: deps.submitGeneration,
+    generationOperation: deps.generationOperation,
     execBridge: deps.execBridge,
   }
 }
@@ -342,6 +344,16 @@ async function commitNode(
   const committed = await store.update(async (g) => {
     const n = g.nodes[nodeId]
     if (!n) return { missing: true as const }
+    const obsolete = (g.activeRun && g.activeRun !== runId) || (!g.activeRun && g.continuation && g.continuation.runId !== runId)
+    if (deps.signal?.aborted || obsolete) {
+      // 外部结果可晚到，不能把撤销后的素材写回当前候选。实际费用仍记入工程。
+      g.budget.spentCoins = round6((g.budget.spentCoins ?? 0) + args.costCoins)
+      if (!obsolete) {
+        n.status = "blocked"
+        n.error = { code: "cancelled", message: "当前执行代已被用户撤销，迟到结果未采用。", retryable: false, at: nowIso }
+      }
+      return { missing: false as const, cancelled: true as const }
+    }
     n.status = args.status
     if (!args.keepOutputs) n.outputs = args.outputs
     if (args.takesPool !== undefined) n.takesPool = args.takesPool
@@ -375,6 +387,7 @@ async function commitNode(
     return { missing: false as const, finalStatus, postSig, producedSig, outputs: n.outputs }
   })
   if (committed.missing) return { node: nodeId, status: "blocked", costCoins: 0, reason: "node not found" }
+  if ("cancelled" in committed) return { node: nodeId, status: "blocked", costCoins: args.costCoins, reason: "run cancelled" }
   const finalStatus = committed.finalStatus!
   const n = { outputs: committed.outputs! }
 
@@ -400,6 +413,7 @@ async function commitNode(
   }
   if (args.costCoins > 0) events.push({ kind: "cost", node: nodeId, run: runId, data: { coins: round6(args.costCoins) } })
   await store.appendEvents(events)
+  if (finalStatus === "done" || finalStatus === "stale") await acknowledgeBridgeOutputs(store, deps, runId, nodeId)
 
   return {
     node: nodeId, status: finalStatus, costCoins: args.costCoins,
@@ -410,13 +424,47 @@ async function commitNode(
 }
 
 // ---------------------------------------------------------------- executeNode（单节点一圈：takes + regenerate + onFail）
+/** 仅确认ArtifactStore耐久接收，不是用户下载或消费ACK。丢包可按同身份重复发送。 */
+export async function acknowledgeBridgeOutputs(store: ProjectStore, deps: RunDeps, runId: RunId, nodeId: NodeId): Promise<void> {
+  if (!deps.execBridge.ingested || deps.signal?.aborted) return
+  const graph = await store.read()
+  if (graph.continuation?.cancelled || (graph.activeRun && graph.activeRun !== runId) || (!graph.activeRun && graph.continuation && graph.continuation.runId !== runId)) return
+  const node = graph.nodes[nodeId]
+  if (!node || (node.status !== "done" && node.status !== "stale")) return
+  const artifacts = [...node.outputs, ...(node.takesPool ?? [])]
+  const operations = new Map<string, { identity: any; outputs: Output[] }>()
+  for (const output of artifacts) {
+    const operation = output.meta?.bridgeOperation as any
+    if (!operation || output.meta?.bridgeIngestedAck === true || operation.sessionId !== store.sessionId || operation.projectId !== graph.id || operation.nodeId !== nodeId) continue
+    const group = operations.get(operation.idemKey) ?? { identity: operation, outputs: [] }
+    if (!group.outputs.some((out) => out.sha256 === output.sha256)) group.outputs.push(output)
+    operations.set(operation.idemKey, group)
+  }
+  for (const { identity, outputs } of operations.values()) {
+    if (!outputs.length || !(await Promise.all(outputs.map((out) => store.artifacts.verify(out.artifactId)))).every(Boolean)) continue
+    const receipt = { ...identity, artifacts: outputs.map((out) => ({ sha256: out.sha256, path: out.path })) }
+    try {
+      if (!(await deps.execBridge.ingested(receipt)).ok) continue
+      await store.update((g) => {
+        if (g.continuation?.cancelled || (g.activeRun && g.activeRun !== runId)) return
+        const n = g.nodes[nodeId]
+        for (const out of [...(n?.outputs ?? []), ...(n?.takesPool ?? [])]) if ((out.meta?.bridgeOperation as any)?.idemKey === identity.idemKey && outputs.some((saved) => saved.sha256 === out.sha256)) out.meta = { ...out.meta, bridgeIngestedAck: true }
+      })
+    } catch { /* 原素材已耐久保存；桥临时副本保留到下次同身份补ACK。 */ }
+  }
+}
+
 export async function executeNode(
   store: ProjectStore, deps: RunDeps, runId: RunId, nodeId: NodeId, opts: ExecuteNodeOptions = {},
 ): Promise<NodeRunReport> {
   const startedMs = Date.now()
+  if (deps.signal?.aborted) return { node: nodeId, status: "blocked", costCoins: 0, reason: "run cancelled" }
   const graph0 = await store.read()
+  if (graph0.activeRun && graph0.activeRun !== runId) return { node: nodeId, status: "blocked", costCoins: 0, reason: "obsolete execution epoch" }
   const node = graph0.nodes[nodeId]
   if (!node) return { node: nodeId, status: "blocked", costCoins: 0, reason: "node not found" }
+  // 普通 run 不能覆盖仍有身份的订单。只有 recovery 在核对同 key 和真实授权后显式续它。
+  if (node.inflight && opts.signature === undefined) return { node: nodeId, status: "running", costCoins: 0, needsRecovery: true, reason: "existing operation awaiting reconciliation" }
   if (node.pinned) return { node: nodeId, status: "done", costCoins: 0, reason: "pinned", outputs: node.outputs }
 
   const startOutputs = node.outputs ?? []
@@ -622,6 +670,7 @@ export async function markReused(
     reused: true,
     ...(outputs[0] ? { artifact_sha256: outputs[0].sha256 } : {}),
   })
+  await acknowledgeBridgeOutputs(store, deps, runId, nodeId)
 }
 
 async function markBlocked(store: ProjectStore, deps: RunDeps, runId: RunId, nodeId: NodeId, reason: string): Promise<void> {
@@ -712,6 +761,9 @@ export async function executePlan(store: ProjectStore, deps: RunDeps, runId: Run
         const dn = g.nodes[d]
         if (!dn) { reason = `missing upstream ${d}`; break }
         if (reasons.has(d)) { reason = reasons.get(d)!; break }
+        // 本轮已计划重做的依赖必须先跑完。旧轮 failed/blocked 不能提前杀掉
+        // 下游；本轮再次失败后它会离队，下一波仍按真实失败阻断。
+        if (queue.has(d)) continue
         if (dn.status === "failed") { reason = `upstream failed: ${d}`; break }
         if (dn.status === "blocked") { reason = `upstream blocked: ${d}`; break }
         if (dn.status === "skipped") { reason = `upstream skipped: ${d}`; break }

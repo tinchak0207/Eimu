@@ -13,14 +13,19 @@
 // 回执上限：patch/run ≤1024B、get digest ≤6144B、node ≤4096B、events ≤2048B（LIMITS）。
 // wait_sec 上限 90 且事件到达即返回：轮询 events.jsonl 的 seq 游标，不空转式长挂。
 import path from "node:path"
+import { createHash } from "node:crypto"
+import { projectBriefResponse } from "./brief.ts"
+import { productionJournalOperation, productionGenerationOperation, loadGenerationJournal } from "./generation-journal.ts"
+import { stableGenerationOwnerScope } from "../job-delivery.ts"
+import { sharedGenerationScope } from "../generation-scope.ts"
 import { CONFIRM_TIMEOUT_MS } from "../constants-gateway.ts"
 import { jsonError } from "../gw-lib.ts"
 import { getOwnedSession, resolveSession } from "../sessions-core.ts"
 import { subagentParentState } from "../subagent.ts"
 import { byChildOc } from "../subagent-runs.ts"
-import { generationParent } from "../job-store.ts"
+import { generationParent, generationReceipt, saveDurableSubagentRun } from "../job-store.ts"
 import { internalTokenRejection } from "../task-board-http.ts"
-import { settleConfirm } from "../media-internal-routes.ts"
+import { settleConfirm, readSpendConfirmation } from "../media-internal-routes.ts"
 import { emitToSession } from "../sse-core.ts"
 import { billingAutoApprovalEnabled } from "../charge-approval-policy.ts"
 import { admit, buildPlan, sessionConfirmPort, type ConfirmPort, type Quote } from "./admission.ts"
@@ -28,17 +33,18 @@ import { ProjectCanvasBridge } from "./bridge-canvas.ts"
 import { CacheIndex } from "./cache-index.ts"
 import { LIMITS } from "./constants.ts"
 import { onProjectEvents } from "./events.ts"
-import { projectContextResponse, type AgentMessage, type AgentPart } from "./context.ts"
+import { projectContextResponse, projectFactsResponse, type AgentMessage, type AgentPart } from "./context.ts"
 import { renderDigest, type DigestInputs } from "./digest.ts"
 import { createExecBridgeClient } from "./exec-bridge-client.ts"
 import { accumulatedSpendCoins, bindSessionBudget, createLedgerWriter, createProjectBudget, gatewayProjectCapOf, graphCapCoins, type ProjectBudgetPort } from "./ledger.ts"
 import { emitDeliveryCards } from "./delivery.ts"
 import { getRecipe } from "./recipes/index.ts"
 import { recoverProject } from "./recovery.ts"
-import { runProject, type RunResult } from "./run.ts"
-import { projectDirFor, resetSharedProjectStores, scanProjectRecoveries, setDefaultRecipes, sharedProjectStore, workspaceDir, ProjectNotFoundError, ProjectStore } from "./store.ts"
+import { cancelProjectRun, runProject, type RunResult } from "./run.ts"
+import { projectDirFor, resetSharedProjectStores, scanProjectRecoveries, setDefaultRecipes, sharedProjectStore, workspaceDir, ProjectNotFoundError, ProjectStore, ackProjectArtifacts } from "./store.ts"
 import { createSubmitGeneration } from "./submit-generation.ts"
 import type { RunDeps } from "./scheduler.ts"
+import { acknowledgeBridgeOutputs } from "./scheduler.ts"
 import type { RecoveryDeps } from "./recovery.ts"
 import type {
   Actor, NodeId, NodeView, PatchReceipt, ProjectEvent, ProjectGetArgs, ProjectGetReceipt, ProjectGraph,
@@ -105,6 +111,7 @@ export interface ProjectRouteHost {
   deps(state: SessionState, store: ProjectStore): RunDeps & RecoveryDeps
   confirm(state: SessionState): ConfirmPort | undefined
   authorized(state: SessionState): Promise<boolean>
+  wakeContinuation?(state: SessionState, note: { id: string; label: string; kind: string; text: string; signal?: AbortSignal }): Promise<"delivered" | "deferred" | "unknown">
 }
 
 function canonicalSessionId(state: SessionState | undefined, fallback: string): string {
@@ -177,11 +184,14 @@ function productionDeps(state: SessionState, store?: ProjectStore): RunDeps & Re
     })()
   }
   const ledger = createLedgerWriter(state)
+  const execBridge = createExecBridgeClient()
   return {
     session: state,
     ledger,
-    submitGeneration: createSubmitGeneration({ session: state, ledger, budget }),
-    execBridge: createExecBridgeClient(),
+    submitGeneration: createSubmitGeneration({ session: state, ledger, budget, ...(store ? { journalOperation: productionJournalOperation(state.sessionId, store) } : {}) }),
+    execBridge,
+    ...(store ? {generationOperation:productionGenerationOperation(state.sessionId,store,execBridge)} : {}),
+    authorizedRecovery: async () => billingAutoApprovalEnabled(state),
     budget,
     ...(defaultScoreTakeRef ? { scoreTake: defaultScoreTakeRef } : {}),
     cache: CacheIndex.forProject(workspaceDir(), state.sessionId),
@@ -199,6 +209,96 @@ const productionHost: ProjectRouteHost = {
 }
 
 let host: ProjectRouteHost = productionHost
+
+/** 组合根接回既有父席位唤醒；不另建席位或制作执行器。 */
+export function setProjectContinuationWake(wake: NonNullable<ProjectRouteHost["wakeContinuation"]>): void {
+  productionHost.wakeContinuation = wake
+  host.wakeContinuation = wake
+}
+
+const CONTINUATION_DRAINS = new Map<string, Promise<void>>()
+const CONTINUATION_AGAIN = new Set<string>()
+const CONTINUATION_SIGNALS = new Map<string, AbortController>()
+
+export async function cancelSessionProject(sessionId: string): Promise<void> {
+  CONTINUATION_SIGNALS.get(sessionId)?.abort()
+  try { await cancelProjectRun(await openStore(sessionId)) } catch (e) {
+    if (!(e instanceof ProjectNotFoundError)) throw e
+  }
+}
+
+/** 只消费已提交的状态变化。投递前耐久占位；unknown 只能对账，重启不盲重投。 */
+export async function drainProjectContinuations(sessionId: string): Promise<void> {
+  const active = CONTINUATION_DRAINS.get(sessionId)
+  if (active) { CONTINUATION_AGAIN.add(sessionId); return active }
+  const promise = consumeProjectContinuation(sessionId).finally(() => {
+    if (CONTINUATION_DRAINS.get(sessionId) === promise) CONTINUATION_DRAINS.delete(sessionId)
+    if (CONTINUATION_AGAIN.delete(sessionId)) void drainProjectContinuations(sessionId).catch((e) => console.error("[gateway] project continuation:", (e as Error).message))
+  })
+  CONTINUATION_DRAINS.set(sessionId, promise)
+  return promise
+}
+
+async function consumeProjectContinuation(sessionId: string): Promise<void> {
+  const state = host.state(sessionId)
+  if (!state || !host.wakeContinuation) return
+  const store = await openStore(canonicalSessionId(state, sessionId))
+  await store.update((g) => {
+    const c = g.continuation
+    if (!c || c.cancelled || g.activeRun) return
+    for (const author of c.tasks.filter((t) => (t.kind === "author" || t.kind === "provider_unknown") && t.delivery !== "completed" && t.delivery !== "cancelled")) {
+    if (author.nodes.every((id) => {
+      const n = g.nodes[id]
+      return !!n && n.status === "done" && n.outputs.length > 0
+    })) {
+      author.delivery = "completed"
+      const id = `${author.id}:ready`
+      if (!c.tasks.some((t) => t.id === id)) c.tasks.push({
+        id, kind: "continue", owner: "orchestrator", nodes: author.nodes,
+        reason: "等待的产物已真正写入工程。按原 targets 增量运行；先核对真实授权，禁止重复生成已成功素材。", delivery: "pending",
+      })
+    }
+    }
+  })
+  const graph = await store.read()
+  const continuation = graph.continuation
+  if (!continuation || continuation.cancelled || graph.activeRun) return
+  for (const snapshot of continuation.tasks) {
+    if (snapshot.owner !== "orchestrator" || snapshot.delivery !== "pending") continue
+    // 父回合在途时不占位；由已有 idle flusher 继续，不轮询。
+    if (state.ackTimer != null) return
+    let claimed = false
+    await store.update((g) => {
+      const c = g.continuation
+      const task = c?.tasks.find((t) => t.id === snapshot.id)
+      if (c?.runId !== continuation.runId || c.cancelled || g.activeRun || task?.delivery !== "pending") return
+      task.delivery = "delivering"
+      claimed = true
+    })
+    if (!claimed) continue
+    let outcome: "delivered" | "deferred" | "unknown" = "unknown"
+    const controller = new AbortController()
+    CONTINUATION_SIGNALS.set(sessionId, controller)
+    try {
+      const fresh = await store.read()
+      if (fresh.continuation?.cancelled || fresh.continuation?.runId !== continuation.runId) continue
+      outcome = await host.wakeContinuation(state, {
+        id: snapshot.id, label: "工程接续", kind: snapshot.kind,
+        signal: controller.signal,
+        text: `工程 ${sessionId}，执行 ${continuation.runId}。责任：${snapshot.kind}；节点：${snapshot.nodes.join(", ") || "整单交付"}。\n${snapshot.reason}\n原 targets：${JSON.stringify(continuation.targets ?? null)}。读取当前工程与用户有效目标后通过既有研究、派工、定向返工、project_run 继续。此通知不是用户授权或完成证明，不得降低内容要求、重复自审同一素材、轮询平台故障或未知订单。`,
+      })
+    } catch (e) {
+      console.error(`[gateway] project continuation dispatch unknown (${sessionId}):`, (e as Error).message)
+    } finally {
+      if (CONTINUATION_SIGNALS.get(sessionId) === controller) CONTINUATION_SIGNALS.delete(sessionId)
+      await store.update((g) => {
+        if (g.continuation?.runId !== continuation.runId || g.continuation.cancelled) return
+        const task = g.continuation.tasks.find((t) => t.id === snapshot.id)
+        if (task?.delivery === "delivering") task.delivery = outcome === "deferred" ? "pending" : outcome
+      })
+    }
+  }
+}
 
 /** 测试注入；返回 restore。未覆盖的字段继续走生产实现。 */
 export function configureProjectRoutes(overrides: Partial<ProjectRouteHost>): () => void {
@@ -320,6 +420,10 @@ const PROGRESS_CARD_TYPES = new Set(["keyframe", "clip", "music", "voice", "mix"
 const PENDING_PROJECTION = new Map<string, { timer: ReturnType<typeof setTimeout>; outputs: Set<string> }>()
 
 onProjectEvents((file, events) => {
+  if (events.some((e) => e.kind === "run_started")) CONTINUATION_SIGNALS.get(path.basename(path.dirname(file)))?.abort()
+  if (events.some((e) => e.kind === "run_finished" || e.kind === "node_output")) {
+    void drainProjectContinuations(path.basename(path.dirname(file))).catch((e) => console.error("[gateway] project continuation:", (e as Error).message))
+  }
   const dir = path.dirname(file)
   let pending = PENDING_PROJECTION.get(dir)
   if (!pending) {
@@ -408,7 +512,7 @@ export async function handleProjectInternal(req: Request, pathname: string): Pro
 async function handleProjectInternalInner(req: Request, pathname: string): Promise<Response> {
   const tokenError = internalTokenRejection(req)
   if (tokenError) return tokenError
-  const m = /^\/internal\/project\/(context|get|patch|run)$/.exec(pathname)
+  const m = /^\/internal\/project\/(context|get|patch|run|generate)$/.exec(pathname)
   if (!m) return jsonError(404, "not found", "not_found", "not_found")
   if (req.method !== "POST") return jsonError(405, "method not allowed", "bad_request", "method_not_allowed")
   const op = m[1]
@@ -426,14 +530,16 @@ async function handleProjectInternalInner(req: Request, pathname: string): Promi
 
   let store: ProjectStore
   try {
-    store = await openStore(canonical, { create: state.projectMode === true })
+    store = await openStore(canonical, { create: op === "generate" || (state.projectMode === true && body.create !== false) })
   } catch (e) {
+    if (e instanceof ProjectNotFoundError && op === "get" && body.view === "nodes" && body.create === false) return Response.json({ ok: true, project_mode: state.projectMode === true, project_state: "absent", version: 0, nodes: [] })
     if (e instanceof ProjectNotFoundError) return jsonError(404, "project not found", "not_found", "project_not_found")
     throw e
   }
 
   if (op === "get") return handleInternalGet(store, body, state)
   if (op === "patch") return handlePatchOp(store, body, host.actor(sessionId, state))
+  if (op === "generate") return handleGenerateOp(store, state, body, host.actor(sessionId, state))
   return handleRunOp(store, state, body)
 }
 
@@ -493,8 +599,8 @@ async function handleProjectSessionRouteInner(key: string, sessionId: string, re
  * 插件据此逐字节回旧路径。只读 project.json，不跑执行器（插件超时 1.5s）。
  */
 async function handleContext(canonical: string, state: SessionState, body: Record<string, unknown>): Promise<Response> {
-  // 旧席位（新会话）自己的历史由 opencode 压缩管，不按工程图重建；只有 lean 席位的旧会话走这里。
-  if (state.projectMode !== true || state.seat !== "creator") {
+  // 旧席位只增补工程事实，历史仍由 opencode 管；历史 lean 席位沿用既有窗口。
+  if (state.projectMode !== true) {
     return jsonError(404, "project mode not enabled for this session", "not_found", "not_project_session")
   }
   const raw = body.messages
@@ -505,11 +611,12 @@ async function handleContext(canonical: string, state: SessionState, body: Recor
     store = await openStore(canonical)
     graph = await store.read()
   } catch (e) {
-    if (e instanceof ProjectNotFoundError) return jsonError(404, "project not found", "not_found", "project_not_found")
+    if (e instanceof ProjectNotFoundError) return Response.json({ project_mode: false, project_state: "absent" })
     throw e
   }
   // S14 停掉工程模式的尾部注入后，「授权模式 / 环境可用性 / 最近事件」只能靠摘要承接：
   // 与 project_get 的 digest 视图共用 digestInputs（一次 authorized 判定 + 读最近 10 行事件）。
+  if (state.seat !== "creator") return Response.json(projectFactsResponse(graph, await digestInputs(store, graph, state)))
   return Response.json(
     projectContextResponse(graph, toAgentMessages(raw), { digestInputs: await digestInputs(store, graph, state) }),
   )
@@ -536,6 +643,7 @@ function toAgentMessages(raw: unknown[]): AgentMessage[] {
 // ───────────────────────── GET ─────────────────────────
 /** 内部 get（工具用）：额外支持 view:"nodes"（工具端展开 {op:"dsl"} 时取当前图摘要）。 */
 async function handleInternalGet(store: ProjectStore, body: Record<string, unknown>, state: SessionState | undefined): Promise<Response> {
+  if (body.view === "brief") return Response.json(projectBriefResponse(await store.read(), body))
   // S20：模型轮询是最重要的画布追平点（GET 先 pump 再读回执）。
   if (state) await pumpCanvas(store, state)
   if (body.view === "nodes") {
@@ -545,7 +653,7 @@ async function handleInternalGet(store: ProjectStore, body: Record<string, unkno
       const node = graph.nodes[id]
       if (node) nodes.push(compactNode(node))
     }
-    return Response.json({ ok: true, version: graph.version, cursor: graph.seq, nodes })
+    return Response.json({ ok: true, project_mode: state?.projectMode === true, version: graph.version, cursor: graph.seq, nodes })
   }
   return Response.json(await buildGetReceipt(store, state, body))
 }
@@ -560,6 +668,8 @@ function compactNode(node: ProjectNode): Record<string, unknown> {
   if (node.takes) out.takes = node.takes
   if (node.onFail) out.onFail = node.onFail
   if (node.locked) out.locked = node.locked
+  if (node.derivedFrom) out.derivedFrom = node.derivedFrom
+  if (node.scratch) out.scratch = node.scratch
   return out
 }
 
@@ -779,6 +889,140 @@ function fitPatchReceipt(receipt: PatchReceipt): PatchReceipt {
 const RUNNING = new Map<string, Promise<RunResult>>()
 const EMPTY_QUOTE: Quote = { coins: null, run: 0, reuse: 0, pinned: 0, unknownPrice: [] }
 
+/** Original media-tool preprocessing enters the same signed node and runner as DSL. */
+async function handleGenerateOp(store: ProjectStore, state: SessionState, body: Record<string, unknown>, actor: Actor): Promise<Response> {
+  const requestId = typeof body.request_id === "string" ? body.request_id : ""
+  const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex")
+  const reject = (code: string, message: string, nodeId?: string) => Response.json({ ok: false, code, message, request_id: requestId, ...(nodeId ? { node_id: nodeId } : {}), recoverable: true, new_generation: false })
+  if (!requestId || requestId.length > 200) return reject("bad_input", "需要原始稳定request_id")
+  if (actor.kind === "subagent") {
+    const live = typeof body.session_id === "string" ? byChildOc.get(body.session_id) : undefined
+    if (!live || live.status !== "running" || live.stoppedAt || live.parentGatewaySessionId !== state.sessionId) return reject("lane_denied", "子代理委派已结束或归属未知；保留旧任务但不接受迟到生成")
+  }
+  if (body.legacy_ref) {
+    const ref = body.legacy_ref as any
+    const g = await store.read()
+    const receipt = typeof ref.task_id === "string" ? generationReceipt(ref.task_id) : undefined
+    const originalRequestId = ref.source === "retry_task_id" && receipt ? receipt.tool_request_id ?? receipt.request_id : ref.request_id
+    const recoveredRequestId = typeof originalRequestId === "string" && originalRequestId ? originalRequestId : requestId
+    const node = Object.values(g.nodes).find(n => (n.params.toolSubmission as any)?.identity?.request_id === originalRequestId)
+    if (node && receipt?.parent_gw === state.sessionId && receipt.node_id === node.id && receipt.tool_request_id === originalRequestId) {
+      if (actor.kind === "subagent" && !actor.lane.includes(node.id)) return reject("lane_denied", "旧任务不属于当前子代理节点", node.id)
+      return Response.json({ ok: true, task_id: ref.task_id, request_id: recoveredRequestId, node_id: node.id, status: receipt.status === "succeeded" ? "succeeded" : "accepted", new_generation: false })
+    }
+    let evidence = "unknown"
+    if (receipt?.parent_gw === state.sessionId && (receipt.tool_request_id ?? receipt.request_id) === originalRequestId && receipt.kind === ref.kind && (actor.kind !== "subagent" || receipt.producer_oc === body.session_id)) {
+      const owner = await stableGenerationOwnerScope(state.sessionId)
+      if (owner) {
+        const journal = await loadGenerationJournal()
+        const originalProject = receipt.tool_request_id ? receipt.tool_project : receipt.project
+        const row = journal.getSubmission(sharedGenerationScope(owner, typeof originalProject === "string" ? originalProject : undefined), originalRequestId)
+        if (row?.task_id === ref.task_id && [state.sessionId, receipt.producer_oc].includes(row.session_id) && row.state !== "rejected") evidence = "journal_and_receipt"
+      }
+    }
+    const recoveredNodes: string[] = []
+    await store.update(current => {
+      const refs = current.legacyGenerationRefs ??= []
+      if (!refs.some(r => r.taskId === ref.task_id && r.requestId === recoveredRequestId)) refs.push({taskId:String(ref.task_id),requestId:recoveredRequestId,kind:ref.kind,evidence,at:new Date().toISOString()})
+    })
+    try {
+    if (evidence === "journal_and_receipt" && receipt?.status === "succeeded" && receipt.artifacts.length) {
+      for (let i = 0; i < receipt.artifacts.length; i++) {
+        const artifact = receipt.artifacts[i]
+        const id = `legacy_${hash([ref.task_id, i]).slice(0,24)}`
+        if (!(await store.read()).nodes[id]) {
+          const out = await store.artifacts.ingest({ url: artifact.url }, { port: "out", origin: "generated" }, {signal: AbortSignal.timeout(30_000)})
+          const snapshot = await store.read()
+          const imported = await store.applyPatches({baseVersion:snapshot.version,atomic:true,ops:[{op:"add_node",node:{id,type:"reference",params:{artifactId:out.artifactId}}}]},{kind:"engine"})
+          if (!imported.committed) return reject("legacy_artifact_link_failed", "旧产物已保全，工程引用登记失败；未新生成")
+          await store.update(current => { const n=current.nodes[id]; n.outputs=[{...out,url:artifact.url,meta:{task_id:ref.task_id,legacy_read_only:true}}]; n.status="done" })
+        }
+        recoveredNodes.push(id)
+      }
+      const restored = await store.read()
+      try { ackProjectArtifacts(ref.task_id, recoveredNodes.flatMap(id => restored.nodes[id].outputs)) }
+      catch { console.error("[project] legacy artifact downloaded ACK pending; durable outputs retained") }
+    }
+    } catch (error) {
+      return Response.json({ok:false,code:"legacy_artifact_recovery_unknown",message:`旧任务已核对，下载/入库尚未完成：${String(error)}；原订单保留，不新生成`,task_id:ref.task_id,request_id:requestId,recoverable:true,new_generation:false})
+    }
+    await store.update(current => {
+      const refs = current.legacyGenerationRefs ??= []
+      const record = { taskId: String(ref.task_id), requestId: recoveredRequestId, kind: ref.kind, evidence, nodes:recoveredNodes, at: new Date().toISOString() }
+      const index = refs.findIndex(r => r.taskId === ref.task_id && r.requestId === recoveredRequestId)
+      if (index < 0) refs.push(record); else if(evidence!=="unknown") refs[index]=record
+    })
+    if (evidence !== "unknown") return Response.json({ ok: true, task_id: ref.task_id, request_id: recoveredRequestId, node_id:recoveredNodes[0], nodes:recoveredNodes, original_cost_coins:receipt!.cost_coins,new_cost_coins:0,status: receipt!.status === "succeeded" ? "succeeded" : "accepted", legacy_read_only: true, new_generation: false })
+    return Response.json({ ok: false, code: "legacy_reconciliation_required", message: "旧任务证据尚未闭合；只读保全原task_id，未新提交", task_id: ref.task_id, request_id: requestId, recoverable: true, new_generation: false })
+  }
+  const payload = body.payload as Record<string, any>, identity = body.identity as Record<string, any>
+  if (!payload || !identity || identity.request_id !== requestId || !["image", "video"].includes(String(body.kind))) return reject("bad_input", "生成载荷或操作身份无效")
+  const payloadSignature = hash(Object.fromEntries(Object.entries(payload).filter(([key]) => !["workflow", "cap_coins"].includes(key))))
+  if (identity.payload_signature !== payloadSignature) return reject("payload_conflict", "生成载荷指纹不一致")
+  let graph = await store.read()
+  const type = body.kind === "video" ? "clip" : "keyframe"
+  const childRun = typeof body.session_id === "string" ? byChildOc.get(body.session_id) : undefined
+  const liveLegacyDelegation = actor.kind === "subagent" && childRun?.status === "running" && !childRun.stoppedAt && childRun.parentGatewaySessionId === state.sessionId && childRun.projectMode !== true && (childRun.lane === undefined || childRun.toolLaneSource === "legacy_generation")
+  const laneCandidates = actor.kind === "subagent" ? actor.lane.filter(id => graph.nodes[id]?.type === type) : []
+  const generatedId = `tool_${hash([state.sessionId, body.session_id, requestId]).slice(0, 24)}`
+  const nodeId = typeof body.node_id === "string" ? body.node_id : !liveLegacyDelegation && actor.kind === "subagent" && laneCandidates.length === 1 ? laneCandidates[0] : generatedId
+  if (liveLegacyDelegation && nodeId === generatedId) {
+    // 领取新独立节点的能力来自仍存活的旧委派；不把工具请求体变成任意lane权限。
+    childRun!.toolLaneSource = "legacy_generation"
+    childRun!.lane = [...new Set([...(childRun!.lane ?? []), nodeId])]
+    saveDurableSubagentRun(childRun!)
+    actor = { kind: "subagent", runId: childRun!.id, lane: childRun!.lane }
+  } else if (actor.kind === "subagent" && (!actor.lane.includes(nodeId) || !graph.nodes[nodeId] || childRun?.status !== "running" || childRun.stoppedAt)) return reject("lane_denied", "子代理只能提交仍存活委派的真实节点", nodeId)
+  const prepared = { payload, identity: { ...identity, ...(typeof body.project_budget_coins === "number" ? { project_budget_coins: body.project_budget_coins } : {}) }, lock: body.lock ?? {} }
+  const prior = graph.nodes[nodeId]
+  if (prior?.params.toolSubmission && JSON.stringify(prior.params.toolSubmission) !== "{}") {
+    if (hash(prior.params.toolSubmission) !== hash(prepared)) return reject("operation_conflict", "原节点操作载荷不同；新拍请使用新request_id", nodeId)
+    const taskId = prior.inflight?.taskId ?? prior.outputs.map(o => o.meta?.task_id).find(t => typeof t === "string")
+    if (taskId) return Response.json({ ok: true, task_id: taskId, request_id: requestId, node_id: nodeId, status: prior.status === "done" ? "succeeded" : "accepted", new_generation: false })
+  }
+  if (!prior?.params.toolSubmission || JSON.stringify(prior.params.toolSubmission) === "{}") {
+    const params: Record<string, any> = { prompt: payload.prompt, model: payload.model, size: payload.size, n: payload.n ?? 1, toolSubmission: prepared }
+    if (body.kind === "video") Object.assign(params, { seconds: payload.duration_seconds, resolution: payload.resolution, generateAudio: payload.generate_audio })
+    else if (payload.quality !== undefined) params.quality = payload.quality
+    for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key]
+    const ops = prior ? Object.entries(params).map(([key, value]) => ({ op: "set" as const, node: nodeId, path: `params.${key}`, value })) : [{ op: "add_node" as const, node: { id: nodeId, type: type as "clip" | "keyframe", params } }]
+    const patched = await store.applyPatches({ baseVersion: graph.version, atomic: true, ops }, actor)
+    if (!patched.committed) return reject("node_rejected", JSON.stringify(patched), nodeId)
+  }
+  const deps = host.deps(state, store)
+  const plan = (await buildPlan({ store, deps, targets: [nodeId], mode: "incremental" })).plan
+  const quoted = await admit({ store, deps, plan, dry_run: true, authorized: async () => true })
+  const amount = quoted.quote?.coins
+  let approved = await host.authorized(state)
+  if (!approved && amount !== null && amount !== undefined && amount <= 0.1) approved = true
+  if (!approved) {
+    let receipt
+    try { receipt = readSpendConfirmation(state, requestId) } catch (e) { return reject("confirmation_conflict", String(e), nodeId) }
+    approved = !!receipt && receipt.outcome === "approved" && receipt.model === payload.model && receipt.input_signature === payloadSignature && receipt.amount_coins === amount
+  }
+  if (!approved) return reject("needs_user", "本操作缺少匹配实际参数、模型与报价的真实批准回执", nodeId)
+  let accepted!: (notice: any) => void
+  const notice = new Promise<any>(resolve => { accepted = resolve })
+  const submit = deps.submitGeneration
+  deps.submitGeneration = async req => submit({ ...req, onAccepted: async n => {
+    await store.update(g => { const node = g.nodes[req.nodeId]; if (!node?.inflight) throw new Error("operation_not_durable"); node.inflight.taskId = n.taskId })
+    if (req.nodeId === nodeId) accepted(n)
+  } })
+  const joining = RUNNING.has(store.paths.dir)
+  const promise = runProject(store, deps, { targets: [nodeId], mode: "incremental", resume: !joining, ...(joining ? { joinPreparedNode: nodeId } : {}), authorized: async () => approved }).catch(e => ({ ok: false, status: "failed", reason: String(e), quote: EMPTY_QUOTE, cursor: graph.seq } as RunResult))
+  if (!joining) {
+    RUNNING.set(store.paths.dir, promise)
+    void promise.finally(() => { if (RUNNING.get(store.paths.dir) === promise) RUNNING.delete(store.paths.dir) })
+  }
+  const result = await raceWithTimeout(Promise.race([notice.then(n => ({ accepted: n })), promise.then(done => ({ done }))]), 40_000)
+  if (result && "accepted" in result) return Response.json({ ok: true, task_id: result.accepted.taskId, request_id: requestId, node_id: nodeId, status: "accepted", new_generation: true })
+  graph = await store.read()
+  const node = graph.nodes[nodeId]
+  const taskId = node?.inflight?.taskId ?? node?.outputs.map(o => o.meta?.task_id).find(t => typeof t === "string")
+  if (taskId) return Response.json({ ok: true, task_id: taskId, request_id: requestId, node_id: nodeId, status: "succeeded", new_generation: false })
+  return reject(node?.inflight?.submitUnknown ? "submission_unknown" : "generation_blocked", result && "done" in result ? JSON.stringify(result.done) : "受理状态未知；保持原request_id接续", nodeId)
+}
+
 async function handleRunOp(store: ProjectStore, state: SessionState | undefined, body: Record<string, unknown>): Promise<Response> {
   const args = body as ProjectRunArgs
   const targets = Array.isArray(args.targets) ? args.targets.filter((t): t is NodeId => typeof t === "string") : undefined
@@ -929,8 +1173,13 @@ export async function recoverAllProjects(depsFor?: (sessionId: string) => (RunDe
   const out: ProjectStartupOutcome[] = []
   for (const e of entries) {
     if (e.error) { out.push({ sessionId: e.sessionId, error: e.error }); continue }
-    if (!e.resumable.length && !e.lost.length) continue
     try {
+      const pendingStore = await openStore(e.sessionId)
+      await pendingStore.update((g) => {
+        // 崩溃时请求可能已被接受，不能把 delivering 当作未投递。
+        for (const task of g.continuation?.tasks ?? []) if (task.delivery === "delivering") task.delivery = "unknown"
+      })
+      await drainProjectContinuations(e.sessionId)
       const state = host.state(e.sessionId)
       const deps = depsFor ? depsFor(e.sessionId) : state ? host.deps(state, await openStore(e.sessionId)) : null
       if (!deps) {
@@ -938,6 +1187,9 @@ export async function recoverAllProjects(depsFor?: (sessionId: string) => (RunDe
         continue
       }
       const store = await openStore(e.sessionId)
+      const saved = await store.read()
+      for (const node of Object.values(saved.nodes)) await acknowledgeBridgeOutputs(store, deps, saved.activeRun ?? saved.continuation?.runId ?? node.lastRun?.runId ?? "recovery", node.id)
+      if (!e.resumable.length && !e.lost.length) continue
       const outcome = await recoverProject(store, deps)
       out.push({
         sessionId: e.sessionId,

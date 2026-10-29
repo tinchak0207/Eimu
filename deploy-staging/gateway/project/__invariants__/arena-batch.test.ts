@@ -22,7 +22,8 @@ const SEEDS = [
   "古风酒楼，12 秒，中景切特写",
 ]
 /** 手写期望：kf3 的 prompt 一变，只重跑它和下游。不读 planRun。 */
-const KF3_RERUN = ["clip3", "export", "kf3", "mix", "qc", "subtitle", "timeline"]
+// 最终候选必须随被修改镜头重合成并重新接受机器/独立评审，旧素材不重做。
+const KF3_RERUN = ["candidate", "clip3", "export", "export_critic", "export_machine", "kf3", "mix", "qc", "subtitle", "timeline"]
 
 const scenes = JSON.parse(readFileSync(new URL("./fixtures/scenes.json", import.meta.url), "utf8")) as Scene[]
 

@@ -153,7 +153,7 @@ describe("内部路由鉴权与 context", () => {
     expect(res.status).toBe(403)
   })
 
-  test("非工程会话 / 工程不存在 → 404（插件回旧路径）", async () => {
+  test("非工程会话 404；无图旧聊天明确 absent 且不创建假工程", async () => {
     const sid = nextSession("ctx404")
     const restore = installHost(makeState(sid, { projectMode: false }), { submits: [], ledger: [] })
     try {
@@ -163,23 +163,23 @@ describe("内部路由鉴权与 context", () => {
     } finally {
       restore()
     }
-    // 新会话＝旧席位＋工程引擎（projectMode=true, seat=creator_legacy）：不按工程图重建上下文，同样 404 回旧路径
+    // 新会话只读投影不创建工程。
     const sidNew = nextSession("ctx404new")
     const restoreNew = installHost(makeState(sidNew, { seat: "creator_legacy" }), { submits: [], ledger: [] })
     try {
       const res = await internal("/internal/project/context", { session_id: sidNew, messages: [] })
-      expect(res.status).toBe(404)
-      expect((await res.json() as any).error.code).toBe("not_project_session")
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ project_mode: false, project_state: "absent" })
     } finally {
       restoreNew()
     }
-    // lean 席位但工程目录不存在 → 也是 404
+    // lean 席位无图也明确返回 absent。
     const sid2 = nextSession("ctx404b")
     const restore2 = installHost(makeState(sid2), { submits: [], ledger: [] })
     try {
       const res = await internal("/internal/project/context", { session_id: sid2, messages: [] })
-      expect(res.status).toBe(404)
-      expect((await res.json() as any).error.code).toBe("project_not_found")
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ project_mode: false, project_state: "absent" })
     } finally {
       restore2()
     }
@@ -224,6 +224,26 @@ describe("内部路由鉴权与 context", () => {
     } finally {
       restore()
     }
+  })
+
+  test("新 legacy 会话经原 context 路由获得工程事实，不收到历史裁剪指令", async () => {
+    const sid = nextSession("legacy-facts")
+    await projectWithNodes(sid, [{ id: "music", type: "music", params: { prompt: "WATERLINE 完整成曲" } }])
+    const restore = installHost(makeState(sid, { seat: "creator_legacy" }), { submits: [], ledger: [] })
+    try {
+      const res = await internal("/internal/project/context", {
+        session_id: sid,
+        messages: [{ id: "original", role: "user", parts: [{ type: "text", text: "做一支完整 MV" }] }],
+      })
+      expect(res.status).toBe(200)
+      const data = await res.json() as any
+      expect(data.project_mode).toBe(true)
+      expect(data.context_mode).toBe("append")
+      expect(data.project_state).toBe("available")
+      expect(data.synthetic).toContain(sid)
+      expect(data.keep_ids).toBeUndefined()
+      expect(data.drop_parts).toBeUndefined()
+    } finally { restore() }
   })
 
   test("context 的 synthetic 承接授权模式/环境可用性/最近事件（S14 停注入后不再有第二来源）", async () => {
@@ -684,7 +704,7 @@ describe("确认卡（非阻塞）", () => {
 })
 
 describe("启动恢复（同 idemKey，不盲重投）", () => {
-  test("inflight key 与当前签名一致 → 用同一 key 重提交一次", async () => {
+  test("服务端持续授权有效且 inflight key 与当前签名一致 → 用同一 key 重提交一次", async () => {
     const sid = nextSession("recover")
     const store = await projectWithNodes(sid, [{ id: "k1", type: "keyframe", params: { prompt: "x" } }])
     const g = await store.read()
@@ -705,7 +725,7 @@ describe("启动恢复（同 idemKey，不盲重投）", () => {
     }, 1)
     const state = makeState(sid)
     routes.resetProjectStores()
-    const out = await routes.recoverAllProjects(() => makeDeps(state, { submits: [], ledger: [] }))
+    const out = await routes.recoverAllProjects(() => ({ ...makeDeps(state, { submits: [], ledger: [] }), authorizedRecovery: async () => true }))
     const mine = out.find((o) => o.sessionId === sid)
     expect(mine?.outcome?.resumed[0]?.result).toBe("done")
     expect(seen).toEqual([inflightKey])
@@ -766,5 +786,124 @@ describe("三工具 schema 与契约 fixtures 双向一致", () => {
     expect(runSchema.safeParse({ targets: ["k1"], mode: "force", dry_run: true, budget_coins: 3, wait_sec: 90 }).success).toBe(true)
     expect(runSchema.safeParse({ wait_sec: 91 }).success).toBe(false)
     expect(runSchema.safeParse({ mode: "turbo" }).success).toBe(false)
+  })
+})
+
+// 2026-10-29 真实失败模式：作者缺内容后无人接手；父会话忙/重启/stop后重复唤醒。
+describe("工程责任的耐久接续", () => {
+  async function waiting(kind = "author") {
+    const sid = nextSession("continuation")
+    const state = makeState(sid)
+    const { store } = await ensureProject(sid)
+    await store.applyPatches({ ops: [{ op: "add_node", node: { id: "sc", type: "script" } }] }, { kind: "agent" })
+    await store.update((g) => {
+      g.continuation = {
+        runId: "history_missing_author", targets: ["sc"],
+        tasks: [{ id: "history_missing_author:author", kind: kind as any, owner: kind === "platform_fault" ? "operator" : "orchestrator", nodes: ["sc"], reason: "原始剧本未写入", delivery: "pending" }],
+      }
+    })
+    return { sid, state, store }
+  }
+
+  test("投递前占位；作者结果落盘后只续一次原 targets，重复事件不重复唤醒", async () => {
+    const { sid, state, store } = await waiting()
+    const notes: any[] = []
+    const restore = installHost(state, { submits: [], ledger: [] }, {
+      wakeContinuation: async (_state, note) => {
+        const c = JSON.parse(readFileSync(store.paths.project, "utf8")).continuation
+        expect(c.tasks.find((t: any) => t.id === note.id).delivery).toBe("delivering")
+        notes.push(note)
+        return "delivered"
+      },
+    })
+    try {
+      await routes.drainProjectContinuations(sid)
+      await routes.drainProjectContinuations(sid)
+      expect(notes).toHaveLength(1)
+      const result = await store.applyPatches({ ops: [{ op: "write_result", node: "sc", value: { text: "用户要求的完整剧本" } }] }, { kind: "agent" })
+      expect(result.committed).toBe(true)
+      await routes.drainProjectContinuations(sid)
+      await routes.drainProjectContinuations(sid)
+      expect(notes.map((n) => n.kind)).toEqual(["author", "continue"])
+      expect(notes[1].text).toContain('["sc"]')
+      await store.appendEvents([{ kind: "node_output", node: "sc", data: {} }])
+      await routes.drainProjectContinuations(sid)
+      expect(notes).toHaveLength(2)
+    } finally { restore() }
+  })
+
+  test("父回合在途不占投递身份；idle消费后可投，平台故障永不唤模型", async () => {
+    const { sid, state, store } = await waiting()
+    let calls = 0
+    const restore = installHost(state, { submits: [], ledger: [] }, { wakeContinuation: async () => { calls++; return "delivered" } })
+    try {
+      state.ackTimer = 1
+      await routes.drainProjectContinuations(sid)
+      expect((await store.read()).continuation?.tasks[0].delivery).toBe("pending")
+      expect(calls).toBe(0)
+      state.ackTimer = null
+      await routes.drainProjectContinuations(sid)
+      expect(calls).toBe(1)
+      await store.update((g) => { g.continuation!.tasks.push({ id: "fault", kind: "platform_fault", owner: "operator", nodes: ["sc"], reason: "EACCES mkdir", delivery: "pending" }) })
+      await routes.drainProjectContinuations(sid)
+      expect(calls).toBe(1)
+    } finally { restore() }
+  })
+
+  test("提交超时记 unknown；丢内存并启动恢复也不盲重投", async () => {
+    const { sid, state, store } = await waiting()
+    let calls = 0
+    const restore = installHost(state, { submits: [], ledger: [] }, { wakeContinuation: async () => { calls++; throw new Error("request timed out after submission") } })
+    try {
+      await routes.drainProjectContinuations(sid)
+      expect((await store.read()).continuation?.tasks[0].delivery).toBe("unknown")
+      routes.resetProjectStores()
+      await routes.recoverAllProjects()
+      await routes.drainProjectContinuations(sid)
+      expect(calls).toBe(1)
+    } finally { restore() }
+  })
+
+  test("崩溃遗留 delivering 转 unknown，未投的 pending 在启动时投一次", async () => {
+    const { sid, state, store } = await waiting()
+    let calls = 0
+    const restore = installHost(state, { submits: [], ledger: [] }, { wakeContinuation: async () => { calls++; return "delivered" } })
+    try {
+      await store.update((g) => { g.continuation!.tasks[0].delivery = "delivering" })
+      routes.resetProjectStores()
+      await routes.recoverAllProjects()
+      expect(calls).toBe(0)
+      expect(JSON.parse(readFileSync(store.paths.project, "utf8")).continuation.tasks[0].delivery).toBe("unknown")
+      const fresh = (await import("./store.ts")).sharedProjectStore(sid)
+      await fresh.update((g) => { g.continuation!.tasks.push({ id: "never_submitted", kind: "continue", owner: "orchestrator", nodes: [], reason: "此前未投递", delivery: "pending" }) })
+      routes.resetProjectStores()
+      await routes.recoverAllProjects()
+      expect(calls).toBe(1)
+    } finally { restore() }
+  })
+
+  test("stop撤销责任并中止在途通知；迟到node_output不复活", async () => {
+    const { sid, state, store } = await waiting()
+    let enter!: () => void
+    const entered = new Promise<void>((r) => { enter = r })
+    let calls = 0
+    let signal: AbortSignal | undefined
+    const restore = installHost(state, { submits: [], ledger: [] }, { wakeContinuation: async (_state, note) => {
+      calls++; signal = note.signal; enter()
+      await new Promise<void>((resolve) => note.signal!.addEventListener("abort", () => resolve(), { once: true }))
+      return "unknown"
+    } })
+    try {
+      const draining = routes.drainProjectContinuations(sid)
+      await entered
+      await routes.cancelSessionProject(sid)
+      await draining
+      expect(signal?.aborted).toBe(true)
+      expect((await store.read()).continuation?.cancelled).toBe(true)
+      await store.appendEvents([{ kind: "node_output", node: "sc", data: {} }])
+      await routes.drainProjectContinuations(sid)
+      expect(calls).toBe(1)
+      expect((await store.read()).continuation?.tasks[0].delivery).toBe("cancelled")
+    } finally { restore() }
   })
 })

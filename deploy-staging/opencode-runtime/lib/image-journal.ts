@@ -1,13 +1,41 @@
 // 正常制作运行时：提交收据、项目硬预算与冻结版本在 SQLite 同一事务内持久化。
 // 不保存 API key、cookie、参考图字节或完整 prompt；未知提交绝不自动释放预算。
 import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
+import { mkdirSync, lstatSync, chmodSync, chownSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { dirname } from "node:path"
 import { createHash } from "node:crypto"
 
+/** Gateway 的共同生成预算端口只加载这份实现；不复制第二份 SQLite 写入器。 */
+export const IMAGE_JOURNAL_CONTRACT_VERSION = 1
+
 let store: Database | undefined
+let openedPath: string | undefined
+function sharedJournalPermissions(path: string): void {
+  const dir = dirname(path)
+  const d = lstatSync(dir)
+  const uid = process.getuid?.()
+  if (d.isSymbolicLink()) throw new Error("shared_journal_permissions: journal目录不能是符号链接")
+  if (d.uid === uid) {
+    chmodSync(dir, 0o2770)
+    // 默认ACL只作用该journal目录的新DB/WAL/SHM，避免UMask0022在WAL重建后再次阻断另一服务。
+    const acl = spawnSync("setfacl", ["-m", "d:u::rwx,d:g::rwx,d:o::---,d:m::rwx", "--", dir], { encoding: "utf8" })
+    if (acl.status !== 0) throw new Error("shared_journal_permissions: 无法设置journal目录默认ACL，需owner初始化acl依赖")
+  } else {
+    const acl = spawnSync("getfacl", ["-cp", "--", dir], { encoding: "utf8" })
+    if ((d.mode & 0o7777) !== 0o2770 || acl.status !== 0 || !acl.stdout.includes("default:group::rwx") || !acl.stdout.includes("default:mask::rwx") || !acl.stdout.includes("default:other::---")) throw new Error("shared_journal_permissions: journal尚未由owner初始化2770/默认ACL，禁止新DB回退")
+  }
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    let s
+    try { s = lstatSync(file) } catch (error: any) { if (error.code === "ENOENT") continue; throw error }
+    if (s.isSymbolicLink() || !s.isFile()) throw new Error("shared_journal_permissions: journal目标不是普通文件")
+    if (s.uid === uid) {
+      if (s.gid !== d.gid) chownSync(file, -1, d.gid)
+      chmodSync(file, 0o660)
+    } else if ((s.mode & 0o777) !== 0o660 || s.gid !== d.gid) throw new Error("shared_journal_permissions: 既有DB/WAL/SHM需其owner修为同组0660，禁止新DB回退")
+  }
+}
 function db(): Database {
-  if (store) return store
   // 默认落点必须在 opencode 服务**可写**的根内：该服务以 agentsvc 运行且 systemd 只授权
   // ReadWritePaths=/opt/agent-harness/workspace（ProtectSystem=strict），写
   // /opt/agent-harness/state/** 会 SQLITE_CANTOPEN（unable to open database file）
@@ -15,7 +43,12 @@ function db(): Database {
   const path =
     process.env.EIMU_TASK_JOURNAL_PATH ||
     "/opt/agent-harness/workspace/.local/share/eimu/tool-journal/tool-jobs.sqlite"
+  if (store && openedPath === path) return store
+  // 路径只由进程组合根配置。独立测试实例换路径时不能沿用另一实例的余额连接。
+  if (store) { store.close(); store = undefined }
+  openedPath = path
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+  sharedJournalPermissions(path)
   store = new Database(path, { create: true })
   store.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=10000;
     CREATE TABLE IF NOT EXISTS tool_submission (
@@ -31,12 +64,15 @@ function db(): Database {
   `)
   const columns=store.query("PRAGMA table_info(tool_project)").all() as any[]
   for(const name of ["budget_version","budget_source"])if(!columns.some(c=>c.name===name))store.exec(`ALTER TABLE tool_project ADD COLUMN ${name} TEXT`)
+  sharedJournalPermissions(path)
   return store
 }
 export function contentHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex")
 }
 export interface SubmissionIdentity {
+  bridge_operation?: string; media_kind?: "music" | "voice"
+  graph_scope?: string; graph_cap?: number; graph_signature?: string;
   scope: string; budget_version?:string; budget_source?:string; submitted_image?:string; size?: string; input_signature?: string; submitted_references?: string[]; reference_fingerprints?: string[]; request_id: string; session_id: string; project?: string; frame?: number;
   reference_version?: string; style_version?: string; model: string; cost_coins: number;
 }
@@ -47,14 +83,15 @@ export function lockedProjectBudget(scope:string): number | null {
   const project:any=db().query("SELECT cap FROM tool_project WHERE scope=?").get(scope)
   return typeof project?.cap==="number" && Number.isFinite(project.cap) ? project.cap : null
 }
-export function prepareSubmission(input: SubmissionIdentity, payload: unknown, lock: unknown, cap?: number): void {
+export function prepareSubmission(input: SubmissionIdentity, payload: unknown, lock: unknown, cap?: number): { created: boolean } {
   const d = db()
-  d.transaction(() => {
+  return d.transaction(() => {
     const hash = contentHash(payload)
     const existing: any = getSubmission(input.scope, input.request_id)
     if (existing) {
-      if (existing.payload_hash !== hash) throw new Error("idempotency_key_reused: 同一 request_id 的模型、帧、提示词或参考版本已改变；未提交。")
-      if (existing.state !== "rejected") return
+      const restored = existing.payload_hash === `restored:${input.input_signature}` && !!input.input_signature
+      if (existing.payload_hash !== hash && !restored) throw new Error("idempotency_key_reused: 同一 request_id 的模型、帧、提示词或参考版本已改变；未提交。")
+      if (existing.state !== "rejected") return { created: false }
     }
     const lockHash = contentHash(lock)
     const project: any = d.query("SELECT * FROM tool_project WHERE scope=?").get(input.scope)
@@ -65,12 +102,41 @@ export function prepareSubmission(input: SubmissionIdentity, payload: unknown, l
     const effectiveCap = humanVersionChanged ? cap : cap == null ? project?.cap : project?.cap == null ? cap : Math.min(cap, project.cap)
     const used: any = d.query("SELECT COALESCE(SUM(reservation),0) AS total FROM tool_submission WHERE scope=? AND state NOT IN ('refunded','rejected')").get(input.scope)
     if (effectiveCap != null && used.total + input.cost_coins > effectiveCap + 1e-8) throw new Error(`task_budget_exceeded: 已保留 ${used.total} 币，本次 ${input.cost_coins} 币，硬预算 ${effectiveCap} 币；未提交。`)
+    if (input.graph_scope && input.graph_cap != null) {
+      if (!Number.isFinite(input.graph_cap) || input.graph_cap < 0) throw new Error("invalid_graph_budget")
+      const graphUsed: any = d.query("SELECT COALESCE(SUM(reservation),0) AS total FROM tool_submission WHERE json_extract(metadata_json,'$.graph_scope')=? AND state NOT IN ('refunded','rejected')").get(input.graph_scope)
+      if (graphUsed.total + input.cost_coins > input.graph_cap + 1e-8) throw new Error(`task_budget_exceeded: 工程已保留/实扣 ${graphUsed.total} 币，本次 ${input.cost_coins} 币，工程硬预算 ${input.graph_cap} 币；未提交。`)
+    }
     d.query("INSERT INTO tool_project(scope,cap,lock_hash,budget_version,budget_source) VALUES(?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET cap=excluded.cap,lock_hash=excluded.lock_hash,budget_version=excluded.budget_version,budget_source=excluded.budget_source").run(input.scope, effectiveCap ?? null, project?.lock_hash && project.lock_hash!=="__unfrozen" ? project.lock_hash : lock == null ? "__unfrozen" : lockHash,input.budget_version??null,input.budget_source??(effectiveCap==null?"no_extra_cap":"agent_constraint"))
     d.query("INSERT INTO tool_submission(scope,request_id,session_id,payload_hash,reservation,state,metadata_json,created_at) VALUES(?,?,?,?,?,'submitting',?,?) ON CONFLICT(scope,request_id) DO UPDATE SET state='submitting',reservation=excluded.reservation").run(input.scope,input.request_id,input.session_id,hash,input.cost_coins,JSON.stringify(input),Date.now())
+    return { created: true }
   }).immediate()
 }
 export function finishSubmission(scope: string, requestID: string, state: string, taskID?: string): void {
   db().query("UPDATE tool_submission SET state=?,task_id=COALESCE(?,task_id) WHERE scope=? AND request_id=?").run(state,taskID ?? null,scope,requestID)
+}
+/** 权威实扣替换本次预留；仍在同一余额表，不另加图预算副本。 */
+export function settleSubmission(scope: string, requestID: string, actualCoins: number): void {
+  if (!Number.isFinite(actualCoins) || actualCoins < 0) throw new Error("invalid_actual_cost")
+  db().query("UPDATE tool_submission SET state='completed',reservation=? WHERE scope=? AND request_id=?").run(actualCoins, scope, requestID)
+}
+
+/** 仅网关按真实ledger/receipt逐笔核验后调用；导入既有事实，不产生新提交许可或调用上游。 */
+export function importVerifiedSubmission(input: SubmissionIdentity, state: "completed" | "accepted" | "submitting" | "refunded", taskId?: string): void {
+  if (!input.input_signature || !Number.isFinite(input.cost_coins) || input.cost_coins < 0) throw new Error("invalid_import_evidence")
+  const d = db()
+  d.transaction(() => {
+    const prior = getSubmission(input.scope, input.request_id)
+    if (prior) {
+      const meta = JSON.parse(prior.metadata_json)
+      if ((prior.task_id && taskId && prior.task_id !== taskId) || (meta.input_signature && meta.input_signature !== input.input_signature)) throw new Error("operation_evidence_conflict")
+      if (prior.state === "refunded" || (prior.state === "completed" && state !== "refunded")) return
+      if (state === "completed" || state === "refunded") d.query("UPDATE tool_submission SET state=?,reservation=?,task_id=COALESCE(task_id,?) WHERE scope=? AND request_id=?").run(state, state === "refunded" ? 0 : input.cost_coins, taskId ?? null, input.scope, input.request_id)
+      else if (state === "accepted" && taskId) d.query("UPDATE tool_submission SET state='accepted',task_id=COALESCE(task_id,?) WHERE scope=? AND request_id=? AND state='submitting'").run(taskId,input.scope,input.request_id)
+      return
+    }
+    d.query("INSERT INTO tool_submission(scope,request_id,session_id,payload_hash,reservation,state,task_id,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(input.scope,input.request_id,input.session_id,`restored:${input.input_signature}`,state === "refunded" ? 0 : input.cost_coins,state,taskId ?? null,JSON.stringify({...input,imported_from:"gateway_ledger_receipt"}),Date.now())
+  }).immediate()
 }
 export function journalRegistration(taskID: string, sessionID: string, payload: Record<string, unknown>): void {
   const d = db()
@@ -124,5 +190,9 @@ export function acquireSharedRateSlot(account: string, now: number, limit: numbe
 
 /** 接受UUID与完整产物收据在同一SQLite事务内提交，退出窗口不会遗失同步成品。 */
 export function acceptTaskSubmission(scope:string,requestID:string,taskID:string,payload:Record<string,unknown>):void {
-  db().transaction(()=>{finishSubmission(scope,requestID,"accepted",taskID);journalRegistration(taskID,String(payload.session_id),payload)}).immediate()
+  db().transaction(()=>{
+    // 已结算操作恢复收据时不能退回accepted，否则下一次恢复会再次把原费用计为新增。
+    if(getSubmission(scope,requestID)?.state!=="completed")finishSubmission(scope,requestID,"accepted",taskID)
+    journalRegistration(taskID,String(payload.session_id),payload)
+  }).immediate()
 }

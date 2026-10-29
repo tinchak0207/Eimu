@@ -13,6 +13,7 @@ import { jsonWithTrace, pixaiAuthError } from "@/lib/pixai-proxy";
 import { getOrCreateTraceId } from "@/lib/request-trace";
 import { compileWorkflow, type WorkflowCompileInput } from "@/lib/workflow-dsl/compile";
 import { compileProjectDsl, normalizeProjectCurrent } from "@/lib/workflow-dsl/project-ops";
+import { decompileProject } from "@/lib/workflow-dsl/decompile";
 import type { WorkflowDslSource } from "@/lib/workflow-dsl/schema";
 
 export const runtime = "nodejs";
@@ -49,11 +50,12 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const { source, current: rawCurrent, label, target } = body as {
+  const { source, current: rawCurrent, label, target, action } = body as {
     source?: unknown;
     current?: unknown;
     label?: unknown;
     target?: unknown;
+    action?: unknown;
   };
   // target 缺省 = "canvas"（旧行为一字不变）；"project" = DSL v2 编译成工程图 PatchOp[]。
   if (target !== undefined && target !== "canvas" && target !== "project") {
@@ -61,6 +63,12 @@ export async function POST(req: NextRequest) {
       { success: false, error: "target 只接受 canvas 或 project。", code: "invalid_request" },
       { status: 400 },
     );
+  }
+  if (action === "decompile" && target === "project") {
+    const current = rawCurrent && typeof rawCurrent === "object" ? rawCurrent as Record<string, unknown> : {};
+    const normalized = normalizeProjectCurrent(current.nodes);
+    const dsl = decompileProject(normalized);
+    return NextResponse.json({ success: true, target: "project", dsl, ...(dsl === null && normalized.nodes.length ? { dsl_omitted: "schema_or_budget" } : {}) }, { headers: { "Cache-Control": "no-store" } });
   }
   if (source === undefined || source === null) {
     return NextResponse.json(

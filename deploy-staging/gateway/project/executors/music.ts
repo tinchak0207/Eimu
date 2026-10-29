@@ -15,6 +15,21 @@ import { defaultClientTimeoutMs } from "../exec-bridge-client.ts"
 // S5 的 Idempotency-Key 同式（types.ts:224）；桥拿它当 musicChargeRef，重放同一式就天然幂等。
 import { idempotencyKeyOf } from "../submit-generation.ts"
 import { releaseGenerationCharge, reserveGenerationCharge, settleGenerationCharge } from "../ledger.ts"
+import { sharedProjectStore } from "../store.ts"
+import type { SharedJournalOperation } from "../generation-journal.ts"
+
+/** 耐久成功回执只能用实际字节恢复，不能再向供应商生成或凭旧路径假成功。 */
+export async function restorePaidAudioOutputs(ctx: ExecContext, row: { registration_json?: string }): Promise<Output[]> {
+  const receipt = JSON.parse(row.registration_json ?? "null")
+  if (!Array.isArray(receipt?.outputs) || !receipt.outputs.length) throw new Error("paid_audio_receipt_missing")
+  const outputs: Output[] = []
+  for (const original of receipt.outputs as Output[]) {
+    const actual = await ctx.ingest({ path: original.path }, { port: original.port, mime: original.mime, origin: original.origin })
+    if (actual.sha256 !== original.sha256 || actual.bytes !== original.bytes) throw new Error("paid_audio_receipt_sha_conflict")
+    outputs.push({ ...original, ...actual, meta: original.meta })
+  }
+  return outputs
+}
 
 /** 设计文档 §3.5：music 1 币/次（平台目录 x_coins_per_music 的同源口径；实际扣费以桥回执为准）。 */
 export const MUSIC_COINS_PER_GENERATION = 1
@@ -99,6 +114,7 @@ export function musicBridgeParams(params: Record<string, Json>): Record<string, 
 }
 
 export interface MusicExecutorOptions {
+  prepareScratch?: (ctx: ExecContext) => Promise<void>
   /** 测试接缝：覆盖桥客户端超时（生产不传，用默认 240s + 15s）。 */
   timeoutMs?: number
 }
@@ -123,14 +139,36 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
       }
 
       const idemKey = musicIdemKey(ctx)
+      try {
+        if (opts.prepareScratch) await opts.prepareScratch(ctx)
+        else await sharedProjectStore(ctx.sessionId).prepareScratch()
+      } catch (error) {
+        return { ok: false, code: "platform_fault", message: `音乐提交前工程scratch不可写：${error instanceof Error ? error.message : String(error)}`, retryable: false }
+      }
       const common = {
         project_id: ctx.project.id, node_id: ctx.node.id, signature: ctx.signature,
         run_id: ctx.runId, attempt: ctx.attempt, take: ctx.take, idem_key: idemKey,
       }
-      const reserved = await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: MUSIC_COINS_PER_GENERATION })
+      let operation: SharedJournalOperation | undefined
+      let originalRow: any
+      let submitAllowed = true
+      try {
+        if (ctx.generationOperation) {
+          operation = await ctx.generationOperation({ kind: "music", projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature, runId: ctx.runId, attempt: ctx.attempt, take: ctx.take, sessionId: ctx.sessionId, idemKey, model: MUSIC_MODEL_ID, payload: bridgeParams, coins: MUSIC_COINS_PER_GENERATION })
+          const reserved = operation.reserve()
+          originalRow = reserved.row
+          submitAllowed = reserved.submitAllowed
+          if (originalRow?.state === "completed") return { ok: true, outputs: await restorePaidAudioOutputs(ctx, originalRow), costCoins: 0 }
+        }
+      } catch (error) {
+        return { ok: false, code: "platform_fault", message: `音乐共同账本/已付费回执不可用，未重投：${error instanceof Error ? error.message : String(error)}`, retryable: false, ...(originalRow ? { submitUnknown: true } : {}) }
+      }
+      const reserved = operation ? { ok: true as const, bound: submitAllowed } : await reserveGenerationCharge(ctx.sessionId, { projectId: ctx.project.id, idemKey, coins: MUSIC_COINS_PER_GENERATION })
       if (reserved.ok === false) return { ok: false, code: reserved.code, message: reserved.message, retryable: reserved.retryable }
       if (reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
-      const res = await ctx.execBridge.call(
+      const recovered = !submitAllowed ? await ctx.execBridge.result(idemKey, { sessionId: ctx.sessionId, projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature }) : null
+      if (recovered && (recovered.state !== "done" || !recovered.files?.length)) return { ok: false, code: "submit_unknown", message: "音乐原操作尚无可核验终态；保留共同预留，只对账不重新生成", retryable: false, submitUnknown: true }
+      const res: Awaited<ReturnType<ExecContext["execBridge"]["call"]>> = recovered ? { ok: true as const, files: recovered.files!, costCoins: recovered.costCoins ?? originalRow?.reservation ?? MUSIC_COINS_PER_GENERATION, chargeRef: recovered.chargeRef, provider: "music_gen" } : await ctx.execBridge.call(
         "music_gen",
         {
           sessionId: ctx.sessionId,
@@ -138,17 +176,20 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
           nodeId: ctx.node.id,
           signature: ctx.signature,
           idemKey,
+          runId: ctx.runId,
           params: bridgeParams,
         },
         { timeoutMs: opts.timeoutMs ?? defaultClientTimeoutMs("music_gen"), signal: ctx.signal },
       )
       if (res.ok === false) {
         const code: ExecErrorCode = res.code
-        if (code === "submit_unknown") {
+        if (code === "submit_unknown" || res.recoverable) {
+          operation?.unknown()
           return { ok: false, code, message: res.message, retryable: false, submitUnknown: true }
         }
         if (reserved.bound) {
-          releaseGenerationCharge(ctx.sessionId, idemKey)
+          if (operation) operation.refunded()
+          else releaseGenerationCharge(ctx.sessionId, idemKey)
           await ctx.ledger.write({ ...common, event: "refunded", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
         }
         if (code !== "bad_input" && code !== "cancelled") {
@@ -157,23 +198,22 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
         return { ok: false, code, message: res.message, retryable: res.retryable }
       }
       if (res.files.length === 0) {
-        if (reserved.bound) {
-          releaseGenerationCharge(ctx.sessionId, idemKey)
-          await ctx.ledger.write({ ...common, event: "refunded", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
-        }
-        await ctx.ledger.write({ ...common, event: "failed", model: MUSIC_MODEL_ID, cost_coins: 0 })
-        return { ok: false, code: "provider_error", message: "exec-bridge 回执成功但没有音频文件；未交付。", retryable: false }
+        operation?.unknown()
+        return { ok: false, code: "platform_fault", message: "桥确认已生成但没有文件，保留原操作对账与回收；未交付。", retryable: false, submitUnknown: true }
       }
 
       const outputs: Output[] = []
+      operation?.accept(idemKey, { kind: "music", bridgeFiles: res.files, chargeRef: res.chargeRef, costCoins: res.costCoins, bridgeIdentity: { sessionId: ctx.sessionId, projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature, runId: ctx.runId } })
       // 桥的 ok 回执在契约之外额外透出 chargeError（exec-bridge-client.ts:14 ExecBridgeOk），扣费未确认时在场。
       const chargeError = (res as { chargeError?: string }).chargeError
-      for (const f of res.files) {
+      try { for (const f of res.files) {
         const hintMime = f.mime || "audio/mpeg"
         const ingested = await ctx.ingest({ path: f.path }, { port: "out", mime: hintMime, origin: "generated" })
+        if (f.sha256 && ingested.sha256 !== f.sha256) throw new Error("音乐回执指纹与实际文件不符，拒绝采用")
         const meta: Record<string, Json> = {
           provider: res.provider ?? "music_gen",
           cost_coins: res.costCoins,
+          bridgeOperation: { idemKey, sessionId: ctx.sessionId, projectId: ctx.project.id, nodeId: ctx.node.id, signature: ctx.signature, runId: ctx.runId },
           ...(res.chargeRef ? { chargeRef: res.chargeRef } : {}),
           ...(chargeError ? { chargeError } : {}),
         }
@@ -192,9 +232,15 @@ export function createMusicExecutor(opts: MusicExecutorOptions = {}): NodeExecut
             ...(typeof f.durationSec === "number" && f.durationSec > 0 ? { durationSec: f.durationSec } : {}),
           },
         })
+      } } catch (error) {
+        // 音乐已生成并有桥回执；入库失败不能退款后另开一单。原订单留给result恢复。
+        return { ok: false, code: "platform_fault", message: `音乐已生成，工程入库失败，保留原操作恢复：${error instanceof Error ? error.message : String(error)}`, retryable: false, submitUnknown: true }
       }
 
-      settleGenerationCharge(ctx.sessionId, idemKey, res.costCoins)
+      if (operation) {
+        operation.accept(idemKey, { kind: "music", outputs, chargeRef: res.chargeRef, originalCostCoins: res.costCoins })
+        operation.settle(res.costCoins)
+      } else settleGenerationCharge(ctx.sessionId, idemKey, res.costCoins)
       if (!reserved.bound) await ctx.ledger.write({ ...common, event: "submitted", model: MUSIC_MODEL_ID, cost_coins: MUSIC_COINS_PER_GENERATION })
       await ctx.ledger.write({
         ...common, event: "completed", model: MUSIC_MODEL_ID, cost_coins: res.costCoins,

@@ -5,15 +5,15 @@
 // 教训来源：记忆 2026-10-18-canvas-snapshot-overwrite-no-rev（整份覆盖 + 零校验 = 旧标签页吃掉新状态）；
 // 这里不提供「整图覆盖」写入口，所有变更必须过 patch 引擎，并带 version 乐观并发。
 import { randomBytes } from "node:crypto"
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, chown, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { acknowledgeGeneration, markProjectSession } from "../job-store.ts"
 import { ArtifactStore, type IngestHint } from "./artifacts.ts"
-import { EventLog, type EventDraft } from "./events.ts"
+import { EventLog, publishProjectEvents, type EventDraft } from "./events.ts"
 import { applyPatch, type PatchEngineOptions, type PatchOutcome } from "./patch.ts"
 import { PROJECT_SCHEMA_VERSION } from "./types.ts"
 import type {
-  Actor, Iso, NodeId, NodeType, Output, PatchRequest, ProjectDefaults, ProjectEvent, ProjectGraph, ProjectNode,
+  Actor, Iso, NodeId, NodeType, Output, PatchRequest, ProjectDefaults, ProjectEvent, ProjectGraph, ProjectNode, ProjectContinuation,
 } from "./types.ts"
 
 /** 与 timeline.ts:32 同一取值方式与默认值。 */
@@ -247,12 +247,30 @@ export class ProjectStore {
     return this.withLock(async () => (await this.loadLocked()).version)
   }
 
+  /** 跨 gateway ubuntu / runtime agentsvc 的唯一共享写目录。只改受控tmp，不递归改用户资产。 */
+  async prepareScratch(): Promise<string> {
+    await this.read() // 只允许已存在且有效的工程
+    const project = await lstat(this.paths.dir)
+    if (!project.isDirectory() || project.isSymbolicLink()) throw new Error("工程目录不是受控真实目录")
+    const scratch = path.join(this.paths.dir, "tmp")
+    await mkdir(scratch, { recursive: false, mode: 0o2770 }).catch((e) => { if (e.code !== "EEXIST") throw e })
+    const info = await lstat(scratch)
+    if (!info.isDirectory() || info.isSymbolicLink() || path.dirname(await realpath(scratch)) !== await realpath(this.paths.dir)) throw new Error("工程scratch目录越界或含符号链接")
+    // 显式chmod抵消UMask0022；父project的setgid保留服务共享组，绝不chown其它目录。
+    const sharedGid = (await stat(path.dirname(this.paths.dir))).gid
+    if (info.gid !== sharedGid) await chown(scratch, -1, sharedGid)
+    if ((info.mode & 0o2770) !== 0o2770) await chmod(scratch, 0o2770)
+    return scratch
+  }
+
   /** 在锁内读-改-写。mutator 只能改传入的副本；抛错则不落盘。 */
   async update<T>(mutator: (g: ProjectGraph) => T | Promise<T>): Promise<T> {
     return this.withLock(async () => {
       const g = await this.loadLocked()
       const copy = structuredClone(g)
       const result = await mutator(copy)
+      // 纯对账/空认领不应不断改updatedAt或重写整个工程。
+      if (JSON.stringify(copy) === JSON.stringify(g)) return result
       copy.updatedAt = this.nowIso()
       await this.writeProjectFile(copy)
       this.graph = copy
@@ -276,6 +294,7 @@ export class ProjectStore {
         await this.writeVersionFile(next)
         await this.writeProjectFile(next)
         this.graph = next
+        publishProjectEvents(this.log.file, events)
         return { ...outcome, events, graph: structuredClone(next) }
       } catch (e) {
         await this.rollbackPartialLocked(g)
@@ -295,6 +314,7 @@ export class ProjectStore {
         copy.updatedAt = this.nowIso()
         await this.writeProjectFile(copy)
         this.graph = copy
+        publishProjectEvents(this.log.file, events)
         return events
       } catch (e) {
         await this.rollbackPartialLocked(g)
@@ -317,12 +337,15 @@ export class ProjectStore {
       const g = await this.loadLocked()
       const copy = structuredClone(g)
       copy.activeRun = runId
+      // 新一轮不制造新待办；保留同输入代的投递身份。正在投递的旧通知只能记未知。
+      for (const task of copy.continuation?.tasks ?? []) if (task.delivery === "delivering") task.delivery = "unknown"
       copy.updatedAt = this.nowIso()
       try {
         const events = await this.appendLocked(copy, [{ kind: "run_started", run: runId, data: {} }])
         await this.writeVersionFile(copy) // run 起点快照（§3.4）
         await this.writeProjectFile(copy)
         this.graph = copy
+        publishProjectEvents(this.log.file, events)
         return events
       } catch (e) {
         await this.rollbackPartialLocked(g)
@@ -331,17 +354,22 @@ export class ProjectStore {
     })
   }
 
-  async finishRun(runId: string): Promise<ProjectEvent[]> {
+  async finishRun(runId: string, continuation?: ProjectContinuation): Promise<ProjectEvent[]> {
     return this.withLock(async () => {
       const g = await this.loadLocked()
+      // 终态只能由当前执行代提交；重复回调与旧代不能覆盖新责任或重复发通知。
+      if (g.activeRun !== runId) return []
       const copy = structuredClone(g)
       if (copy.activeRun === runId) copy.activeRun = null
+      if (continuation && copy.continuation?.runId !== runId) copy.continuation = continuation
+      else if (continuation && !copy.continuation?.cancelled) copy.continuation = continuation
       copy.updatedAt = this.nowIso()
       try {
         const events = await this.appendLocked(copy, [{ kind: "run_finished", run: runId, data: {} }])
         await this.writeVersionFile(copy) // run 终点快照（§3.4）
         await this.writeProjectFile(copy)
         this.graph = copy
+        publishProjectEvents(this.log.file, events)
         return events
       } catch (e) {
         await this.rollbackPartialLocked(g)

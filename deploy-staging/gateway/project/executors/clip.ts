@@ -10,7 +10,7 @@ import { NODE_SPECS } from "../specs.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output, ProjectGraph, ProjectNode } from "../types.ts"
 import { admitPipelineSmoke, countsTowardCompletion } from "../completion-admission.ts"
 import {
-  apiKeyOf, collectReferenceImages, effectiveParams, failureOf, ingestGenerated, textParam, unresolvedRefs,
+  apiKeyOf, collectReferenceImages, effectiveParams, failureOf, ingestGenerated, textParam, unresolvedRefs, preparedSubmissionOf,
 } from "./keyframe.ts"
 
 function bad(message: string): ExecResult {
@@ -92,10 +92,12 @@ export const clipExecutor: NodeExecutor = {
       ...(resolution ? { resolution } : {}),
       ...(generateAudio !== undefined ? { generate_audio: generateAudio } : {}),
     }
-    return videoNodeCoinsSync({ id: node.id, metadata }, undefined, seconds)
+    const cost = videoNodeCoinsSync({ id: node.id, metadata }, undefined, seconds)
+    return cost === null ? null : cost * (typeof eff.n === "number" ? eff.n : 1)
   },
   async run(ctx: ExecContext): Promise<ExecResult> {
     const eff = effectiveParams(ctx.node, ctx.project)
+    const prepared = preparedSubmissionOf(eff.toolSubmission)
     const prompt = textParam(eff.prompt)
     const styleLock = textParam(eff.styleLock)
     if (!prompt) return bad(`clip 节点 ${ctx.node.id} 缺少 params.prompt；未提交。`)
@@ -117,7 +119,7 @@ export const clipExecutor: NodeExecutor = {
     }
 
     const original = prompt
-    if (!countsTowardCompletion(ctx.project)) {
+    if (!prepared && !countsTowardCompletion(ctx.project)) {
       const sentence = jsonString(ctx.params.sentence) ?? original
       const decision = admitPipelineSmoke({
         sessionEntry: false,
@@ -140,7 +142,9 @@ export const clipExecutor: NodeExecutor = {
     const generateAudio = typeof eff.generateAudio === "boolean" ? eff.generateAudio : undefined
 
     const res = await ctx.submitGeneration({
+      ...(prepared ? { prepared } : {}),
       kind: "video",
+      n: typeof eff.n === "number" ? eff.n : 1,
       model,
       prompt: submittedPrompt,
       seconds,
@@ -182,6 +186,7 @@ export const clipExecutor: NodeExecutor = {
     }
     const briefText = ctx.project.brief[0]?.text
     const sentenceForCheck = typeof briefText === "string" && briefText.trim() ? briefText : original
+    if (prepared) return { ok: true, outputs, costCoins: res.costCoins }
     if (clipSubjectChecker) {
       const report = await clipSubjectChecker({ framePath: outputs[0]?.path ?? "", sentence: sentenceForCheck })
       if (!report.present) {

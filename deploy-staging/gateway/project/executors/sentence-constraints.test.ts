@@ -133,8 +133,8 @@ function makeCtx(opts: { brief?: string; inputs: Record<string, import("../types
   }
 }
 
-describe("export 首句", () => {
-  test("写了没有字幕，srt 有词则导出失败", async () => {
+describe("原话约束与候选执行边界", () => {
+  test("无字幕要求仍有独立可验证反例；候选不是最终交付，语义由critic核对全部修订", async () => {
     const file = join(MEDIA, "plain.mp4")
     ffmpeg(["-f", "lavfi", "-i", "color=c=red:s=160x120:d=1:r=24", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-t", "1"], file)
     const clip = await store.ingest({ path: file }, { port: "out", mime: "video/mp4", origin: "generated" })
@@ -142,18 +142,22 @@ describe("export 首句", () => {
     writeFileSync(srt, "1\n00:00:00,000 --> 00:00:01,000\n字\n", "utf8")
     const sub = await store.ingest({ path: srt }, { port: "srt", mime: "text/plain", origin: "generated" })
     const res = await exportExecutor.run(makeCtx({ brief: "这镜没有字幕", inputs: { v: [clip], cap: [{ ...sub, port: "srt" }] } }))
-    expect(res.ok).toBe(false)
-    if (res.ok !== false) return
-    expect(res.message).toContain("没有字幕")
+    expect(res.ok).toBe(true)
+    if (res.ok !== true) return
+    expect(res.outputs[0].meta?.stage).toBe("candidate")
+    const violation = await evaluateSentenceConstraints({ text: "这镜没有字幕", videoPath: res.outputs[0].path, durationSec: res.outputs[0].durationSec ?? 1, subtitleBurnIn: false, subtitleFiles: [{ path: srt, port: "srt" }] })
+    expect(violation).toContain("没有字幕")
   }, 180_000)
 
-  test("首句静音：成片音轨被剥掉", async () => {
+  test("当前结构目标静音：候选音轨被剥掉；不靠首句regex替代目标版本", async () => {
     const file = join(MEDIA, "with-audio.mp4")
     ffmpeg(["-f", "lavfi", "-i", "color=c=green:s=160x120:d=1:r=24", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", "1"], file)
     const before = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type", "-of", "json", file]).toString()) as { streams?: { codec_type?: string }[] }
     expect((before.streams ?? []).some((s) => s.codec_type === "audio")).toBe(true)
     const clip = await store.ingest({ path: file }, { port: "out", mime: "video/mp4", origin: "generated" })
-    const res = await exportExecutor.run(makeCtx({ brief: "请静音", inputs: { v: [clip] } }))
+    const ctx = makeCtx({ brief: "请静音", inputs: { v: [clip] } })
+    ctx.project.targets = { audio: "none", setBy: { kind: "agent" }, at: ctx.project.createdAt }
+    const res = await exportExecutor.run(ctx)
     expect(res.ok, JSON.stringify(res)).toBe(true)
     if (res.ok !== true) return
     expect(res.outputs[0].meta?.hasAudio).toBe(false)

@@ -1,3 +1,4 @@
+import { sharedGenerationScope } from "./generation-scope.ts"
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
   completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner, ProjectNodeRequiredError } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
@@ -67,7 +68,7 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       if (!parent || typeof input.project !== "string" || !input.project.trim()) return Response.json({ ok: false, error: "known owner and project required" }, { status: 409 })
       const ownerScope = await stableGenerationOwnerScope(input.session_id)
       if (!ownerScope) return Response.json({ ok: false, durable: true, authorized: false, error: "trusted stable owner identity unavailable; no new paid submission" }, { status: 503 })
-      const scope = `project:${createHash("sha256").update(ownerScope + "\0" + input.project).digest("hex")}`
+      const scope = sharedGenerationScope(ownerScope, input.project)
       const authorization = generationProjectAuthorization(ownerScope, input.project)
       return Response.json({ ok: true, durable: true, scope, authorized: !!authorization, ...(authorization || {}) })
     }

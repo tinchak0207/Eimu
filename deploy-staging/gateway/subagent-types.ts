@@ -385,6 +385,7 @@ export interface SubagentRun {
   // 补丁 Actor={kind:"subagent",runId,lane} 由此取）；projectMode=派工时父会话工程模式快照；
   // seat=实际挂给子会话的席位（工程版 `<expert>_p`，旧会话=原 expert）。
   lane?: NodeId[]
+  toolLaneSource?: "legacy_generation" // 仅服务端活跃旧委派领取的新工具节点；显式空lane不升级
   projectMode?: boolean
   seat?: string
   // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
@@ -768,4 +769,3 @@ export interface ChildProbe {
   pendingToolCount?: number
   text: string
 }
-

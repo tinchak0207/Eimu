@@ -15,7 +15,83 @@ import path from "node:path"
 import { NODE_SPECS_LITE } from "./specs.ts"
 import { computeSignature } from "./signature.ts"
 import { ensureProject, type ProjectStore } from "./store.ts"
+import { effectiveGoalRevision, briefLedgerRevision } from "./digest.ts"
 import type { Actor, Json, NodeId, PatchOp, ProjectNode, Sha256 } from "./types.ts"
+
+/** 已知电影配方原位接最终候选链。用户制作节点、锁、资产和目标不迁走。 */
+export async function upgradeLegacyVideoCandidate(store: ProjectStore): Promise<{ upgraded: boolean; blocked?: string }> {
+  const result = await store.update((graph) => {
+    const legacy = Object.values(graph.nodes).filter((n) => n.type === "export" && n.params.preset !== "image_pack" && !n.params.stage)
+    for (const final of legacy) {
+      if (final.locked || final.pinned) {
+        return { upgraded: false, blocked: `需要保留人工锁的评审接线确认：${final.id} 被锁定，不覆盖锁或产物。` }
+      }
+    }
+    let upgraded = false
+    for (const final of legacy) {
+      const candidateId = final.id === "export" ? "candidate" : `${final.id.slice(0, 32)}_candidate`
+      if (graph.nodes[candidateId]) return { upgraded: false, blocked: `候选节点身份冲突：${candidateId} 已存在，保留原图等待明确接线。` }
+      const oldMachine = graph.nodes[final.inputs.machine?.from]
+      const oldCritic = graph.nodes[final.inputs.verdict?.from]
+      const machineId = oldMachine?.type === "qc" && !oldMachine.locked && !oldMachine.pinned ? oldMachine.id : `${final.id.slice(0, 32)}_machine`
+      const criticId = oldCritic?.type === "qc" && !oldCritic.locked && !oldCritic.pinned ? oldCritic.id : `${final.id.slice(0, 32)}_critic`
+      const candidate = structuredClone(final)
+      candidate.id = candidateId
+      candidate.params.stage = "candidate"
+      candidate.inputs = Object.fromEntries(Object.entries(final.inputs).filter(([name]) => name !== "machine" && name !== "verdict"))
+      candidate.status = "stale"
+      candidate.signature = null
+      candidate.lastRun = null
+      graph.nodes[candidateId] = candidate
+      graph.order.splice(Math.max(0, graph.order.indexOf(final.id)), 0, candidate.id)
+      final.params.stage = "publish"
+      final.inputs = { candidate: { from: candidate.id }, jianying: { from: candidate.id, port: "jianying" }, fcpxml: { from: candidate.id, port: "fcpxml" }, machine: { from: machineId }, verdict: { from: criticId } }
+      for (const [id, mode] of [[machineId, "machine"], [criticId, "critic"]] as const) {
+        if (!graph.nodes[id]) {
+          graph.nodes[id] = { id, type: "qc", intent: "独立核查完整最终候选与用户当前要求", params: { mode, rubric: mode === "critic" ? "film_final_critic" : "film_default" }, inputs: {}, refs: [], status: "pending", signature: null, lastRun: null, outputs: [], rev: 0, pinned: null }
+          graph.order.splice(graph.order.indexOf(final.id), 0, id)
+        }
+        const qc = graph.nodes[id]
+        qc.inputs = { final: { from: candidate.id } }
+        if (qc.params.mode === "critic") qc.params.rubric = "film_final_critic"
+        if (qc.params.thresholds && typeof qc.params.thresholds === "object" && !Array.isArray(qc.params.thresholds)) {
+          delete qc.params.thresholds.requireAudio
+          delete qc.params.thresholds.maxDurationSec
+        }
+        delete qc.onFail
+        qc.status = "stale"
+        qc.signature = null
+        qc.rev++
+      }
+      final.status = "stale"
+      final.signature = null
+      final.rev++
+      upgraded = true
+    }
+    const goalRevision = effectiveGoalRevision(graph)
+    for (const node of Object.values(graph.nodes)) {
+      if (node.type !== "export" || node.params.stage !== "candidate" || node.params.goalRevision === goalRevision) continue
+      node.params.goalRevision = goalRevision
+      node.status = "stale"
+      node.signature = null
+      node.rev++
+      upgraded = true
+    }
+    const ledgerRevision = briefLedgerRevision(graph)
+    for (const node of Object.values(graph.nodes)) {
+      if (node.type !== "qc" || node.params.mode !== "critic" || !Object.values(node.inputs).some((ref) => graph.nodes[ref.from]?.params.stage === "candidate") || node.params.briefLedgerRevision === ledgerRevision) continue
+      node.params.briefLedgerRevision = ledgerRevision
+      node.status = "stale"
+      node.signature = null
+      node.rev++
+      upgraded = true
+    }
+    if (upgraded) graph.version++
+    return { upgraded }
+  })
+  if (result.upgraded) await store.appendEvents([{ kind: "patch", data: { reason: "final_candidate_upgrade", nodes: (await store.read()).order } }])
+  return result
+}
 
 /** 旧快照节点（graph.nodes 是 unknown[]，逐项收窄）。 */
 export interface LegacySnapshotNode {

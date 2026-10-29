@@ -38,6 +38,11 @@ const patchOp = z.union([
   z.object({ op: z.literal("write_result"), node: nodeId, value: z.any() }),
   z.object({
     op: z.literal("set_targets"),
+    sourceMessageId: z.string().optional().describe("解释依据的真实用户messageId；记录来源，不提升actor权限，不能覆盖用户锁"),
+    interpretation: z.object({
+      sourceMessageIds: z.array(z.string()),
+      requirements: z.string(), supersedes: z.array(z.string()).optional(), statusOnly: z.boolean().optional(),
+    }).optional().describe("原话解释候选，艺术纠正也可用；可配空targets。statusOnly不改变制作版本，但不能免除最终评审核对原话"),
     targets: z.object({
       durationSec: z.number().optional(), aspect: z.string().optional(), shots: z.number().int().optional(),
       subtitles: z.boolean().optional(), audio: z.enum(["voice", "music", "both", "none"]).optional(),

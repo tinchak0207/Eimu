@@ -481,7 +481,7 @@ async function projectIngressStore(record: ProjectIngressRecord): Promise<void> 
     // 配方注册表由 S11z 注入 store 的 opts.recipes；缺注册表时引擎回 UNKNOWN_RECIPE，只记录不阻断 ingress。
     const outcome = await store.applyPatches(
       { ops: [{ op: "apply_recipe", recipe: record.recipe, params: {} }] },
-      { kind: "user" },
+      { kind: "engine" },
     )
     if (outcome.receipt.rejected.length > 0) {
       console.warn(

@@ -57,7 +57,10 @@ async function projectRequest<T>(path: string, body: Record<string, unknown>, ti
 }
 
 export interface ProjectCallArgs {
-  view?: "digest" | "node" | "events"
+  view?: "digest" | "node" | "events" | "brief"
+  message_id?: string
+  offset?: number
+  limit?: number
   node?: string
   since?: number
   wait_sec?: number
@@ -76,6 +79,9 @@ export async function projectGet(sessionID: string, args: ProjectCallArgs): Prom
     session_id: sessionID,
     ...(args.view ? { view: args.view } : {}),
     ...(typeof args.node === "string" ? { node: args.node } : {}),
+    ...(typeof args.message_id === "string" ? { message_id: args.message_id } : {}),
+    ...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+    ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
     ...(typeof args.since === "number" ? { since: args.since } : {}),
     ...(waitSec > 0 ? { wait_sec: waitSec } : {}),
     ...(args.detail ? { detail: args.detail } : {}),
@@ -83,8 +89,8 @@ export async function projectGet(sessionID: string, args: ProjectCallArgs): Prom
 }
 
 /** 工具端展开 DSL 需要的当前图摘要（网关内部扩展视图 view:"nodes"）。 */
-export async function projectNodes(sessionID: string): Promise<GatewayCallResult<{ nodes: Record<string, unknown>[] }>> {
-  return projectRequest(`/internal/project/get`, { session_id: sessionID, view: "nodes" }, 20_000)
+export async function projectNodes(sessionID: string): Promise<GatewayCallResult<{ nodes: Record<string, unknown>[]; version?: number; project_mode?: boolean; project_state?: string }>> {
+  return projectRequest(`/internal/project/get`, { session_id: sessionID, view: "nodes", create: false }, 20_000)
 }
 
 export async function projectPatch(sessionID: string, args: { ops: unknown[]; baseVersion?: number; atomic?: boolean }): Promise<GatewayCallResult<Record<string, unknown>>> {
@@ -94,6 +100,22 @@ export async function projectPatch(sessionID: string, args: { ops: unknown[]; ba
     ...(typeof args.baseVersion === "number" ? { baseVersion: args.baseVersion } : {}),
     ...(typeof args.atomic === "boolean" ? { atomic: args.atomic } : {}),
   }, 30_000)
+}
+
+export interface ProjectGenerateArgs {
+  request_id: string
+  kind: "image" | "video"
+  payload?: Record<string, unknown>
+  identity?: Record<string, unknown>
+  lock?: Record<string, unknown>
+  project_budget_coins?: number
+  node_id?: string
+  legacy_ref?: { task_id: string; kind: "image" | "video"; request_id?: string; source: "retry_task_id" | "journal" }
+}
+
+/** 预处理保留在原工具，付费副作用进入已存在的工程runner。调用体不能指定actor/owner。 */
+export async function projectGenerate(sessionID: string, args: ProjectGenerateArgs): Promise<GatewayCallResult<Record<string, unknown>>> {
+  return projectRequest("/internal/project/generate", { session_id: sessionID, ...args }, 45_000)
 }
 
 export async function projectRun(sessionID: string, args: { targets?: string[]; mode?: "incremental" | "force"; dry_run?: boolean; budget_coins?: number; wait_sec?: number }): Promise<GatewayCallResult<Record<string, unknown>>> {
@@ -113,6 +135,7 @@ export interface DslExpansion {
   ops?: unknown[]
   errors?: string[]
   warnings?: string[]
+  baseVersion?: number
 }
 
 /**
@@ -149,5 +172,5 @@ export async function expandProjectDsl(source: unknown, sessionID: string, signa
   if (!Array.isArray(body?.ops)) return { ok: false, errors: ["编译器回包缺少 ops 数组"] }
   const summary = body?.summary as Record<string, unknown> | undefined
   const warnings = Array.isArray(summary?.warnings) ? (summary?.warnings as unknown[]).map(String).slice(0, 3) : []
-  return { ok: true, ops: body.ops as unknown[], errors: [], warnings }
+  return { ok: true, ops: body.ops as unknown[], errors: [], warnings, baseVersion: current.data?.version }
 }

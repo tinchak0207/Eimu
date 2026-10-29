@@ -582,6 +582,9 @@ const PROJECT_DIGEST_TAG = "<eimu-project-digest>"
 const projectModeOffAt = new Map<string, number>()
 
 type ProjectWindow = {
+  mode?: "append" | "replace"
+  goalCard?: string
+  briefCount?: number
   keepIds: string[]
   synthetic: string
   replacements: { messageId: string; partIndex: number; text: string }[]
@@ -619,7 +622,14 @@ function projectManifest(msgs: PluginMsg[]): Array<Record<string, unknown>> {
   }))
 }
 
-/** 问网关要本轮窗口；404/5xx/超时/非工程模式 → null（旧席位路径原样执行）。 */
+function unknownProjectWindow(): ProjectWindow {
+  return {
+    mode: "append", keepIds: [], replacements: [], dropParts: [],
+    synthetic: `${PROJECT_DIGEST_TAG}\n工程状态未知：本轮读取失败或超时，不能把旧投影当现况，也不能推断为无工程、无资产或未提交。保留历史与原话；执行前用 project_get 核对工程及在途订单。\n</eimu-project-digest>`,
+  }
+}
+
+/** 问网关要本轮事实；明确非工程才回旧路径，读取失败必须保留 unknown。 */
 async function projectContextWindow(sessionID: string, msgs: PluginMsg[]): Promise<ProjectWindow | null> {
   const offAt = projectModeOffAt.get(sessionID)
   if (offAt !== undefined && Date.now() - offAt < PROJECT_CONTEXT_RECHECK_MS) return null
@@ -630,20 +640,39 @@ async function projectContextWindow(sessionID: string, msgs: PluginMsg[]): Promi
       body: JSON.stringify({ session_id: sessionID, messages: projectManifest(msgs) }),
       signal: AbortSignal.timeout(PROJECT_CONTEXT_TIMEOUT_MS),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      // 只有已知的非工程会话是正常缺省；其余 HTTP 故障不伪装为空工程。
+      const error = await res.json().catch(() => null) as any
+      if (res.status === 404 && error?.error?.code === "not_project_session") return null
+      return unknownProjectWindow()
+    }
     const data = (await res.json().catch(() => null)) as {
       project_mode?: unknown
+      context_mode?: unknown
+      project_state?: unknown
+      goal_card?: unknown
+      brief_count?: unknown
       keep_ids?: unknown
       synthetic?: unknown
       replacements?: unknown
       drop_parts?: unknown
     } | null
-    if (!data || data.project_mode !== true || !Array.isArray(data.keep_ids)) {
-      projectModeOffAt.set(sessionID, Date.now())
+    if (data?.project_mode === false) {
+      // 无图可能在本轮下一步就建图，不能负缓存把新工程藏到下一分钟。
+      if (data.project_state === "absent") projectModeOffAt.delete(sessionID)
+      else projectModeOffAt.set(sessionID, Date.now())
       boundMap(projectModeOffAt, 200)
       return null
     }
+    if (!data || data.project_mode !== true) return unknownProjectWindow()
     projectModeOffAt.delete(sessionID)
+    if (data.context_mode === "append" && typeof data.synthetic === "string") {
+      return { mode: "append", keepIds: [], synthetic: data.synthetic, replacements: [], dropParts: [],
+        ...(typeof data.goal_card === "string" ? { goalCard: data.goal_card } : {}),
+        ...(typeof data.brief_count === "number" ? { briefCount: data.brief_count } : {}),
+      }
+    }
+    if (!Array.isArray(data.keep_ids)) return unknownProjectWindow()
     const replacements = Array.isArray(data.replacements)
       ? (data.replacements as Array<Record<string, unknown>>)
           .filter((r) => typeof r?.messageId === "string" && typeof r?.partIndex === "number" && typeof r?.text === "string")
@@ -661,7 +690,7 @@ async function projectContextWindow(sessionID: string, msgs: PluginMsg[]): Promi
       dropParts,
     }
   } catch {
-    return null
+    return unknownProjectWindow()
   }
 }
 
@@ -671,7 +700,7 @@ function applyProjectWindow(msgs: PluginMsg[], plan: ProjectWindow): void {
     if (p?.synthetic !== true) return false
     if (String(p?.id ?? "").startsWith(PROJECT_SYNTHETIC_PREFIX)) return true
     const text = typeof p?.text === "string" ? p.text.trimStart() : ""
-    return text.startsWith(GOAL_CARD_TAG) || text.startsWith(PROJECT_DIGEST_TAG)
+    return (plan.mode !== "append" && text.startsWith(GOAL_CARD_TAG)) || text.startsWith(PROJECT_DIGEST_TAG)
   }
   for (const m of msgs) {
     if (!Array.isArray(m?.parts)) continue
@@ -690,7 +719,7 @@ function applyProjectWindow(msgs: PluginMsg[], plan: ProjectWindow): void {
     if (Array.isArray(m?.parts) && m.parts[d.partIndex]) m.parts.splice(d.partIndex, 1)
   }
   const keep = new Set(plan.keepIds)
-  const kept = msgs.filter((m) => keep.has(String(m?.info?.id ?? "")))
+  const kept = plan.mode === "append" ? msgs.slice() : msgs.filter((m) => keep.has(String(m?.info?.id ?? "")))
   if (plan.synthetic) {
     for (let i = kept.length - 1; i >= 0; i--) {
       const m = kept[i]
@@ -1296,6 +1325,16 @@ export const EimuGuard: Plugin = async ({ client }) => {
           if (typeof sid === "string") sessionID = sid
         }
         if (!sessionID) return
+        const at = compactingAt.get(sessionID)
+        if (at !== undefined) {
+          compactingAt.delete(sessionID)
+          if (Date.now() - at <= 10_000) return // 压缩请求本身不增补合成上下文
+        }
+        // 每步重新读权威状态。上一轮投影不能在工程被撤销/不存在时残留为现况，
+        // 也不应回传网关充当用户输入或工具历史；只移除本插件自己的片段。
+        for (const m of msgs) {
+          if (Array.isArray(m?.parts)) m.parts = m.parts.filter((p) => !String(p?.id ?? "").startsWith(PROJECT_SYNTHETIC_PREFIX) && !String(p?.id ?? "").startsWith("prt_goalcard_"))
+        }
         // S15（工程模式）：每轮窗口由网关装配（目标卡＋工程摘要＋最近 K 步）。
         // 命中 → 原地裁剪 + 追加合成片段并 return（不走下面的旧目标卡逻辑；工程模式不再压缩）。
         // 探针依据：opencode 1.18.14 prompt.ts:1255 的 transform 与 :1257 的 toModelMessages
@@ -1303,12 +1342,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
         const projectWindow = await projectContextWindow(sessionID, msgs)
         if (projectWindow) {
           applyProjectWindow(msgs, projectWindow)
-          return
-        }
-        const at = compactingAt.get(sessionID)
-        if (at !== undefined) {
-          compactingAt.delete(sessionID)
-          if (Date.now() - at <= 10_000) return // 压缩请求本身不加目标卡
+          if (projectWindow.mode !== "append") return
         }
         ingestUsers(sessionID, msgs)
         const st = goalState(sessionID)
@@ -1324,8 +1358,11 @@ export const EimuGuard: Plugin = async ({ client }) => {
           }
         }
         // 只有一条用户原话且就在眼前时，卡片是逐字重复，不加。
-        if (st.entries.size < 2 && !compacted) return
-        const card = renderGoalCardFromEntries([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
+        if (st.entries.size < 2 && !compacted && !projectWindow?.goalCard) return
+        // 冷启动会话史不可读时，用耐久brief的同一目标卡渲染兜底，绝不再追加第二份卡。
+        const card = projectWindow?.goalCard && (projectWindow.briefCount ?? 0) > st.entries.size
+          ? projectWindow.goalCard
+          : renderGoalCardFromEntries([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
         if (!card) return
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i]

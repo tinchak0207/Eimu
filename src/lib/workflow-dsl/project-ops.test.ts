@@ -305,9 +305,12 @@ test("forEach / takes / onFail / refs / pinned 边界（契约 §3.3、§3.5）"
   assert.ok(errorsOf({ steps: [{ id: "x", kind: "audio" }] }).some((e) => e.field === "kind"), "audio 须明确 voice/music");
 });
 
-test("旧字段 gate/tool 在 project 下忽略并回 warning；校验入口拒绝非对象/空 steps", () => {
-  const r = mustCompile({ steps: [{ id: "nn", kind: "image", gate: true, tool: "image_generate" }] }, EMPTY);
-  assert.equal(r.summary.warnings.length, 2);
+test("旧tool映射真实节点，gate和未接工具必须具名拒绝；不得警告后假成功", () => {
+  const r = mustCompile({ steps: [{ id: "nn", kind: "image", tool: "image_generate", prompt: "真实生成输入" }] }, EMPTY);
+  assert.equal(r.ops[0].op, "add_node");
+  assert.equal((r.ops[0] as any).node.type, "keyframe");
+  assert.ok(errorsOf({ steps: [{ id: "nn", kind: "image", gate: true }] }, EMPTY).some((e) => e.field === "gate"));
+  assert.ok(errorsOf({ steps: [{ id: "nn", kind: "image", tool: "image_edit" }] }, EMPTY).some((e) => e.field === "tool"));
   assert.equal(validateProjectDsl(null).ok, false);
   assert.equal(validateProjectDsl({ steps: [] }).ok, false);
   assert.equal(validateProjectDsl({ workflow: "Bad Name", steps: [{ id: "a", kind: "clip" }] }).ok, false);

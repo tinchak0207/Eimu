@@ -27,6 +27,8 @@ function verdictCanonical(body: Omit<SignedCriticVerdict, "sig">): string {
     actor: body.actor,
     parentSessionId: body.parentSessionId,
     artifactSha256: body.artifactSha256,
+    ...(body.goalRevision ? { goalRevision: body.goalRevision } : {}),
+    ...(body.briefLedgerRevision ? { briefLedgerRevision: body.briefLedgerRevision } : {}),
     receiptCallIds: body.receiptCallIds,
   })
 }
@@ -81,7 +83,9 @@ export function signedTestCriticVerdictOutput(
   opts: {
     parentSessionId: string
     artifactSha256: string
-    rubric: "image_default" | "film_frame_critic"
+    rubric: "image_default" | "film_frame_critic" | "film_final_critic"
+    goalRevision?: string
+    briefLedgerRevision?: string
     qcNodeId?: string
     runId?: string
     receiptCallIds?: string[]
@@ -107,6 +111,8 @@ export function signedTestCriticVerdictOutput(
     },
     parentSessionId: opts.parentSessionId,
     artifactSha256: opts.artifactSha256,
+    ...(opts.goalRevision ? { goalRevision: opts.goalRevision } : {}),
+    ...(opts.briefLedgerRevision ? { briefLedgerRevision: opts.briefLedgerRevision } : {}),
     receiptCallIds: opts.receiptCallIds ?? ["call_review"],
   }
   return writeVerdict(dir, signWithTestKey(body))
