@@ -284,11 +284,11 @@ release_prompts_only() {
   r_tar="/tmp/oc-prompts-$sha12-$ts.tar"
   log "== 提示词快发 @ $sha12 → $ts（只装 AGENTS.md + skills/_prompt-routing，不重启）=="
   remote_binary "cat > $r_tar" < "$tmp/prompts.tar"
-  run_oc_activation "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" "$OC_EXPECTED" "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" "$BACKUP_DIR" "$OWNER" "$SERVICE" "$HEALTH_URL" <<'REMOTE'
+  run_oc_activation "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" "$OC_EXPECTED" "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" "$BACKUP_DIR" "$OWNER" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$sha" <<'REMOTE'
 set -euo pipefail
 export LC_ALL=C
 WORKSPACE_DIR="$1"; VPS_DIR="$2"; r_tar="$3"; SRC_SUBDIR="$4"
-OWNER="$8"; SERVICE="$9"; HEALTH_URL="${10}"
+OWNER="$8"; SERVICE="$9"; HEALTH_URL="${10}"; HISTORY_LOG="${11}"; sha="${12}"
 oc_prepare "$5" "$6"
 OC_UNDO="$7/prompts-recovery-$(date -u +%Y%m%dT%H%M%SZ)-$$.tgz"
 oc_create_backup "$OC_UNDO"
@@ -306,6 +306,9 @@ while IFS= read -r -d '' f; do
   n=$((n+1))
 done < <(find "$src/skills/_prompt-routing" -type f -print0)
 rm -rf "$stage" "$r_tar"
+# 快发也记一行：下次全量发布的 recon 以 history 末行 sha 为基准，不记就把自己发的 AGENTS.md 误判成手改漂移。
+sudo mkdir -p "$(dirname "$HISTORY_LOG")"
+printf 'prompts-only %s %s prompts\n' "$sha" "$(date -u +%s)" | sudo tee -a "$HISTORY_LOG" >/dev/null
 maintenance_end
 OC_CHANGED=0
 trap - EXIT
