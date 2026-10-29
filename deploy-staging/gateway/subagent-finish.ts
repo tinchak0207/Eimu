@@ -100,12 +100,17 @@ async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: st
 function artifactVerifyRecords(run: SubagentRun): ArtifactVerifyRecord[] {
   try {
     if (!run.opencodeSessionId) return []
-    return listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
+    const records = listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
       name: view.name,
       verify_status: view.verify_status,
       url: view.url,
       local_available: artifactLocalEvidenceMatches(view),
     }))
+    // 同名多条（先登记了还没写完的空文件、后又重登记）：只要有一条过得了就算这个交付物有证据，
+    // 不拿被取代的空占位去拦——2026-10 实测 57 次研究子代理成果在盘却被判失败。
+    const passes = (r: ArtifactVerifyRecord): boolean => r.verify_status !== "blocked" && (r.url === null ? r.local_available === true : r.verify_status === "verified")
+    const passedNames = new Set(records.filter(passes).map((r) => r.name))
+    return records.filter((r) => passes(r) || !passedNames.has(r.name))
   } catch (e) {
     console.warn(`[gateway] delivery gate: artifact verify 状态读取失败，拒绝交付 run=${run.id}`, e)
     return [{ name: "artifact_store_unavailable", verify_status: "blocked" }]
