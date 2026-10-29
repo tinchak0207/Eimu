@@ -16,6 +16,7 @@ import {
 import { buildPatchReceipt } from "./receipt.ts"
 import { checkParams, materializeDefaults, resolvePort, specOf } from "./specs.ts"
 import { validateSet } from "./validate.ts"
+import { RESEARCH_NODE, RESEARCH_RECIPES, isResearchNode, researchNewNode } from "./research.ts"
 import type {
   Actor, Json, NodeId, NodeType, Output, PatchErrorCode, PatchOp, PatchReceipt, PatchRequest, ProjectGraph, ProjectNode, Recipe,
 } from "./types.ts"
@@ -287,6 +288,7 @@ function opRemoveNode(ctx: Ctx, op: Extract<PatchOp, { op: "remove_node" }>): vo
   const node = getNode(ctx, op.node)
   checkLane(ctx, node.id)
   assertUnlocked(ctx, node, ["*"])
+  if (isResearchNode(node) && ctx.actor.kind !== "user") return fail("ACTOR_FORBIDDEN", "研究节点只有用户能删；研究写进 research 节点再开跑", node.id)
   if (node.pinned && ctx.actor.kind !== "user") return fail("PINNED_FORBIDS", `节点 ${node.id} 已钉住，先 unpin 再删`, node.id)
   if (node.status === "running" || node.status === "queued" || node.inflight) return fail("RUN_ACTIVE_CONFLICT", `节点 ${node.id} 正在运行，不能删除`, node.id)
   delete g.nodes[node.id]
@@ -542,7 +544,15 @@ function opApplyRecipe(ctx: Ctx, op: Extract<PatchOp, { op: "apply_recipe" }>): 
     return fail("BAD_VALUE", `配方 ${op.recipe} 构建失败：${e instanceof Error ? e.message : String(e)}`)
   }
   const trial = fork(ctx)
-  for (const nn of built.nodes) opAddNode(trial, nn) // 任一节点失败 → 整个配方丢弃（trial 不提交）
+  const withResearch = RESEARCH_RECIPES.has(recipe.id) && !trial.g.nodes[RESEARCH_NODE] && !built.nodes.some((n) => n.id === RESEARCH_NODE)
+  if (withResearch) opAddNode(trial, researchNewNode())
+  for (const nn of built.nodes) {
+    // 剧本是第一道创作工序：接上研究，研究没写完它就停在 awaiting author，下游跟着停。
+    const wired = withResearch && nn.type === "script" && !nn.inputs?.research
+      ? { ...nn, inputs: { ...(nn.inputs ?? {}), research: { from: RESEARCH_NODE } } }
+      : nn
+    opAddNode(trial, wired) // 任一节点失败 → 整个配方丢弃（trial 不提交）
+  }
   if (built.defaults) opSetDefaults(trial, { op: "set_defaults", defaults: built.defaults })
   if (built.targets) {
     try {

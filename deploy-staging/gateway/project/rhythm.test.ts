@@ -92,3 +92,37 @@ describe("R-19 产物卡投影", () => {
     expect(routes.emitProgressCards({ sessionId: "x" } as any, graph, ["k1", "c1", "m1"], emit)).toBe(0)
   })
 })
+
+describe("R-20 研究先行", () => {
+  test("研究没写满 → 付费节点被拒；写满 3 个出处后放行；代理删不掉研究节点", async () => {
+    const { researchGate, researchIssues, RESEARCH_NODE } = await import("./research.ts")
+    const { store } = await ensureProject(sid("research"))
+    const out = await store.applyPatches({ ops: [{ op: "apply_recipe", recipe: "feature_film", params: {} }] }, { kind: "user" })
+    expect(out.receipt.rejected).toEqual([])
+    let g = await store.read()
+    expect(g.nodes[RESEARCH_NODE]?.type).toBe("script")
+    expect((g.nodes.script?.inputs as any)?.research?.from).toBe(RESEARCH_NODE)
+    expect(researchGate(g)).toContain("研究先行")
+
+    const del = await store.applyPatches({ ops: [{ op: "remove_node", node: RESEARCH_NODE }] }, { kind: "agent" })
+    expect(del.receipt.rejected.map((r) => r.code)).toContain("ACTOR_FORBIDDEN")
+
+    const thin = "参考了获奖作品 https://a.example/1"
+    expect(researchIssues(thin).length).toBe(2)
+    const full = [
+      "同类头部 MV 普遍用一镜到底串起三段情绪：主歌压暗、预副歌提速、副歌硬切到全景，观众在 8 秒内看到核心意象。",
+      "https://a.example/one-take https://b.example/anamorphic https://c.example/chorus-cut",
+      "可借鉴：副歌第一拍做结构硬切；夜景用变形宽银幕的椭圆光斑统一质感；人物身份全片锁一套造型，避免跳脸。",
+      "验收：每段情绪转折对齐小节线，副歌镜头时长不超过两小节，关键帧风格统一分数不低于 70。主歌每镜四到六秒，桥段放慢到八秒以上留呼吸；结尾回到开场意象形成闭环，片尾不加字卡。色彩上青琥珀对冲，湿面反光承担节奏点的高光闪烁，人物在副歌才第一次正面看镜头。",
+    ].join("\n")
+    expect(researchIssues(full)).toEqual([])
+    await store.applyPatches({ ops: [{ op: "write_result", node: RESEARCH_NODE, value: full }] }, { kind: "agent" })
+    g = await store.read()
+    expect(researchGate(g)).toBeNull()
+
+    // 非多步配方不加研究节点（保住几个字出图）
+    const { store: single } = await ensureProject(sid("single"))
+    await single.applyPatches({ ops: [{ op: "apply_recipe", recipe: "single_image", params: {} }] }, { kind: "user" })
+    expect((await single.read()).nodes[RESEARCH_NODE]).toBeUndefined()
+  })
+})

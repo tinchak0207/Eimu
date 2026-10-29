@@ -103,6 +103,10 @@ export const RULES_MAP: Readonly<Record<string, RuleMapping>> = {
     enforce: "deploy-staging/gateway/project/routes.ts:emitProgressCards（节点新产物即时进对话）",
     test: "新 node_output 有公网 url → 对应 image/video/audio.done 各推一次、不重复",
   },
+  "R-20": {
+    enforce: "deploy-staging/gateway/project/research.ts:researchGate（admission 拦付费节点）＋ project/patch.ts:opApplyRecipe（多步配方图首加 research）",
+    test: "研究没写满 → 付费节点被拒；写满 3 个出处后放行；代理删不掉研究节点",
+  },
 }
 
 /** 有规则但找不到强制点 = 该规则不该留在 AGENTS.md；v1 为空（删掉的愿望见 S17 回报清单）。 */

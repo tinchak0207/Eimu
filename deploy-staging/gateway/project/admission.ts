@@ -19,6 +19,7 @@ import { NODE_SPECS_LITE } from "./specs.ts"
 import { checkRunnable } from "./validate.ts"
 import type { NodeId, ProjectGraph, RunPlan } from "./types.ts"
 import type { ProjectStore } from "./store.ts"
+import { researchGate } from "./research.ts"
 import type { RunDeps } from "./scheduler.ts"
 
 export interface Quote {
@@ -191,6 +192,12 @@ export async function admit(input: AdmissionInput): Promise<AdmissionResult> {
   }
 
   if (input.dry_run) return { ok: true, mode: "quote", quote }
+
+  // R-20 研究闸：研究没写满，要花钱的节点一律不开跑（作者节点 0 成本照常跑，研究本身就是作者节点）。
+  const gate = researchGate(graph)
+  if (gate && (quote.coins === null || quote.coins > 0)) {
+    return { ok: false, status: "rejected", reason: gate, quote }
+  }
 
   if (notRunnable.length) {
     return { ok: false, status: "rejected", reason: `节点还不能运行：${notRunnable.join("；")}`, quote }
