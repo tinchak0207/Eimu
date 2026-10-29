@@ -242,11 +242,13 @@ function confirmStatusOf(state: SessionState, requestId: string): "pending" | "a
 const STORES = new Map<string, ProjectStore>()
 
 /** 打开已有工程（不创建）；不存在抛 ProjectNotFoundError。同一目录在整个进程里只有一个 store（共享 promise 链）。 */
-async function openStore(sessionId: string): Promise<ProjectStore> {
+async function openStore(sessionId: string, opts: { create?: boolean } = {}): Promise<ProjectStore> {
   const dir = projectDirFor(sessionId)
   const cached = STORES.get(dir)
   if (cached) return cached
   const store = new ProjectStore(sessionId, dir, { recipes: getRecipe })
+  // 工程模式会话的图在首条用户消息 ingress 才建；工具/画布先到时不能回 404 断点，就地建空图（幂等）。
+  if (opts.create) await store.ensure()
   await store.read()
   STORES.set(dir, store)
   return store
@@ -346,7 +348,7 @@ async function handleProjectInternalInner(req: Request, pathname: string): Promi
 
   let store: ProjectStore
   try {
-    store = await openStore(canonical)
+    store = await openStore(canonical, { create: state.projectMode === true })
   } catch (e) {
     if (e instanceof ProjectNotFoundError) return jsonError(404, "project not found", "not_found", "project_not_found")
     throw e
@@ -376,7 +378,7 @@ async function handleProjectSessionRouteInner(key: string, sessionId: string, re
 
   let store: ProjectStore
   try {
-    store = await openStore(canonical)
+    store = await openStore(canonical, { create: state.projectMode === true })
   } catch (e) {
     if (e instanceof ProjectNotFoundError) return jsonError(404, "project not found", "not_found", "project_not_found")
     throw e

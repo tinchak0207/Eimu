@@ -174,6 +174,25 @@ describe("内部路由鉴权与 context", () => {
     }
   })
 
+  test("工程会话图尚未建时 get 就地建空图，不回 project_not_found", async () => {
+    const sid = nextSession("get-autocreate")
+    const restore = installHost(makeState(sid), { submits: [], ledger: [] })
+    try {
+      const res = await internal("/internal/project/get", { session_id: sid, view: "digest" })
+      expect(res.status).toBe(200)
+    } finally {
+      restore()
+    }
+    const sid2 = nextSession("get-legacy")
+    const restore2 = installHost(makeState(sid2, { projectMode: false }), { submits: [], ledger: [] })
+    try {
+      const res = await internal("/internal/project/get", { session_id: sid2, view: "digest" })
+      expect(res.status).toBe(404)
+    } finally {
+      restore2()
+    }
+  })
+
   test("工程会话 context 回 projectContextResponse 的 snake_case 形状", async () => {
     const sid = nextSession("ctx")
     await projectWithNodes(sid, [{ id: "k1", type: "keyframe", params: { prompt: "雨夜站台" } }])
