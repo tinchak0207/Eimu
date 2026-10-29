@@ -36,7 +36,7 @@ import {
   sessionTmpDir,
   unwrapShellCommand,
 } from "../lib/sandbox"
-import { GOAL_CARD_TAG, renderGoalCardFromEntries, visibleUserTextFromPart, type GoalCardEntry } from "../../gateway/project/goal-card.ts"
+import { GOAL_CARD_TAG, renderGoalCardFromEntries, visibleUserTextFromPart, type GoalCardEntry } from "../lib/goal-card.ts"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 

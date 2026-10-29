@@ -393,6 +393,24 @@ cmd_release() {
   run_recon
   stage_from_commit "$stage" "$exp" "$sha"
   log "  预期 $(wc -l < "$exp") 档"
+  # 插件跨树 import 闸（2026-10-29 事故）：stage 只有 .opencode/**，与生产布局同形（生产没有
+  # 爷爷层的 gateway/），插件若 import 到 stage 外的 gateway 树——仓库布局能解析、生产解析不到——
+  # opencode 会静默不加载整支插件，路径白名单／密钥遮罩／SSRF 闸／他租户附件过滤全部失效，
+  # 服务仍显示 active。这里在发布前用同一布局编译每支插件，解析不到就拒绝发布。
+  if [ -d "$stage/plugin" ]; then
+    local pf gate_out
+    gate_out="$stage/.plugin-gate"
+    mkdir -p "$gate_out"
+    for pf in "$stage"/plugin/*.ts; do
+      [ -f "$pf" ] || continue
+      if ! bun build "$pf" --target=bun --packages external --outfile="$gate_out/out.js" >/dev/null 2>"$gate_out/err.txt"; then
+        cat "$gate_out/err.txt" >&2
+        die "插件在部署布局下无法编译：$(basename "$pf")（跨树 import 会让插件在生产静默失效）"
+      fi
+    done
+    rm -rf "$gate_out"
+    log "  插件部署布局编译：PASS"
+  fi
   # 目录模式不可由 stage 决定（2026-10-02 事故，已实锤）：stage 是 mktemp -d（0700），tar 会把
   # "./" 的 0700 记进压缩档，远端 sudo tar -x 再把它盖到生产 .opencode 上 → opencode-server
   # （agentsvc，systemd PrivateTmp）失去 traverse，沙箱对 skills/lib/node_modules 的 ro-bind 与
