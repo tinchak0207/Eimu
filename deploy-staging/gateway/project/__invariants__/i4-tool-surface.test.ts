@@ -20,11 +20,13 @@ const R = join(DEPLOY_STAGING, "opencode-runtime")
 const OPENCODE_JSON = join(R, "opencode.json")
 const EXPERT_JSON = join(DEPLOY_STAGING, "gateway", "expert", "opencode-agents.json")
 
-const MAIN_TOOLS_MAX = 12 // 设计文档 §3 常量表
+const MAIN_TOOLS_MAX = 14 // 设计文档 §3 常量表（2026-10-29：+quote_bundle/skill/subagent_status）
 /** 设计文档 §3.7 第 8 点的十个主席位工具（逐字）。 */
 const DOC_MAIN_TOOLS = [
   "project_get", "project_patch", "project_run", "subagent_dispatch", "subagent_stop",
   "question", "read_image", "search_web", "asset_search", "read",
+  // 2026-10-29 补回：报价合并、技能库（提示词功底）、子代理进度——迁移时静默丢掉的三项。
+  "quote_bundle", "skill", "subagent_status",
 ].sort()
 
 /** 设计文档 §3 的起始超集清单（逐字）。 */

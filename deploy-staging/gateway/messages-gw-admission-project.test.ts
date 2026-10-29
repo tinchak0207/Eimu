@@ -54,6 +54,10 @@ const MAIN_TOOLS = [
   "search_web",
   "asset_search",
   "read",
+  // 2026-10-29 补回：报价合并、技能库（提示词功底）、子代理进度。
+  "quote_bundle",
+  "skill",
+  "subagent_status",
 ].sort()
 
 // R/tools/*.ts 扫描补全：这些工具源码里真的提交生成（不是描述里提到）：
@@ -73,7 +77,7 @@ const PROJECT_TOOLS = ["project_get", "project_patch", "project_run"]
 
 // 权威专家席位清单：expert/expert-ids.json（S16 的 project/lanes.ts 也用它，不另抄第二份）。
 const EXPERTS: string[] = Array.isArray(expertIds.experts) ? expertIds.experts : []
-const CORE_SEATS = new Set(["build", "plan", "compaction", "creator", "creator_legacy", "orchestrator", "orchestrator_legacy"])
+const CORE_SEATS = new Set(["researcher", "build", "plan", "compaction", "creator", "creator_legacy", "orchestrator", "orchestrator_legacy"])
 
 // S14 改前（git HEAD）各席位对象的 sha256：JSON.parse 保序 + 紧凑序列化 ⇒ 逐字指纹。
 const HEAD_OPENCODE_SEATS: Record<string, string> = {

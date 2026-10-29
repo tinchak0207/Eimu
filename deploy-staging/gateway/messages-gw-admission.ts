@@ -615,17 +615,28 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
         // 并且「必读记忆」会把过往教训升格成每轮任务约束。本轮只报阶段名。
         systemSections.push(systemStaticSection("beast-core", BEAST_STABLE_CORE.content))
         const stages = BEAST_STAGE_ALL ? BEAST_STAGE_ORDER : await selectBeastStages(content)
-        maybeAppendSystemTail(state, promptBody, `本轮启用总导演职责。相关阶段：${stages.join("、")}。研究、创作、评审与接续以派遣手册为准，不另找阶段契约。`, "【本轮角色与阶段】")
         const playbookVersion = createHash("sha256").update(playbookBody).digest("hex").slice(0, 12)
-        maybeAppendContextDelta(state, promptBody, "【派遣配方·版本契约】", playbookBody)
-        tailExtraChars += playbookBody.length
         const digestText = `${digestBody}\n派遣配方版本：${playbookVersion}。注册表仅供选择具名专家与交付契约，权限以本轮核实状态为准。`
-        maybeAppendContextDelta(state, promptBody, "【专家注册表·版本资料】", digestText)
-        tailExtraChars += digestText.length
         const skillModule = BEAST_SKILL_LIST ? buildBudgetedSkillModule() : null
-        if (skillModule) {
-          maybeAppendContextDelta(state, promptBody, "【技能索引·版本资料】", skillModule.content)
-          tailExtraChars += skillModule.content.length
+        if (projectSession) {
+          // 工程会话不往 user 尾部贴文本（S14），但派遣手册、专家注册表、技能索引是做事方法，不是本轮事实：
+          // 进稳定 system 段。此前随尾部注入一起被停掉，主席位因此不研究、不评审、不返工。
+          systemSections.push(systemStaticSection(
+            "project-dispatch-playbook",
+            `工程会话：生成一律经工程节点（project_patch 建节点 → project_run 跑），手册里提到的生成工具对应同类节点；研究、创作、评审、接续四阶段照手册执行。\n\n${playbookBody}`,
+          ))
+          systemSections.push(systemStaticSection("project-expert-registry", digestText))
+          if (skillModule) systemSections.push(systemStaticSection("project-skill-index", skillModule.content))
+        } else {
+          maybeAppendSystemTail(state, promptBody, `本轮启用总导演职责。相关阶段：${stages.join("、")}。研究、创作、评审与接续以派遣手册为准，不另找阶段契约。`, "【本轮角色与阶段】")
+          maybeAppendContextDelta(state, promptBody, "【派遣配方·版本契约】", playbookBody)
+          tailExtraChars += playbookBody.length
+          maybeAppendContextDelta(state, promptBody, "【专家注册表·版本资料】", digestText)
+          tailExtraChars += digestText.length
+          if (skillModule) {
+            maybeAppendContextDelta(state, promptBody, "【技能索引·版本资料】", skillModule.content)
+            tailExtraChars += skillModule.content.length
+          }
         }
         // 能力断路：ON 轮把派遣手册注入 system（S14 起 beast 只决定提示词开关段，
         // 不再切席位；旧行为由 <seat>_legacy 承载，见下方统一赋值）。

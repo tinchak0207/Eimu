@@ -35,7 +35,9 @@ function checkRulesBinding(agentsText: string, mappedTags: readonly string[], ma
   if (lineCount > maxLines) throw new Error(`AGENTS.md ${lineCount} 行超过上限 ${maxLines}`)
 
   const tags: string[] = []
-  for (const [i, raw] of lines.entries()) {
+  // 「# 做事方法」起是手艺层（无代码强制点），不参与标签绑定；行数上限仍按全文计。
+  const doctrineAt = lines.findIndex((l) => /^# 做事方法\s*$/.test(l.trim()))
+  for (const [i, raw] of (doctrineAt >= 0 ? lines.slice(0, doctrineAt) : lines).entries()) {
     const line = raw.trim()
     if (!line || HEADING_RE.test(line)) continue
     const m = RULE_LINE_RE.exec(line)

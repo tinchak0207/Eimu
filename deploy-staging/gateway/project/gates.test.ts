@@ -267,9 +267,13 @@ suite("S17 工程模式交付前置检查", () => {
 
   test("规则绑定：AGENTS.md 每条规则带 [R-nn]，与 rules-map 双向精确相等", () => {
     const runtimeDir = join(import.meta.dir, "..", "..", "opencode-runtime")
-    const md = readFileSync(join(runtimeDir, "AGENTS.md"), "utf-8")
+    const full = readFileSync(join(runtimeDir, "AGENTS.md"), "utf-8")
+    expect(full.split("\n").length).toBeLessThanOrEqual(200)
+    // 「# 做事方法」之后是手艺层（研究、评审、返工、并行、说话）：没有代码强制点，不进规则绑定。
+    // 规则层只放有强制点的硬规则；两层分开，硬规则不再挤掉做事方法。
+    const md = full.split(/^# 做事方法\s*$/m)[0]
+    expect(full.includes("\n# 做事方法")).toBe(true)
     const lines = md.split("\n")
-    expect(lines.length).toBeLessThanOrEqual(200)
     expect(lines.filter((l) => l.trim().length > 0).every((l) => l.trim().startsWith("#") || /\[R-\d{2}\]/.test(l))).toBe(true)
 
     const ruleLines = lines.filter((l) => l.trim().startsWith("- "))
