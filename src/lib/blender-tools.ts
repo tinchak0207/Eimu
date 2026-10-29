@@ -851,7 +851,7 @@ export const blenderRenderTool: BlenderToolDef = {
         "画质档：final=强制 RT on + 阴影开 + 采样数至少 32（显式 samples 优先）；preview=只用场景值。仅单帧 still 生效（turntable/多帧动画一律走 1spp + RT off 存活预设）。",
     },
   },
-  async execute(rawArgs, context) {
+  async execute(rawArgs, context = {}) {
     try {
       const engineRaw = asString(rawArgs.render_engine)
       if (engineRaw !== undefined && engineRaw !== "eevee" && engineRaw !== "cycles") {

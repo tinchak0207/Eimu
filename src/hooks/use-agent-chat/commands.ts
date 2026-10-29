@@ -141,7 +141,7 @@ export function useAgentChatCommands(P: AgentChatCommandsProps): {
           dispatchNotice("error", "尚未建立会话，无法发送消息。");
         },
       });
-      if (outcome !== "deliver") return;
+      if (outcome !== "deliver" || sid === null) return; // keepSentenceOnSend的deliver契约保证sid存在；同时显式窄化
       // 记录发送时刻：僵尸自愈要区分「turn.done 之后用户又发了新消息」——
       // 那之后的内容帧属于新回合，不算还魂证据。
       lastSendAtRef.current = Date.now();

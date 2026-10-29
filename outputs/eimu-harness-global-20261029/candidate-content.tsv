@@ -91,6 +91,8 @@ mode	sha256	bytes	path
 100644	02118361c99ec8b36f025288240c8839d27691c119259fa32279d1cf0bc6574f	7768	outputs/eimu-harness-global-20261029/release-dependencies.md
 100644	bf11983cf52c376393cd46d7b4db66793570960829552049274b9f5b1a4b2995	2366	outputs/eimu-harness-global-20261029/template-capability-preservation.md
 100644	0c2a6950c0e7cf4ec64d28c23b82b76c79e8026ee0bdc4540eae9fe80de7ca1d	5533	src/app/api/v1/workflow/compile/route.ts
+100644	0d0492949ce2f4358997105f6ba65f5e0176326db765ce79de583a6de0efbc39	19907	src/hooks/use-agent-chat/commands.ts
+100644	f58888b4b524d60f21ddfc0de4739643d4f46bcd1509f3b48f71394e5793d349	52375	src/lib/blender-tools.ts
 100644	50bd14cc167297520abfd30475ae24b88710a8f732d0f2edf34db250591f63fa	22261	src/lib/supplier-channels.config.ts
 100644	7e52f57538e14a619d7545fda123a5b4434c0bf7371bc2cd16eeee5a6cdbdfb4	5955	src/lib/supplier-channels.test.ts
 100644	c1031918c0c98c50594f6d712a4d43277aaacd3e5a242867009d1fe3cac78bc1	24939	src/lib/workflow-dsl/project-ops.test.ts
