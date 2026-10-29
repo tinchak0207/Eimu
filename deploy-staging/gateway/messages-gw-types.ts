@@ -508,7 +508,8 @@ async function ingressProjectBrief(state: SessionState, content: string): Promis
   const messageId = `u${turn}_${createHash("sha256").update(text).digest("hex").slice(0, 16)}`
   const first = turn === 0
   let recipe: string | null = null
-  if (first) {
+  // 旧席位自己决定要不要用工程图，不替它铺 30 个待办节点（2026-10-29：画布被没人填的节点淹没）。
+  if (first && state.seat === "creator") {
     try {
       const meta = await classifyDispatchMeta(text)
       const id = meta.template?.templateId ?? ""

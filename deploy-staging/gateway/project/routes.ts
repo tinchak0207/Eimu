@@ -493,7 +493,8 @@ async function handleProjectSessionRouteInner(key: string, sessionId: string, re
  * 插件据此逐字节回旧路径。只读 project.json，不跑执行器（插件超时 1.5s）。
  */
 async function handleContext(canonical: string, state: SessionState, body: Record<string, unknown>): Promise<Response> {
-  if (state.projectMode !== true) {
+  // 旧席位（新会话）自己的历史由 opencode 压缩管，不按工程图重建；只有 lean 席位的旧会话走这里。
+  if (state.projectMode !== true || state.seat !== "creator") {
     return jsonError(404, "project mode not enabled for this session", "not_found", "not_project_session")
   }
   const raw = body.messages
@@ -564,7 +565,9 @@ function compactNode(node: ProjectNode): Record<string, unknown> {
 
 async function buildGetReceipt(store: ProjectStore, state: SessionState | undefined, rawArgs: Record<string, unknown> = {}): Promise<ProjectGetReceipt> {
   const args = rawArgs as ProjectGetArgs
-  const view = args.view === "node" || args.view === "events" ? args.view : "digest"
+  // 给了 node 就是看节点（模型常漏写 view 或写错成 view:"full"，此前静默退回 digest，它以为没读到又接着猜）。
+  const hasNode = typeof args.node === "string" && args.node.trim() !== ""
+  const view = args.view === "events" ? "events" : args.view === "node" || (hasNode && args.view !== "digest") ? "node" : "digest"
   let graph = await store.read()
   const explicitSince = typeof args.since === "number" && Number.isFinite(args.since) ? Math.max(0, Math.floor(args.since)) : null
   const since = view === "events" ? (explicitSince ?? Math.max(0, graph.seq - 20)) : graph.seq
@@ -576,14 +579,14 @@ async function buildGetReceipt(store: ProjectStore, state: SessionState | undefi
   }
 
   if (view === "digest") {
-    const digest = renderDigest(graph, await digestInputs(store, graph, state), LIMITS.DIGEST_BYTES - 96)
+    const digest = renderDigest(graph, await digestInputs(store, graph, state), LIMITS.DIGEST_BYTES - 96, { nodeMap: true })
     return fitGetReceipt({ ok: true, version: graph.version, cursor: graph.seq, digest })
   }
 
   if (view === "node") {
     const nodeId = typeof args.node === "string" ? args.node : ""
     const node = nodeId ? graph.nodes[nodeId] : undefined
-    if (!node) return { ok: false, version: graph.version, cursor: graph.seq }
+    if (!node) return { ok: false, version: graph.version, cursor: graph.seq, known: knownNodeIds(graph) }
     return fitGetReceipt({ ok: true, version: graph.version, cursor: graph.seq, node: nodeView(node, args.detail) })
   }
 
@@ -604,6 +607,17 @@ async function buildGetReceipt(store: ProjectStore, state: SessionState | undefi
   const receipt: ProjectGetReceipt = { ok: true, version: graph.version, cursor, events: lines }
   if (truncated) receipt.truncated = true
   return fitGetReceipt(receipt)
+}
+
+/** 节点不存在时回给代理的现有 id（按类型分组），让它一次改对，不再逐个猜。 */
+function knownNodeIds(graph: ProjectGraph): string {
+  const byType = new Map<string, string[]>()
+  for (const id of graph.order?.length ? graph.order : Object.keys(graph.nodes)) {
+    const n = graph.nodes[id]
+    if (!n || id.includes("#")) continue
+    byType.set(n.type, [...(byType.get(n.type) ?? []), id])
+  }
+  return [...byType].map(([t, ids]) => `${t}: ${ids.join(",")}`).join("; ").slice(0, 1500)
 }
 
 async function digestInputs(store: ProjectStore, graph: ProjectGraph, state: SessionState | undefined): Promise<DigestInputs> {

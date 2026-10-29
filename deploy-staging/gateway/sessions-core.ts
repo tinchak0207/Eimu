@@ -66,6 +66,11 @@ export function seatUserId(apiKey: string): string {
   return createHash("sha256").update(apiKey).digest("hex").slice(0, 24)
 }
 
+/** 会话是否仍是 lean 的 `creator` 席位（2026-10-29 前锁存的工程会话）；新会话恒 false。 */
+export function leanSeat(state: { seat?: string } | null | undefined): boolean {
+  return state?.seat === "creator"
+}
+
 /** 纯决策：开关 + userId → 席位/工程模式/野兽模式。allowlist 只看 userId 是否在名单里。 */
 export function seatDecision(opts: {
   mode: ProjectModeSwitch
@@ -75,7 +80,9 @@ export function seatDecision(opts: {
 }): { seat: SessionSeat; projectMode: boolean; beast: boolean } {
   const allow = new Set((opts.allowlist ?? []).map((s) => s.trim().toLowerCase()))
   const projectMode = opts.mode === "on" || (opts.mode === "allowlist" && allow.has(opts.userId.toLowerCase()))
-  return { seat: projectMode ? "creator" : "creator_legacy", projectMode, beast: opts.beastMode === true }
+  // 2026-10-29：工程模式只表示「工程图引擎在线」，席位一律旧架构的 creator_legacy／orchestrator_legacy
+  // （完整工具表、完整规则、每轮注入、子代理唤醒原样保留）。lean 的 `creator` 席位只服务此前锁存的旧会话。
+  return { seat: "creator_legacy", projectMode, beast: opts.beastMode === true }
 }
 
 /** 给一个还没有锁存的 state 写入三个键。已锁存（seat 已存在）＝永不再改。 */

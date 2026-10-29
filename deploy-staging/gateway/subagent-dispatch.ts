@@ -418,7 +418,10 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // 分支跑过之后（几十行以后）才有值 ⇒ OFF 下恒等于「没点名」，覆盖语义是死码。
   // 点名值以 body 原样为准，路由后的 expertId 只用于席位/工具面，不参与「这是不是写词」。
   const rawExpert = typeof body.expert === "string" ? body.expert.trim() : ""
-  if (!isFork) {
+  // 工程会话的先后次序由工程图的节点依赖保证（研究→剧本/歌词→音乐→画面），旧会话的 Jev 词闸/专辑闸/研究在途闸
+  // 不再适用：2026-10-29 实测它把 researcher 判成「依赖未交付歌词」连拒两次。
+  const legacyGates = !isFork && parent.seat !== "creator"
+  if (legacyGates) {
     dispatchGuards = await classifyDispatchGuardsCached(parent.sessionId, label, prompt)
   }
   // 域判定（Jev 题 + 点名覆盖，见 jev-gate 的 isMusicWorkVerdict 等纯函数）。
@@ -430,7 +433,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const isReviewWork = isReviewWorkVerdict(rawExpert, dispatchGuards.isReviewWork)
   // 2026-10-24：本任务的素材是否必须建立在先前研究成果之上（决定是否注入研究正文、
   // 是否在本会话有研究在途时拦下）。点名为准 + Jev 判，零词表。
-  const consumesResearch = !isFork && consumesResearchVerdict(rawExpert, dispatchGuards.consumesResearch)
+  const consumesResearch = legacyGates && consumesResearchVerdict(rawExpert, dispatchGuards.consumesResearch)
   // B（2026-10-24）：本专辑范围内的交付判据。交付簿跨轮累积，「上一轮的歌还在簿里」
   // 会让新专辑还没出曲就放行评审。收窄口径＝**本 turnGen**（同一轮内完成的研究/作词/
   // 谱曲才算本专辑的实体）；turnGen 取不到或子代理跨轮完成（异步 run 落在下一轮）时，
@@ -450,7 +453,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   const lyricDeliveries = deliveryRows.filter((d) => d.agent === "lyricist" && d.contractOk && d.relPath)
   // 在途写词（先词后曲、专辑工序、歌词注入共用；同步内存查询，无额外成本）。
   const lyricsInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "lyricist" && r.status === "running")
-  if (!isFork && (beastOn || rawExpert === "lyricist" || rawExpert === "music")) {
+  if (legacyGates && (beastOn || rawExpert === "lyricist" || rawExpert === "music")) {
     let allowed: unknown
     try {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
@@ -529,7 +532,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // B（2026-10-24）：交付簿跨轮累积，「已交付」收窄到本专辑范围（本 turnGen 或近窗）。
   // P0 修复（2026-10-24 二审）：本对象字面量曾把 `lyricistInFlight` 写两次、后者值取自
   // music 在途，专辑闸于是读到错的旗标。现在两个键一次各写一遍：写词在途、music 在途。
-  if (!isFork) {
+  if (legacyGates) {
     const musicInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "music" && r.status === "running")
     const albumReason = albumPhaseBlockReason(isMusicWork, {
       isLyricistWork,
@@ -608,7 +611,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   //   前 80 字摘要。为什么宁可多给元数据也不让机器猜专辑边界：口令式的「本专辑」在
   //   交付簿里没有可靠锚点（重启回灌无 turnGen、async 跨轮完成），机器猜错一次就是
   //   谱错歌；而 music 读到 label + 摘要就能自己认出哪几份是这张专辑的。
-  if (!isFork && isMusicWork && dispatchGuards.lyricsDependency !== false) {
+  if (legacyGates && isMusicWork && dispatchGuards.lyricsDependency !== false) {
     const inAlbumLyrics = lyricDeliveries.filter((d) => inAlbum(d))
     if (inAlbumLyrics.length) {
       const list = inAlbumLyrics.map((d, i) => `${i + 1}. ${d.relPath}${d.label ? `（${d.label}）` : ""}`).join("\n")
@@ -917,7 +920,7 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   // 工程会话把专家席位换成 `<expert>_p`；非专家的通用子代理用 researcher，不落到 build。
   // 旧会话：点名专家用原席位，未点名用 creator_legacy / orchestrator_legacy。
   // lane 进子运行配置（补丁 Actor 由此取）。旧会话 lane 为空、run 上不写工程栏位。
-  const projectMode = parent.projectMode === true
+  const projectMode = parent.seat === "creator" // lean 席位才走工程席位／lane；新会话是旧席位＋工程引擎
   const beast = deps.beastMode(parent)
   const seat = resolveDispatchAgent({ projectMode, named: expertId || rawExpert || "", beast })
   let lane = projectMode ? normalizeLane(body.lane) : []

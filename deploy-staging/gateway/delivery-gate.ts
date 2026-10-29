@@ -60,12 +60,12 @@ export function deliveryFieldCheckApplies(projectMode: boolean | undefined): boo
  * 旧席位把 agent 原样交回 checkDelivery，行为逐字不变。
  */
 export function checkDeliveryForSession(
-  session: { projectMode?: boolean } | null | undefined,
+  session: { projectMode?: boolean; seat?: string } | null | undefined,
   agent: string | undefined,
   text: string,
   contracts: DeliveryContracts,
   artifactVerify?: ReadonlyArray<ArtifactVerifyRecord> | null,
 ): DeliveryGateResult {
-  const applicable = deliveryFieldCheckApplies(session?.projectMode)
+  const applicable = deliveryFieldCheckApplies(session?.seat === "creator")
   return checkDeliveryFields(applicable ? agent : undefined, text, contracts, artifactVerify)
 }

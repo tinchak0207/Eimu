@@ -790,7 +790,7 @@ export function handleOpencodeEvent(event: any): void {
           const evidenceCount =
             state.claimEvidence && state.claimEvidence.gen === gen ? state.claimEvidence.items.length : 0
           if (
-            state.projectMode !== true &&
+            state.seat !== "creator" &&
             shouldBlockCompletionForUnbackedClaim({
               claim,
               evidenceCount,

@@ -166,6 +166,7 @@ export interface ProjectGetArgs { view?: "digest" | "node" | "events"; node?: No
 export interface ProjectGetReceipt {      // digest≤6144B；node≤4096B；events≤20 行且总≤2048B
   ok: boolean; version: number; cursor: number
   digest?: string; node?: NodeView; events?: string[]; truncated?: boolean
+  known?: string                         // 节点不存在时：现有节点 id（按类型分组）
 }
 export interface NodeView { id: NodeId; type: NodeType; status: NodeStatus; intent: string; params: Record<string, Json>; inputs: Record<string, InputRef>
   outputs: { port: string; artifactId: ArtifactId; sha256: Sha256; mime: string; bytes: number; durationSec?: number; url?: string }[]

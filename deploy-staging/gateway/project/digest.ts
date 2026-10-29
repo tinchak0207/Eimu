@@ -87,6 +87,29 @@ function statusCounts(graph: Readonly<ProjectGraph>): string {
   return `## 状态计数\nv${graph.version} · 节点 ${total}${run}${graph.templateId ? ` · 配方 ${graph.templateId}` : ""}${parts.length ? ` · ${parts.join(" / ")}` : ""}`
 }
 
+/**
+ * 节点地图：按类型列出全部节点 id（非 pending 的附状态）。digest 是代理认识工程图的唯一入口——
+ * 2026-10-29 实测：digest 只给计数不给 id，代理只好逐个猜 id（clip/clips/shots/storyboard…）连调十几次 project_get。
+ * level 1＝已完成的只计数；level 2＝每类只计数。
+ */
+function nodesSection(graph: Readonly<ProjectGraph>, level: number): string {
+  const ids = graph.order?.length ? graph.order.filter((id) => graph.nodes[id]) : Object.keys(graph.nodes)
+  const byType = new Map<string, ProjectGraph["nodes"][string][]>()
+  for (const id of ids) {
+    const n = graph.nodes[id]!
+    if (n.id.includes("#")) continue // forEach 实例跟着模板节点走，不单列
+    byType.set(n.type, [...(byType.get(n.type) ?? []), n])
+  }
+  const rows = [...byType].map(([type, nodes]) => {
+    if (level >= 2) return `- ${type} ${nodes.length}`
+    const shown = level >= 1 ? nodes.filter((n) => n.status !== "done") : nodes
+    const done = nodes.length - shown.length
+    const list = shown.map((n) => (n.status === "pending" ? n.id : `${n.id}[${n.status}]`)).join("、")
+    return `- ${type}：${list}${done ? `${list ? "；" : ""}已完成 ${done}` : ""}`
+  })
+  return `## 节点（view:"node" 用这些 id）\n${rows.length ? rows.join("\n") : "无"}`
+}
+
 function failedSection(graph: Readonly<ProjectGraph>, level: number): string {
   const nodes = failedNodes(graph)
   const head = `## 失败与阻塞（${nodes.length}）`
@@ -198,12 +221,15 @@ export function renderDigest(
   graph: Readonly<ProjectGraph>,
   inputs: DigestInputs = {},
   maxBytes: number = LIMITS.DIGEST_BYTES,
+  opts: { nodeMap?: boolean } = {},
 ): string {
   // 固定顺序输出（slots 顺序 = 段落顺序）；priority 数字越小越先被压缩（越可牺牲）。
   const slots = [
     { key: "status", priority: 7, render: (l: number) => statusCounts(graph) },
     { key: "failed", priority: 10, render: (l: number) => failedSection(graph, l) },
     { key: "pinned", priority: 9, render: (l: number) => pinnedSection(graph, l) },
+    // 节点地图只进 project_get 的 digest；每轮注入上下文的 digest 不带（守住 I1 的 64KB 与最近 6 步）。
+    ...(opts.nodeMap ? [{ key: "nodes", priority: 3, render: (l: number) => nodesSection(graph, l) }] : []),
     { key: "decisions", priority: 2, render: (l: number) => decisionsSection(graph, inputs, l) },
     { key: "budget", priority: 6, render: (l: number) => budgetSection(graph, inputs, l) },
     { key: "env", priority: 5, render: (_l: number) => environmentSection(inputs) },
@@ -214,7 +240,7 @@ export function renderDigest(
   const total = () => slots.reduce((n, s) => n + bytes(s.render(levels.get(s.key) ?? 0)) + 1, 0)
   let current = total()
   // 从最可牺牲的段开始升到最小档。
-  for (const prio of [1, 2, 4, 5, 6, 7, 9, 10]) {
+  for (const prio of [1, 2, 3, 4, 5, 6, 7, 9, 10]) {
     for (const s of slots) {
       if (s.priority !== prio) continue
       while (current > maxBytes && (levels.get(s.key) ?? 0) < 2) {
@@ -227,7 +253,7 @@ export function renderDigest(
   }
   // 仍超限：把非保护段整段删掉（事件 → 决定 → 偏好 → 环境 → 预算 → 计数）；失败/钉住段保留。
   const PROTECTED = new Set(["failed", "pinned"])
-  for (const key of ["events", "decisions", "prefs", "env", "budget", "status"]) {
+  for (const key of ["events", "decisions", "nodes", "prefs", "env", "budget", "status"]) {
     if (current <= maxBytes) break
     if (PROTECTED.has(key)) continue
     const s = slots.find((x) => x.key === key)!

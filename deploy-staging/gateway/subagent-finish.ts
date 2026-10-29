@@ -448,7 +448,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
     : scrubSubagentPayload(summary)
   // S16（2026-10-28，设计 §3.8）：工程模式回父内容有界（≤4096B、nodeIds ≤20；全文在节点产物），
   // 且完成事件写进 events.jsonl、不唤醒父会话。旧会话（projectMode 非 true）逐字不变。
-  const projectMode = parentStateOf(run)?.projectMode === true
+  const projectMode = parentStateOf(run)?.seat === "creator"
   const compactSummary = projectMode ? compactSubagentSummary(visibleSummary, run.lane ?? []) : null
   const parentSummary = compactSummary ? compactSummary.text : visibleSummary
   run.summary = parentSummary

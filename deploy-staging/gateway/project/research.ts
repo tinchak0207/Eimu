@@ -11,7 +11,9 @@ import type { Json, NewNode, NodeId, ProjectGraph, ProjectNode } from "./types.t
 export const RESEARCH_NODE: NodeId = "research"
 export const RESEARCH_PREFIX = "research_"
 /** 需要研究先行的配方（多步成片类）；单图／单段视频这类一句话的活不加，保住「几个字出图」。 */
-export const RESEARCH_RECIPES: ReadonlySet<string> = new Set(["feature_film", "novel_film", "novel_ip", "shortdrama_visual", "ecom_launch"])
+// 2026-10-29：暂空——旧席位的研究靠它自己并行派研究子代理（落文件，不写节点），强加研究节点会让它的付费节点被闸住。
+// 研究节点机制保留：图里手动加了 research/research_* 节点时，闸与写权限照常生效。
+export const RESEARCH_RECIPES: ReadonlySet<string> = new Set<string>()
 export const RESEARCH_MIN_SOURCES = 3
 export const RESEARCH_MIN_CHARS = 200
 

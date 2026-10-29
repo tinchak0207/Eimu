@@ -6,7 +6,7 @@ import { gateUserInput } from "./jev-gate"
 import { isMultiStepAvProductionIntent } from "./canvas-write-gate.ts"
 import { jsonError } from "./gw-lib.ts"
 import { MEMORY_SHARED_ENABLED, UPSTREAM_HARD_TOKEN_LIMIT, PRE_DISPATCH_COMPACT_WAIT_MS } from "./constants-gateway.ts"
-import { sessions, markDirty, getOwnedSession } from "./sessions-core.ts"
+import { sessions, markDirty, getOwnedSession, leanSeat } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { normalizeUserSettings, PROFILE_ONBOARDING_DIRECTIVE } from "./sessions-http.ts"
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
@@ -44,7 +44,7 @@ export function resolvePromptSeat(input: {
   seat?: "creator" | "creator_legacy"
   beast?: boolean
 }): PromptSeat {
-  if (input.projectMode === true || input.seat === "creator") return "creator"
+  if (input.projectMode === true || input.seat === "creator") return "creator"  // projectMode 此处＝lean 席位（调用方传 leanSeat）
   return input.beast === true ? "orchestrator_legacy" : "creator_legacy"
 }
 
@@ -71,8 +71,8 @@ export function shouldBuildTemplateSkeleton(input: {
 // 所以 projectMode 会话这里一处都不追加；旧席位路径是逐字节不变的薄 pass-through。
 // 注意：sanitizeUserContent / fenceInjectedData / 认证与安全清洗不在此列——它们作用于
 // 输入与权限，本函数只决定「要不要往 user 消息尾部贴文本」。
-export function turnTailAllowed(state: Pick<SessionState, "projectMode">): boolean {
-  return state.projectMode !== true
+export function turnTailAllowed(state: Pick<SessionState, "seat">): boolean {
+  return !leanSeat(state)
 }
 
 export function maybeAppendSystemTail(
@@ -404,10 +404,10 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   if (userTemplateAttached) {
     console.log(`[gateway] template_guard: PROMPT_SKELETON skipped (user template attached) session=${state.sessionId}`)
   }
-  const skeletonTask = shouldBuildTemplateSkeleton({ projectMode: state.projectMode, userTemplateAttached })
+  const skeletonTask = shouldBuildTemplateSkeleton({ projectMode: leanSeat(state), userTemplateAttached })
     ? buildTemplateSkeletonForPrompt(state, content)
     : Promise.resolve()
-  if (state.projectMode === true) {
+  if (leanSeat(state)) {
     console.log(`[gateway] template_guard: PROMPT_SKELETON skipped (project mode) session=${state.sessionId}`)
   }
   if (await gateUserInput(`user:${state.sessionId}`, content)) {
@@ -586,7 +586,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     {
       // S14（设计文档 §3.7 第 9 点）：工程模式下 beast 取创建时锁存值（会话内不变），
       // 旧会话仍每轮读实时设置（旧行为冻结）。
-      const projectSession = state.projectMode === true || state.seat === "creator"
+      const projectSession = leanSeat(state)
       const liveBeastMode = loadUserSettings(key)?.beast_mode === true
       const beastMode = resolveBeastMode({ projectMode: projectSession, latched: state.beast }, liveBeastMode)
       if (beastMode === true) {

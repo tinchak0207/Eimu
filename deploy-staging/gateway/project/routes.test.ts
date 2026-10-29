@@ -285,6 +285,16 @@ describe("GET 三种 view", () => {
       expect(node.node.params.prompt).toBe("第一帧")
       expect(bytes(node)).toBeLessThanOrEqual(LIMITS.NODE_VIEW_BYTES)
 
+      // digest 列出节点 id；只给 node（漏写 view 或写错 view）也按节点读；节点不存在回现有 id。
+      expect(digest.digest).toContain("- keyframe：k1、k2")
+      const implicit = await (await internal("/internal/project/get", { session_id: sid, node: "k2" })).json() as any
+      expect(implicit.node?.id).toBe("k2")
+      const wrongView = await (await internal("/internal/project/get", { session_id: sid, node: "k2", view: "full" })).json() as any
+      expect(wrongView.node?.id).toBe("k2")
+      const missing = await (await internal("/internal/project/get", { session_id: sid, view: "node", node: "clips" })).json() as any
+      expect(missing.ok).toBe(false)
+      expect(missing.known).toBe("keyframe: k1,k2")
+
       const events = await (await internal("/internal/project/get", { session_id: sid, view: "events", since: 0 })).json() as any
       expect(events.ok).toBe(true)
       expect(Array.isArray(events.events)).toBe(true)

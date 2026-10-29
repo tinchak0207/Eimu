@@ -15,7 +15,7 @@ export const projectGetArgsSchema = tool.schema.object({
 
 export default tool({
   description:
-    "读工程图（唯一真相）。开始任何工作前先 view:\"digest\" 看现状（状态计数/失败与阻塞/钉住与漂移/待决问题/预算授权/最近事件）。\n" +
+    "读工程图（唯一真相）。开始任何工作前先 view:\"digest\" 看现状（状态计数/节点 id 地图/失败与阻塞/钉住与漂移/待决问题/预算授权/最近事件）。digest 已含最近事件，不必再从 0 读 events。\n" +
     "· view:\"digest\"：工程摘要，确定性生成，≤6144B。\n" +
     "· view:\"node\" + node:\"<id>\"：单节点详情（params/inputs/outputs/pinned/drift/lastRun/error）；detail:\"full\" 取完整 guidance。\n" +
     "· view:\"events\" + since:<cursor>：seq 之后的事件（≤20 行）。带上回执里的 cursor 继续取，不要从 0 重读。\n" +
@@ -28,7 +28,8 @@ export default tool({
     }
     const receipt = r.data ?? {}
     if (receipt.ok !== true) {
-      return fail("node_not_found", "节点不存在；先用 view:\"digest\" 看现有节点 id。")
+      const known = typeof receipt.known === "string" && receipt.known ? `现有节点：${receipt.known}` : "先用 view:\"digest\" 看「节点」一节里的 id。"
+      return fail("node_not_found", `节点 ${String(args.node ?? "")} 不存在。${known}`)
     }
     return ok(receipt as Record<string, unknown>)
   },

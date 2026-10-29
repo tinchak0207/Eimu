@@ -5,7 +5,7 @@
 // 前缀＋本档头＋单行 import，其余一字未动。
 import type { MemoryDocLite, SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
-import { getOwnedSession, sessions, deleteOpencodeSession, seatDecision, projectModeSwitch, seatUserId, projectModeAllowlist } from "./sessions-core.ts"
+import { getOwnedSession, sessions, deleteOpencodeSession, leanSeat, seatDecision, projectModeSwitch, seatUserId, projectModeAllowlist } from "./sessions-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { hashKey } from "./auth-gw.ts"
 import { loadUserSettings, saveSession } from "./persistence.ts"
@@ -22,7 +22,7 @@ import { MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // 工程席位，旧席位会话（含缺键→creator_legacy）的野兽模式必须走 orchestrator_legacy
 // （原席位逐字拷贝），不能指到新的 orchestrator。工程会话恒 creator，beast 不换席位、也不读设置。
 export function beastAgentField(state: SessionState): Record<string, string> {
-  if (state.projectMode === true || state.seat === "creator") return { agent: "creator" }
+  if (leanSeat(state)) return { agent: "creator" }
   try {
     if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator_legacy" }
   } catch {}
