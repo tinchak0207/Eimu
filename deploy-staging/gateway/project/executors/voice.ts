@@ -12,7 +12,7 @@ import type { ExecContext, ExecErrorCode, ExecResult, NodeExecutor, Output, Proj
 import { NODE_SPECS } from "../specs"
 import { synthesizeSpeech, TTS_MODEL_ID, type SpeechDeps, type SynthesisErrorCode } from "../speech"
 import { restorePaidAudioOutputs } from "./music.ts"
-import type { SharedJournalOperation } from "../generation-journal.ts"
+import type { SharedGenerationOperation as SharedJournalOperation } from "../types.ts"
 
 /** ffprobe 实测音频时长（秒）；拿不到 → null（不阻断交付，旧路径也从未要求时长）。 */
 export type DurationProbe = (file: string) => Promise<number | null>

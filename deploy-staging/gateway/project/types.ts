@@ -214,7 +214,7 @@ export interface NodeSpecLite { type: NodeType; specVersion: number; signedParam
 
 // ===== 执行器 =====
 export interface ExecContext {
-  generationOperation?: (req: GenerationOperationReq) => Promise<import("./generation-journal.ts").SharedJournalOperation>
+  generationOperation?: (req: GenerationOperationReq) => Promise<SharedGenerationOperation>
   project: Readonly<ProjectGraph>; node: Readonly<ProjectNode>
   signature: string; runId: RunId; attempt: number; take: number
   sessionId: string; session: unknown                      // 网关 SessionState，只供执行器取 apiKey/用户设置
@@ -250,6 +250,17 @@ export interface SubmitGenerationReq {
 export interface GenerationOperationReq {
   kind: "music" | "voice"; projectId: string; nodeId: string; signature: string; runId: string; attempt: number; take: number; sessionId: string
   idemKey: string; model: string; payload: Record<string, Json>; coins: number
+}
+
+/** 纯契约端口；前端DSL也引用本文件，不能反向依赖Bun/服务端journal实现。 */
+export interface SharedGenerationOperation {
+  read(): any
+  reserve(): {row:any;submitAllowed:boolean}
+  accept(taskId:string,receipt:Record<string,unknown>):unknown
+  reject():void
+  refunded():void
+  settle(actualCoins:number):void
+  unknown():void
 }
 export type SubmitGenerationRes =
   | { ok: true; taskId: string; urls: string[]; costCoins: number; requestId: string; executedModel: string; reusedOperation?: boolean; originalCostCoins?: number }

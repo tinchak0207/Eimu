@@ -16,7 +16,7 @@ import { defaultClientTimeoutMs } from "../exec-bridge-client.ts"
 import { idempotencyKeyOf } from "../submit-generation.ts"
 import { releaseGenerationCharge, reserveGenerationCharge, settleGenerationCharge } from "../ledger.ts"
 import { sharedProjectStore } from "../store.ts"
-import type { SharedJournalOperation } from "../generation-journal.ts"
+import type { SharedGenerationOperation as SharedJournalOperation } from "../types.ts"
 
 /** 耐久成功回执只能用实际字节恢复，不能再向供应商生成或凭旧路径假成功。 */
 export async function restorePaidAudioOutputs(ctx: ExecContext, row: { registration_json?: string }): Promise<Output[]> {

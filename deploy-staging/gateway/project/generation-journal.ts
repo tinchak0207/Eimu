@@ -7,7 +7,7 @@ import { sharedGenerationScope } from "../generation-scope.ts"
 export { sharedGenerationScope } from "../generation-scope.ts"
 import type { SubmissionIdentity } from "../../opencode-runtime/lib/image-journal.ts"
 import type { ProjectStore } from "./store.ts"
-import type { SubmitGenerationReq, GenerationOperationReq, ExecBridgeClient } from "./types.ts"
+import type { SubmitGenerationReq, GenerationOperationReq, ExecBridgeClient, SharedGenerationOperation } from "./types.ts"
 import type { ProjectGraph } from "./types.ts"
 import { readProjectLedgerOperations, type LedgerOperation } from "./project-ledger-index.ts"
 
@@ -75,7 +75,7 @@ export function sharedJournalOperation(journal: Journal, trustedOwnerScope: stri
     settle(actualCoins: number) { journal.settleSubmission(identity.scope, identity.request_id, actualCoins) },
     /** 未知不是拒收。保留原预留，重复入口只可读，不获得再次 POST 的许可。 */
     unknown() { journal.finishSubmission(identity.scope, identity.request_id, "submitting") },
-  }
+  } satisfies SharedGenerationOperation
 }
 export type SharedJournalOperation = ReturnType<typeof sharedJournalOperation>
 
