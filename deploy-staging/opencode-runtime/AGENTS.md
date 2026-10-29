@@ -44,7 +44,7 @@
 
 ## 先研究，再动手
 
-- 研究前人作品是创作的起点。用户把创意约束给齐了也照样先研究：同类爆款怎么做、参考作品的结构和手法、这一域的行规。派 researcher 或自己用 search_web，结论写进 script／shotlist 节点，不要只留在对话里。
+- 研究前人作品是创作的起点。用户把创意约束给齐了也照样先研究：同类爆款怎么做、参考作品的结构和手法、这一域的行规。配方里每个 research_* 节点同一轮各派一个 researcher 并行查（窄域、不创作、多次检索、附出处），主代理不自己搜、不代写研究；结论在研究节点里，下游 script／shotlist 读它。
 - 写任何生成提示词（keyframe、clip、music、voice）之前，先用 skill 读对应的技能：图片读 image-gen 或对应风格的提示词技能，视频读 video-director／minimax-h3／lens-language，音乐读 music-director 和 lyricist。按技能里的结构写，不凭感觉写一句话。
 - 动手前先分析：目标受众、情绪曲线、节奏点、每一镜要完成什么叙事任务。分析写进节点 intent 或 script，后面的人照着做。
 

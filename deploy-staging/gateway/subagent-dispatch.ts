@@ -21,6 +21,7 @@ import { parentOwnsRunId } from "./subagent-messages.ts"
 import { checkSeatTools, formatSeatPreflightNotice, loadSeatToolTable, type SeatToolCheck } from "./seat-preflight.ts"
 // S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位映射与 lane 规范化（旧会话不经过这两步）。
 import { inferLane, isExpertSeat, laneBriefLine, normalizeLane, projectSeatOf } from "./project/lanes.ts"
+import { claimResearchNode, isResearchNode, researchBriefLine } from "./project/research.ts"
 
 /** 子代理 prompt_async 的席位。空字符串会被 opencode 落到 build，这里始终返回一个席位名。 */
 export function resolveDispatchAgent(input: { projectMode: boolean; named: string; beast: boolean }): string {
@@ -922,11 +923,18 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   let lane = projectMode ? normalizeLane(body.lane) : []
   // 工程会话：没给 lane 就按专家类型从图里推；不论哪种都把 lane 写进任务书——子代理此前不知道自己能写哪些节点。
   if (projectMode) {
-    const expert = expertId || rawExpert || ""
+    const expert = seat === "researcher" ? "researcher" : expertId || rawExpert || ""
     try {
       const inferred = expert ? await inferLane(parent.sessionId, expert) : { lane: [] as string[] }
+      const graph = "graph" in inferred ? inferred.graph : undefined
       if (!lane.length) lane = inferred.lane
-      prompt = `${laneBriefLine(lane, "graph" in inferred ? inferred.graph : undefined)}\n\n${prompt}`
+      // researcher：每派一个认领一个研究方向（在途子代理已占的跳过），同一轮并行派三个各拿一个。
+      if (seat === "researcher" && !lane.length && graph) {
+        const busy = new Set((byParent.get(parent.sessionId) ?? []).filter((r) => !r.stopped && (r.status === "running" || r.status === "interrupted" || r.status === "suspended")).flatMap((r) => r.lane ?? []))
+        lane = claimResearchNode(parent.sessionId, graph, busy)
+      }
+      const research = lane.length === 1 && graph && isResearchNode(graph.nodes[lane[0]!])
+      prompt = `${research ? researchBriefLine(lane[0]!, graph) : laneBriefLine(lane, graph)}\n\n${prompt}`
     } catch (e) {
       console.warn(`[gateway] subagent lane inference failed: session=${parent.sessionId} expert=${expert}: ${(e as Error)?.message ?? e}`)
     }

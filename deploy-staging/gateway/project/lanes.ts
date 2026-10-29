@@ -3,6 +3,7 @@
 // checkLane（Actor={kind:"subagent",runId,lane} 越界 → LANE_VIOLATION）；本档只负责把 lane
 // 规范化、在派发时传进子运行配置，并给出同一套语义的纯函数供接线处自检。
 import expertIds from "../expert/expert-ids.json"
+import { isResearchNode } from "./research.ts"
 import { NODE_ID_RE } from "./specs.ts"
 import { openProject, ProjectNotFoundError } from "./store.ts"
 import type { Json, NodeId, ProjectEvent, RunId } from "./types.ts"
@@ -67,7 +68,8 @@ export function inferLaneFromGraph(graph: { nodes: Record<string, { id: string; 
   const types = EXPERT_NODE_TYPES[expertBase(expert)]
   if (!types) return []
   const ids = graph.order?.length ? graph.order : Object.keys(graph.nodes)
-  const mine = ids.map((id) => graph.nodes[id]).filter((n) => n && types.includes(n.type))
+  // 研究节点归 researcher（派发时按方向逐个认领），不进作词／编剧的 lane。
+  const mine = ids.map((id) => graph.nodes[id]).filter((n) => n && types.includes(n.type) && !isResearchNode(n))
   const open = mine.filter((n) => n.status !== "done")
   const done = mine.filter((n) => n.status === "done")
   return normalizeLane([...open, ...done].map((n) => n.id))

@@ -95,16 +95,20 @@ describe("R-19 产物卡投影", () => {
 
 describe("R-20 研究先行", () => {
   test("研究没写满 → 付费节点被拒；写满 3 个出处后放行；代理删不掉研究节点", async () => {
-    const { researchGate, researchIssues, RESEARCH_NODE } = await import("./research.ts")
+    const { researchGate, researchIssues, researchNodeIds, RESEARCH_DIRECTIONS } = await import("./research.ts")
     const { store } = await ensureProject(sid("research"))
     const out = await store.applyPatches({ ops: [{ op: "apply_recipe", recipe: "feature_film", params: {} }] }, { kind: "user" })
     expect(out.receipt.rejected).toEqual([])
     let g = await store.read()
-    expect(g.nodes[RESEARCH_NODE]?.type).toBe("script")
-    expect((g.nodes.script?.inputs as any)?.research?.from).toBe(RESEARCH_NODE)
+    const ids = researchNodeIds(g)
+    expect(ids).toEqual(RESEARCH_DIRECTIONS.map((d) => d.id))
+    for (const id of ids) {
+      expect(g.nodes[id]?.type).toBe("script")
+      expect((g.nodes.script?.inputs as any)?.[id]?.from).toBe(id)
+    }
     expect(researchGate(g)).toContain("研究先行")
 
-    const del = await store.applyPatches({ ops: [{ op: "remove_node", node: RESEARCH_NODE }] }, { kind: "agent" })
+    const del = await store.applyPatches({ ops: [{ op: "remove_node", node: ids[0] }] }, { kind: "agent" })
     expect(del.receipt.rejected.map((r) => r.code)).toContain("ACTOR_FORBIDDEN")
 
     const thin = "参考了获奖作品 https://a.example/1"
@@ -116,13 +120,49 @@ describe("R-20 研究先行", () => {
       "验收：每段情绪转折对齐小节线，副歌镜头时长不超过两小节，关键帧风格统一分数不低于 70。主歌每镜四到六秒，桥段放慢到八秒以上留呼吸；结尾回到开场意象形成闭环，片尾不加字卡。色彩上青琥珀对冲，湿面反光承担节奏点的高光闪烁，人物在副歌才第一次正面看镜头。",
     ].join("\n")
     expect(researchIssues(full)).toEqual([])
-    await store.applyPatches({ ops: [{ op: "write_result", node: RESEARCH_NODE, value: full }] }, { kind: "agent" })
+
+    // 主代理不能代写研究（write_result 和 set params.text 都不行），研究归 researcher 子代理。
+    const byAgent = await store.applyPatches({ ops: [{ op: "write_result", node: ids[0], value: full }] }, { kind: "agent" })
+    expect(byAgent.receipt.rejected.map((r) => r.code)).toContain("ACTOR_FORBIDDEN")
+    const bySet = await store.applyPatches({ ops: [{ op: "set", node: ids[0], path: "params.text", value: full }] }, { kind: "agent" })
+    expect(bySet.receipt.rejected.map((r) => r.code)).toContain("ACTOR_FORBIDDEN")
+
+    // 写满一个方向还不够：闸看全部研究节点。
+    await store.applyPatches({ ops: [{ op: "write_result", node: ids[0], value: full }] }, { kind: "subagent", runId: "r0", lane: [ids[0]] })
+    g = await store.read()
+    expect(researchGate(g)).toContain(ids[1])
+    expect(researchGate(g)).not.toContain(ids[0])
+    for (const [i, id] of ids.slice(1).entries()) {
+      await store.applyPatches({ ops: [{ op: "write_result", node: id, value: full }] }, { kind: "subagent", runId: `r${i + 1}`, lane: [id] })
+    }
     g = await store.read()
     expect(researchGate(g)).toBeNull()
 
     // 非多步配方不加研究节点（保住几个字出图）
     const { store: single } = await ensureProject(sid("single"))
     await single.applyPatches({ ops: [{ op: "apply_recipe", recipe: "single_image", params: {} }] }, { kind: "user" })
-    expect((await single.read()).nodes[RESEARCH_NODE]).toBeUndefined()
+    expect(researchNodeIds(await single.read())).toEqual([])
+  })
+
+  test("并行派三个 researcher → 各认领一个方向；在途占用的跳过；作词 lane 不含研究节点", async () => {
+    const { claimResearchNode, resetResearchClaims, researchBriefLine } = await import("./research.ts")
+    resetResearchClaims()
+    const g: any = {
+      order: ["research_ref", "research_craft", "research_audience", "script"],
+      nodes: {
+        research_ref: { id: "research_ref", type: "script", status: "pending", params: {}, intent: "头部作品拆解" },
+        research_craft: { id: "research_craft", type: "script", status: "pending", params: {} },
+        research_audience: { id: "research_audience", type: "script", status: "pending", params: {} },
+        script: { id: "script", type: "script", status: "pending", params: {} },
+      },
+    }
+    const picks = [claimResearchNode("p1", g), claimResearchNode("p1", g), claimResearchNode("p1", g), claimResearchNode("p1", g)]
+    expect(picks).toEqual([["research_ref"], ["research_craft"], ["research_audience"], []])
+    resetResearchClaims()
+    expect(claimResearchNode("p2", g, new Set(["research_ref"]))).toEqual(["research_craft"])
+    expect(inferLaneFromGraph(g, "lyricist")).toEqual(["script"])
+    const brief = researchBriefLine("research_ref", g)
+    expect(brief).toContain("不做创作")
+    expect(brief).toContain("write_result 写进 research_ref")
   })
 })

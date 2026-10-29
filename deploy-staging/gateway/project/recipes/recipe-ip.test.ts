@@ -17,6 +17,7 @@ import { novelIpRecipe } from "./novel_ip"
 import { artCurationRecipe } from "./art_curation"
 import { artStyleRecipe } from "./art_style"
 import { RUBRICS } from "../rubrics"
+import { isResearchNode } from "../research"
 
 const ISO = "2026-10-28T00:00:00.000Z"
 const OLD_EXEC_KINDS = new Set(["image", "video", "audio", "film"])
@@ -213,7 +214,8 @@ function genEdges(graph: ProjectGraph): number {
 }
 
 function authoredRatio(graph: ProjectGraph): number {
-  const exec = Object.values(graph.nodes).filter((n) => !(n.forEach && !n.id.includes("#")))
+  // 研究节点是 apply_recipe 加的前置工序（R-20），不算配方自身的作者节点。
+  const exec = Object.values(graph.nodes).filter((n) => !(n.forEach && !n.id.includes("#")) && !isResearchNode(n))
   return exec.filter((n) => AUTHORED_TYPES.has(n.type)).length / exec.length
 }
 

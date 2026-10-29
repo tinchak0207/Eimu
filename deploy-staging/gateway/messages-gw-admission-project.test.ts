@@ -51,7 +51,6 @@ const MAIN_TOOLS = [
   "subagent_stop",
   "question",
   "read_image",
-  "search_web",
   "asset_search",
   "read",
   // 2026-10-29 补回：报价合并、技能库（提示词功底）、子代理进度。

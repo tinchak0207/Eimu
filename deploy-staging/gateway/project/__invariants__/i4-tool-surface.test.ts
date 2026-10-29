@@ -24,7 +24,7 @@ const MAIN_TOOLS_MAX = 14 // 设计文档 §3 常量表（2026-10-29：+quote_bu
 /** 设计文档 §3.7 第 8 点的十个主席位工具（逐字）。 */
 const DOC_MAIN_TOOLS = [
   "project_get", "project_patch", "project_run", "subagent_dispatch", "subagent_stop",
-  "question", "read_image", "search_web", "asset_search", "read",
+  "question", "read_image", "asset_search", "read",
   // 2026-10-29 补回：报价合并、技能库（提示词功底）、子代理进度——迁移时静默丢掉的三项。
   "quote_bundle", "skill", "subagent_status",
 ].sort()
@@ -190,14 +190,14 @@ describe("I4 主席位工具面", () => {
 // video_fetch / video_result_fetch / video_analyze / video_transcribe / video_measure /
 // video_evidence / video_quote 是取回或感知，不在这份生成清单里。bash/write/edit 不是生成工具。
 // 工程会话可达席位（creator、orchestrator、researcher、全部 *_p）不得启用上述并集。
-const RESEARCHER_TOOLS = ["grep", "project_get", "read", "read_image", "search_web"].sort()
+const RESEARCHER_TOOLS = ["grep", "project_get", "project_patch", "read", "read_image", "search_web", "skill", "webfetch"].sort()
 const CREATOR_PROMPT = [
   "工程图是唯一工作面。读工程用 project_get，改工程用 project_patch，跑工程用 project_run。[R-01]",
   "本席位不直接调用生成工具。要产出画面、影片或声音，改节点后 project_run。[R-02]",
   "专家任务派 subagent_dispatch。子代理只能写自己 lane 里的节点，越界写入会被拒绝。[R-12]",
   "问用户用 question。报价达到确认阈值且没有持续授权时，停下来等确认；持续授权只认网关核实的 auto/full。[R-07][R-08]",
   "交付只认 export 产物，口头说完成不算交付。[R-03]",
-  "先铺满整条产线再细化；专家的活派给专家，互不依赖的同一轮并行派；每出一个产物、每派出或收回一个子代理，就用一两句话告诉用户进展和下一步。[R-17][R-18][R-19]",
+  "研究派 researcher：图里每个 research_* 节点同一轮各派一个，并行查，你自己不搜也不写研究。先铺满整条产线再细化；专家的活派给专家，互不依赖的同一轮并行派；每出一个产物、每派出或收回一个子代理，就用一两句话告诉用户进展和下一步。[R-17][R-18][R-19]",
 ].join("\n")
 const ORCHESTRATOR_PROMPT = [
   "工程图是唯一工作面。你负责读工程、改工程、派子代理、问用户、交付。",
@@ -206,7 +206,7 @@ const ORCHESTRATOR_PROMPT = [
   "专家任务派 subagent_dispatch。子代理只能写自己 lane 里的节点。[R-12]",
   "问用户用 question。收费确认按网关核实的授权与阈值执行。[R-07][R-08]",
   "交付只认 export 产物。[R-03]",
-  "先铺满整条产线再细化；专家的活派给专家，互不依赖的同一轮并行派；每出一个产物、每派出或收回一个子代理，就用一两句话告诉用户进展和下一步。[R-17][R-18][R-19]",
+  "研究派 researcher：图里每个 research_* 节点同一轮各派一个，并行查，你自己不搜也不写研究。先铺满整条产线再细化；专家的活派给专家，互不依赖的同一轮并行派；每出一个产物、每派出或收回一个子代理，就用一两句话告诉用户进展和下一步。[R-17][R-18][R-19]",
 ].join("\n")
 const CREATOR_LEGACY_PROMPT = "用户直接跟你说话，你要么当场把东西做出来，要么派给专家做。手上开放的工具就用来做图、做片、做音乐。开工前按任务读 .opencode/skills/_prompt-routing/creator-guide.md 里对应的那节和本域配方，不相关的域不要加载。不是一句话能办完的事先研究，做完要有人独立看过。多步骤的活派 subagent_dispatch。只写歌词派 lyricist；整首歌要原创歌词的，先 lyricist 后 music；用户给了完整原词就直接照原样谱曲；纯器乐不派歌词。其余规则见 workspace/AGENTS.md。"
 const ORCHESTRATOR_LEGACY_PROMPT = "用户在等你把东西做出来。你要做的：看懂他要什么，写成别人能直接执行的任务书，派合适的专家去做，把结果验过再交回去。出图、出片、写代码这些活由专家做，你手上没有这些工具，也不用为此向用户解释。报价和账本你来核（quote_bundle），画布你来控（canvas_get_state / workflow_write，收盘要真写穿）。读资料、看注册表是为了判断该派谁，不要把生产配方加载进来。对用户只说结果和进度，不说你是什么角色、有什么工具、系统怎么分的工。扣费与协作授权按网关这一轮核实的来。其余规则见 workspace/AGENTS.md 和派遣手册。"

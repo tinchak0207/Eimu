@@ -16,7 +16,7 @@ import {
 import { buildPatchReceipt } from "./receipt.ts"
 import { checkParams, materializeDefaults, resolvePort, specOf } from "./specs.ts"
 import { validateSet } from "./validate.ts"
-import { RESEARCH_NODE, RESEARCH_RECIPES, isResearchNode, researchNewNode } from "./research.ts"
+import { RESEARCH_AGENT_FORBIDDEN, RESEARCH_RECIPES, isResearchNode, researchNewNodes, researchNodeIds } from "./research.ts"
 import type {
   Actor, Json, NodeId, NodeType, Output, PatchErrorCode, PatchOp, PatchReceipt, PatchRequest, ProjectGraph, ProjectNode, Recipe,
 } from "./types.ts"
@@ -223,6 +223,7 @@ function opSet(ctx: Ctx, op: Extract<PatchOp, { op: "set" }>): void {
     node.intent = next
     lockFieldByUser(ctx, node, path)
   } else if (pm) {
+    if (pm[1] === "text" && isResearchNode(node) && ctx.actor.kind === "agent") return fail("ACTOR_FORBIDDEN", RESEARCH_AGENT_FORBIDDEN, node.id)
     const next = unwrap(checkJson(value, "params 值"), node.id)
     if (jsonEqual(node.params[pm[1]], next) && pm[1] in node.params) return
     const had = pm[1] in node.params
@@ -474,6 +475,7 @@ function opReroll(ctx: Ctx, op: Extract<PatchOp, { op: "reroll" }>): void {
 async function opWriteResult(ctx: Ctx, op: Extract<PatchOp, { op: "write_result" }>): Promise<void> {
   const node = getNode(ctx, op.node)
   checkLane(ctx, node.id)
+  if (isResearchNode(node) && ctx.actor.kind === "agent") return fail("ACTOR_FORBIDDEN", RESEARCH_AGENT_FORBIDDEN, node.id)
   if (node.type === "qc" && ctx.actor.kind !== "subagent") {
     return fail("LANE_VIOLATION", "主代理或非 critic lane 不能写 outputs.verdict", node.id)
   }
@@ -544,12 +546,12 @@ function opApplyRecipe(ctx: Ctx, op: Extract<PatchOp, { op: "apply_recipe" }>): 
     return fail("BAD_VALUE", `配方 ${op.recipe} 构建失败：${e instanceof Error ? e.message : String(e)}`)
   }
   const trial = fork(ctx)
-  const withResearch = RESEARCH_RECIPES.has(recipe.id) && !trial.g.nodes[RESEARCH_NODE] && !built.nodes.some((n) => n.id === RESEARCH_NODE)
-  if (withResearch) opAddNode(trial, researchNewNode())
+  const research = RESEARCH_RECIPES.has(recipe.id) && !researchNodeIds(trial.g).length && !built.nodes.some((n) => isResearchNode(n)) ? researchNewNodes() : []
+  for (const rn of research) opAddNode(trial, rn)
   for (const nn of built.nodes) {
-    // 剧本是第一道创作工序：接上研究，研究没写完它就停在 awaiting author，下游跟着停。
-    const wired = withResearch && nn.type === "script" && !nn.inputs?.research
-      ? { ...nn, inputs: { ...(nn.inputs ?? {}), research: { from: RESEARCH_NODE } } }
+    // 剧本是第一道创作工序：接上全部研究，研究没写完它就停在 awaiting author，下游跟着停。
+    const wired = research.length && nn.type === "script"
+      ? { ...nn, inputs: { ...(nn.inputs ?? {}), ...Object.fromEntries(research.filter((r) => !nn.inputs?.[r.id]).map((r) => [r.id, { from: r.id }])) } }
       : nn
     opAddNode(trial, wired) // 任一节点失败 → 整个配方丢弃（trial 不提交）
   }

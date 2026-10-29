@@ -388,12 +388,12 @@ test("beast OFF / creator_legacy：开放工具面，禁止套用 Expert 唯一�
   assert.doesNotMatch(fact, /唯一通路/)
 })
 
-test("工程模式 creator：固定 13 工具；直接生成工具 0；blender 0", () => {
+test("工程模式 creator：固定 12 工具；直接生成工具 0；blender 0", () => {
   // 独立依据：设计文档 §3.7 第 8 点的十个工具清单 + project/constants.ts 的
   // DIRECT_GENERATION_TOOLS。断言的是「启用集」，不是断路名单。
   const MAIN_TOOLS = [
     "project_get", "project_patch", "project_run", "subagent_dispatch", "subagent_stop",
-    "question", "read_image", "search_web", "asset_search", "read",
+    "question", "read_image", "asset_search", "read",
     "quote_bundle", "skill", "subagent_status",
   ].sort()
   const env = collect({ plane: "creator" })
