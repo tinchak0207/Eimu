@@ -20,7 +20,7 @@ import { parentOwnsRunId } from "./subagent-messages.ts"
 // 提示写回 orchestrator（原先 editor 无 image_generate 仍先派工、跑 10 分钟才 BLOCKED）。
 import { checkSeatTools, formatSeatPreflightNotice, loadSeatToolTable, type SeatToolCheck } from "./seat-preflight.ts"
 // S16（2026-10-28，设计 §3.8/§3.10）：工程模式席位映射与 lane 规范化（旧会话不经过这两步）。
-import { isExpertSeat, normalizeLane, projectSeatOf } from "./project/lanes.ts"
+import { inferLane, isExpertSeat, laneBriefLine, normalizeLane, projectSeatOf } from "./project/lanes.ts"
 
 /** 子代理 prompt_async 的席位。空字符串会被 opencode 落到 build，这里始终返回一个席位名。 */
 export function resolveDispatchAgent(input: { projectMode: boolean; named: string; beast: boolean }): string {
@@ -919,7 +919,18 @@ ${JSON.stringify(inheritedCp.data, null, 2)}
   const projectMode = parent.projectMode === true
   const beast = deps.beastMode(parent)
   const seat = resolveDispatchAgent({ projectMode, named: expertId || rawExpert || "", beast })
-  const lane = projectMode ? normalizeLane(body.lane) : []
+  let lane = projectMode ? normalizeLane(body.lane) : []
+  // 工程会话：没给 lane 就按专家类型从图里推；不论哪种都把 lane 写进任务书——子代理此前不知道自己能写哪些节点。
+  if (projectMode) {
+    const expert = expertId || rawExpert || ""
+    try {
+      const inferred = expert ? await inferLane(parent.sessionId, expert) : { lane: [] as string[] }
+      if (!lane.length) lane = inferred.lane
+      prompt = `${laneBriefLine(lane, "graph" in inferred ? inferred.graph : undefined)}\n\n${prompt}`
+    } catch (e) {
+      console.warn(`[gateway] subagent lane inference failed: session=${parent.sessionId} expert=${expert}: ${(e as Error)?.message ?? e}`)
+    }
+  }
   const runId = crypto.randomUUID()
   const run: SubagentRun = {
     id: runId,

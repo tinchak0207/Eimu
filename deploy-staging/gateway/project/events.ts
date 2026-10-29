@@ -28,6 +28,15 @@ async function readText(file: string): Promise<string> {
   }
 }
 
+/** 事件追加的订阅者（投影层：画布、对话卡）。只做通知，读图须自行走 store 的锁。 */
+export type ProjectEventsListener = (file: string, events: readonly ProjectEvent[]) => void
+const EVENT_LISTENERS = new Set<ProjectEventsListener>()
+
+export function onProjectEvents(listener: ProjectEventsListener): () => void {
+  EVENT_LISTENERS.add(listener)
+  return () => EVENT_LISTENERS.delete(listener)
+}
+
 export class EventLog {
   constructor(readonly file: string) {}
 
@@ -36,6 +45,13 @@ export class EventLog {
     if (drafts.length === 0) return []
     const events = drafts.map((d, i): ProjectEvent => ({ seq: startSeq + i, at, ...d }))
     await appendFile(this.file, events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf-8")
+    for (const listener of EVENT_LISTENERS) {
+      try {
+        listener(this.file, events)
+      } catch (e) {
+        console.error(`[gateway] project events listener failed (${this.file}):`, (e as Error)?.message ?? e)
+      }
+    }
     return events
   }
 

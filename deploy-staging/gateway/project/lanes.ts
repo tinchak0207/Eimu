@@ -41,6 +41,59 @@ export function normalizeLane(raw: unknown): NodeId[] {
   return out
 }
 
+/**
+ * 专家 → 它负责的节点类型。派发没带 lane 时按这张表从工程图里推出 lane，
+ * 否则 lane 为空＝只读，子代理写不了任何节点，派了也是白派。
+ */
+export const EXPERT_NODE_TYPES: Readonly<Record<string, readonly string[]>> = {
+  lyricist: ["script"],
+  screenwriter: ["script", "shotlist"],
+  music: ["music"],
+  "video-director": ["shotlist", "keyframe", "clip"],
+  "motion-director": ["clip"],
+  editor: ["timeline", "subtitle", "mix", "export"],
+  director3d: ["render3d"],
+  "web3d-director": ["render3d"],
+  critic: ["qc"],
+}
+
+function expertBase(expert: string): string {
+  const e = expert.trim()
+  return e.endsWith(PROJECT_SEAT_SUFFIX) ? e.slice(0, -PROJECT_SEAT_SUFFIX.length) : e
+}
+
+/** 按专家类型从图里挑节点：未完成（pending/failed/stale…）优先，再到已完成的，上限 LANE_MAX。 */
+export function inferLaneFromGraph(graph: { nodes: Record<string, { id: string; type: string; status?: string }>; order?: string[] }, expert: string): NodeId[] {
+  const types = EXPERT_NODE_TYPES[expertBase(expert)]
+  if (!types) return []
+  const ids = graph.order?.length ? graph.order : Object.keys(graph.nodes)
+  const mine = ids.map((id) => graph.nodes[id]).filter((n) => n && types.includes(n.type))
+  const open = mine.filter((n) => n.status !== "done")
+  const done = mine.filter((n) => n.status === "done")
+  return normalizeLane([...open, ...done].map((n) => n.id))
+}
+
+/** 子代理任务书里的 lane 说明：它能写哪些节点、怎么开始。lane 为空时说明只读。 */
+export function laneBriefLine(lane: readonly string[], graph?: { nodes: Record<string, { type: string; intent?: string }> }): string {
+  if (!lane.length) return "【工程图】本次是只读任务：可以用 project_get 看图，不要写节点。"
+  const items = lane.map((id) => {
+    const n = graph?.nodes[id]
+    return n ? `${id}（${n.type}${n.intent ? `：${n.intent.slice(0, 30)}` : ""}）` : id
+  })
+  return `【工程图】你负责并且只能写这些节点：${items.join("、")}。先用 project_get view:"node" 读它们，做完用 project_patch 写回，需要出图出片出声就 project_run 跑它们。`
+}
+
+/** 读图推 lane（工程不存在＝空）。 */
+export async function inferLane(sessionId: string, expert: string): Promise<{ lane: NodeId[]; graph?: Awaited<ReturnType<Awaited<ReturnType<typeof openProject>>["read"]>> }> {
+  try {
+    const graph = await (await openProject(sessionId)).read()
+    return { lane: inferLaneFromGraph(graph as never, expert), graph }
+  } catch (e) {
+    if (e instanceof ProjectNotFoundError) return { lane: [] }
+    throw e
+  }
+}
+
 /** 子代理可用的写操作（与 patch.ts SUBAGENT_OPS 的写子集同义；读操作不归本函数管）。 */
 export type LaneWriteOp = "add_node" | "set" | "write_result" | "remove_node" | "connect" | "disconnect" | "reroll"
 

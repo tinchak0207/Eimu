@@ -12,6 +12,7 @@
 //
 // 回执上限：patch/run ≤1024B、get digest ≤6144B、node ≤4096B、events ≤2048B（LIMITS）。
 // wait_sec 上限 90 且事件到达即返回：轮询 events.jsonl 的 seq 游标，不空转式长挂。
+import path from "node:path"
 import { CONFIRM_TIMEOUT_MS } from "../constants-gateway.ts"
 import { jsonError } from "../gw-lib.ts"
 import { getOwnedSession, resolveSession } from "../sessions-core.ts"
@@ -26,6 +27,7 @@ import { admit, buildPlan, sessionConfirmPort, type ConfirmPort, type Quote } fr
 import { ProjectCanvasBridge } from "./bridge-canvas.ts"
 import { CacheIndex } from "./cache-index.ts"
 import { LIMITS } from "./constants.ts"
+import { onProjectEvents } from "./events.ts"
 import { projectContextResponse, type AgentMessage, type AgentPart } from "./context.ts"
 import { renderDigest, type DigestInputs } from "./digest.ts"
 import { createExecBridgeClient } from "./exec-bridge-client.ts"
@@ -34,7 +36,7 @@ import { emitDeliveryCards } from "./delivery.ts"
 import { getRecipe } from "./recipes/index.ts"
 import { recoverProject } from "./recovery.ts"
 import { runProject, type RunResult } from "./run.ts"
-import { projectDirFor, scanProjectRecoveries, workspaceDir, ProjectNotFoundError, ProjectStore } from "./store.ts"
+import { projectDirFor, resetSharedProjectStores, scanProjectRecoveries, setDefaultRecipes, sharedProjectStore, workspaceDir, ProjectNotFoundError, ProjectStore } from "./store.ts"
 import { createSubmitGeneration } from "./submit-generation.ts"
 import type { RunDeps } from "./scheduler.ts"
 import type { RecoveryDeps } from "./recovery.ts"
@@ -238,6 +240,9 @@ function confirmStatusOf(state: SessionState, requestId: string): "pending" | "a
   return state.pendingConfirms.has(requestId) ? "pending" : "unknown"
 }
 
+// 配方注册表在组合根注入一次：首句 ingress 的 apply_recipe 与工具路由用同一张表（缺了会回 UNKNOWN_RECIPE、首屏空图）。
+setDefaultRecipes(getRecipe)
+
 // ───────────────────────── 工程 store 注册表（进程内单例，写串行） ─────────────────────────
 const STORES = new Map<string, ProjectStore>()
 
@@ -246,7 +251,7 @@ async function openStore(sessionId: string, opts: { create?: boolean } = {}): Pr
   const dir = projectDirFor(sessionId)
   const cached = STORES.get(dir)
   if (cached) return cached
-  const store = new ProjectStore(sessionId, dir, { recipes: getRecipe })
+  const store = sharedProjectStore(sessionId)
   // 工程模式会话的图在首条用户消息 ingress 才建；工具/画布先到时不能回 404 断点，就地建空图（幂等）。
   if (opts.create) await store.ensure()
   await store.read()
@@ -257,6 +262,7 @@ async function openStore(sessionId: string, opts: { create?: boolean } = {}): Pr
 /** 仅测试：丢掉缓存的 store 实例与在跑表。 */
 export function resetProjectStores(): void {
   STORES.clear()
+  resetSharedProjectStores()
   RUNNING.clear()
   CANVAS_BRIDGES.clear()
   DELIVERY_SEEN.clear()
@@ -303,6 +309,78 @@ export async function pumpCanvas(
     console.error(`[gateway] project canvas pump failed (${store.sessionId}):`, (e as Error)?.message ?? e)
     return { cursor: 0, events: 0, frames: 0 }
   }
+}
+
+// ─────────────────────── 对话投影：工程事件 → 画布与对话卡 ───────────────────────
+// 工程图是真源，画布和对话都是它的投影。任何写入方（ingress 配方、模型补丁、子代理、执行器、恢复）
+// 追加事件后都在这里统一推送：画布即时追平；新产出的图／片／音直接进对话，不必等到 export。
+// 只投影本批事件里新出的 node_output，进程重启不会把旧产物重刷一遍。
+const PROJECTION_DEBOUNCE_MS = 150
+const PROGRESS_CARD_TYPES = new Set(["keyframe", "clip", "music", "voice", "mix", "render3d"])
+const PENDING_PROJECTION = new Map<string, { timer: ReturnType<typeof setTimeout>; outputs: Set<string> }>()
+
+onProjectEvents((file, events) => {
+  const dir = path.dirname(file)
+  let pending = PENDING_PROJECTION.get(dir)
+  if (!pending) {
+    pending = {
+      outputs: new Set(),
+      timer: setTimeout(() => {
+        const batch = PENDING_PROJECTION.get(dir)
+        PENDING_PROJECTION.delete(dir)
+        void projectToSession(path.basename(dir), [...(batch?.outputs ?? [])])
+      }, PROJECTION_DEBOUNCE_MS),
+    }
+    PENDING_PROJECTION.set(dir, pending)
+  }
+  for (const e of events) if (e.kind === "node_output" && e.node) pending.outputs.add(e.node)
+})
+
+async function projectToSession(sessionId: string, outputNodes: string[]): Promise<void> {
+  try {
+    const state = host.state(sessionId)
+    if (!state || state.projectMode !== true) return
+    const store = await openStore(canonicalSessionId(state, sessionId))
+    await pumpCanvas(store, state)
+    if (outputNodes.length) emitProgressCards(state, await store.read(), outputNodes)
+  } catch (e) {
+    if (e instanceof ProjectNotFoundError) return
+    console.error(`[gateway] project projection failed (${sessionId}):`, (e as Error)?.message ?? e)
+  }
+}
+
+/** 节点新产物 → 对话里的图／片／音卡（与 export 交付卡共用去重表；只发有公网 url 的真实产物）。 */
+export function emitProgressCards(
+  state: SessionState,
+  graph: Readonly<ProjectGraph>,
+  nodeIds: readonly string[],
+  emit: (name: string, data: unknown) => void = (name, data) => emitToSession(state, name, data),
+): number {
+  let emitted = 0
+  for (const id of nodeIds) {
+    const node = graph.nodes[id]
+    if (!node || node.status !== "done" || !PROGRESS_CARD_TYPES.has(node.type)) continue
+    for (const out of node.outputs ?? []) {
+      const url = typeof out.url === "string" ? out.url.trim() : ""
+      if (!url) continue
+      const key = `${id}:${out.sha256}`
+      if (DELIVERY_SEEN.has(key)) continue
+      const mime = String(out.mime ?? "").toLowerCase()
+      const event = mime.startsWith("image/") ? "image.done" : mime.startsWith("video/") ? "video.done" : mime.startsWith("audio/") ? "audio.done" : null
+      if (!event) continue
+      DELIVERY_SEEN.add(key)
+      const mediaKind = event === "image.done" ? "image" : event === "video.done" ? "video" : "audio"
+      emit(event, {
+        url,
+        cost_coins: node.lastRun?.costCoins ?? 0,
+        task_id: id,
+        media_kind: mediaKind,
+        ...(node.intent ? { title: clipChars(node.intent, 60) } : {}),
+      })
+      emitted += 1
+    }
+  }
+  return emitted
 }
 
 /** run 收尾：先追平画布，再从 export 产物发交付卡（全程不抛）。 */

@@ -13,7 +13,7 @@ process.env.WORKSPACE_DIR = join(SANDBOX, "workspace")
 process.env.SESSIONS_DB_PATH = join(SANDBOX, "sessions.db")
 process.env.LEDGER_PATH = join(SANDBOX, "ledger.jsonl")
 
-const { ensureProject, openProject, projectDirFor, projectsRoot, scanProjectRecoveries, ackProjectArtifacts, defaultIngestRoots, workspaceDir, ProjectNotFoundError, KEEP_VERSIONS } = await import("./store.ts")
+const { ensureProject, openProject, resetSharedProjectStores, projectDirFor, projectsRoot, scanProjectRecoveries, ackProjectArtifacts, defaultIngestRoots, workspaceDir, ProjectNotFoundError, KEEP_VERSIONS } = await import("./store.ts")
 const jobStore = await import("../job-store.ts")
 jobStore.reopenSessionsDbForTest()
 const { resetCatalogCacheForTest } = await import("../pricing-gateway.ts")
@@ -106,6 +106,7 @@ describe("补丁提交：version、事件 seq、原子写", () => {
     const dir = projectDirFor("ses_reconcile")
     appendFileSync(join(dir, "events.jsonl"), '{"seq":2,"at":"x","kind":"patch","data":{}}\n{"seq":3,"at":"x","kind":"patch","data":{}}\n')
     expect(await store.log.count()).toBe(3)
+    resetSharedProjectStores() // 模拟进程重启：新进程里没有内存中的 store 实例
     const reopened = await openProject("ses_reconcile")
     expect((await reopened.read()).seq).toBe(1)
     expect((await reopened.log.read(0)).map((e) => e.seq)).toEqual([1])
@@ -157,6 +158,7 @@ describe("崩溃模拟：临时文件写了但不 rename", () => {
 
     // 残留的临时文件不影响 load，open 时清掉。
     writeFileSync(join(dir, ".project.json.crash.tmp"), '{"schema":1,"version":99}', "utf-8")
+    resetSharedProjectStores() // 模拟进程重启：新进程里没有内存中的 store 实例
     const reopened = await openProject("ses_crash")
     expect((await reopened.read()).version).toBe(1)
     expect(readdirSync(dir).filter((n) => n.endsWith(".tmp"))).toEqual([])

@@ -89,6 +89,20 @@ export const RULES_MAP: Readonly<Record<string, RuleMapping>> = {
     enforce: "deploy-staging/gateway/memory-gate.ts:applyMemoryGates（G4 身份泄漏）",
     test: "G4 身份泄漏（仅 shared → 降级 private）",
   },
+
+  // ── 节奏：铺满、派专家、多回报 ──────────────────────────────────
+  "R-17": {
+    enforce: "deploy-staging/gateway/project/store.ts:setDefaultRecipes（首句 ingress 的 apply_recipe 与工具共用配方表）＋ project/routes.ts:onProjectEvents（任何写入后画布即时追平）",
+    test: "首句命中配方 → 节点建齐，不回 UNKNOWN_RECIPE",
+  },
+  "R-18": {
+    enforce: "deploy-staging/gateway/project/lanes.ts:inferLaneFromGraph（派发未带 lane 时按专家类型推 lane，并写进任务书）",
+    test: "派 music 不带 lane → lane＝图里的 music 节点；未完成的排前面",
+  },
+  "R-19": {
+    enforce: "deploy-staging/gateway/project/routes.ts:emitProgressCards（节点新产物即时进对话）",
+    test: "新 node_output 有公网 url → 对应 image/video/audio.done 各推一次、不重复",
+  },
 }
 
 /** 有规则但找不到强制点 = 该规则不该留在 AGENTS.md；v1 为空（删掉的愿望见 S17 回报清单）。 */

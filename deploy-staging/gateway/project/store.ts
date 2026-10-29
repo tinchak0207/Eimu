@@ -40,6 +40,12 @@ export function defaultIngestRoots(): string[] {
   return [path.join(root, "uploads"), path.join(root, "tts-audio")]
 }
 
+/** 配方注册表的进程级缺省：组合根（routes.ts）注入一次，ensureProject/openProject 等所有入口都带上。 */
+let defaultRecipes: PatchEngineOptions["recipes"] | undefined
+export function setDefaultRecipes(recipes: PatchEngineOptions["recipes"] | undefined): void {
+  defaultRecipes = recipes
+}
+
 export const KEEP_VERSIONS = 50
 export const PROJECT_INITIAL_VERSION = 0
 
@@ -204,7 +210,7 @@ export class ProjectStore {
     return {
       now: this.opts.now,
       artifacts: this.artifacts,
-      recipes: this.opts.recipes,
+      recipes: this.opts.recipes ?? defaultRecipes,
       isSignedParam: this.opts.isSignedParam,
     }
   }
@@ -515,9 +521,31 @@ export function ackProjectArtifacts(taskId: string, outputs: readonly Pick<Outpu
   })
 }
 
+/**
+ * 进程内每个工程目录只有一个 ProjectStore：锁（withLock）与内存图都挂在实例上，
+ * 两个实例各自缓存图、各自编 seq，后写的会用旧图覆盖先写的（简报丢失、事件 seq 撞号）。
+ * 所有入口（ingress、工具路由、画布、导入）都从这里取实例；opts 只在首次创建时生效。
+ */
+const SHARED_STORES = new Map<string, ProjectStore>()
+
+export function sharedProjectStore(sessionId: string, opts: ProjectStoreOptions = {}): ProjectStore {
+  const dir = projectDirFor(sessionId)
+  let store = SHARED_STORES.get(dir)
+  if (!store) {
+    store = new ProjectStore(sessionId, dir, opts)
+    SHARED_STORES.set(dir, store)
+  }
+  return store
+}
+
+/** 仅测试：丢掉进程内共享的 store 实例。 */
+export function resetSharedProjectStores(): void {
+  SHARED_STORES.clear()
+}
+
 /** 工程入口：不存在则建（写 versions/0.json + project.json + events.jsonl），并标记 job-store 的工程会话。 */
 export async function ensureProject(sessionId: string, opts: EnsureProjectOptions = {}): Promise<{ store: ProjectStore; created: boolean }> {
-  const store = new ProjectStore(sessionId, projectDirFor(sessionId), opts)
+  const store = sharedProjectStore(sessionId, opts)
   const created = await store.ensure()
   if (opts.parentGw) markProjectSession(opts.parentGw)
   return { store, created }
@@ -525,7 +553,7 @@ export async function ensureProject(sessionId: string, opts: EnsureProjectOption
 
 /** 接上已有工程（不创建）。 */
 export async function openProject(sessionId: string, opts: ProjectStoreOptions = {}): Promise<ProjectStore> {
-  const store = new ProjectStore(sessionId, projectDirFor(sessionId), opts)
+  const store = sharedProjectStore(sessionId, opts)
   await store.read() // 不存在会抛 ProjectNotFoundError
   return store
 }
