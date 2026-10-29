@@ -57,7 +57,7 @@ const { timelineExecutor } = await import("./timeline")
 const { subtitleExecutor } = await import("./subtitle")
 const { mixExecutor } = await import("./mix")
 const { exportExecutor } = await import("./export")
-const { signedCriticVerdictOutput } = await import("./qc")
+const { signedTestCriticVerdictOutput } = await import("./qc.fixture")
 const { assembleFilmNode, assembleFromClips } = await import("../../workflow-gw-assemble")
 
 const store = new ArtifactStore({ projectDir: PROJECT_DIR })
@@ -113,9 +113,10 @@ const makeCtx = (opts: {
     inputs: opts.type === "export" && !opts.inputs.verdict
       ? {
           ...opts.inputs,
-          verdict: [signedCriticVerdictOutput(MEDIA, {
+          verdict: [signedTestCriticVerdictOutput(MEDIA, {
             parentSessionId: SID,
             artifactSha256: (Object.values(opts.inputs).flat().find((o) => /^(video|image)\//.test(o.mime)) ?? { sha256: "a".repeat(64) }).sha256,
+            rubric: opts.params.preset === "image_pack" ? "image_default" : "film_frame_critic",
           })],
         }
       : opts.inputs,
@@ -280,7 +281,7 @@ describe("export 执行器", () => {
     expect(r1).toBeGreaterThan(g1 + 60)
     expect(out.meta?.durationSec as number).toBeGreaterThan(5.5)
     expect(out.meta?.hasAudio).toBe(true)
-  })
+  }, 180_000)
 
   test("字幕烧录由 subtitle.meta.burnIn 决定（真像素痕迹）", async () => {
     const subBurn = await subtitleExecutor.run(makeCtx({

@@ -15,7 +15,9 @@ import { checkExportArtifacts } from "../gates.ts"
 import { verifySignedCriticVerdict } from "./qc.ts"
 import { isPublishFailure, publishProjectArtifact } from "../publish.ts"
 import type { ExecContext, ExecResult, Json, NodeExecutor, Output } from "../types"
-import { appendInterchangeOutputs } from "./interchange"
+import { appendInterchangeOutputs, type InterchangeClip } from "./interchange"
+import { countsTowardCompletion } from "../completion-admission"
+import { evaluateSentenceConstraints, parseSentenceConstraints } from "./sentence-constraints"
 import { flattenInputs, isAudio, isJson, isObj, isVideo, mimeOf, projectScratchDir, readJsonOutput } from "./timeline"
 
 async function sha256File(file: string): Promise<{ sha: string; bytes: number }> {
@@ -28,16 +30,21 @@ async function sha256File(file: string): Promise<{ sha: string; bytes: number }>
   return { sha: h.digest("hex"), bytes }
 }
 
-async function probeStreams(file: string): Promise<{ width: number; height: number; durationSec: number; hasVideo: boolean; hasAudio: boolean }> {
+interface ProbeResult { width: number; height: number; durationSec: number; hasVideo: boolean; hasAudio: boolean | null }
+
+function shq(v: string): string { return `'${String(v).replace(/'/g, "'\\''")}'` }
+function unknownProbe(): ProbeResult { return { width: 0, height: 0, durationSec: 0, hasVideo: false, hasAudio: null } }
+
+async function probeStreams(file: string): Promise<ProbeResult> {
   const { invoke } = await import("../../editor/adapter/tauri-adapter")
   const { detectFfmpeg } = await import("../../editor/canvas/videoCompose")
   const ffmpeg = await detectFfmpeg()
-  const shq = (v: string) => `'${String(v).replace(/'/g, "'\\''")}'`
-  if (!ffmpeg) return { width: 0, height: 0, durationSec: 0, hasVideo: false, hasAudio: false }
+  if (!ffmpeg) return unknownProbe()
   const r = await invoke<{ stdout: string; stderr: string; exit_code: number }>("execute_command", {
     command: `${ffmpeg.replace(/ffmpeg$/, "ffprobe")} -v error -show_entries stream=codec_type,width,height -show_entries format=duration -of json ${shq(file)}`,
     timeoutMs: 20000,
   }).catch(() => ({ stdout: "", stderr: "", exit_code: 1 }))
+  if (r.exit_code !== 0) return unknownProbe()
   try {
     const j = JSON.parse(r.stdout) as { streams?: { codec_type?: string; width?: number; height?: number }[]; format?: { duration?: string } }
     const v = (j.streams ?? []).find((s) => s.codec_type === "video")
@@ -49,8 +56,31 @@ async function probeStreams(file: string): Promise<{ width: number; height: numb
       hasAudio: (j.streams ?? []).some((s) => s.codec_type === "audio"),
     }
   } catch {
-    return { width: 0, height: 0, durationSec: 0, hasVideo: false, hasAudio: false }
+    return unknownProbe()
   }
+}
+
+async function stripAudioTrack(src: string, dest: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { invoke } = await import("../../editor/adapter/tauri-adapter")
+  const { detectFfmpeg } = await import("../../editor/canvas/videoCompose")
+  const ffmpeg = await detectFfmpeg()
+  if (!ffmpeg) return { ok: false, message: "未检测到 ffmpeg，无法按静音要求剥掉音轨" }
+  const r = await invoke<{ stdout: string; stderr: string; exit_code: number }>("execute_command", {
+    command: `${ffmpeg} -y -i ${shq(src)} -map 0:v:0 -c:v copy -an ${shq(dest)}`,
+    timeoutMs: 20000,
+  }).catch(() => ({ stdout: "", stderr: "", exit_code: 1 }))
+  if (r.exit_code !== 0) return { ok: false, message: `静音失败，没有剥掉音轨：${(r.stderr || r.stdout || "").slice(-180)}` }
+  return { ok: true }
+}
+
+function wantsDeliveredSilence(ctx: ExecContext, separateAudioCount: number): boolean {
+  if (ctx.project.targets?.audio === "none") return true
+  const text = ctx.project.brief[0]?.text
+  if (typeof text === "string" && parseSentenceConstraints(text).mute) return true
+  const targetsAudio = ctx.project.targets?.audio
+  const targetsWantSound = targetsAudio === "voice" || targetsAudio === "music" || targetsAudio === "both"
+  if (targetsWantSound || separateAudioCount > 0) return false
+  return Object.values(ctx.project.nodes).some((n) => n.type === "clip" && n.params.generateAudio === false)
 }
 
 interface TimelineClipLite { id?: string; path?: string; label?: string; duration?: number; inSec?: number; outSec?: number; speed?: number }
@@ -79,7 +109,9 @@ function rejectUnsignedVerdict(ctx: ExecContext): ExecResult | null {
   } catch {
     return { ok: false, code: "qc_failed", message: "export 的 verdict 文件不可读", retryable: false }
   }
-  const checked = verifySignedCriticVerdict(parsed, ctx.sessionId)
+  const preset = typeof ctx.params?.preset === "string" ? ctx.params.preset : ""
+  const mediaKind = preset === "image_pack" ? "image" : "video"
+  const checked = verifySignedCriticVerdict(parsed, ctx.sessionId, mediaKind)
   if (!checked.ok) return { ok: false, code: "qc_failed", message: `export 拒绝放行：${checked.reason}`, retryable: false }
   return null
 }
@@ -215,22 +247,35 @@ export const exportExecutor: NodeExecutor = {
     // 字幕烧录：subtitle 节点的 meta.burnIn=true 才烧（外挂模式不动画面）。
     const assEntry = entries.find((e) => e.output.port === "ass" && isObj(e.output.meta as Json) && (e.output.meta as Record<string, Json>).burnIn === true)
     const resolution = presetMeta.h >= 1080 ? "1080p" : "720p"
+    const silence = wantsDeliveredSilence(ctx, audio.length)
+    const sourceFacts = await Promise.all(clips.map((c) => probeStreams(c.path)))
 
     const outPath = path.join(scratch, `master_${preset}.mp4`)
-    const res = await assembleFromClips(clips, audio, {
+    const res = await assembleFromClips(clips, silence ? [] : audio, {
       workDir: scratch,
       outPath,
       order: clips.map((c) => c.id).filter((v): v is string => Boolean(v)),
       aspect: presetMeta.aspect,
       resolution,
       fps: 30,
-      audioRequested: audio.length,
+      audioRequested: silence ? 0 : audio.length,
       ...(assEntry ? { assPath: assEntry.output.path } : {}),
     })
     if (res.ok !== true) return { ok: false, code: "bad_input", message: (res as { error: string }).error, retryable: false }
 
-    const ingested = await ctx.ingest({ path: res.path }, { port: "out", mime: "video/mp4", origin: "derived" })
-    const probed = await probeStreams(res.path)
+    let deliverPath = res.path
+    if (silence) {
+      const strippedPath = path.join(scratch, `master_${preset}_silent.mp4`)
+      const stripped = await stripAudioTrack(res.path, strippedPath)
+      if (!stripped.ok) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
+      deliverPath = strippedPath
+    }
+
+    const ingested = await ctx.ingest({ path: deliverPath }, { port: "out", mime: "video/mp4", origin: "derived" })
+    const probed = await probeStreams(deliverPath)
+    if (silence && probed.hasAudio !== false) {
+      return { ok: false, code: "bad_input", message: "静音未落实：成片仍有音轨，或 ffprobe 读不出流", retryable: false }
+    }
     const meta: Record<string, Json> = {
       preset,
       presetLabel: presetMeta.label,
@@ -240,9 +285,20 @@ export const exportExecutor: NodeExecutor = {
       height: probed.height,
       durationSec: Math.round(probed.durationSec * 1000) / 1000,
       hasVideo: probed.hasVideo,
-      hasAudio: probed.hasAudio,
       subtitleBurnIn: Boolean(assEntry),
+      countsTowardCompletion: countsTowardCompletion(ctx.project),
       notes: res.notes.join("；").slice(0, 600),
+    }
+    if (probed.hasAudio !== null) meta.hasAudio = probed.hasAudio
+    if (presetMeta.h >= 1080) {
+      const native = sourceFacts.find((p) => p.width > 0 && p.height > 0 && p.height <= 768 && p.width <= 1344)
+      if (native) {
+        meta.nativeResolution = "720p"
+        meta.nativeWidth = native.width
+        meta.nativeHeight = native.height
+        meta.deliveredResolution = resolution
+        meta.upscaled = true
+      }
     }
     const outputs: Output[] = [{
       ...ingested,
@@ -270,23 +326,55 @@ export const exportExecutor: NodeExecutor = {
     })
     if (isPublishFailure(published)) meta.publishError = String(published.reason).slice(0, 200)
     else outputs[0].url = published.url
-    // 剪映草稿 + FCPXML。失败只记在 mp4 meta，不把已通过的成片打成失败。
-    outputs.push(...await appendInterchangeOutputs(ctx, outputs[0], {
-      clips: clips.map((c, i) => ({
+    const interchangeClips: InterchangeClip[] = []
+    for (let i = 0; i < clips.length; i++) {
+      const c = clips[i]
+      const fact = sourceFacts[i] ?? unknownProbe()
+      let mediaPath = c.path
+      let hasAudio = fact.hasAudio
+      if (silence) {
+        const dest = path.join(scratch, `silent-src-${i}.mp4`)
+        const stripped = await stripAudioTrack(c.path, dest)
+        if (!stripped.ok) return { ok: false, code: "bad_input", message: stripped.message, retryable: false }
+        mediaPath = dest
+        hasAudio = false
+      }
+      interchangeClips.push({
         id: c.id || `clip_${i}`,
-        path: c.path,
+        path: mediaPath,
         durationSec: c.durationSec,
         inSec: c.inSec,
         outSec: c.outSec,
         speed: c.speed,
-      })),
-      audio: audioOutputs.map((e) => ({ id: e.from ?? e.output.artifactId, path: e.output.path, durationSec: e.output.durationSec })),
+        ...(fact.width > 0 && fact.height > 0 ? { width: fact.width, height: fact.height } : {}),
+        ...(hasAudio === null ? {} : { hasAudio }),
+      })
+    }
+    const subtitleFiles = entries.filter((e) => e.output.port === "srt" || e.output.port === "ass").map((e) => ({ path: e.output.path, port: e.output.port }))
+    // 剪映草稿 + FCPXML。失败只记在 mp4 meta，不把已通过的成片打成失败。
+    outputs.push(...await appendInterchangeOutputs(ctx, outputs[0], {
+      clips: interchangeClips,
+      audio: silence ? [] : audioOutputs.map((e) => ({ id: e.from ?? e.output.artifactId, path: e.output.path, durationSec: e.output.durationSec })),
       scratch,
       width: presetMeta.w,
       height: presetMeta.h,
-      subtitleFiles: entries.filter((e) => e.output.port === "srt" || e.output.port === "ass").map((e) => ({ path: e.output.path, port: e.output.port })),
+      subtitleFiles,
       timelineSubtitles: timelineValue?.subtitles,
     }))
+    const briefText = ctx.project.brief[0]?.text
+    if (typeof briefText === "string" && briefText.length > 0) {
+      const problem = await evaluateSentenceConstraints({
+        text: briefText,
+        videoPath: outputs[0].path,
+        durationSec: probed.durationSec,
+        subtitleBurnIn: Boolean(assEntry),
+        subtitleFiles,
+        timelineSubtitles: timelineValue?.subtitles,
+        fcpxmlZipPath: outputs.find((o) => o.port === "fcpxml")?.path,
+        jianyingZipPath: outputs.find((o) => o.port === "jianying")?.path,
+      })
+      if (problem) return { ok: false, code: "qc_failed", message: problem, retryable: false }
+    }
     return { ok: true, costCoins: 0, outputs }
   },
 }

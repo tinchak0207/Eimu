@@ -50,6 +50,8 @@ export interface RubricItem {
 export interface Rubric {
   id: RubricId
   title: string
+  /** 这张表能签的交付媒体。验签必须与 export 的媒体种类一致，不能拿单图表去放行视频。 */
+  media: "image" | "video"
   /** 低于此分判不过（设计文档 §3.9「qc 评分≥阈值」；阈值为本片默认，可由 params.thresholds.minScore 覆盖）。 */
   minScore: number
   weights: RubricWeights
@@ -65,8 +67,8 @@ export const QUIET_LUFS = -70
 
 const TECH_WEIGHTS: RubricWeights = { noAudio: 45, duration: 45, black: 50, freeze: 45, loudness: 45, truePeak: 45 }
 
-function criticRubric(id: string, title: string, minScore: number, items: readonly RubricItem[]): Rubric {
-  return { id, title, minScore, weights: TECH_WEIGHTS, items }
+function criticRubric(id: string, title: string, minScore: number, media: "image" | "video", items: readonly RubricItem[]): Rubric {
+  return { id, title, media, minScore, weights: TECH_WEIGHTS, items }
 }
 
 const pf = (id: string, rule: string): RubricItem => ({ id, kind: "passfail", rule })
@@ -76,44 +78,45 @@ export const RUBRICS: Readonly<Record<string, Rubric>> = {
   film_default: {
     id: "film_default",
     title: "影音交付默认",
+    media: "video",
     minScore: QC_MIN_SCORE,
     weights: TECH_WEIGHTS,
   },
-  image_default: criticRubric("image_default", "单图三要素", 60, [
+  image_default: criticRubric("image_default", "单图三要素", 60, "image", [
     pf("subject", "画面主体与提示词里的主体是同一个，多一个或少一个主体即不过"),
     pf("style", "画面风格与提示词里的风格词一致，对不上即不过"),
     pf("composition", "构图与提示词里的构图要求一致，裁切主体或主体出画即不过"),
     pf("no_fake_text", "画面没有伪造文字、乱码或标签畸变；出现任一即不过"),
   ]),
-  scene_default: criticRubric("scene_default", "场景设定锚", 60, [
+  scene_default: criticRubric("scene_default", "场景设定锚", 60, "image", [
     pf("light_direction", "光源方向、色温与场景设定文本一致，方向相反即不过"),
     pf("no_characters", "画面没有人物；出现人物即不过"),
     pf("no_text", "画面没有文字；出现文字即不过"),
   ]),
-  character_sheet: criticRubric("character_sheet", "角色四视图", 60, [
+  character_sheet: criticRubric("character_sheet", "角色四视图", 60, "image", [
     pf("dna_dims", "DNA 八维短语在四视图上逐维可指认，缺一维即不过"),
     pf("identity_anchors", "瞳距、脸型轮廓、发际线三锚点与设定一致，任一漂移即不过"),
     pf("no_fake_text", "画面没有伪造文字；出现即不过"),
   ]),
-  ecom_launch: criticRubric("ecom_launch", "电商上市 PRODUCT LOCK", 60, [
+  ecom_launch: criticRubric("ecom_launch", "电商上市 PRODUCT LOCK", 60, "image", [
     pf("product_lock", "产品形状、标签文字、LOGO 与 PRODUCT LOCK 一致，零变形零乱码；任一不符即不过"),
     sc("cta_negative_space", "CTA 负空间占比 ≥ 30%，视觉层级里产品锐度未因逆光损失；低于 30% 即不过"),
     pf("label_readable", "标签文字放大后仍可读，错别字或乱码即不过"),
     pf("hand_joints", "若画面有手，指数与关节无畸变；畸变即不过"),
   ]),
-  ecom_model: criticRubric("ecom_model", "电商模特试穿", 60, [
+  ecom_model: criticRubric("ecom_model", "电商模特试穿", 60, "image", [
     pf("garment_fit", "服装贴合、抠图边缘无光晕，服色与原件 ΔE ≤ 5；超标即不过"),
     pf("identity_anchors", "瞳距、脸型轮廓、发际线与模特卡一致，任一漂移即不过"),
     pf("hand_joints", "手部指数与关节无畸变；畸变即不过"),
     pf("safe_area", "平台安全区顶部 ≥ 12%、底部 ≥ 20%，画面文字 ≥ 24px；任一不达标即不过"),
   ]),
-  shortdrama_poster: criticRubric("shortdrama_poster", "短剧海报", 60, [
+  shortdrama_poster: criticRubric("shortdrama_poster", "短剧海报", 60, "image", [
     pf("identity", "两版五官是同一个人：瞳距、脸型轮廓、发际线一致，脸互串即不过"),
     pf("safe_area", "9:16 内剧名区与平台 UI 区没有关键元素入侵；入侵即不过"),
     pf("text_over_face", "文字与字效不覆盖演员面部关键区；覆盖即不过"),
     sc("palette", "取色落在规范色板内，与色板 ΔE ≤ 5；超标即不过"),
   ]),
-  ip_pack_visual: criticRubric("ip_pack_visual", "小说 IP 视觉包", 70, [
+  ip_pack_visual: criticRubric("ip_pack_visual", "小说 IP 视觉包", 70, "image", [
     pf("mood_blind", "情绪板盲测能猜中题材频道；猜不对即不过。无关者盲猜 3 次，至少 2 次猜中同一频道；9 格至少 7 格命中该频道关键词，主色 3 个 HEX、点缀 2 个 HEX。"),
     pf("style_retest", "同一风格锚配方复测 2 次无偏差；有偏差即不过。两次的主色 HEX 逐个相同，色相偏移 0°，构图逻辑一致；sref 权重只在 0.4、0.5、0.6、0.7 四档里冻结命中最高的一档后再复测。"),
     pf("shuffle_recognize", "三视图与表情列打乱后仍能认出同一角色；认不出即不过。3 张视图加 6 张表情共 9 张打乱，盲认必须 9/9 都指回同一角色。"),
@@ -121,14 +124,14 @@ export const RUBRICS: Readonly<Record<string, Rubric>> = {
     pf("cover_title", "封面书名区完整且主体无截断；裁字或截断即不过"),
     pf("archive", "DNA 表、sref 配方、衍生物料三者齐备；缺一项即不过"),
   ]),
-  curation_consistency: criticRubric("curation_consistency", "策展一致", 60, [
+  curation_consistency: criticRubric("curation_consistency", "策展一致", 60, "image", [
     sc("color_temp", "全组色温一致：色相偏移 ≤ 8° 且 ΔE ≤ 12；超标即不过"),
     pf("light_direction", "全组光源方向一致；方向打架即不过"),
     sc("stroke", "笔触密度差 ≤ 15%；超出即不过"),
     sc("whitespace", "留白占比在 30%–45%，单张偏差 ≤ 5%；出区间即不过"),
     pf("no_outlier", "每张的色盘、笔触密度、留白占比都落在上述区间；任一出界即不过"),
   ]),
-  style_dna_consistency: criticRubric("style_dna_consistency", "风格 DNA", 70, [
+  style_dna_consistency: criticRubric("style_dna_consistency", "风格 DNA", 70, "image", [
     sc("restore_70", "五维还原度全部 ≥ 70%（复现成功特征数 / 该维特征总数）；任一维低于 70% 即不过。每维出 5 张，去掉最高与最低各 1 张，取中间 3 张的中位数；中位数低于 70% 即不过。"),
     sc("high_weight_85", "高权重项还原度 ≥ 85%；低于 85% 即不过。高权重锚点按 DNA 卡每张对位图圈出的 3 处计。"),
     pf("grid_7_of_9", "9 格至少 7 格保留四个以上 DNA 维度，且 outlier 已记录；未达到即不过"),
@@ -136,7 +139,7 @@ export const RUBRICS: Readonly<Record<string, Rubric>> = {
     pf("composition_unique", "任意两张的景别、视点、负形三项不完全相同；完全相同即不过"),
     pf("theme_not_copy", "题材没有复刻单一代表作；复刻即不过"),
   ]),
-  film_frame_critic: criticRubric("film_frame_critic", "电影族抽帧评审", 70, [
+  film_frame_critic: criticRubric("film_frame_critic", "电影族抽帧评审", 70, "video", [
     sc("style_unity_70", "风格统一审计 ≥ 70：色彩方差、质感一致性、风格关键词命中都要有可复算证据；低于 70 即不过"),
     pf("shot_consistency", "逐镜关键帧与角色三视图比对脸部、服装、配色；任一镜不一致即不过"),
     pf("frame_sample", "抽首帧、中帧、尾帧；形变、闪帧或角色漂移任一即不过"),

@@ -4,8 +4,7 @@
 // critic：经 lanes.dispatchCriticRun 派独立 critic 席位；回执用 delivery-gate-critic.checkCriticReceipt 校验后签名落盘。
 // 评分表与扣分权重在 rubrics.ts；takes 的 select:"qc" 由 takes.ts 读取 Output.meta.qcScore。
 import { execFile } from "node:child_process"
-import { createHash, createHmac, randomBytes } from "node:crypto"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { createHmac, randomBytes } from "node:crypto"
 import { rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { checkCriticReceipt } from "../../delivery-gate-critic.ts"
@@ -313,7 +312,8 @@ const failureMessage = (r: QcInspection) =>
   `qc 未通过（${r.score}/${r.minScore}）：${r.deficiencies.join("；") || "未给出缺陷说明"}`
 
 // ---------------------------------------------------------------- critic 派发（复用 dispatchCriticRun + checkCriticReceipt）
-const VERDICT_KEY = randomBytes(32)
+// 测试钥匙只在非生产使用。生产只认 EIMU_CRITIC_VERDICT_KEY；缺省或与测试钥匙相同则拒绝，不退回测试钥匙。
+export const CRITIC_VERDICT_TEST_KEY = "eimu-critic-verdict-test-key-v1"
 const MEDIA_LOCATOR_EXT = /\.(png|jpe?g|webp|gif|mp4|mov|webm|mkv)(?:[?#].*)?$/i
 const criticRounds = new Set<string>()
 let criticDispatchForTest: CriticDispatchFn | null = null
@@ -366,11 +366,35 @@ function verdictCanonical(body: Omit<SignedCriticVerdict, "sig">): string {
   })
 }
 
-function signVerdict(body: Omit<SignedCriticVerdict, "sig">): string {
-  return createHmac("sha256", VERDICT_KEY).update(verdictCanonical(body)).digest("hex")
+function productionVerdictEnv(): boolean {
+  return process.env.NODE_ENV === "production" || process.env.EIMU_ENV === "production"
 }
 
-export function verifySignedCriticVerdict(raw: unknown, parentSessionId: string): { ok: true; verdict: SignedCriticVerdict } | { ok: false; reason: string } {
+function verdictKey(): { ok: true; key: string } | { ok: false; reason: string } {
+  if (productionVerdictEnv()) {
+    const raw = process.env.EIMU_CRITIC_VERDICT_KEY
+    if (!raw || raw === CRITIC_VERDICT_TEST_KEY) return { ok: false, reason: "生产钥匙不可用" }
+    return { ok: true, key: raw }
+  }
+  return { ok: true, key: CRITIC_VERDICT_TEST_KEY }
+}
+
+function signVerdict(body: Omit<SignedCriticVerdict, "sig">): string | null {
+  const key = verdictKey()
+  if (!key.ok) return null
+  return createHmac("sha256", key.key).update(verdictCanonical(body)).digest("hex")
+}
+
+function rubricForVerdict(id: string): Rubric | null {
+  if (!id || !Object.prototype.hasOwnProperty.call(RUBRICS, id)) return null
+  return RUBRICS[id]
+}
+
+export function verifySignedCriticVerdict(
+  raw: unknown,
+  parentSessionId: string,
+  mediaKind: "image" | "video",
+): { ok: true; verdict: SignedCriticVerdict } | { ok: false; reason: string } {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "verdict 不是对象（只读 pass 不够）" }
   const v = raw as Partial<SignedCriticVerdict>
   if (v.schema !== 1 || v.mode !== "critic" || typeof v.sig !== "string" || !v.sig) {
@@ -411,41 +435,27 @@ export function verifySignedCriticVerdict(raw: unknown, parentSessionId: string)
     receiptCallIds: v.receiptCallIds.map((id) => String(id)),
   }
   if (body.parentSessionId !== parentSessionId) return { ok: false, reason: "verdict 不属于本会话" }
-  const expect = signVerdict(body)
-  if (expect !== v.sig) return { ok: false, reason: "verdict 签名对不上 critic lane" }
+  if (mediaKind !== "image" && mediaKind !== "video") return { ok: false, reason: "交付媒体类型必须是 image 或 video" }
+  const key = verdictKey()
+  if (!key.ok) return { ok: false, reason: key.reason }
+  const expect = createHmac("sha256", key.key).update(verdictCanonical(body)).digest("hex")
+  const hmacOk = expect === v.sig
+  const runFixture = body.actor.runId === "critic:fixture" || body.actor.runId.includes(":fixture")
+  const receiptFixture = body.receiptCallIds.some((id) => id.includes("call_fixture"))
+  if (runFixture || receiptFixture) {
+    const marks = [
+      runFixture ? "runId critic:fixture / :fixture" : "",
+      receiptFixture ? "receiptCallIds call_fixture" : "",
+    ].filter(Boolean)
+    return { ok: false, reason: `拒收夹具签名，HMAC ${hmacOk ? "正确" : "不正确"}：${marks.join("，")}` }
+  }
+  const rubric = rubricForVerdict(body.rubric)
+  if (!rubric) return { ok: false, reason: `未知评分表 ${body.rubric}` }
+  if (rubric.media !== mediaKind) {
+    return { ok: false, reason: `评分表 ${rubric.id} 媒体类型 ${rubric.media} 与交付媒体类型 ${mediaKind} 不一致` }
+  }
+  if (!hmacOk) return { ok: false, reason: "verdict 签名对不上 critic lane" }
   return { ok: true, verdict: { ...body, sig: v.sig } }
-}
-
-export function signedCriticVerdictOutput(dir: string, opts: { parentSessionId: string; artifactSha256: string; qcNodeId?: string }): Output {
-  const body: Omit<SignedCriticVerdict, "sig"> = {
-    schema: 1,
-    mode: "critic",
-    rubric: "image_default",
-    score: 90,
-    pass: true,
-    items: [{ id: "subject", pass: true, evidence: opts.artifactSha256 }],
-    deficiencies: [],
-    evidence: [opts.artifactSha256],
-    actor: { kind: "subagent", seat: criticSeat(), runId: "critic:fixture", lane: [opts.qcNodeId ?? "qc"], sessionId: `critic-child:${opts.parentSessionId}` },
-    parentSessionId: opts.parentSessionId,
-    artifactSha256: opts.artifactSha256,
-    receiptCallIds: ["call_fixture"],
-  }
-  const full: SignedCriticVerdict = { ...body, sig: signVerdict(body) }
-  const text = JSON.stringify(full)
-  const sha = createHash("sha256").update(text).digest("hex")
-  mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, `verdict-${sha.slice(0, 12)}.json`)
-  writeFileSync(file, text)
-  return {
-    port: "out",
-    artifactId: `art_${sha.slice(0, 16)}`,
-    sha256: sha,
-    path: file,
-    mime: "application/json",
-    bytes: Buffer.byteLength(text),
-    origin: "derived",
-  }
 }
 
 function reviewLocator(output: Output): string | null {
@@ -571,7 +581,9 @@ async function runCritic(ctx: ExecContext): Promise<ExecResult> {
     artifactSha256: picked.sha256,
     receiptCallIds: receipt.checked.map((row) => row.callId),
   }
-  const signed: SignedCriticVerdict = { ...body, sig: signVerdict(body) }
+  const sig = signVerdict(body)
+  if (!sig) return { ok: false, code: "bad_input", message: "critic 判过但生产钥匙不可用，拒绝签发", retryable: false }
+  const signed: SignedCriticVerdict = { ...body, sig }
   try {
     const out = await persistVerdict(ctx, picked.path, signed as unknown as Json)
     return {

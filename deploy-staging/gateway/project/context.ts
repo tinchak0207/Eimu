@@ -580,7 +580,12 @@ export async function persistUserBriefNow(sessionId: string, text: string, turn:
   const { ensureProject } = await import("./store.ts")
   const messageId = await briefMessageId(turn, raw)
   const { store, created } = await ensureProject(sessionId)
-  const added = await store.update((g) => appendBriefEntry(g.brief, { at: new Date().toISOString(), messageId, text: raw }) !== null)
+  const added = await store.update((g) => {
+    const entry = appendBriefEntry(g.brief, { at: new Date().toISOString(), messageId, text: raw })
+    if (!entry) return false
+    if (!g.entry) g.entry = { via: "session_api", messageId }
+    return true
+  })
   if (!added) return
   await store.appendEvents([
     { kind: "brief", data: { messageId, chars: [...raw].length, recipe: "", created } },

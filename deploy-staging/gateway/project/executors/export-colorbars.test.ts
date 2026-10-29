@@ -3,7 +3,7 @@ import "../__invariants__/fixtures/env"
 import "../__invariants__/fixtures/fake-platform"
 import { beforeEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 process.env.PROJECT_PUBLIC_UPLOADS_DIR = join(process.env.WORKSPACE_DIR!, "public-uploads")
@@ -16,7 +16,7 @@ const { registerExecutor, clearExecutors } = await import("../executor-registry.
 const { ensureProject } = await import("../store.ts")
 const { runProject } = await import("../run.ts")
 const { exportExecutor } = await import("./export.ts")
-const { signedCriticVerdictOutput } = await import("./qc.ts")
+const { signedTestCriticVerdictOutput } = await import("./qc.fixture.ts")
 
 const SHOTS = ["shot_a", "shot_b"] as const
 
@@ -89,7 +89,7 @@ function installFakes(): void {
       const groups = ctx.inputs as Record<string, { sha256?: string; mime?: string }[]>
       const media = Object.values(groups).flat().find((o) => /^(video|image)\//.test(String(o?.mime)))
       const inputs = media?.sha256
-        ? { ...ctx.inputs, verdict: [signedCriticVerdictOutput(scratch(ctx.sessionId), { parentSessionId: ctx.sessionId, artifactSha256: media.sha256 })] }
+        ? { ...ctx.inputs, verdict: [signedTestCriticVerdictOutput(scratch(ctx.sessionId), { parentSessionId: ctx.sessionId, artifactSha256: media.sha256, rubric: "film_frame_critic" })] }
         : ctx.inputs
       return exportExecutor.run({ ...ctx, inputs })
     },
@@ -170,10 +170,22 @@ describe("E3 色条成片", () => {
     const shotIds = (draft.tracks ?? []).filter((t) => t.type === "video").flatMap((t) => (t.segments ?? []).map((s) => s.id))
     expect(shotIds).toEqual([...SHOTS])
 
+    const metaUnpacked = spawnSync("/usr/bin/unzip", ["-p", zip.path, "draft_meta_info.json"], { encoding: "utf8", timeout: 20_000, maxBuffer: 32 * 1024 * 1024 })
+    expect(metaUnpacked.status, metaUnpacked.stderr || metaUnpacked.stdout).toBe(0)
+    const meta = JSON.parse(metaUnpacked.stdout) as { draft_id?: string; tm_duration?: number }
+    expect(typeof meta.draft_id).toBe("string")
+    expect((meta.draft_id ?? "").length).toBeGreaterThan(8)
+    expect(typeof meta.tm_duration).toBe("number")
+
     const xmlOut = (node.outputs as any[]).find((o) => o.port === "fcpxml")
     expect(xmlOut, JSON.stringify(mp4.meta)).toBeTruthy()
-    const xml = readFileSync(xmlOut.path, "utf8")
+    expect(xmlOut.mime).toBe("application/zip")
+    const xmlPacked = spawnSync("/usr/bin/unzip", ["-p", xmlOut.path, "export.fcpxml"], { encoding: "utf8", timeout: 20_000, maxBuffer: 32 * 1024 * 1024 })
+    expect(xmlPacked.status, xmlPacked.stderr || xmlPacked.stdout).toBe(0)
+    const xml = xmlPacked.stdout
     expect(xml).toContain('fcpxml version="1.10"')
     expect(xml).toContain("第三镜")
+    expect(xml).not.toContain("file://")
+    expect(xml).toContain("media/")
   }, 180_000)
 })

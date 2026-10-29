@@ -26,7 +26,8 @@ mkdirSync(join(WS, "home"), { recursive: true })
 
 const { ArtifactStore } = await import("./artifacts")
 const { exportExecutor } = await import("./executors/export")
-const { signedCriticVerdictOutput } = await import("./executors/qc")
+const { verifySignedCriticVerdict, CRITIC_VERDICT_TEST_KEY } = await import("./executors/qc")
+const { signedCriticVerdictOutput, signedTestCriticVerdictOutput } = await import("./executors/qc.fixture")
 
 const store = new ArtifactStore({ projectDir: PROJECT_DIR })
 const sha256 = (buf: Uint8Array) => createHash("sha256").update(buf).digest("hex")
@@ -51,7 +52,7 @@ function makeCtx(targets: Targets | null, inputs: Record<string, Output[]>, node
     }
   } else if (verdict === "signed" && !inputs.verdict) {
     const media = Object.values(inputs).flat().find((o) => /^(video|image)\//.test(o.mime))
-    if (media) next = { ...inputs, verdict: [signedCriticVerdictOutput(MEDIA, { parentSessionId: SID, artifactSha256: media.sha256 })] }
+    if (media) next = { ...inputs, verdict: [signedTestCriticVerdictOutput(MEDIA, { parentSessionId: SID, artifactSha256: media.sha256, rubric: "film_frame_critic" })] }
   }
   const node: ProjectNode = {
     id: nodeId,
@@ -172,4 +173,79 @@ describe("S20 export 交付闸（真 ffmpeg）", () => {
     expect(res.outputs[0].sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(res.outputs[0].sha256).toBe(sha256(readFileSync(res.outputs[0].path)))
   }, 180_000)
+})
+
+describe("critic 签名拒收", () => {
+  const sha = "ab".repeat(32)
+
+  test("夹具签名即使 HMAC 正确也被拒", () => {
+    const out = signedCriticVerdictOutput(MEDIA, { parentSessionId: SID, artifactSha256: sha })
+    const parsed = JSON.parse(readFileSync(out.path, "utf8"))
+    const checked = verifySignedCriticVerdict(parsed, SID, "image")
+    expect(checked.ok).toBe(false)
+    if (checked.ok) return
+    expect(checked.reason).toContain("HMAC 正确")
+    expect(checked.reason).toContain("critic:fixture")
+    expect(checked.reason).toContain(":fixture")
+    expect(checked.reason).toContain("call_fixture")
+  })
+
+  test("image_default 拿去验视频也被拒", () => {
+    const out = signedTestCriticVerdictOutput(MEDIA, {
+      parentSessionId: SID,
+      artifactSha256: sha,
+      rubric: "image_default",
+      runId: "critic:image-as-video",
+      receiptCallIds: ["call_image_as_video"],
+    })
+    const parsed = JSON.parse(readFileSync(out.path, "utf8"))
+    const checked = verifySignedCriticVerdict(parsed, SID, "video")
+    expect(checked.ok).toBe(false)
+    if (checked.ok) return
+    expect(checked.reason).toContain("媒体类型")
+  })
+
+  test("生产环境变量把钥匙设成测试常量时验签失败", () => {
+    const out = signedTestCriticVerdictOutput(MEDIA, {
+      parentSessionId: SID,
+      artifactSha256: sha,
+      rubric: "film_frame_critic",
+      runId: "critic:prod-key",
+      receiptCallIds: ["call_prod_key"],
+    })
+    const parsed = JSON.parse(readFileSync(out.path, "utf8"))
+    const prevNode = process.env.NODE_ENV
+    const prevEimu = process.env.EIMU_ENV
+    const prevKey = process.env.EIMU_CRITIC_VERDICT_KEY
+    const restore = () => {
+      if (prevNode === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = prevNode
+      if (prevEimu === undefined) delete process.env.EIMU_ENV
+      else process.env.EIMU_ENV = prevEimu
+      if (prevKey === undefined) delete process.env.EIMU_CRITIC_VERDICT_KEY
+      else process.env.EIMU_CRITIC_VERDICT_KEY = prevKey
+    }
+    try {
+      process.env.NODE_ENV = "production"
+      delete process.env.EIMU_ENV
+      process.env.EIMU_CRITIC_VERDICT_KEY = CRITIC_VERDICT_TEST_KEY
+      const same = verifySignedCriticVerdict(parsed, SID, "video")
+      expect(same.ok).toBe(false)
+      if (!same.ok) expect(same.reason).toContain("生产钥匙不可用")
+
+      delete process.env.EIMU_CRITIC_VERDICT_KEY
+      const missing = verifySignedCriticVerdict(parsed, SID, "video")
+      expect(missing.ok).toBe(false)
+      if (!missing.ok) expect(missing.reason).toContain("生产钥匙不可用")
+
+      process.env.NODE_ENV = "test"
+      process.env.EIMU_ENV = "production"
+      process.env.EIMU_CRITIC_VERDICT_KEY = CRITIC_VERDICT_TEST_KEY
+      const eimu = verifySignedCriticVerdict(parsed, SID, "video")
+      expect(eimu.ok).toBe(false)
+      if (!eimu.ok) expect(eimu.reason).toContain("生产钥匙不可用")
+    } finally {
+      restore()
+    }
+  })
 })

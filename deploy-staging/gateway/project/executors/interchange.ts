@@ -1,11 +1,9 @@
 // L4 交换件。键来自上游，不搬 Python。
-// 剪映 GuanYixuan/pyJianYingDraft：script_file.py dumps() 写 fps/duration/config.maintrack_adsorb/canvas_config/materials/tracks；
-// time_util.py SEC=1000000（微秒）；track.py export_json 的 type 为 TrackType.name（video/audio/text）；
-// local_materials.py、segment.py、text_segment.py 的素材/片段字段。
-// FCPXML：OpenTimelineIO/otio-fcpx-xml-adapter fcpx_xml.py（ASWF 主仓 fcp_xml.py 已删，那份写 xmeml version="4"）。
-// FcpxOtio 写 version="1.8"，此处按任务写 1.10。asset/_create_asset_element，asset-clip/_create_asset_clip_element，
-// audio/_element_for_clip。adapter 不写 title；title 用 Apple FCPXML 1.10 DTD（ref 必填，文本在 text/text-style）。
-import { randomBytes } from "node:crypto"
+// 剪映 GuanYixuan/pyJianYingDraft（Apache-2.0）：script_file.py dumps() 在 DRAFT_CONTENT_TEMPLATE 上写
+// fps/duration/config.maintrack_adsorb/canvas_config/materials/tracks；draft_folder.py 另拷 draft_meta_info.json。
+// 模板原文在 ./jianying/。素材路径用包内相对路径，不用 abspath。
+// FCPXML 1.10：交付物是 zip（export.fcpxml + media/<文件名>），src 相对，宽高与 hasAudio 只写调用方传入的值。
+import { randomBytes, randomUUID } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -15,11 +13,27 @@ const SEC = 1_000_000
 const hid = () => randomBytes(16).toString("hex")
 const us = (sec: number) => Math.round(sec * SEC)
 
-export interface InterchangeClip { id: string; path: string; durationSec?: number; inSec?: number; outSec?: number; speed?: number }
+export interface InterchangeClip {
+  id: string
+  path: string
+  durationSec?: number
+  inSec?: number
+  outSec?: number
+  speed?: number
+  width?: number
+  height?: number
+  hasAudio?: boolean
+}
 export interface InterchangeAudio { id: string; path: string; durationSec?: number }
 export interface InterchangeCue { text: string; startSec?: number; endSec?: number }
 export interface InterchangeInput { clips: InterchangeClip[]; audio?: InterchangeAudio[]; subtitles?: InterchangeCue[]; width?: number; height?: number; fps?: number }
-export interface InterchangeBuild { draftJson: Record<string, unknown>; fcpxml: string; zipBytes: Uint8Array }
+export interface InterchangeBuild {
+  draftJson: Record<string, unknown>
+  draftMeta: Record<string, unknown>
+  fcpxml: string
+  zipBytes: Uint8Array
+  fcpxmlZipBytes: Uint8Array
+}
 export interface AppendInterchangeSpec {
   clips: InterchangeClip[]
   audio: InterchangeAudio[]
@@ -34,6 +48,9 @@ export interface AppendInterchangeSpec {
 const CROP = { upper_left_x: 0, upper_left_y: 0, upper_right_x: 1, upper_right_y: 0, lower_left_x: 0, lower_left_y: 1, lower_right_x: 1, lower_right_y: 1 }
 const VISUAL = { alpha: 1, flip: { horizontal: false, vertical: false }, rotation: 0, scale: { x: 1, y: 1 }, transform: { x: 0, y: 0 } }
 
+function readTemplate(name: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(new URL(`./jianying/${name}`, import.meta.url), "utf8")) as Record<string, unknown>
+}
 function gcd(a: number, b: number): number { return b ? gcd(b, a % b) : a }
 function xmlEsc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") }
 function fcpxTime(sec: number): string {
@@ -42,10 +59,6 @@ function fcpxTime(sec: number): string {
   if (ms % 1000 === 0) return `${ms / 1000}s`
   const g = gcd(ms, 1000)
   return `${ms / g}/${1000 / g}s`
-}
-function fileUrl(p: string): string {
-  const abs = path.isAbsolute(p) ? p : path.resolve(p)
-  return "file://" + abs.split("/").map((part, i) => (i === 0 ? part : encodeURIComponent(part))).join("/")
 }
 function span(c: { durationSec?: number; inSec?: number; outSec?: number; speed?: number }) {
   const speed = c.speed && c.speed > 0 ? c.speed : 1
@@ -57,11 +70,20 @@ function safeBase(p: string): string {
   const base = path.basename(p).replace(/[^A-Za-z0-9._-]/g, "_")
   return base && base !== "." && base !== ".." ? base : "media.bin"
 }
-function mediaRel(id: string, filePath: string, used: Set<string>): string {
+function mediaName(id: string, filePath: string, used: Set<string>): string {
   let name = safeBase(filePath)
   if (used.has(name)) name = `${safeBase(id)}__${name}`
   used.add(name)
-  return `materials/${name}`
+  return name
+}
+function audioAttr(hasAudio: boolean | undefined): string {
+  if (hasAudio === true) return ' hasAudio="1"'
+  if (hasAudio === false) return ' hasAudio="0"'
+  return ""
+}
+function knownSize(width?: number, height?: number): { width: number; height: number } | null {
+  if (typeof width === "number" && width > 0 && typeof height === "number" && height > 0) return { width, height }
+  return null
 }
 function crc32(buf: Buffer): number {
   let c = 0xffffffff
@@ -111,46 +133,64 @@ function readCopy(filePath: string, rel: string, zip: { name: string; data: Buff
   if (existsSync(filePath)) zip.push({ name: rel, data: readFileSync(filePath) })
 }
 
+interface PlacedClip { id: string; media: string; inSec: number; sourceSec: number; targetSec: number; startSec: number; width?: number; height?: number; hasAudio?: boolean }
+
 export function buildInterchange(input: InterchangeInput): InterchangeBuild {
   const fps = input.fps && input.fps > 0 ? input.fps : 30
-  const width = input.width && input.width > 0 ? input.width : 1920
-  const height = input.height && input.height > 0 ? input.height : 1080
+  const canvasW = input.width && input.width > 0 ? input.width : 0
+  const canvasH = input.height && input.height > 0 ? input.height : 0
   const videos: Record<string, unknown>[] = []
   const audios: Record<string, unknown>[] = []
   const texts: Record<string, unknown>[] = []
   const speeds: Record<string, unknown>[] = []
-  const zipFiles: { name: string; data: Buffer }[] = []
+  const jianyingFiles: { name: string; data: Buffer }[] = []
+  const fcpxFiles: { name: string; data: Buffer }[] = []
   const used = new Set<string>()
   const cues = (input.subtitles ?? []).filter((c) => c.text.length > 0)
   const videoSegments: Record<string, unknown>[] = []
-  const slots: { id: string; startSec: number; durSec: number }[] = []
+  const placed: PlacedClip[] = []
   let cursorUs = 0
   for (const clip of input.clips) {
     const t = span(clip)
-    const rel = mediaRel(clip.id, clip.path, used)
+    const name = mediaName(clip.id, clip.path, used)
+    const mat = `materials/${name}`
+    const media = `media/${name}`
     const sp = speedOf(t.speed)
     speeds.push(sp.json)
-    videos.push({
+    const size = knownSize(clip.width, clip.height)
+    const video: Record<string, unknown> = {
       audio_fade: null, category_id: "", category_name: "local", check_flag: 63487, crop: CROP, crop_ratio: "free", crop_scale: 1,
-      duration: us(t.sourceSec), height, id: clip.id, local_material_id: clip.id, material_id: clip.id, material_name: clip.id,
-      media_path: "", path: rel, type: "video", width,
-    })
+      duration: us(t.sourceSec), id: clip.id, local_material_id: clip.id, material_id: clip.id, material_name: clip.id,
+      media_path: "", path: mat, type: "video",
+    }
+    if (size) { video.width = size.width; video.height = size.height }
+    videos.push(video)
     videoSegments.push({ ...seg(clip.id, clip.id, cursorUs, us(t.targetSec), { start: us(t.inSec), duration: us(t.sourceSec) }, t.speed, sp.id), clip: VISUAL, uniform_scale: { on: true, value: 1 }, hdr_settings: { intensity: 1, mode: 1, nits: 1000 } })
-    readCopy(clip.path, rel, zipFiles)
-    slots.push({ id: clip.id, startSec: cursorUs / SEC, durSec: t.targetSec })
+    readCopy(clip.path, mat, jianyingFiles)
+    readCopy(clip.path, media, fcpxFiles)
+    placed.push({
+      id: clip.id, media, inSec: t.inSec, sourceSec: t.sourceSec, targetSec: t.targetSec, startSec: cursorUs / SEC,
+      ...(size ? { width: size.width, height: size.height } : {}),
+      ...(typeof clip.hasAudio === "boolean" ? { hasAudio: clip.hasAudio } : {}),
+    })
     cursorUs += us(t.targetSec)
   }
+  const audioPlaced: { id: string; media: string; durationSec: number }[] = []
   const audioTracks = (input.audio ?? []).map((a) => {
     const durSec = typeof a.durationSec === "number" && a.durationSec > 0 ? a.durationSec : 0
-    const rel = mediaRel(a.id, a.path, used)
+    const name = mediaName(a.id, a.path, used)
+    const mat = `materials/${name}`
+    const media = `media/${name}`
     const sp = speedOf(1)
     speeds.push(sp.json)
     audios.push({
       app_id: 0, category_id: "", category_name: "local", check_flag: 3, copyright_limit_type: "none", duration: us(durSec),
-      effect_id: "", formula_id: "", id: a.id, local_material_id: a.id, music_id: a.id, name: a.id, path: rel,
+      effect_id: "", formula_id: "", id: a.id, local_material_id: a.id, music_id: a.id, name: a.id, path: mat,
       source_platform: 0, type: "extract_music", wave_points: [],
     })
-    readCopy(a.path, rel, zipFiles)
+    readCopy(a.path, mat, jianyingFiles)
+    readCopy(a.path, media, fcpxFiles)
+    audioPlaced.push({ id: a.id, media, durationSec: durSec })
     return track("audio", [{ ...seg(a.id, a.id, 0, us(durSec), { start: 0, duration: us(durSec) }, 1, sp.id), clip: null, hdr_settings: null }])
   })
   const totalSec = cursorUs / SEC
@@ -165,53 +205,82 @@ export function buildInterchange(input: InterchangeInput): InterchangeBuild {
   })
   const audioEnd = audioTracks.flatMap((t) => t.segments.map((s) => (s.target_timerange as { start: number; duration: number }).start + (s.target_timerange as { duration: number }).duration))
   const duration = Math.max(cursorUs, ...audioEnd, 0)
-  const draftJson: Record<string, unknown> = {
-    fps, duration, canvas_config: { width, height, ratio: "original" }, config: { maintrack_adsorb: true },
-    materials: { videos, audios, texts, speeds },
-    tracks: [track("video", videoSegments), ...audioTracks, track("text", textSegments)],
-  }
-  const zipBytes = zipStore([{ name: "draft_content.json", data: Buffer.from(JSON.stringify(draftJson), "utf8") }, ...zipFiles])
-  return { draftJson, fcpxml: renderFcpxml(input, slots, cues, width, height, fps), zipBytes }
+  const content = readTemplate("draft_content_template.json")
+  content.fps = fps
+  content.duration = duration
+  const config = content.config
+  if (config && typeof config === "object" && !Array.isArray(config)) (config as Record<string, unknown>).maintrack_adsorb = true
+  if (canvasW > 0 && canvasH > 0) content.canvas_config = { width: canvasW, height: canvasH, ratio: "original" }
+  const materials = content.materials
+  if (!materials || typeof materials !== "object" || Array.isArray(materials)) throw new Error("剪映模板 materials 不是对象")
+  const bag = materials as Record<string, unknown>
+  bag.videos = videos
+  bag.audios = audios
+  bag.texts = texts
+  bag.speeds = speeds
+  content.tracks = [track("video", videoSegments), ...audioTracks, track("text", textSegments)]
+  const meta = readTemplate("draft_meta_info.json")
+  meta.draft_id = randomUUID()
+  meta.draft_name = "export"
+  meta.tm_duration = duration
+  const fcpxml = renderFcpxml(placed, audioPlaced, cues, canvasW, canvasH, fps)
+  const zipBytes = zipStore([
+    { name: "draft_content.json", data: Buffer.from(JSON.stringify(content), "utf8") },
+    { name: "draft_meta_info.json", data: Buffer.from(JSON.stringify(meta), "utf8") },
+    ...jianyingFiles,
+  ])
+  const fcpxmlZipBytes = zipStore([{ name: "export.fcpxml", data: Buffer.from(fcpxml, "utf8") }, ...fcpxFiles])
+  return { draftJson: content, draftMeta: meta, fcpxml, zipBytes, fcpxmlZipBytes }
 }
 
-function renderFcpxml(input: InterchangeInput, slots: { id: string; startSec: number; durSec: number }[], cues: InterchangeCue[], width: number, height: number, fps: number): string {
+function renderFcpxml(placed: PlacedClip[], audioPlaced: { id: string; media: string; durationSec: number }[], cues: InterchangeCue[], canvasW: number, canvasH: number, fps: number): string {
   const frame = fps === 30 ? "100/3000s" : `1/${fps}s`
-  const formatName = height === 1080 ? `FFVideoFormat1080p${fps}` : height === 720 ? `FFVideoFormat720p${fps}` : `FFVideoFormat${height}p${fps}`
+  const formatName = (h: number) => h === 1080 ? `FFVideoFormat1080p${fps}` : h === 720 ? `FFVideoFormat720p${fps}` : h > 0 ? `FFVideoFormat${h}p${fps}` : `FFVideoFormat${fps}`
   let n = 1
-  const formatId = `r${n++}`
-  const resources = [`<format id="${formatId}" frameDuration="${frame}" width="${width}" height="${height}" name="${formatName}"/>`]
-  const spine: string[] = []
-  input.clips.forEach((clip, i) => {
-    const t = span(clip)
+  const formats: string[] = []
+  const seqId = `r${n++}`
+  const seqDims = canvasW > 0 && canvasH > 0 ? ` width="${canvasW}" height="${canvasH}"` : ""
+  formats.push(`<format id="${seqId}" frameDuration="${frame}"${seqDims} name="${formatName(canvasH)}"/>`)
+  const nativeFormat = (w?: number, h?: number): string => {
+    if (!(w && w > 0 && h && h > 0)) return ""
+    if (w === canvasW && h === canvasH) return seqId
     const id = `r${n++}`
-    const slot = slots[i]
-    resources.push(`<asset name="${xmlEsc(clip.id)}" src="${xmlEsc(fileUrl(clip.path))}" format="${formatId}" id="${id}" duration="${fcpxTime(t.sourceSec)}" start="${fcpxTime(t.inSec)}" hasAudio="0" hasVideo="1"/>`)
+    formats.push(`<format id="${id}" frameDuration="${frame}" width="${w}" height="${h}" name="${formatName(h)}"/>`)
+    return id
+  }
+  const resources: string[] = []
+  const audioRefs = audioPlaced.map((a) => {
+    const id = `r${n++}`
+    resources.push(`<asset name="${xmlEsc(a.id)}" src="${xmlEsc(a.media)}" id="${id}" duration="${fcpxTime(a.durationSec)}" start="0s" hasAudio="1" hasVideo="0"/>`)
+    return { id, durationSec: a.durationSec }
+  })
+  const spine: string[] = []
+  placed.forEach((clip, i) => {
+    const id = `r${n++}`
+    const fid = nativeFormat(clip.width, clip.height)
+    const formatAttr = fid ? ` format="${fid}"` : ""
+    resources.push(`<asset name="${xmlEsc(clip.id)}" src="${xmlEsc(clip.media)}"${formatAttr} id="${id}" duration="${fcpxTime(clip.sourceSec)}" start="${fcpxTime(clip.inSec)}"${audioAttr(clip.hasAudio)} hasVideo="1"/>`)
     const kids: string[] = []
-    if (i === 0) for (const a of input.audio ?? []) {
-      const aid = `r${n++}`
-      const dur = typeof a.durationSec === "number" && a.durationSec > 0 ? a.durationSec : 0
-      resources.push(`<asset name="${xmlEsc(a.id)}" src="${xmlEsc(fileUrl(a.path))}" format="${formatId}" id="${aid}" duration="${fcpxTime(dur)}" start="0s" hasAudio="1" hasVideo="0"/>`)
-      kids.push(`<audio offset="0s" ref="${aid}" duration="${fcpxTime(dur)}" lane="-1"/>`)
-    }
+    if (i === 0) for (const a of audioRefs) kids.push(`<audio offset="0s" ref="${a.id}" duration="${fcpxTime(a.durationSec)}" lane="-1"/>`)
     for (const cue of cues) {
       const timed = typeof cue.startSec === "number"
       if (!timed && i !== 0) continue
-      const start = timed ? cue.startSec ?? 0 : slot?.startSec ?? 0
-      const end = typeof cue.endSec === "number" && cue.endSec > start ? cue.endSec : (slot ? slot.startSec + slot.durSec : start)
-      const slotEnd = slot ? slot.startSec + slot.durSec : end
-      if (slot && !(start < slotEnd && end > slot.startSec)) continue
-      const off = Math.max(0, start - (slot?.startSec ?? 0))
-      const dur = Math.max(0, Math.min(end, slotEnd) - Math.max(start, slot?.startSec ?? 0))
+      const start = timed ? cue.startSec ?? 0 : clip.startSec
+      const end = typeof cue.endSec === "number" && cue.endSec > start ? cue.endSec : clip.startSec + clip.targetSec
+      const slotEnd = clip.startSec + clip.targetSec
+      if (!(start < slotEnd && end > clip.startSec)) continue
+      const off = Math.max(0, start - clip.startSec)
+      const dur = Math.max(0, Math.min(end, slotEnd) - Math.max(start, clip.startSec))
       const eid = `r${n++}`
       const ts = `ts${n}`
       resources.push(`<effect id="${eid}" name="Basic Title" uid="/Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"/>`)
       kids.push(`<title ref="${eid}" name="${xmlEsc(clip.id)}" lane="1" offset="${fcpxTime(off)}" duration="${fcpxTime(dur)}"><text><text-style ref="${ts}">${xmlEsc(cue.text)}</text-style></text><text-style-def id="${ts}"><text-style font="Helvetica" fontSize="52" fontColor="1 1 1 1"/></text-style-def></title>`)
     }
     const tail = kids.length ? `>${kids.join("")}</asset-clip>` : "/>"
-    spine.push(`<asset-clip name="${xmlEsc(clip.id)}" format="${formatId}" ref="${id}" offset="${fcpxTime(slot?.startSec ?? 0)}" duration="${fcpxTime(t.targetSec)}" start="${fcpxTime(t.inSec)}"${tail}`)
+    spine.push(`<asset-clip name="${xmlEsc(clip.id)}" format="${seqId}" ref="${id}" offset="${fcpxTime(clip.startSec)}" duration="${fcpxTime(clip.targetSec)}" start="${fcpxTime(clip.inSec)}"${tail}`)
   })
-  const seqDur = fcpxTime(slots.reduce((s, c) => s + c.durSec, 0))
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n<fcpxml version="1.10">\n<resources>\n${resources.join("\n")}\n</resources>\n<project name="export">\n<sequence duration="${seqDur}" format="${formatId}">\n<spine>\n${spine.join("\n")}\n</spine>\n</sequence>\n</project>\n</fcpxml>\n`
+  const seqDur = fcpxTime(placed.reduce((s, c) => s + c.targetSec, 0))
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n<fcpxml version="1.10">\n<resources>\n${[...formats, ...resources].join("\n")}\n</resources>\n<project name="export">\n<sequence duration="${seqDur}" format="${seqId}">\n<spine>\n${spine.join("\n")}\n</spine>\n</sequence>\n</project>\n</fcpxml>\n`
 }
 
 function parseStamp(raw: string): number {
@@ -274,11 +343,11 @@ export async function appendInterchangeOutputs(ctx: Pick<ExecContext, "ingest">,
     })
     await mkdir(spec.scratch, { recursive: true })
     const zipPath = path.join(spec.scratch, "jianying_draft.zip")
-    const xmlPath = path.join(spec.scratch, "export.fcpxml")
+    const xmlZipPath = path.join(spec.scratch, "export.fcpxml.zip")
     await writeFile(zipPath, built.zipBytes)
-    await writeFile(xmlPath, built.fcpxml, "utf8")
+    await writeFile(xmlZipPath, built.fcpxmlZipBytes)
     const zipIn = await ctx.ingest({ path: zipPath }, { port: "jianying", mime: "application/zip", origin: "derived" })
-    const xmlIn = await ctx.ingest({ path: xmlPath }, { port: "fcpxml", mime: "application/xml", origin: "derived" })
+    const xmlIn = await ctx.ingest({ path: xmlZipPath }, { port: "fcpxml", mime: "application/zip", origin: "derived" })
     return [
       { ...zipIn, port: "jianying", meta: { kind: "jianying_draft" } },
       { ...xmlIn, port: "fcpxml", meta: { kind: "fcpxml" } },

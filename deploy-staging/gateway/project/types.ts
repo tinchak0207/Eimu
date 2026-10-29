@@ -122,6 +122,7 @@ export interface ProjectGraph {
   budget: Budget
   activeRun: RunId | null
   seq: number                        // 事件序号高水位
+  entry?: { via: "session_api"; messageId: string } // 只有 persistUserBriefNow 成功时写；补丁不能写
 }
 
 // ===== 补丁 =====

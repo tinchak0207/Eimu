@@ -706,6 +706,7 @@ export async function applyPatch(graph: Readonly<ProjectGraph>, req: PatchReques
     ctx.warnings.push(`fanout:+${exp.created.length} -${exp.removed.length} orphan:${exp.orphaned.length}`)
   }
   const g = ctx.g
+  if (actor.kind !== "user" && actor.kind !== "engine") g.entry = base.entry
   g.version = base.version + 1
   g.updatedAt = nowIso
   const changed = [...ctx.changed].map(([node, fields]) => ({ node, fields: [...fields] }))
