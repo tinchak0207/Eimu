@@ -414,6 +414,8 @@ describe("⑦ 工程模式停掉全部尾部注入（§3.7 第 7 点，伪用户
       opencodeSessionId: `oc_s14_tail_${tag}`,
       apiKey: "sk-s14-tail-fixture-0123456789",
       projectMode,
+      // 注入开关看席位：lean creator 席位不注入；新会话（旧席位＋工程引擎）照旧注入
+      seat: projectMode ? "creator" : "creator_legacy",
     }) as unknown as import("./types-gateway.ts").SessionState
 
   const newBody = () => ({ parts: [] as import("./types-gateway.ts").GatewayPromptPart[] })

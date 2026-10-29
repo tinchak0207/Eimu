@@ -250,17 +250,17 @@ suite("S17 工程模式交付前置检查", () => {
     expect(shouldBlockCompletionForWorkflowWrite(base)).toBe(true)
 
     const text = "已完成，音频在 AUDIO_URL。"
-    const projectVerdict = checkDeliveryForSession({ projectMode: true }, "music", text, DELIVERY_CONTRACTS)
+    const projectVerdict = checkDeliveryForSession({ projectMode: true, seat: "creator" }, "music", text, DELIVERY_CONTRACTS)
     expect(projectVerdict.ok).toBe(true)
     expect(projectVerdict.missing).toEqual([])
 
-    const legacyVerdict = checkDeliveryForSession({ projectMode: false }, "music", text, DELIVERY_CONTRACTS)
+    const legacyVerdict = checkDeliveryForSession({ projectMode: false, seat: "creator_legacy" }, "music", text, DELIVERY_CONTRACTS)
     expect(legacyVerdict.ok).toBe(false)
     expect(legacyVerdict.missing.length).toBeGreaterThan(0)
 
     // 工程模式只停「字段名」检查；产物证据仍然判（那不是措辞闸）。
     const blocked: ArtifactVerifyRecord[] = [{ name: "final.mp4", url: null, local_available: false, verify_status: "blocked" }]
-    const withBlocked = checkDeliveryForSession({ projectMode: true }, "music", text, DELIVERY_CONTRACTS, blocked)
+    const withBlocked = checkDeliveryForSession({ projectMode: true, seat: "creator" }, "music", text, DELIVERY_CONTRACTS, blocked)
     expect(withBlocked.ok).toBe(false)
     expect(withBlocked.missing.some((m) => m.startsWith("artifact:final.mp4"))).toBe(true)
   })

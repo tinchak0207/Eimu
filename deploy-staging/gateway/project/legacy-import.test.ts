@@ -251,7 +251,7 @@ describe("EIMU_PROJECT_MODE 开关与 allowlist（按已鉴权 userId）", () =>
     expect(sessionsCore.projectModeSwitch({ PROJECT_MODE_DEFAULT: "garbage" })).toBe("off")
     const st = bareSession("sk-seat-default-on", "sess_seat_default_on")
     sessionsCore.latchSessionSeat(st, {})
-    expect(st.seat).toBe("creator")
+    expect(st.seat).toBe("creator_legacy")
     expect(st.projectMode).toBe(true)
   })
 
@@ -289,17 +289,20 @@ describe("EIMU_PROJECT_MODE 开关与 allowlist（按已鉴权 userId）", () =>
     sessionsCore.sessions.delete(forged.sessionId)
   })
 
-  test("on：新会话锁存为 creator（工程模式）", () => {
+  test("on：新会话锁存为旧席位 creator_legacy＋工程引擎（projectMode=true），leanSeat 为 false", () => {
     process.env.EIMU_PROJECT_MODE = "on"
     delete process.env.EIMU_PROJECT_MODE_ALLOWLIST
     const st = bareSession("sk-seat-on", "sess_seat_on")
     sessionsCore.sessions.set(st.sessionId, st)
-    expect(st.seat).toBe("creator")
+    expect(st.seat).toBe("creator_legacy")
     expect(st.projectMode).toBe(true)
+    expect(sessionsCore.leanSeat(st)).toBe(false)
+    expect(sessionsCore.leanSeat({ seat: "creator" })).toBe(true)
+    expect(sessionsCore.seatDecision({ mode: "on", userId: "u1" })).toMatchObject({ seat: "creator_legacy", projectMode: true })
     sessionsCore.sessions.delete(st.sessionId)
   })
 
-  test("allowlist：命中 → creator，未命中 → creator_legacy；id 由已鉴权 apiKey 派生", async () => {
+  test("allowlist：命中 → 旧席位＋工程引擎，未命中 → 旧席位无引擎；id 由已鉴权 apiKey 派生", async () => {
     const allowedKey = "sk-allow-hit"
     const otherKey = "sk-allow-miss"
     const allowedUserId = sessionsCore.seatUserId(allowedKey)
@@ -313,7 +316,7 @@ describe("EIMU_PROJECT_MODE 开关与 allowlist（按已鉴权 userId）", () =>
     const miss = bareSession(otherKey, "sess_allow_miss")
     sessionsCore.sessions.set(hit.sessionId, hit)
     sessionsCore.sessions.set(miss.sessionId, miss)
-    expect(hit.seat).toBe("creator")
+    expect(hit.seat).toBe("creator_legacy")
     expect(hit.projectMode).toBe(true)
     expect(miss.seat).toBe("creator_legacy")
     expect(miss.projectMode).toBe(false)

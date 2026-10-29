@@ -101,21 +101,21 @@ describe("会话创建席位（opencode 创建时绑定工具表）", () => {
     expect(state.beast).toBe(true)
   })
 
-  test("on → 创建 body agent=creator（工程席位），锁存 seat=creator/projectMode=true", async () => {
+  test("on → 创建 body agent=旧席位（creator_legacy／beast 时 orchestrator_legacy），锁存 seat=creator_legacy/projectMode=true", async () => {
     configure("on")
     for (const beast of [false, true]) {
       const key = `sk-create-on-${beast ? "beast" : "plain"}`
       setBeast(key, beast)
       const { agent, state } = await createSession(key)
-      // 工程会话恒 creator（S14 resolvePromptSeat：projectMode=true → creator，beast 不换席位）
-      expect(agent).toBe("creator")
-      expect(state.seat).toBe("creator")
+      // 2026-10-29：工程模式＝旧席位＋工程图引擎，席位随 beast 走旧映射；lean creator 不再分给新会话
+      expect(agent).toBe(beast ? "orchestrator_legacy" : "creator_legacy")
+      expect(state.seat).toBe("creator_legacy")
       expect(state.projectMode).toBe(true)
       expect(state.beast).toBe(beast)
     }
   })
 
-  test("allowlist：命中 → agent=creator；未命中 → agent=creator_legacy（按已鉴权 userId）", async () => {
+  test("allowlist：命中 → 旧席位＋工程引擎（projectMode=true）；未命中 → 旧席位无引擎（按已鉴权 userId）", async () => {
     const hitKey = "sk-create-allow-hit"
     const missKey = "sk-create-allow-miss"
     setBeast(hitKey, false)
@@ -123,8 +123,8 @@ describe("会话创建席位（opencode 创建时绑定工具表）", () => {
     configure("allowlist", [seatUserId(hitKey)])
 
     const hit = await createSession(hitKey)
-    expect(hit.agent).toBe("creator")
-    expect(hit.state.seat).toBe("creator")
+    expect(hit.agent).toBe("creator_legacy")
+    expect(hit.state.seat).toBe("creator_legacy")
     expect(hit.state.projectMode).toBe(true)
 
     const miss = await createSession(missKey)

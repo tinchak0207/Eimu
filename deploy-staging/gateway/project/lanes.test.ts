@@ -197,7 +197,7 @@ const runOf = (sessionId: string) => (byParent.get(sessionId) ?? [])[0]
 
 describe("工程模式派发：席位 <expert>_p 与 lane 进子运行配置", () => {
   test("工程会话（beast OFF）点名 critic → 子会话 agent=critic_p，lane 规范化并截到 20", async () => {
-    const p = makeParent("s16-proj", { projectMode: true, beastMode: false })
+    const p = makeParent("s16-proj", { projectMode: true, seat: "creator", beastMode: false })
     const many = Array.from({ length: LANE_MAX + 5 }, (_, i) => `n${i}`)
     const res = await dispatch(p, "评审官", { expert: "critic", lane: ["qc1", "qc1", "bad id", ...many] })
     const body = (await res.json()) as Record<string, unknown>
@@ -228,7 +228,7 @@ describe("工程模式派发：席位 <expert>_p 与 lane 进子运行配置", (
 
 describe("工程模式 finishRun", () => {
   test("不调 wakeParent（spy 0 次）；run_finished 事件落盘；回父摘要 ≤4096B、node_ids ≤20", async () => {
-    const p = makeParent("s16-finish", { projectMode: true, beastMode: false })
+    const p = makeParent("s16-finish", { projectMode: true, seat: "creator", beastMode: false })
     await ensureProject(p.sessionId)
     const ids = Array.from({ length: LANE_MAX }, (_, i) => `k${i}`)
     await dispatch(p, "写手", { expert: "screenwriter", lane: ids })

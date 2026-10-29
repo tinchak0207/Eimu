@@ -25,7 +25,7 @@ beforeAll(async () => {
 beforeEach(() => recorderOf().reset())
 
 function projectState() {
-  return { sessionId: "gw_i3", apiKey: "sk-i3-project", opencodeSessionId: "ses_inv", projectMode: true as const }
+  return { sessionId: "gw_i3", apiKey: "sk-i3-project", opencodeSessionId: "ses_inv", projectMode: true as const, seat: "creator" as const }
 }
 function legacyState() {
   return { sessionId: "gw_i3", apiKey: "sk-i3-project", opencodeSessionId: "ses_inv", projectMode: false as const, seat: "creator_legacy" as const }

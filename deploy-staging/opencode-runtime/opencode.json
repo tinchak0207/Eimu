@@ -1403,7 +1403,10 @@
         "workflow_update_node": true,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "project_get": true,
+        "project_patch": true,
+        "project_run": true
       }
     },
     "orchestrator": {
@@ -1759,7 +1762,10 @@
         "workflow_update_node": false,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": false
+        "write": false,
+        "project_get": true,
+        "project_patch": true,
+        "project_run": true
       }
     },
     "director3d": {

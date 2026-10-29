@@ -57,6 +57,7 @@ function makeState(sessionId: string, over: Record<string, unknown> = {}): any {
     resolvedConfirms: new Map(),
     pendingQuestions: new Map(),
     projectMode: true,
+    seat: "creator",
     ...over,
   }
 }
@@ -162,7 +163,17 @@ describe("内部路由鉴权与 context", () => {
     } finally {
       restore()
     }
-    // projectMode=true 但工程目录不存在 → 也是 404
+    // 新会话＝旧席位＋工程引擎（projectMode=true, seat=creator_legacy）：不按工程图重建上下文，同样 404 回旧路径
+    const sidNew = nextSession("ctx404new")
+    const restoreNew = installHost(makeState(sidNew, { seat: "creator_legacy" }), { submits: [], ledger: [] })
+    try {
+      const res = await internal("/internal/project/context", { session_id: sidNew, messages: [] })
+      expect(res.status).toBe(404)
+      expect((await res.json() as any).error.code).toBe("not_project_session")
+    } finally {
+      restoreNew()
+    }
+    // lean 席位但工程目录不存在 → 也是 404
     const sid2 = nextSession("ctx404b")
     const restore2 = installHost(makeState(sid2), { submits: [], ledger: [] })
     try {

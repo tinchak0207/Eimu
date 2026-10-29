@@ -95,17 +95,25 @@ describe("R-19 产物卡投影", () => {
 
 describe("R-20 研究先行", () => {
   test("研究没写满 → 付费节点被拒；写满 3 个出处后放行；代理删不掉研究节点", async () => {
-    const { researchGate, researchIssues, researchNodeIds, RESEARCH_DIRECTIONS } = await import("./research.ts")
+    const { researchGate, researchIssues, researchNodeIds, researchNewNodes, RESEARCH_DIRECTIONS, RESEARCH_RECIPES } = await import("./research.ts")
     const { store } = await ensureProject(sid("research"))
+    // 配方不再自动加研究节点（旧席位自己并行派研究子代理）；图里手动加上研究节点时，闸与权限照常生效。
+    expect(RESEARCH_RECIPES.size).toBe(0)
     const out = await store.applyPatches({ ops: [{ op: "apply_recipe", recipe: "feature_film", params: {} }] }, { kind: "user" })
     expect(out.receipt.rejected).toEqual([])
+    expect(researchNodeIds(await store.read())).toEqual([])
+    const add = await store.applyPatches({ ops: researchNewNodes().map((node) => ({ op: "add_node" as const, node })) }, { kind: "user" })
+    expect(add.receipt.rejected).toEqual([])
+    // 剧本接上全部研究：研究没写完它停在 awaiting author
+    const wire = await store.applyPatches(
+      { ops: RESEARCH_DIRECTIONS.map((d) => ({ op: "connect" as const, from: d.id, to: "script", input: d.id })) },
+      { kind: "user" },
+    )
+    expect(wire.receipt.rejected).toEqual([])
     let g = await store.read()
     const ids = researchNodeIds(g)
     expect(ids).toEqual(RESEARCH_DIRECTIONS.map((d) => d.id))
-    for (const id of ids) {
-      expect(g.nodes[id]?.type).toBe("script")
-      expect((g.nodes.script?.inputs as any)?.[id]?.from).toBe(id)
-    }
+    for (const id of ids) expect(g.nodes[id]?.type).toBe("script")
     expect(researchGate(g)).toContain("研究先行")
 
     const del = await store.applyPatches({ ops: [{ op: "remove_node", node: ids[0] }] }, { kind: "agent" })
@@ -138,10 +146,6 @@ describe("R-20 研究先行", () => {
     g = await store.read()
     expect(researchGate(g)).toBeNull()
 
-    // 非多步配方不加研究节点（保住几个字出图）
-    const { store: single } = await ensureProject(sid("single"))
-    await single.applyPatches({ ops: [{ op: "apply_recipe", recipe: "single_image", params: {} }] }, { kind: "user" })
-    expect(researchNodeIds(await single.read())).toEqual([])
   })
 
   test("并行派三个 researcher → 各认领一个方向；在途占用的跳过；作词 lane 不含研究节点", async () => {
