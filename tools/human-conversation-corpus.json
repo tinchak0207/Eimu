@@ -1,0 +1,57 @@
+{
+  "rule": "每条 prompt 是生产会话里用户亲自发送的原文，按 opencode part 文本截到系统注入之前。禁止模型改写、缩短、变容易，也禁止用 runProject 夹具或自签 QC 代替。source.session 是当时的 opencode 会话 id 前缀。",
+  "scenes": [
+    {
+      "id": "quote-before-generate",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_e7b9d0"
+      },
+      "turns": [
+        "做 2 个版本的 8 秒铃声要多少钱？先只给报价，别生成。",
+        "帮我做一条 8 秒钟的手机来电铃声，只要一句歌词的记忆点，别太长。先别生成，先告诉我：8 秒到底做不做得到、怎么做，会花多少钱。"
+      ],
+      "turn_sources": [
+        "ses_e7b9d0",
+        "ses_e7bad0"
+      ]
+    },
+    {
+      "id": "same-turn-text",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_e7d63f"
+      },
+      "turns": [
+        "帮我排一份婚礼晚宴歌单。场地是四小时，宾客大概这样：45 到 60 岁的长辈占一半，25 到 35 岁的朋友占三成，10 岁以下小孩两成。要求：不放分手、离世这类丧气歌；长辈那几段要能跟着唱；小孩在场不能有露骨内容；中间要留一首给爷爷奶奶结婚四十周年跳一支慢舞。给我曲目、顺序、每首大概用在哪一段、以及为什么这么排。先不要生成任何音频。"
+      ]
+    },
+    {
+      "id": "generate-then-receipt",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 40,
+      "cap_note": "这句原话要 4K。生产目录里 4K 没有价，同一条只报得出 720p 25 币。上限只盖住这一笔成片，盖不住第二笔。",
+      "source": {
+        "session": "ses_e7ebd1"
+      },
+      "turns": [
+        "清晨薄雾中的竹林，一位穿白色长衫的年轻剑客缓缓拔剑，竹叶被风卷起，镜头从低角度手部特写缓慢推至全身并环绕半圈，阳光穿过竹叶形成丁达尔光，冷绿色调，浅景深，35mm胶片质感，动作流畅自然，画面稳定，4K，24fps，16:9，时长5秒。负面提示：不要文字、水印、logo、画面畸变、多余手指、人物变形、闪烁、卡顿、过度锐化。"
+      ]
+    },
+    {
+      "id": "image-first-try",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "source": {
+        "session": "ses_e7230d"
+      },
+      "turns": [
+        "随便生成一张图片"
+      ]
+    }
+  ]
+}
