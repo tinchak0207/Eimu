@@ -6,6 +6,8 @@ import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
+import { byChildOc } from "./subagent-runs.ts"
+import { pushParentNote } from "./subagent-live.ts"
 import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP } from "./constants-gateway.ts"
@@ -390,6 +392,18 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   // exceeds both Bun's idleTimeout ceiling (255s) and the caller's abort, so
   // the tool polls /internal/confirm-status instead.
   emitToSession(state, "confirm.request", { request_id, amount_coins: amount, description })
+
+  // 子代理在等钱时，确认卡只发前端，父代理那一侧完全看不到：2026-10-30 实测，用户在父会话里
+  // 干等 30 分钟，父代理一路报「正在生成／已经超时」，直到确认请求过期才问到「放行 1 币」。
+  // 这里给发起该笔扣费的子 run 推一条回报，父代理下一拍就能把真实卡点说给用户。
+  const childRun = byChildOc.get(session_id)
+  if (childRun) {
+    pushParentNote(
+      childRun,
+      "charge_confirm",
+      `子代理在等你放行 ${amount} 币（${description || "扣费确认"}）。确认卡只在页面上的卡片，聊天里说「放行」不算授权：请在卡片上选放行，或把互动模式切到自动。`,
+    )
+  }
 
   return Response.json({ status: "pending", request_id }, { status: 202 })
 }
