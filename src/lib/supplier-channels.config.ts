@@ -257,10 +257,33 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     tier: "managed_pool",
     sitePriority: 11,
     chatImageModels: [],
-    // 2026-10-22 暴君裁定：gpt image 系列供货商全部换成 a6api，yyds 清空认领。
-    // 保留空条目＝seed 维护 supplier 行并将旧 capability 收回（is_current=false），
-    // 调度路由（model-routes.config.ts）已不再含 yyds，不会再有尝试。
-    claims: [],
+    // 2026-10-31 暴君裁定：gpt image 系列出图渠道改为 yyds 优先（a6api 退为兜底）。
+    // 2026-10-31 实测（VPS 经控面容器的 key，直连 images/generations，1024x1024）：
+    // gpt-image-2 200/29.5s（首发一次 150s 超时）、flare 200/38.8s、sunburst 200/29.5s，均真出图 b64。
+    // 价格与 edit 能力沿 10/22 前契约（0.016 元/次；edits 2026-09-14／10-14 生产实证）。
+    claims: [
+      {
+        modelId: "gpt-image-2",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+      {
+        modelId: "gpt-image-2.5-flare",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+      {
+        modelId: "gpt-image-2.5-sunburst",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+    ],
   },
 
 {

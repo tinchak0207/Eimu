@@ -35,11 +35,11 @@ export const NEWAPI_SUPERSEDED_LABELS: ReadonlySet<string> = new Set(["hublinuxd
 
 export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // ── 图片：GPT 系 ──
-  // 2026-10-22 暴君裁定：gpt image 系列（gpt-image-2 / 2.5-flare / 2.5-sunburst）
-  // 供货商全部换成 a6api（直连，images/generations 实测真出图）。
-  "gpt-image-2": ["a6api"],
-  "gpt-image-2.5-flare": ["a6api"],
-  "gpt-image-2.5-sunburst": ["a6api"],
+  // 2026-10-31 暴君裁定：gpt image 系列（gpt-image-2 / 2.5-flare / 2.5-sunburst）
+  // 出图渠道 yyds 优先，a6api 兜底（两者均直连 images/generations，实测真出图）。
+  "gpt-image-2": ["yyds", "a6api"],
+  "gpt-image-2.5-flare": ["yyds", "a6api"],
+  "gpt-image-2.5-sunburst": ["yyds", "a6api"],
   "gpt-image-1.5": ["adobe2api", "newapi"],
   "gpt-image": ["adobe2api"],
 
