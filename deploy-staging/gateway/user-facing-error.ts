@@ -176,3 +176,79 @@ function mapToUserFacing(text: string, kind: UserFacingErrorKind): { text: strin
 export function userFacingError(raw: unknown, opts: UserFacingErrorOpts): string {
   return userFacingErrorParts(raw, opts).text
 }
+
+// ── 工具失败的用户可见文案（2026-10-31 ses_e7211ef0dffe7S6KleX7YB4F1Q 泄漏修复）────────────
+//
+// 工具把「给模型的自修提示」（未提交、未扣费、改好参数再调用）当失败回传：
+//   unsupported_size「不支持的 size 1920x1080（未提交、未跳确认、未扣费）…改好尺寸再调用。」×12
+//   project_lock_changed「同项目模型、尺寸、canonical或STYLE LOCK版本不一致；未提交。」×8
+// 这类句子是中文、无内部痕迹，isPresentableErrorText 会放行 → 用户被红卡刷屏，而这一步
+// 根本没发生任何对用户有意义的事（没提交、没扣费、模型下一步自己改参数）。
+// 判定：先结构化（error.code／字符串开头的 `code:`），落在下表即自修类；再退一步文本判定。
+// 自修类 → 用户侧返回 ""（不出红字），模型侧原文不受影响（模型读的是 opencode 工具输出）。
+
+/** 自修类错误码：均为 opencode-runtime/tools|lib 里「未提交/未扣费，改参数再调」性质的实际 code。 */
+const MODEL_SELF_FIX_CODES = new Set<string>([
+  "unsupported_size", // image_generate／img-orchestrate 尺寸白名单
+  "invalid_size",
+  "project_lock_changed", // image-journal prepareSubmission：同项目锁版本不一致
+  "idempotency_key_reused", // 同 request_id 输入改变
+  "model_requires_video_kind", // image_generate：kind 与模型不符
+  "model_requires_image_kind",
+  "invalid_reference_images", // 参考图张数超限
+  "unsupported_resolution", // 模型无该档位
+  "too_many_shots", // last_frame_video_chain 镜数超限
+  "invalid_shots", // 关键帧清单解析失败
+  "invalid_frame_contract", // 逐帧生成参数契约
+  "invalid_project",
+  "invalid_request_id",
+  "request_id_required",
+  "project_budget_unknown", // 改图/放大未继承 project
+  "missing_canonical",
+  "missing_style_lock",
+  "missing_model",
+  "invalid_budget",
+  "budget_locked", // 工具试图扩大已有项目预算
+  "invalid_args", // music_gen 参数校验
+])
+
+/** 字符串错误开头的稳定代码：`project_lock_changed: …`（可带 opencode 的 `Error: ` 前缀）。 */
+const LEADING_CODE_RE = /^(?:Error:\s*)?([a-z][a-z0-9_]+):/
+
+function errorFields(raw: unknown): { code: string; texts: string[]; primary: string } {
+  if (typeof raw === "string") return { code: "", texts: [raw], primary: raw }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { code: "", texts: [], primary: raw == null ? "" : String(raw) }
+  const o = raw as Record<string, unknown>
+  // 工具输出整体（{ok:false, error:{code,hint}}）或错误对象本身都收。
+  const e = o.error && typeof o.error === "object" && !Array.isArray(o.error) ? (o.error as Record<string, unknown>) : typeof o.error === "string" ? { message: o.error } : o
+  const str = (v: unknown): string => (typeof v === "string" ? v : "")
+  const code = str(e.code) || str(o.code)
+  const human = str(e.human_message)
+  const texts = [human, str(e.message), str(e.hint)].filter((t) => t.length > 0)
+  return { code, texts, primary: texts[0] ?? "" }
+}
+
+/** 是否为「模型自修类」工具错误（用户不看红字，模型自己改参数重试）。 */
+export function isModelSelfFixError(raw: unknown): boolean {
+  const { code, texts } = errorFields(raw)
+  if (code && MODEL_SELF_FIX_CODES.has(code)) return true
+  for (const t of texts) {
+    const lead = LEADING_CODE_RE.exec(t.trim())
+    if (lead && MODEL_SELF_FIX_CODES.has(lead[1])) return true
+    if (/未提交/.test(t) && /未扣费|再调用|改好/.test(t)) return true
+  }
+  return false
+}
+
+/**
+ * 工具失败 → 用户可见文案的唯一权威（实时 SSE scrubVisibleFrame 的 tool.result 分支与
+ * 历史端点 slimHistoryMessages 都只调这里）。
+ *  - 模型自修类 → ""（含义：不出红字）
+ *  - 其余 → userFacingError(…, kind:"tool")
+ * `raw` 可以是字符串、错误对象 {code,message,hint,human_message} 或工具输出 {ok:false,error}。
+ */
+export function visibleToolError(tool: string, raw: unknown, where?: string): string {
+  if (isModelSelfFixError(raw)) return ""
+  const { primary } = errorFields(raw)
+  return userFacingError(primary, { kind: "tool", where: where ? `${where} tool=${tool}` : `tool=${tool}` })
+}

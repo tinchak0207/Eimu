@@ -16,8 +16,10 @@ export function ok(data: Record<string, unknown>): MusicToolResult {
 }
 
 export function fail(code: string, hint: string, extra?: Record<string, unknown>): MusicToolResult {
-  const { title, ...rest } = extra ?? {}
-  return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error: { code, hint }, ...rest }) }
+  // human_message（可选）＝用户侧短句，进 error 对象；hint 只给模型（可带诊断细节）。
+  const { title, human_message, ...rest } = extra ?? {}
+  const error = typeof human_message === "string" && human_message ? { code, hint, human_message } : { code, hint }
+  return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error, ...rest }) }
 }
 
 /** 同构 director-common resolveKey：gateway /internal/session-key 解 Bearer，fallback HARNESS_API_KEY。 */
@@ -136,10 +138,13 @@ const YUE2_TRANSIENT_RETRY_DELAYS_MS = [5_000, 15_000] as const
 export class Yue2TransientExhaustedError extends Error {
   code: string
   attempts: number
-  constructor(code: string, attempts: number, message: string) {
+  /** 用户侧短句（不含端点、内部通路与部署措辞）；message 给模型，保留诊断细节。 */
+  humanMessage: string
+  constructor(code: string, attempts: number, message: string, humanMessage = "") {
     super(message)
     this.code = code
     this.attempts = attempts
+    this.humanMessage = humanMessage
     this.name = "Yue2TransientExhaustedError"
   }
 }
@@ -171,6 +176,7 @@ export async function generateYue2TrackResilient(
     attempts,
     `YuE2 瞬时不可用（${code}：${yue2FallbackReason(lastError)}）；已按退避重试 ${attempts - 1} 次仍失败。` +
       "按「音乐只走 YuE2」的要求，本次未回落 FlowMusic／Lyria、未扣费。请稍候（等本机当前生成结束或反向隧道恢复）后原样重试。",
+    `音乐生成服务暂时${code === "yue2_busy" ? "繁忙" : code === "yue2_timeout" ? "响应超时" : "连不上"}，已自动重试 ${attempts - 1} 次，本次未扣费。稍后重试即可。`,
   )
 }
 

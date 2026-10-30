@@ -478,6 +478,45 @@ export function armErrorStallTimer(state: SessionState): void {
   }, TURN_ERROR_WATCHDOG_MS)
 }
 
+/** 本轮小结的人话标签：节点种类（id 尾段）与工具名 → 中文；工具名部分同名抄自
+ *  src/components/agent-chat/AgentToolCard.tsx TOOL_TITLES。 */
+const STEP_LABELS: Record<string, string> = {
+  // 节点种类（events-translate-canvas 的 `${unitId}-image|text|config`）
+  image: "生成图片",
+  video: "生成视频",
+  film: "生成视频",
+  audio: "生成音频",
+  music: "生成音乐",
+  text: "整理提示词",
+  config: "配置参数",
+  // 工具名（同 AgentToolCard TOOL_TITLES）
+  image_generate: "生成图片",
+  image_edit: "编辑图片",
+  image_upscale: "放大图片",
+  canvas_generate_image: "画布生图",
+  background_remove: "抠图去背",
+  virtual_tryon: "虚拟试穿",
+  keyframe_render: "生成关键帧",
+  last_frame_video_chain: "首尾帧续接视频",
+  music_gen: "生成音乐",
+  tts_speak: "语音合成",
+  workflow_generate: "执行节点生成",
+  workflow_rerun_node: "重跑节点",
+  blender_render: "Blender 渲染",
+}
+function stepLabel(raw: string): string {
+  const hit = STEP_LABELS[raw]
+  if (hit) return hit
+  // 未知的裸英文标识（工具名/内部 id 尾段）不进用户视线。
+  return /^[A-Za-z0-9_]+$/.test(raw) ? "其他环节" : raw
+}
+/** 同名多条合并：「生成图片、生成图片、生成图片」→「生成图片 ×3」（保留首次出现顺序）。 */
+function groupStepLabels(labels: string[]): string[] {
+  const counts = new Map<string, number>()
+  for (const l of labels) counts.set(l, (counts.get(l) ?? 0) + 1)
+  return [...counts].map(([l, n]) => (n > 1 ? `${l} ×${n}` : l))
+}
+
 /** R4-A S8（2026-08-28）：turn 收尾兜底汇报——本轮有节点落终态但零主动汇报
  *  时补一帧中文总结（R4 实锤：第一轮 5 成功+1 失败零汇报悄悄收工）。环名
  *  来源 = workflow graph 节点的模板预置 title（如「角色卡」），取不到才用
@@ -502,9 +541,12 @@ export function emitTurnEndSummaryIfSilent(state: SessionState): void {
       if (typeof v === "number") costById.set(k, v)
     }
   }
-  const labelOf = (id: string): string => titleById.get(id) || (id.includes("-") ? id.slice(id.lastIndexOf("-") + 1) : id)
-  const okList = nodes.filter((n) => n.status === "success").map((n) => labelOf(n.id))
-  const badList = nodes.filter((n) => n.status === "error").map((n) => labelOf(n.id))
+  // 2026-10-31：节点无模板 title 时 id 尾段是节点种类／工具名（`<unit>-image`），给用户看人话标签。
+  const labelOf = (id: string): string => titleById.get(id) || stepLabel(id.includes("-") ? id.slice(id.lastIndexOf("-") + 1) : id)
+  const okList = groupStepLabels(nodes.filter((n) => n.status === "success").map((n) => labelOf(n.id)))
+  const badList = groupStepLabels(nodes.filter((n) => n.status === "error").map((n) => labelOf(n.id)))
+  const okCount = nodes.filter((n) => n.status === "success").length
+  const badCount = nodes.filter((n) => n.status === "error").length
   if (okList.length === 0 && badList.length === 0) return
   let spent = 0
   let anyCost = false
@@ -517,12 +559,12 @@ export function emitTurnEndSummaryIfSilent(state: SessionState): void {
     }
   }
   const lines: string[] = ["【本轮小结】"]
-  lines.push(okList.length > 0 ? `已完成 ${okList.length} 个环节：${okList.join("、")}。` : "本轮没有完成的环节。")
-  if (badList.length > 0) lines.push(`失败 ${badList.length} 个环节：${badList.join("、")}。失败节点可在画布上重试。`)
+  lines.push(okCount > 0 ? `已完成 ${okCount} 个环节：${okList.join("、")}。` : "本轮没有完成的环节。")
+  if (badCount > 0) lines.push(`失败 ${badCount} 个环节：${badList.join("、")}。失败节点可在画布上重试。`)
   if (anyCost) lines.push(`本轮已完成环节共花费 ${Math.round(spent * 100) / 100} 币。`)
   lines.push(badList.length > 0 ? "下一步：可重试失败节点，或告诉我接下来怎么调整。" : "下一步：可继续推进后续环节，或让我检查已完成环节的产出。")
   emitToSession(state, "message.delta", { text: lines.join("\n") + "\n" })
-  console.log(`[gateway] S8 turn-end fallback summary: ${okList.length} ok / ${badList.length} failed — session=${state.sessionId}`)
+  console.log(`[gateway] S8 turn-end fallback summary: ${okCount} ok / ${badCount} failed — session=${state.sessionId}`)
 }
 
 /** R5-C（2026-08-28）：恢复轮强制结语——watchdog 重投/redrive/中段哨重投的

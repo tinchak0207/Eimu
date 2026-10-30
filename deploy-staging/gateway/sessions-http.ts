@@ -20,6 +20,8 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText } from "./outbound-sanitize.ts"
+import { visibleToolError } from "./user-facing-error.ts"
+import { isHarnessInternalToolInput } from "./humanize-gw.ts"
 
 // L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
 // 以选择题采集画像（PM 原则：别让用户动脑写表单）。答案存 pendingProfile，
@@ -259,9 +261,11 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               ? (part.state as Record<string, unknown>)
               : null
             const st: Record<string, unknown> = {}
+            const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
             if (stSrc) {
               if (stSrc.status !== undefined) st.status = stSrc.status
-              if (stSrc.input !== undefined) {
+              // 2026-10-31：原生工具操作 agent 自身挽具（/opt/agent-harness、.opencode、skills…）→ 参数整体不回传。
+              if (stSrc.input !== undefined && !isHarnessInternalToolInput(name ?? "", stSrc.input)) {
                 let s: string
                 try {
                   s = typeof stSrc.input === "string" ? stSrc.input : JSON.stringify(stSrc.input)
@@ -271,15 +275,19 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
                 if (s.length > 500) s = s.slice(0, 500)
                 st.input = s
               }
-              if (typeof stSrc.error === "string") {
-                if (stSrc.error.length > 0) st.error = stSrc.error
-              } else if (stSrc.error !== null && typeof stSrc.error === "object" && !Array.isArray(stSrc.error)) {
-                const em = (stSrc.error as Record<string, unknown>).message
-                if (typeof em === "string") st.error = { message: em }
+              // 2026-10-31：失败原文与实时 SSE 同一权威 visibleToolError；自修类（""）不写 st.error＝不出红字。
+              const rawErr =
+                typeof stSrc.error === "string"
+                  ? stSrc.error
+                  : stSrc.error !== null && typeof stSrc.error === "object" && !Array.isArray(stSrc.error)
+                    ? (stSrc.error as Record<string, unknown>).message
+                    : undefined
+              if (typeof rawErr === "string" && rawErr.length > 0) {
+                const visible = visibleToolError(name ?? "?", rawErr, "history")
+                if (visible) st.error = typeof stSrc.error === "string" ? visible : { message: visible }
               }
             }
             const tool: Record<string, unknown> = { type: "tool", state: st }
-            const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
             if (name !== undefined) tool.tool = name
             parts.push(tool)
             continue

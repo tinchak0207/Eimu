@@ -29,6 +29,32 @@ export function humanMessageFor(message: string, code?: string): string {
   return `执行失败（上游原因：${brief}）。请重试或换一种方式`
 }
 
+/** 原生文件/终端工具：参数原文就是命令与路径。 */
+const NATIVE_HARNESS_TOOLS = new Set(["bash", "read", "glob", "grep", "list", "ls", "write", "edit", "patch"])
+/** agent 自身挽具（工作区技能/路由/提示词目录）——不是用户的文件。 */
+const HARNESS_INTERNAL_RE = /\/opt\/agent-harness\/|(?:^|[\s/"'=:;(])\.opencode(?:[/"'\s;]|$)|_prompt-routing|(?:^|[\s/"'=:;(])skills\//
+
+/**
+ * 2026-10-31：原生工具的输入若引用 agent 自身挽具（/opt/agent-harness、.opencode、_prompt-routing、
+ * skills 目录），用户可见面（实时 tool.invoke 的 args_summary、历史端点的 state.input）整体省略参数；
+ * 用户自己的文件/上传目录不命中，照常显示。
+ */
+export function isHarnessInternalToolInput(tool: string, input: unknown): boolean {
+  if (!NATIVE_HARNESS_TOOLS.has(tool) || input == null) return false
+  let s: string
+  try {
+    s = typeof input === "string" ? input : JSON.stringify(input)
+  } catch {
+    return false
+  }
+  return HARNESS_INTERNAL_RE.test(s)
+}
+
+/** 用户可见的工具参数摘要：挽具内部操作 → ""（前端无参数即无展开抽屉）。 */
+export function visibleToolArgs(tool: string, input: unknown): string {
+  return isHarnessInternalToolInput(tool, input) ? "" : summarizeArgs(input)
+}
+
 export function summarizeArgs(args?: unknown): string {
   if (!args) return ""
   if (typeof args !== "object") {

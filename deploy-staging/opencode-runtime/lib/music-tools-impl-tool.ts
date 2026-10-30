@@ -344,7 +344,7 @@ export const musicGenTool: MusicToolDef = {
           break
         } catch (e) {
           // YuE2 瞬时故障穷尽：不回落、直接如实 fail（未扣费）。硬失败与其余通路走既有回落链。
-          if (e instanceof Yue2TransientExhaustedError) return fail(e.code, e.message)
+          if (e instanceof Yue2TransientExhaustedError) return fail(e.code, e.message, { human_message: e.humanMessage })
           if (hasScoreSemantics) throw e
           if (i === channelChain.length - 1) {
             // 单通路失败照旧抛原错误；多通路全灭则每一路原因都要在回执里看得见。

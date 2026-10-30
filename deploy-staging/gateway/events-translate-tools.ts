@@ -3,7 +3,7 @@ import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
 import { WORKSPACE_DIR, UPLOADS_DIR, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
-import { humanMessageFor, summarizeArgs } from "./humanize-gw.ts"
+import { humanMessageFor, visibleToolArgs } from "./humanize-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
@@ -22,6 +22,7 @@ import { noteToolRunning, noteToolTerminal, toolCallSignature, TOOL_RUNNING_CAP 
 import { recordDeliveryEvidence } from "./claim-gate.ts"
 import { markDirty } from "./sessions-core.ts"
 import { canvasResultNodeId } from "./canvas-cascade-state.ts"
+import { isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
 import { AUTO_CANVAS_TOOLS, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask } from "./events-translate-canvas.ts"
@@ -41,11 +42,14 @@ export function toolErrorPayload(
 ): { code: string; message: string; human_message: string } {
   let code = "tool_failed"
   let message = fallbackMessage
+  let toolHuman: string | undefined
   const e = parsed && typeof parsed === "object" ? parsed.error : null
   if (typeof e === "string" && e) {
     message = e
   } else if (e && typeof e === "object") {
-    const o = e as { code?: unknown; message?: unknown; hint?: unknown }
+    const o = e as { code?: unknown; message?: unknown; hint?: unknown; human_message?: unknown }
+    // 2026-10-31：工具自带用户侧短句（模型侧 hint 保留诊断细节）→ 用户侧以它为准。
+    if (typeof o.human_message === "string") toolHuman = o.human_message
     if (o.code && typeof o.code === "object") {
       const inner = o.code as { message?: unknown; code?: unknown }
       if (typeof inner.message === "string" && inner.message) message = inner.message
@@ -56,7 +60,9 @@ export function toolErrorPayload(
       if (typeof o.code === "string" && o.code) code = o.code
     }
   }
-  return { code, message, human_message: humanMessageFor(message, code) }
+  // 模型自修类（未提交/未扣费、改参数再调）→ human_message 空串＝不出红字（判定权威在 user-facing-error）。
+  if (isModelSelfFixError({ code, message })) return { code, message, human_message: "" }
+  return { code, message, human_message: toolHuman || humanMessageFor(message, code) }
 }
 
 /**
@@ -240,7 +246,7 @@ if (status === "pending" || status === "running") {
     // 只在拿到工具输入后才发 invoke。opencode 的 pending 状态常只有
     // {status:"pending"} 而没有 input；等 running（input 完整）再发，
     // 前端工具卡才显示得出「在做什么」，不是黑盒。
-    const argsSummary = summarizeArgs(st.input)
+    const argsSummary = visibleToolArgs(toolName, st.input)
     if (state.toolInvokeSeen.has(callId)) return
     if (!argsSummary && status === "pending") return
     state.toolInvokeSeen.add(callId)
@@ -263,7 +269,7 @@ if (status === "pending" || status === "running") {
       boundSet(state.toolInvokeSeen, TOOL_STATUS_DEDUP_CAP)
       emitToSession(state, "tool.invoke", {
         tool: toolName,
-        args_summary: summarizeArgs(st.input),
+        args_summary: visibleToolArgs(toolName, st.input),
       })
       // 同上：跑到 completed 才见到 input 的工具（理论上不会，但保险起见）。
       if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId)) {
@@ -548,7 +554,9 @@ if (status === "pending" || status === "running") {
     // S2a：error 态的 tool.result 同样补齐三栏位错误合同。
     // 闸门/运行时错误：模型侧 message 仍保留原文；用户可见 human_message 换成产品句。
     const gateErr = !isQuestionFreezeAbort && isRuntimeGateErrorText(message)
-    const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : humanMessageFor(message)
+    // 2026-10-31：工具抛出的自修提示（`project_lock_changed: …未提交。` 等）→ 不出红字、不弹 session.error。
+    const selfFix = !isQuestionFreezeAbort && !gateErr && isModelSelfFixError(message)
+    const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : selfFix ? "" : humanMessageFor(message)
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
@@ -569,6 +577,10 @@ if (status === "pending" || status === "running") {
     // 闸门/运行时错误：工具卡已有产品句，不再弹 session.error 红气泡（原文只给模型）。
     if (gateErr) {
       console.log(`[gateway] runtime gate tool_error card suppressed: callId=${callId} tool=${toolName}`)
+      return
+    }
+    if (selfFix) {
+      console.log(`[gateway] model self-fix tool_error (no red card): callId=${callId} tool=${toolName}`)
       return
     }
     emitSessionError(state, "tool_error", message)
