@@ -65,7 +65,8 @@
       },
       "turns": [
         "做一个Billboard级别的MV, 邓紫棋风格"
-      ]
+      ],
+      "stop_after_first_image_ms": 30000
     }
   ]
 }

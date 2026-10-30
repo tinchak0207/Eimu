@@ -360,13 +360,16 @@ async function sceneImage(scene, reasons) {
 
 // MV 关键帧场景（2026-10-31）：只批准图片确认卡；视频确认卡拒绝并中止会话。
 // 断言：至少一个 image.done；用户可见帧与历史端点都不含内部自修提示／内部端点／挽具路径。
-const LEAK_RE = /未提交|改好尺寸|再调用|project_lock_changed|127\.0\.0\.1|\/opt\/|_prompt-routing|\.opencode|上游只回传/g
+const LEAK_RE = /未提交|改好尺寸|再调用|project_lock_changed|127\.0\.0\.1|\/opt\/|_prompt-routing|\.opencode|机器闸|Resume Next Action|上游只回传/g
 function visibleFieldsOf(ev, obj) {
   if (!obj) return []
   if (ev === "tool.result") return [obj.error?.message, obj.error?.human_message].map((v) => [`tool.result:${obj.tool}`, v])
   if (ev === "tool.invoke") return [[`tool.invoke:${obj.tool}`, obj.args_summary]]
   if (ev === "message.delta") return [["message.delta", obj.text]]
   if (ev === "session.error") return [["session.error", obj.message], ["session.error", obj.human_message]]
+  if (ev === "subagent.delta") return [["subagent.delta", obj.text]]
+  if (ev === "subagent.done") return [["subagent.done", obj.summary]]
+  if (ev === "reasoning.delta") return [["reasoning.delta", obj.text]]
   return []
 }
 function leakHits(pairs) {
@@ -418,8 +421,17 @@ async function sceneMvKeyframes(scene, reasons) {
         frame.handled = true
         const qs = Array.isArray(obj?.questions) ? obj.questions : [{}]
         const answers = qs.map((q) => {
-          const opts = (Array.isArray(q?.options) ? q.options : []).filter((o) => !/视频|video|动态镜头|运镜|镜头.{0,4}段|\d+\s*段/i.test(`${o?.label || ""} ${o?.description || ""}`))
-          const pick = opts.find((o) => /关键帧|图|推荐/.test(String(o?.label || ""))) || opts[0]
+          const all = Array.isArray(q?.options) ? q.options : []
+          const txt = (o) => `${o?.label || ""} ${o?.description || ""}`
+          const VIDEO_RE = /视频|video|动态|运镜|镜头.{0,4}段|\d+\s*段/i
+          const EXPLICIT_NO = /不要(?:动态镜头|动态|视频)|不做视频|去掉视频|只做(?:静帧|图|关键帧)/
+          const planHasVideo = VIDEO_RE.test(String(q?.question || ""))
+          const noVideo = all.filter((o) => EXPLICIT_NO.test(txt(o)) || (!planHasVideo && !VIDEO_RE.test(txt(o))))
+            .filter((o) => !/只做歌|画面暂停|不要画面/.test(txt(o)))
+          let pick = noVideo.find((o) => /不要(?:动态镜头|视频)|不做视频|去掉视频/.test(txt(o))) || noVideo.find((o) => /关键帧|图|推荐/.test(String(o?.label || ""))) || noVideo[0]
+          let how = "no-video"
+          if (!pick && all.length) { pick = all.map((o) => ({ o, c: optionCoins(o) ?? Infinity })).sort((a, b) => a.c - b.c)[0].o; how = "smallest" }
+          log.pickHow = how
           return [pick?.label || "先只做关键帧和音乐，视频先不做"]
         })
         log.questions.push({ questions: qs.map((q) => ({ q: q?.question, options: (q?.options || []).map((o) => o?.label) })), answers })
@@ -429,8 +441,23 @@ async function sceneMvKeyframes(scene, reasons) {
         lastNew = Date.now()
       }
     }
+    if (!log.videoSubmit) {
+      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && /"kind":"video"/.test(String(obj?.args_summary || "")) })
+      if (vf) {
+        // 低价视频（≤0.1 币）不弹确认卡，只能从 tool.invoke 看见：立刻中止。
+        log.videoSubmit = { at: Math.round((Date.now() - t0) / 1000), args: String(parseFrame(vf.raw).obj?.args_summary || "").slice(0, 200) }
+        const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+        log.aborted = !!ab?.ok
+        stopAt = Date.now() + 10000
+      }
+    }
     if (stopAt && Date.now() > stopAt) break
     const names = eventNames(sse.frames, 0)
+    if (scene.stop_after_first_image_ms && !stopAt && names.includes("image.done")) {
+      stopAt = Date.now() + scene.stop_after_first_image_ms
+      log.firstImageAt = Math.round((Date.now() - t0) / 1000)
+      continue
+    }
     const raw = sse.frames.map((f) => f.raw).join("\n")
     const musicDone = /"tool":"music_gen"[^\n]*"ok"|event: audio\.(?:done|failed)/.test(raw) || /music_gen[^\n]*(?:ok|error)/.test(sse.frames.filter((f) => parseFrame(f.raw).ev === "tool.result").map((f) => f.raw).join("\n"))
     const imgDone = names.includes("image.done")
@@ -438,9 +465,23 @@ async function sceneMvKeyframes(scene, reasons) {
     if (quiet && names.includes("turn.done") && imgDone && musicDone) break
     if (Date.now() - lastNew >= 5 * 60 * 1000) break
   }
+  if (scene.stop_after_first_image_ms && !log.aborted) {
+    const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+    log.aborted = !!ab?.ok
+    await sleep(3000)
+  }
   fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
-  const pairs = sse.frames.flatMap((f) => { const { ev, obj } = parseFrame(f.raw); return visibleFieldsOf(ev, obj) })
-  const sseHits = leakHits(pairs)
+  // delta 帧是逐 token 碎片，逐帧扫会漏掉跨帧的命中：同类 delta 先拼接再扫。
+  const DELTA = new Set(["message.delta", "reasoning.delta", "subagent.delta"])
+  const joined = {}
+  const pairs = sse.frames.flatMap((f) => {
+    const { ev, obj } = parseFrame(f.raw)
+    if (DELTA.has(ev)) { joined[ev] = (joined[ev] || "") + (typeof obj?.text === "string" ? obj.text : ""); return [] }
+    return visibleFieldsOf(ev, obj)
+  })
+  for (const [ev, text] of Object.entries(joined)) pairs.push([ev, text])
+  const reasoningHits = leakHits(pairs.filter(([w]) => w === "reasoning.delta"))
+  const sseHits = leakHits(pairs.filter(([w]) => w !== "reasoning.delta"))
   const names = eventNames(sse.frames, 0)
   const imageUrls = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "image.done").map((x) => x.obj?.url)
   await sse.stop()
@@ -452,11 +493,13 @@ async function sceneMvKeyframes(scene, reasons) {
     if (p.type === "tool") histPairs.push([`hist.tool.input:${p.tool}`, p.state?.input], [`hist.tool.error:${p.tool}`, typeof p.state?.error === "string" ? p.state.error : p.state?.error?.message])
     else if (typeof p.text === "string") histPairs.push([`hist.${m.info?.role}.${p.type}`, p.text])
   }
-  const histHits = leakHits(histPairs)
+  const histReasoningHits = leakHits(histPairs.filter(([w]) => /\.reasoning$/.test(w)))
+  const histHits = leakHits(histPairs.filter(([w]) => !/\.reasoning$/.test(w)))
   if (!imageUrls.length) fail(reasons, `${scene.id} 没有 image.done`)
+  if (log.videoSubmit) fail(reasons, `${scene.id} 出现视频提交（无确认卡）：${log.videoSubmit.args.slice(0, 80)}`)
   if (sseHits.length) fail(reasons, `${scene.id} SSE 用户可见字段命中 ${sseHits.length}`)
   if (histHits.length) fail(reasons, `${scene.id} 历史端点命中 ${histHits.length}`)
-  return { sid, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
+  return { sid, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
 }
 
 const runners = {
