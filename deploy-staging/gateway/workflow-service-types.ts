@@ -51,6 +51,11 @@ export interface WorkflowServiceOptions {
    * 未注入（测试/旧呼叫端）＝恒 null，与旧行为逐位元一致。
    */
   awaitingApproval?: (wf: ActiveWorkflow) => Promise<string | null>
+  /**
+   * 2026-10-30 同会话多工作流撞 id 探测：该 owner 的画布上是否已有此节点 id
+   *（重启后旧工作流不在内存、节点仍在画布）。未注入＝只看内存工作流。
+   */
+  nodeIdTaken?: (owner: unknown, nodeId: string) => boolean
 }
 
 export interface ActiveWorkflow {

@@ -491,7 +491,8 @@ export async function submitWorkflowNode(
       submittedTaskId = String(taskId)
       {
         // 2026-10-02：登记进工作流 job 表——终态向控面结算实扣、放弃/停滞时据此取消。
-        const jwf = workflowOwnerBySession.get(session.sessionId) ?? wfidFromNodeId(nodeId)
+        // 2026-10-30：同会话多工作流时属主表只指最新一个，job 必须记到节点自己的工作流（workflow_ns）。
+        const jwf = (typeof meta.workflow_ns === "string" && meta.workflow_ns) || (workflowOwnerBySession.get(session.sessionId) ?? wfidFromNodeId(nodeId))
         if (jwf) {
           if (!workflowJobs.has(jwf)) workflowJobs.set(jwf, new Map())
           workflowJobs.get(jwf)!.set(submittedTaskId, { nodeId, kind: node.kind === "video" ? "video" : "image" })
@@ -522,7 +523,7 @@ export async function submitWorkflowNode(
           // 2026-10-02：轮询打点直发 emitToSession 绕过 emit hook，停滞时钟不刷新 → 长排队被误判 stuck。
           {
             // 节点 id 形如 single_image-result-2（不含 wfid），故 wfIdMatch 对模板节点恒不命中；改按会话属主工作流刷新。
-            const pw = workflowOwnerBySession.get(session.sessionId) ?? (wfIdMatch ? wfIdMatch[1] : "")
+            const pw = (typeof meta.workflow_ns === "string" && meta.workflow_ns) || (workflowOwnerBySession.get(session.sessionId) ?? (wfIdMatch ? wfIdMatch[1] : ""))
             if (pw && workflowWake.has(pw)) workflowWake.get(pw)!.lastProgressAt = Date.now()
           }
           applyCanvasNodeUpdated(session.sessionId, { node_id: nodeId, patch })

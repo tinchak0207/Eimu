@@ -14,7 +14,7 @@ import { TTS_UPSTREAM, probeTtsUpstream } from "./media-internal-routes.ts"
 import { OPENCODE_URL, TTS_AUDIO_DIR, TTS_PUBLIC_BASE, PLATFORM_BASE } from "./constants-gateway.ts"
 import { pickVideoModel, type ModelStatusEntryLike } from "./video-model-select.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
-import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeDisconnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
+import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeDisconnected, applyCanvasNodeUpdated, getCanvasState } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import type { SessionState, TaskStatus } from "./types-gateway.ts"
 import { appendLedgerFor, emitQuotaChanged } from "./quota-ledger.ts"
@@ -136,6 +136,12 @@ export const workflowService = new WorkflowService({
   },
   // 工作流持久化挂点（对齐 canvas 快照的 markDirty 模式）：状态每次变更
   // （start/addNode/connect/generate 逐节点）镜像进 owner session 并防抖落盘。
+  nodeIdTaken: (owner, nodeId) => {
+    const sid = (owner as SessionState | undefined)?.sessionId
+    if (!sid) return false
+    const nodes = (getCanvasState(sid)?.state as { nodes?: unknown } | undefined)?.nodes
+    return Array.isArray(nodes) && nodes.some((n) => (n as { id?: unknown } | null)?.id === nodeId)
+  },
   onDirty: (wf) => {
     const owner = (wf.owner as SessionState | undefined) ?? null
     if (!owner || !owner.sessionId) return

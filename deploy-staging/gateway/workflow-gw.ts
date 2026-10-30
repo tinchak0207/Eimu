@@ -13,6 +13,36 @@ import { workflowOwnerBySession, workflowJobs, workflowWake, autoResumedWorkflow
 import { cancelPlatformJob, workflowSnapshotOf, videoZeroDelivery24h, type PersistableWorkflow } from "./workflow-gw-submit.ts"
 import { workflowService, sendWorkflowNotice } from "./workflow-gw-service.ts"
 import { pushWorkflowCompletion, runWfGenerate } from "./workflow-gw-completion.ts"
+import type { ActiveWorkflow } from "./workflow-service-types.ts"
+
+// 2026-10-30 workflow_start 同内容并发合并（轮子 = waveform.ts inflight Map）：key＝session＋模板＋content。
+type WorkflowStartSettled = { status: number; body: Record<string, unknown> }
+const workflowStartInflight = new Map<string, Promise<WorkflowStartSettled>>()
+
+function workflowTextOf(v: unknown): string {
+  const o = v as { content?: unknown; prompt?: unknown; shot?: unknown } | undefined
+  if (typeof o?.content === "string") return o.content
+  if (typeof o?.prompt === "string") return o.prompt
+  return o?.shot !== undefined ? JSON.stringify(o.shot) : ""
+}
+
+/** 已存工作流的模板 text 主节点内容与本次 content 逐 role 相同（重投/重复调用）。 */
+function workflowStartContentMatches(w: ActiveWorkflow, content: Record<string, unknown>): boolean {
+  const roles = Object.keys(content)
+  if (!roles.length) return false
+  return roles.every((role) => {
+    const n = w.graph.nodes.find((x) => x.role === role && x.kind === "text")
+    if (!n) return false
+    const want = workflowTextOf(content[role])
+    return want !== "" && (workflowTextOf(n.metadata) === want || (n.metadata.shot !== undefined && JSON.stringify(n.metadata.shot) === want))
+  })
+}
+
+/** 网关自动骨架尚未被填写（text 主节点全是「（待填：」占位）。 */
+function workflowIsPristineSkeleton(w: ActiveWorkflow): boolean {
+  const texts = w.graph.nodes.filter((n) => n.kind === "text" && !n.role.includes("__") && typeof n.metadata.pipelineCard !== "string")
+  return texts.length > 0 && texts.every((n) => workflowTextOf(n.metadata).trim().startsWith("（待填："))
+}
 export { workflowCompletionPushed, stateForWorkflow, workflowOwnerBySession, autoResumedWorkflows, workflowBilling, workflowJobs, workflowNoticeSent, workflowWake, workflowGenerateApproved, wfGenerateContinuations, workflowGateApprovals, wfGateContinuations } from "./workflow-gw-state.ts"
 export { registerWorkflowTask, firstSentence, formatNodeFailure, QUEUE_SWITCH_MS, wfidFromNodeId, cancelPlatformJob, pickSamePriceVideoAlternative, workflowSnapshotOf, resolveConnectedVideoDuration, MODEL_STATUS_TTL_MS, modelStatusCache, fetchModelStatusCached, videoZeroDelivery24h, resolveActiveModel, submitWorkflowNode } from "./workflow-gw-submit.ts"
 export { assembleFilmNode } from "./workflow-gw-assemble.ts"
@@ -197,34 +227,19 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
   }
   if (pathname.endsWith("/workflow/start") && req.method === "POST") {
     const templateId = typeof body.template_id === "string" ? body.template_id : (typeof url.searchParams.get("template_id") === "string" ? url.searchParams.get("template_id") : null)
-    // P0 idempotent workflow_start（2026-08-31 卡片堆积事故）：gateway 重启 →
-    // N1 redrive 重投上一条 prompt → agent 再次呼叫 workflow_start → 旧行为会
-    // 新建第二套全新 id 的节点堆上画布（大量卡片重叠 + 连线乱麻 + 整屏闪烁）。
-    // 本档既有设计已声明「单 session 只镜像最新工作流，反覆 start 属异常路径」，
-    // 这里把它落成硬守卫：同 session 已有同模板且未 success 的工作流 → 复用，
-    // 不新建、不重发节点、不发欢迎词；agent 据 reused/note 继续推进或 rerun。
-    const ownedWfId = workflowOwnerBySession.get(state.sessionId)
-    if (ownedWfId && templateId) {
-      const owned = workflowService.get(ownedWfId)
-      if (owned && owned.templateId === templateId && owned.status !== "success") {
-        console.log(`[gateway] workflow_start reused: session=${state.sessionId} wf=${ownedWfId} status=${owned.status} (P0 idempotent guard)`)
-        return Response.json({
-          ok: true,
-          workflowId: ownedWfId,
-          reused: true,
-          status: owned.status,
-          note: `该会话已存在同模板工作流（workflow_id=${ownedWfId}，status=${owned.status}），本次调用已复用，未新建任何节点。请勿再次调用 workflow_start；失败节点用 workflow_rerun 重跑，推进生成用 workflow_generate。`,
-        })
+    // content 归一（2026-10-30 22d9825a S04「缺少必要内容」实锤）：模型把 content 序列化成
+    // JSON 字串传入（"content":"{\"previz\":...}"），旧码 typeof !== "object" 当作没传 → 回落
+    // query → {} → 模板报「缺 shot、previz」，内容其实在。字串先按 JSON 解析；解析不了明确报错。
+    // role 值为纯字串（{ shot: "..." }）同样包成 { content }——与 query 回退同一 JSON 解析口径。
+    let rawContent: unknown = body.content
+    if (typeof rawContent === "string") {
+      try {
+        rawContent = JSON.parse(rawContent)
+      } catch {
+        return jsonError(400, "content 必须是对象 { role: { content: \"...\" } }，收到的是无法解析的字串；请直接传对象，不要把 JSON 序列化成字串", "invalid_content", "invalid_content")
       }
     }
-    // S4：start 即发 canvas.plan（cost_hint 需目录）——start 前同步预热目录
-    //（带上限 5s，失败/超时照走：cost_hint 保守回 null，不挡搭建）。
-    await Promise.race([
-      catalogUnitCoins("pixai-tsubaki2", session.apiKey).catch(() => {}),
-      new Promise((r) => setTimeout(r, 5000)),
-    ])
-    const rawContent = body.content && typeof body.content === "object" ? body.content : null
-    const content = rawContent ?? (() => {
+    const content = rawContent && typeof rawContent === "object" && !Array.isArray(rawContent) ? (rawContent as Record<string, unknown>) : (() => {
       // query 参数回退：?content={"role":{"content":"..."}}（URL-encoded JSON）
       const q = url.searchParams.get("content")
       if (!q) return {}
@@ -236,11 +251,61 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       }
     })()
     if (content === null) return jsonError(400, "invalid content json (query or body)", "bad_request", "bad_request")
+    for (const [role, v] of Object.entries(content)) {
+      if (typeof v === "string") content[role] = { content: v }
+    }
+    // P0 idempotent workflow_start（2026-08-31 卡片堆积事故）：gateway 重启 → N1 redrive 重投
+    // 上一条 prompt → agent 再次呼叫 workflow_start → 新建第二套节点堆上画布。
+    // 2026-10-30 收窄（22d9825a）：旧键＝(session, template)，同会话逐镜各建一个 single_video
+    // 时，第二批起全部被复用成同一个 workflow_id、内容被吞，且回包仍称「已建」。改为：
+    //   ① 同 session＋同模板＋同 content（重投/重复调用）→ 复用；
+    //   ② 未填过的骨架（全部 text 节点仍是「（待填：」占位）→ 照旧复用（骨架去重语义不变）；
+    //   ③ 并发同键调用共享同一个进行中的 start（轮子 = waveform.ts inflight Map）。
+    // 内容不同 → 新建；service 侧撞 id 时自动加命名空间，画布不再互相覆盖。
+    const startKey = templateId ? `${state.sessionId}\u0000${templateId}\u0000${JSON.stringify(content)}` : ""
+    const pending = startKey ? workflowStartInflight.get(startKey) : undefined
+    if (pending) {
+      const prev = await pending
+      if (prev.status !== 200) return Response.json(prev.body, { status: prev.status })
+      console.log(`[gateway] workflow_start reused (inflight same content): session=${state.sessionId} wf=${String(prev.body.workflowId)}`)
+      return Response.json({ ...prev.body, reused: true, note: `同内容的 workflow_start 并发调用已合并到 workflow_id=${String(prev.body.workflowId)}，未新建节点。` })
+    }
+    if (templateId) {
+      const ownedWfId = workflowOwnerBySession.get(state.sessionId)
+      const reusable = workflowService.list().find((w) => {
+        if (w.templateId !== templateId || w.status === "success") return false
+        if ((w.owner as SessionState | undefined)?.sessionId !== state.sessionId && w.workflowId !== ownedWfId) return false
+        return workflowStartContentMatches(w, content) || (w.workflowId === ownedWfId && workflowIsPristineSkeleton(w))
+      })
+      if (reusable) {
+        console.log(`[gateway] workflow_start reused: session=${state.sessionId} wf=${reusable.workflowId} status=${reusable.status} (P0 idempotent guard, same content/skeleton)`)
+        return Response.json({
+          ok: true,
+          workflowId: reusable.workflowId,
+          reused: true,
+          status: reusable.status,
+          note: `该会话已存在同模板、同内容的工作流（workflow_id=${reusable.workflowId}，status=${reusable.status}），本次调用已复用，未新建任何节点。失败节点用 workflow_rerun 重跑，推进生成用 workflow_generate。`,
+        })
+      }
+    }
+    let settle!: (v: WorkflowStartSettled) => void
+    let settled: WorkflowStartSettled | undefined
+    if (startKey) workflowStartInflight.set(startKey, new Promise((res) => (settle = res)))
+    try {
+    // S4：start 即发 canvas.plan（cost_hint 需目录）——start 前同步预热目录
+    //（带上限 5s，失败/超时照走：cost_hint 保守回 null，不挡搭建）。
+    await Promise.race([
+      catalogUnitCoins("pixai-tsubaki2", session.apiKey).catch(() => {}),
+      new Promise((r) => setTimeout(r, 5000)),
+    ])
     // R8（2026-09-10）：start 改 async（shotN_gen 动态选可用视频模型需 await
     // model-status 探测）——必须 await，否则「error in r」对 Promise 恒 false，
     // 缺内容 400 守卫失效。
     const r = await workflowService.start(templateId, content as never, session)
-    if ("error" in r) return jsonError(400, r.error, "missing_content", "missing_content")
+    if ("error" in r) {
+      settled = { status: 400, body: { error: { message: r.error, type: "missing_content", code: "missing_content" } } }
+      return jsonError(400, r.error, "missing_content", "missing_content")
+    }
     // R5-C（2026-08-28）：模板启动成功即 emit 零 LLM 欢迎词（毫秒级，不过模型）。
     // 暴君规格：零内部话术、简体、直接可执行。小说影视化模板用专属文案；
     // 其余模板用通用引导。走 emitAgentNotice（message 通道，前端零改动）。
@@ -251,8 +316,16 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
         : "已为你搭好工作流画布。把素材或要求发给我，我会按环节推进，每个节点完成后逐条汇报。\n"
     emitAgentNotice(state, welcomeText)
     console.log(`[gateway] R5-C welcome emitted: template=${templateId} workflow=${wfId} session=${state.sessionId}`)
+    settled = { status: 200, body: { ok: true, ...r } }
     return Response.json({ ok: true, ...r })
-  }  if (pathname.endsWith("/workflow/node") && req.method === "POST") {
+    } finally {
+      if (startKey) {
+        settle(settled ?? { status: 500, body: { error: { message: "workflow_start 并发同内容调用的首个请求异常结束，请重试", type: "workflow_start_failed", code: "workflow_start_failed" } } })
+        workflowStartInflight.delete(startKey)
+      }
+    }
+  }
+  if (pathname.endsWith("/workflow/node") && req.method === "POST") {
     const r = workflowService.addNode(
       typeof body.workflow_id === "string" ? body.workflow_id : "",
       typeof body.role === "string" ? body.role : "node",

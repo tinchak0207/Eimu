@@ -262,9 +262,21 @@ export class WorkflowService {
     }
     workflowCounter += 1
     const workflowId = `wf_${Date.now().toString(36)}_${workflowCounter}`
+    // 2026-10-30 同会话多工作流（22d9825a 逐镜 single_video）：节点 id 只由 templateId
+    // 派生，同会话第二个同模板工作流与第一个全部同 id，画布按 id upsert → 后建覆盖先建。
+    // 撞 id 时以 workflowId 去掉 wf_ 前缀作命名空间（无 `-`，wfidFromNodeId 正则不受影响）；
+    // 首个工作流保持旧 id，零回归。
+    let idPrefix: string | undefined
+    if (template && templateId && owner && template.nodes[0]) {
+      const probe = `${templateId}-${template.nodes[0].role}-0`
+      const taken =
+        [...this.workflows.values()].some((w) => w.owner === owner && w.graph.nodes.some((n) => n.id === probe)) ||
+        (this.opts.nodeIdTaken?.(owner, probe) ?? false)
+      if (taken) idPrefix = `${templateId}_${workflowId.slice(3)}`
+    }
     // 2026-10-08 DSL 读面：传 workflowId 让 expandTemplate 主卡带 workflow_ns/stepId/stepIndex
     //（前端 DSL 反推器只认这三键；模板产线不带 → canvas_get_state 的 dsl 永远空）。
-    const graph = template ? expandTemplate(templateId!, template, content, workflowId) : { nodes: [], connections: [] }
+    const graph = template ? expandTemplate(templateId!, template, content, workflowId, idPrefix) : { nodes: [], connections: [] }
     // config 节点补默认参数（与 submitWorkflowNode 的默认一致），画布上永远显示得出参数
     for (const n of graph.nodes) {
       if (n.kind === "config") {
@@ -338,6 +350,11 @@ export class WorkflowService {
 
   get(workflowId: string): ActiveWorkflow | undefined {
     return this.workflows.get(workflowId)
+  }
+
+  /** 内存中全部工作流（workflow_start 同内容幂等比对用）。 */
+  list(): ActiveWorkflow[] {
+    return [...this.workflows.values()]
   }
 
   addNode(workflowId: string, role: string, kind: string, title: string, metadata: Record<string, unknown> = {}): { nodeId: string } | { error: string } {

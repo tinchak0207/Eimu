@@ -104,7 +104,12 @@ export function expandTemplate(
   },
   content: TemplateContent,
   workflowId?: string,
+  idPrefix?: string,
 ): WorkflowGraph {
+  // 2026-10-30 同会话多工作流：节点 id 只由 templateId 派生时，同会话第二个同模板工作流
+  // 的节点与第一个同 id，画布 applyCanvasNodeCreated 按 id upsert → 后建覆盖先建。
+  // service 侧检测到撞 id 时传 idPrefix（模板 id + 工作流序号）；未传＝旧 id，零回归。
+  const pfx = idPrefix || templateId
   // 节点 id → 其模板规格（含 tools/notes/gate 衍生材料；克隆链的规格经 spread 继承原型）
   const specByNodeId = new Map<string, DerivableNodeSpec>()
   // role → 本模板实例生成的节点 id（保序、可多个；主回圈与克隆回圈都在生成处顺手登记）。
@@ -133,7 +138,7 @@ export function expandTemplate(
     if (filled.emitsEntity && typeof filled.emitsEntity === "object" && !Array.isArray(filled.emitsEntity)) {
       filled.emitsEntity = { ...(filled.emitsEntity as Record<string, unknown>) }
     }
-    const nodeId = `${templateId}-${spec.role}-${i}`
+    const nodeId = `${pfx}-${spec.role}-${i}`
     registerRoleNode(spec.role, nodeId)
     // DSL 读面键（2026-10-08）：主卡带 workflow_ns/stepId/stepIndex 供前端反推 dsl。
     // 最后写：身分键由引擎管辖，不让 content 覆盖。workflowId 缺席（旧调用点）→ 不写，零回归。
@@ -150,7 +155,7 @@ export function expandTemplate(
       metadata: filled,
     }
   })
-  for (const [i, spec] of template.nodes.entries()) specByNodeId.set(`${templateId}-${spec.role}-${i}`, spec)
+  for (const [i, spec] of template.nodes.entries()) specByNodeId.set(`${pfx}-${spec.role}-${i}`, spec)
 
   // ── R8 多镜展开：multiShot 模板 + content 带 shot2..N → 克隆 shot1 链 ──
   // 原型 = 模板已定义的 shot1 三件套（text/config/video）。content 只给 shot1
@@ -196,7 +201,7 @@ export function expandTemplate(
             if (filled.emitsEntity && typeof filled.emitsEntity === "object" && !Array.isArray(filled.emitsEntity)) {
               filled.emitsEntity = { ...(filled.emitsEntity as Record<string, unknown>) }
             }
-            const nodeId = `${templateId}-${spec.role}-${nodes.length}`
+            const nodeId = `${pfx}-${spec.role}-${nodes.length}`
             // 同主回圈：克隆节点也登记 role→nodeId（参考图 post-pass 会看到同名 role 的多个实例）
             registerRoleNode(spec.role, nodeId)
             // 同主回圈：DSL 读面键——克隆 spec 不在 template.nodes 里没有模板下标，
@@ -248,7 +253,7 @@ export function expandTemplate(
     // 工具卡：主节点/前序卡 → 工具卡（顺序流水线，不反折回连）
     if (spec.tools) {
       spec.tools.forEach((tool, ti) => {
-        const id = `${templateId}-${n.role}__tool_${ti}-${nodes.length}`
+        const id = `${pfx}-${n.role}__tool_${ti}-${nodes.length}`
         nodes.push({
           id,
           role: `${n.role}__tool_${ti}`,
@@ -270,7 +275,7 @@ export function expandTemplate(
     // 配方笔记卡：紧随工具卡后顺序串联
     if (spec.notes) {
       spec.notes.forEach((note, ni) => {
-        const id = `${templateId}-${n.role}__note_${ni}-${nodes.length}`
+        const id = `${pfx}-${n.role}__note_${ni}-${nodes.length}`
         nodes.push({
           id,
           role: `${n.role}__note_${ni}`,
@@ -285,7 +290,7 @@ export function expandTemplate(
     // 门禁卡：位于本行流水线末端验收
     const gateText = typeof n.metadata.gate === "string" ? n.metadata.gate : spec.gate
     if (gateText !== undefined) {
-      const id = `${templateId}-${n.role}__gate-${nodes.length}`
+      const id = `${pfx}-${n.role}__gate-${nodes.length}`
       nodes.push({
         id,
         role: `${n.role}__gate`,
