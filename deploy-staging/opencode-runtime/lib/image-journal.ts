@@ -17,7 +17,11 @@ function sharedJournalPermissions(path: string): void {
   const uid = process.getuid?.()
   if (d.isSymbolicLink()) throw new Error("shared_journal_permissions: journal目录不能是符号链接")
   if (d.uid === uid) {
-    chmodSync(dir, 0o2770)
+    // 照 project/store.ts scratch 与 exec-bridge outDir：已是2770就不再chmod。
+    // 2026-10-29 16:42 owner在某执行上下文里chmod 2770被内核静默去掉setgid（落成770且不报错），
+    // 网关（非owner）随后在新进程首次开库时于下方else分支拒绝，视频/图片全部未提交。
+    if ((d.mode & 0o2770) !== 0o2770) chmodSync(dir, 0o2770)
+    if ((lstatSync(dir).mode & 0o7777) !== 0o2770) throw new Error("shared_journal_permissions: journal目录chmod 2770未生效（setgid被丢弃），需owner在服务外初始化")
     // 默认ACL只作用该journal目录的新DB/WAL/SHM，避免UMask0022在WAL重建后再次阻断另一服务。
     const acl = spawnSync("setfacl", ["-m", "d:u::rwx,d:g::rwx,d:o::---,d:m::rwx", "--", dir], { encoding: "utf8" })
     if (acl.status !== 0) throw new Error("shared_journal_permissions: 无法设置journal目录默认ACL，需owner初始化acl依赖")
