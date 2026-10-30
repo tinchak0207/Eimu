@@ -1,4 +1,5 @@
 import type { ReviewClass } from "./delivery-gate-types.ts"
+import { LEGACY_UPSTREAM_SHELL_RE, userFacingError, userFacingErrorParts, type UserFacingErrorKind } from "./user-facing-error.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // F10（2026-10-04）：内审/复核正文从用户可见文字剥离 v2（结构判定 + 分层降级）
@@ -453,9 +454,25 @@ function scrubUserFacingErrorText(raw: unknown): string {
   return cleaned === raw ? scrubVisibleProse(raw) : cleaned
 }
 
-export function scrubVisibleFrame(name: string, data: unknown): unknown {
+const MEDIA_FAILED_KIND: Record<string, UserFacingErrorKind> = {
+  "image.failed": "image",
+  "video.failed": "video",
+  "audio.failed": "audio",
+}
+
+/**
+ * 用户可见 SSE 帧的单一咽喉点清洗（sse-core.emitToSession 每帧必经）。
+ *  ① 子代理摘要/正文 → F10 同源判定；② 正文/状态/通知 → scrubVisibleProse；
+ *  ③ 2026-10-30 防线 2：所有**失败帧**（session.error / tool.result ok:false /
+ *     image|video|audio.failed / canvas.node.updated status=error）的可见文案一律过
+ *     user-facing-error.ts 的唯一出口：空串、tool failed、上游英文、内部串 → 有原因有下一步的人话，
+ *     原文只进服务端日志。message/reason/errorDetails 也同步替换，前端任何回落都拿不到原文。
+ *  其余帧一律不碰 → 零误伤。`where` 只用于日志定位。
+ */
+export function scrubVisibleFrame(name: string, data: unknown, where?: string): unknown {
   if (data === null || typeof data !== "object" || Array.isArray(data)) return data
   const d = data as Record<string, unknown>
+  const at = where ? `${name} ${where}` : name
   if (name === "subagent.done") {
     if (typeof d.summary !== "string") return data
     const cleaned = scrubSubagentPayload(d.summary)
@@ -468,38 +485,63 @@ export function scrubVisibleFrame(name: string, data: unknown): unknown {
   }
   if (isUserVisibleTextFrame(name)) {
     if (typeof d.text !== "string") return data
-    const cleaned = scrubVisibleProse(d.text)
+    let cleaned = scrubVisibleProse(d.text)
+    // 旧兜底壳「执行失败（上游原因：X）」不论从哪个 emit 点拼出来，都换成统一出口的人话。
+    LEGACY_UPSTREAM_SHELL_RE.lastIndex = 0
+    if (LEGACY_UPSTREAM_SHELL_RE.test(cleaned)) {
+      LEGACY_UPSTREAM_SHELL_RE.lastIndex = 0
+      cleaned = cleaned.replace(LEGACY_UPSTREAM_SHELL_RE, (_m, inner: string) => userFacingError(inner, { kind: "tool", where: at }))
+    }
     return cleaned === d.text ? data : { ...d, text: cleaned }
   }
-  // 2026-10-27：session.error / tool.result 红卡不得把闸门/运行时原文甩给用户。
+  // 2026-10-27：session.error / tool.result 红卡不得把闸门/运行时原文甩给用户（闸门句先换产品句）。
   if (name === "session.error") {
     const msg = typeof d.message === "string" ? d.message : ""
     const human = typeof d.human_message === "string" ? d.human_message : ""
-    const cleanedMsg = scrubUserFacingErrorText(msg)
-    const cleanedHuman = human ? scrubUserFacingErrorText(human) : human
-    if (cleanedMsg === msg && cleanedHuman === human) return data
-    return {
-      ...d,
-      ...(msg ? { message: cleanedMsg } : {}),
-      ...(human ? { human_message: cleanedHuman } : {}),
-    }
+    const candidate = (human ? scrubUserFacingErrorText(human) : "") || scrubUserFacingErrorText(msg)
+    const visible = userFacingError(candidate, { kind: "session", where: at })
+    if (visible === msg && visible === human) return data
+    return { ...d, message: visible, human_message: visible }
   }
   if (name === "tool.result" && d.ok === false && d.error && typeof d.error === "object" && !Array.isArray(d.error)) {
     const err = d.error as Record<string, unknown>
     const msg = typeof err.message === "string" ? err.message : ""
-    const human = typeof err.human_message === "string" ? err.human_message : ""
-    // 用户卡优先看 human_message；闸门类错误把可见文案换成产品句，message 同步剥以免回落原文。
-    const cleanedMsg = msg ? scrubUserFacingErrorText(msg) : msg
-    const cleanedHuman = human ? scrubUserFacingErrorText(human) : (msg && cleanedMsg !== msg ? cleanedMsg : human)
-    if (cleanedMsg === msg && cleanedHuman === human) return data
-    return {
-      ...d,
-      error: {
-        ...err,
-        ...(msg ? { message: cleanedMsg } : {}),
-        ...(cleanedHuman ? { human_message: cleanedHuman } : {}),
-      },
+    const hasHuman = typeof err.human_message === "string"
+    const human = hasHuman ? (err.human_message as string) : ""
+    // 授权卡（needs_authorization）走专门的 action 态，文案是本站写的选择提示，不碰。
+    if (err.code === "needs_authorization" || err.action_required === "authorize_local_files") return data
+    const tool = typeof d.tool === "string" ? d.tool : "?"
+    // human_message 显式为空串＝发起方判定「模型自修回路、不出红字」（卡片只显示中性未成功）：
+    // 尊重该语义，但 message 同步换成人话，前端任何回落都拿不到原文。
+    if (hasHuman && human === "") {
+      const visibleMsg = msg ? userFacingError(scrubUserFacingErrorText(msg), { kind: "tool", where: `${at} tool=${tool}`, silent: true }) : msg
+      return visibleMsg === msg ? data : { ...d, error: { ...err, message: visibleMsg } }
     }
+    const candidate = (human ? scrubUserFacingErrorText(human) : "") || scrubUserFacingErrorText(msg)
+    const visible = userFacingError(candidate, { kind: "tool", where: `${at} tool=${tool}` })
+    if (visible === msg && visible === human) return data
+    return { ...d, error: { ...err, message: visible, human_message: visible } }
+  }
+  const mediaKind = MEDIA_FAILED_KIND[name]
+  if (mediaKind) {
+    const reason = typeof d.reason === "string" ? d.reason : ""
+    const human = typeof d.human_message === "string" ? d.human_message : ""
+    const parts = userFacingErrorParts(human || reason, { kind: mediaKind, where: at })
+    // 原文已经可见（人话）且两栏一致 → 原样；否则 reason 给短原因（前端外壳「生成失败（…）」用），
+    // human_message 给整句。
+    if (parts.reason === reason && parts.text === human) return data
+    return { ...d, reason: parts.reason, human_message: parts.text }
+  }
+  if (name === "canvas.node.updated") {
+    const patch = d.patch
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return data
+    const p = patch as Record<string, unknown>
+    if (p.status !== "error") return data
+    const details = typeof p.errorDetails === "string" ? p.errorDetails : ""
+    const human = typeof p.human_message === "string" ? p.human_message : ""
+    const visible = userFacingError(human || details, { kind: "node", where: at })
+    if (visible === details && visible === human) return data
+    return { ...d, patch: { ...p, errorDetails: visible, human_message: visible } }
   }
   return data
 }
