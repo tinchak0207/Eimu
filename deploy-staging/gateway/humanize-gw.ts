@@ -50,9 +50,34 @@ export function isHarnessInternalToolInput(tool: string, input: unknown): boolea
   return HARNESS_INTERNAL_RE.test(s)
 }
 
-/** 用户可见的工具参数摘要：挽具内部操作 → ""（前端无参数即无展开抽屉）。 */
+/** 服务端工作区绝对路径（含 file://）：用户侧只留文件名。 */
+const SERVER_ABS_PATH_RE = /(?:file:\/\/)?\/opt\/agent-harness\/[^\s"'`,，。；;）)\]}]*/g
+/** 用户本机文件桥：路径是用户自己机器上的，原样保留。 */
+const USER_LOCAL_PATH_TOOLS = new Set(["local_files", "local_files_authorize"])
+
+function basenameServerPaths(v: unknown, depth: number): unknown {
+  if (typeof v === "string") {
+    SERVER_ABS_PATH_RE.lastIndex = 0
+    return v.replace(SERVER_ABS_PATH_RE, (m) => {
+      const trimmed = m.replace(/\/+$/, "")
+      return trimmed.slice(trimmed.lastIndexOf("/") + 1) || "文件"
+    })
+  }
+  if (depth > 4 || v === null || typeof v !== "object") return v
+  if (Array.isArray(v)) return v.map((x) => basenameServerPaths(x, depth + 1))
+  const out: Record<string, unknown> = {}
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = basenameServerPaths(x, depth + 1)
+  return out
+}
+
+/**
+ * 用户可见的工具参数摘要（实时 tool.invoke.args_summary 与历史 state.input 的唯一出口）：
+ *  - 原生工具操作 agent 自身挽具 → ""（前端无参数即无展开抽屉）；
+ *  - 其余工具参数值里的服务端绝对路径（/opt/agent-harness/…）→ 文件名（用户仍知道看的是哪张图）。
+ */
 export function visibleToolArgs(tool: string, input: unknown): string {
-  return isHarnessInternalToolInput(tool, input) ? "" : summarizeArgs(input)
+  if (isHarnessInternalToolInput(tool, input)) return ""
+  return summarizeArgs(USER_LOCAL_PATH_TOOLS.has(tool) ? input : basenameServerPaths(input, 0))
 }
 
 export function summarizeArgs(args?: unknown): string {

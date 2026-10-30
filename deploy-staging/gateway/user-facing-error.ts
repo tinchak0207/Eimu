@@ -203,13 +203,13 @@ const MODEL_SELF_FIX_CODES = new Set<string>([
   "invalid_project",
   "invalid_request_id",
   "request_id_required",
-  "project_budget_unknown", // 改图/放大未继承 project
   "missing_canonical",
   "missing_style_lock",
-  "missing_model",
-  "invalid_budget",
-  "budget_locked", // 工具试图扩大已有项目预算
+  "missing_model", // last_frame_video_chain：工具让模型先 video_quote 查模型再提交
+  "invalid_budget", // 模型传了非数/负数预算（image-journal、client.authorizedProjectBudget）
   "invalid_args", // music_gen 参数校验
+  // 不收：budget_locked（扩大预算须用户新预算版本）、project_budget_unknown（image_generate 把
+  // 预算查询的任何无码异常都兜成此码，含服务端故障）——这两类用户要看得见。
 ])
 
 /** 字符串错误开头的稳定代码：`project_lock_changed: …`（可带 opencode 的 `Error: ` 前缀）。 */

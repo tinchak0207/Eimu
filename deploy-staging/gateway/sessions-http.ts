@@ -21,7 +21,7 @@ import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-g
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText } from "./outbound-sanitize.ts"
 import { visibleToolError } from "./user-facing-error.ts"
-import { isHarnessInternalToolInput } from "./humanize-gw.ts"
+import { visibleToolArgs } from "./humanize-gw.ts"
 
 // L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
 // 以选择题采集画像（PM 原则：别让用户动脑写表单）。答案存 pendingProfile，
@@ -264,16 +264,10 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
             const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
             if (stSrc) {
               if (stSrc.status !== undefined) st.status = stSrc.status
-              // 2026-10-31：原生工具操作 agent 自身挽具（/opt/agent-harness、.opencode、skills…）→ 参数整体不回传。
-              if (stSrc.input !== undefined && !isHarnessInternalToolInput(name ?? "", stSrc.input)) {
-                let s: string
-                try {
-                  s = typeof stSrc.input === "string" ? stSrc.input : JSON.stringify(stSrc.input)
-                } catch {
-                  s = ""
-                }
-                if (s.length > 500) s = s.slice(0, 500)
-                st.input = s
+              // 与实时 tool.invoke 同一出口 visibleToolArgs：挽具内部 → 省略；服务端绝对路径 → 文件名。
+              if (stSrc.input !== undefined) {
+                const s = visibleToolArgs(name ?? "", stSrc.input)
+                if (s) st.input = s
               }
               // 2026-10-31：失败原文与实时 SSE 同一权威 visibleToolError；自修类（""）不写 st.error＝不出红字。
               const rawErr =
