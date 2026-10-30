@@ -20,7 +20,8 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText } from "./outbound-sanitize.ts"
-import { visibleToolError } from "./user-facing-error.ts"
+import { isModelSelfFixError, visibleToolError } from "./user-facing-error.ts"
+import { parseToolOutput } from "./events-translate-core.ts"
 import { visibleToolArgs } from "./humanize-gw.ts"
 
 // L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
@@ -262,6 +263,17 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               : null
             const st: Record<string, unknown> = {}
             const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
+            // 2026-10-31：模型自修类（未提交、改参数再调）整个 part 丢弃——与实时 model_self_fix 同一判定。
+            // error 态看 state.error；completed 态看 state.output 的 {ok:false, error}。
+            if (stSrc) {
+              const rawErr = stSrc.status === "error"
+                ? stSrc.error
+                : stSrc.status === "completed" && typeof stSrc.output === "string" && stSrc.output.includes('"ok"')
+                  ? parseToolOutput(stSrc.output)
+                  : null
+              const failedOutput = stSrc.status !== "completed" || (rawErr !== null && (rawErr as { ok?: unknown }).ok === false)
+              if (rawErr != null && failedOutput && isModelSelfFixError(rawErr)) continue
+            }
             if (stSrc) {
               if (stSrc.status !== undefined) st.status = stSrc.status
               // 与实时 tool.invoke 同一出口 visibleToolArgs：挽具内部 → 省略；服务端绝对路径 → 文件名。

@@ -1,5 +1,5 @@
 import type { ReviewClass } from "./delivery-gate-types.ts"
-import { LEGACY_UPSTREAM_SHELL_RE, isModelSelfFixError, userFacingError, userFacingErrorParts, visibleToolError, type UserFacingErrorKind } from "./user-facing-error.ts"
+import { LEGACY_UPSTREAM_SHELL_RE, MODEL_SELF_FIX_CODE, isModelSelfFixError, userFacingError, userFacingErrorParts, visibleToolError, type UserFacingErrorKind } from "./user-facing-error.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // F10（2026-10-04）：内审/复核正文从用户可见文字剥离 v2（结构判定 + 分层降级）
@@ -513,8 +513,11 @@ export function scrubVisibleFrame(name: string, data: unknown, where?: string): 
     const tool = typeof d.tool === "string" ? d.tool : "?"
     // 2026-10-31：模型自修类（未提交/未扣费、改参数再调）→ 两栏都清空，用户侧不出红字、
     // 前端任何回落也拿不到给模型的原句。判定唯一权威＝user-facing-error.visibleToolError。
-    if (isModelSelfFixError({ code: err.code, message: msg, human_message: human })) {
-      return msg === "" && human === "" ? data : { ...d, error: { ...err, message: "", human_message: "" } }
+    // 只看原始 code/message（不看 human_message）；出站统一 code=model_self_fix，前端整行不显示。
+    if (isModelSelfFixError({ code: err.code, message: msg })) {
+      return err.code === MODEL_SELF_FIX_CODE && msg === "" && human === ""
+        ? data
+        : { ...d, error: { ...err, code: MODEL_SELF_FIX_CODE, message: "", human_message: "" } }
     }
     // human_message 显式为空串＝发起方判定「模型自修回路、不出红字」（卡片只显示中性未成功）：
     // 尊重该语义，但 message 同步换成人话，前端任何回落都拿不到原文。
@@ -523,7 +526,7 @@ export function scrubVisibleFrame(name: string, data: unknown, where?: string): 
       return visibleMsg === msg ? data : { ...d, error: { ...err, message: visibleMsg } }
     }
     const candidate = (human ? scrubUserFacingErrorText(human) : "") || scrubUserFacingErrorText(msg)
-    const visible = visibleToolError(tool, candidate, at)
+    const visible = visibleToolError(tool, { code: err.code, message: msg, human_message: candidate }, at)
     if (visible === msg && visible === human) return data
     return { ...d, error: { ...err, message: visible, human_message: visible } }
   }

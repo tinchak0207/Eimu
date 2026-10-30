@@ -212,8 +212,17 @@ const MODEL_SELF_FIX_CODES = new Set<string>([
   // 预算查询的任何无码异常都兜成此码，含服务端故障）——这两类用户要看得见。
 ])
 
-/** 字符串错误开头的稳定代码：`project_lock_changed: …`（可带 opencode 的 `Error: ` 前缀）。 */
-const LEADING_CODE_RE = /^(?:Error:\s*)?([a-z][a-z0-9_]+):/
+/** 自修类在出站帧上的统一错误码：前端据此整行不显示（不留无原因的红卡）。 */
+export const MODEL_SELF_FIX_CODE = "model_self_fix"
+
+/** 运行时/工具原文前缀：`Tool execution failed:`、`Error:`、`Error：`（可叠加）。 */
+const RAW_PREFIX_RE = /^(?:\s*(?:tool execution failed|error)\s*[:：]\s*)+/i
+/** 字符串错误开头的稳定代码：`project_lock_changed: …`（大小写不敏感，冒号可全角）。 */
+const LEADING_CODE_RE = /^([a-z][a-z0-9_]+)\s*[:：]/i
+/** 写给模型的指令词：改参数后再调。 */
+const MODEL_INSTRUCTION_RE = /再调用|改好|重新调用|修改.{0,40}?后(?:重新)?调用/
+/** 用户需要知道的事实（账务/审核/上游/服务状态）：出现即不是自修类。 */
+const USER_FACT_RE = /欠费|余额|额度|充值|审核|已扣费|上游|(?<!\d)5(?:\d\d|xx)(?!\d)|超时|限流|不可用/i
 
 function errorFields(raw: unknown): { code: string; texts: string[]; primary: string } {
   if (typeof raw === "string") return { code: "", texts: [raw], primary: raw }
@@ -228,14 +237,28 @@ function errorFields(raw: unknown): { code: string; texts: string[]; primary: st
   return { code, texts, primary: texts[0] ?? "" }
 }
 
-/** 是否为「模型自修类」工具错误（用户不看红字，模型自己改参数重试）。 */
+/**
+ * 是否为「模型自修类」工具错误（用户不看，模型自己改参数重试）。
+ * 只看**工具原始错误**：code、hint、message 或 throw 原文；**不看** human_message 与网关翻译句
+ * （网关写给用户的欠费归因句也带「未提交、未扣费」，绝不能被当成自修提示清空）。
+ */
 export function isModelSelfFixError(raw: unknown): boolean {
-  const { code, texts } = errorFields(raw)
-  if (code && MODEL_SELF_FIX_CODES.has(code)) return true
-  for (const t of texts) {
-    const lead = LEADING_CODE_RE.exec(t.trim())
-    if (lead && MODEL_SELF_FIX_CODES.has(lead[1])) return true
-    if (/未提交/.test(t) && /未扣费|再调用|改好/.test(t)) return true
+  let code = ""
+  let texts: string[]
+  if (typeof raw === "string") texts = [raw]
+  else if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>
+    const e = o.error && typeof o.error === "object" && !Array.isArray(o.error) ? (o.error as Record<string, unknown>) : typeof o.error === "string" ? { message: o.error } : o
+    const str = (v: unknown): string => (typeof v === "string" ? v : "")
+    code = str(e.code) || str(o.code)
+    texts = [str(e.message), str(e.hint)].filter((t) => t.length > 0)
+  } else return false
+  if (code && (code === MODEL_SELF_FIX_CODE || MODEL_SELF_FIX_CODES.has(code.toLowerCase()))) return true
+  for (const rawText of texts) {
+    const t = rawText.trim().replace(RAW_PREFIX_RE, "")
+    const lead = LEADING_CODE_RE.exec(t)
+    if (lead && MODEL_SELF_FIX_CODES.has(lead[1].toLowerCase())) return true
+    if (/未提交/.test(t) && MODEL_INSTRUCTION_RE.test(t) && !USER_FACT_RE.test(t)) return true
   }
   return false
 }

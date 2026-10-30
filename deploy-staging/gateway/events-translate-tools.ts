@@ -22,7 +22,7 @@ import { noteToolRunning, noteToolTerminal, toolCallSignature, TOOL_RUNNING_CAP 
 import { recordDeliveryEvidence } from "./claim-gate.ts"
 import { markDirty } from "./sessions-core.ts"
 import { canvasResultNodeId } from "./canvas-cascade-state.ts"
-import { isModelSelfFixError } from "./user-facing-error.ts"
+import { MODEL_SELF_FIX_CODE, isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
 import { AUTO_CANVAS_TOOLS, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask } from "./events-translate-canvas.ts"
@@ -60,8 +60,9 @@ export function toolErrorPayload(
       if (typeof o.code === "string" && o.code) code = o.code
     }
   }
-  // 模型自修类（未提交/未扣费、改参数再调）→ human_message 空串＝不出红字（判定权威在 user-facing-error）。
-  if (isModelSelfFixError({ code, message })) return { code, message, human_message: "" }
+  // 模型自修类（未提交、改参数再调）→ 出站 code=model_self_fix、两栏空串：前端整行不显示
+  //（判定只看工具原始 code/hint/message，权威在 user-facing-error）。模型侧原文在 opencode 输出里不受影响。
+  if (isModelSelfFixError({ code, message })) return { code: MODEL_SELF_FIX_CODE, message: "", human_message: "" }
   return { code, message, human_message: toolHuman || humanMessageFor(message, code) }
 }
 
@@ -493,6 +494,8 @@ if (status === "pending" || status === "running") {
         : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : "tool failed"
+    // 2026-10-31：自修判定只看工具 throw 的原文（下方 deny/workflow_start 改写之前）。
+    const rawToolMessage = message
     // 0919 断点②修复：question 工具以 aborted 收尾≠用户中止——是 orchestrator
     // 调 question 冻结 turn 时杀掉在途轮的内部中止（实锤 13:00:21 两条
     // 「已按你的要求中止本轮」冒充用户话术）。此处换中性话术；用户真中止
@@ -555,14 +558,14 @@ if (status === "pending" || status === "running") {
     // 闸门/运行时错误：模型侧 message 仍保留原文；用户可见 human_message 换成产品句。
     const gateErr = !isQuestionFreezeAbort && isRuntimeGateErrorText(message)
     // 2026-10-31：工具抛出的自修提示（`project_lock_changed: …未提交。` 等）→ 不出红字、不弹 session.error。
-    const selfFix = !isQuestionFreezeAbort && !gateErr && isModelSelfFixError(message)
+    const selfFix = !isQuestionFreezeAbort && !gateErr && isModelSelfFixError(rawToolMessage)
     const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : selfFix ? "" : humanMessageFor(message)
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
       error: {
-        code: isQuestionFreezeAbort ? "question_freeze" : gateErr ? "runtime_gate" : "tool_error",
-        message,
+        code: isQuestionFreezeAbort ? "question_freeze" : gateErr ? "runtime_gate" : selfFix ? MODEL_SELF_FIX_CODE : "tool_error",
+        message: selfFix ? "" : message,
         human_message: userFacing,
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
         ...(denyProv ? { deny_provenance: denyProv } : {}),

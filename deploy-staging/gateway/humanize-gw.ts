@@ -31,13 +31,16 @@ export function humanMessageFor(message: string, code?: string): string {
 
 /** 原生文件/终端工具：参数原文就是命令与路径。 */
 const NATIVE_HARNESS_TOOLS = new Set(["bash", "read", "glob", "grep", "list", "ls", "write", "edit", "patch"])
-/** agent 自身挽具（工作区技能/路由/提示词目录）——不是用户的文件。 */
-const HARNESS_INTERNAL_RE = /\/opt\/agent-harness\/|(?:^|[\s/"'=:;(])\.opencode(?:[/"'\s;]|$)|_prompt-routing|(?:^|[\s/"'=:;(])skills\//
+/** agent 自身挽具（工作区、.opencode/skills、路由提示词、本机内部端点）——不是用户的文件。 */
+const HARNESS_INTERNAL_RE =
+  /\/opt\/agent-harness(?![\w.-])|(?:^|[\s/"'=:;(])\.opencode(?:[/"'\s;]|$)|_prompt-routing|\b127\.0\.0\.1\b|\blocalhost:\d+/i
+/** 用户自己的上传：任何工具都不按挽具省略，只把路径换成文件名。 */
+const USER_UPLOAD_PATH_RE = /(?:file:\/\/)?\/opt\/agent-harness\/workspace\/uploads\/[^\s"'`,，。；;）)\]}]*/g
 
 /**
  * 2026-10-31：原生工具的输入若引用 agent 自身挽具（/opt/agent-harness、.opencode、_prompt-routing、
- * skills 目录），用户可见面（实时 tool.invoke 的 args_summary、历史端点的 state.input）整体省略参数；
- * 用户自己的文件/上传目录不命中，照常显示。
+ * 127.0.0.1／localhost:端口），用户可见面（实时 tool.invoke 的 args_summary、历史端点的 state.input）
+ * 整体省略参数；/opt/agent-harness/workspace/uploads/ 下（用户自己的上传）不算挽具。
  */
 export function isHarnessInternalToolInput(tool: string, input: unknown): boolean {
   if (!NATIVE_HARNESS_TOOLS.has(tool) || input == null) return false
@@ -47,7 +50,8 @@ export function isHarnessInternalToolInput(tool: string, input: unknown): boolea
   } catch {
     return false
   }
-  return HARNESS_INTERNAL_RE.test(s)
+  USER_UPLOAD_PATH_RE.lastIndex = 0
+  return HARNESS_INTERNAL_RE.test(s.replace(USER_UPLOAD_PATH_RE, " "))
 }
 
 /** 服务端工作区绝对路径（含 file://）：用户侧只留文件名。 */

@@ -110,6 +110,17 @@ export function reduceToolProgress(state: AgentChatState, event: AgentSseEvent &
 
 export function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
   const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
+  // 2026-10-31：模型自修类（未提交、未扣费，agent 改参数重试）整行不显示：删掉对应 running 条目，
+  // 找不到就不补条目——它重试时会有自己的那一行。
+  if (!ok && error?.code === "model_self_fix") {
+    for (let i = state.items.length - 1; i >= 0; i -= 1) {
+      const it = state.items[i];
+      if (it.kind === "tool" && it.tool === tool && it.status === "running") {
+        return { ...state, items: [...state.items.slice(0, i), ...state.items.slice(i + 1)], turnActive: true };
+      }
+    }
+    return { ...state, turnActive: true };
+  }
   // 缺陷 C（2026-10-04）：本机档案读取未授权 ＝ needs_authorization。这**不是**
   // 成功，也不是一般失败——是等使用者在卡片上选授权范围的 action 态。判定同时看
   // error.code 与 action_required，避免上游只带其一时语义写反成「完成」。
