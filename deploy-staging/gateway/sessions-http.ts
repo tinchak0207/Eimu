@@ -15,11 +15,12 @@ import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
-import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders } from "./system-wake.ts"
+import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders, isCompactionSummaryInfo, COMPACTION_PART_TYPE } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
-import { t2sVisibleText } from "./outbound-sanitize.ts"
+import { t2sVisibleText, stripOutboundFeed, stripOutboundFlush, type PartStripState } from "./outbound-sanitize.ts"
+import { scrubVisibleFrame } from "./delivery-gate-scrub.ts"
 import { isModelSelfFixError, visibleToolError } from "./user-facing-error.ts"
 import { parseToolOutput } from "./events-translate-core.ts"
 import { visibleToolArgs } from "./humanize-gw.ts"
@@ -192,6 +193,8 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
         if (typeof infoSrc.role === "string") info.role = infoSrc.role
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
+      // 2026-10-31：compaction 摘要讯息（及其触发讯息）实时从不上屏 → 历史整条丢弃（同一判据）。
+      if (isCompactionSummaryInfo(infoSrc) || partsSrc.some((p) => !!p && typeof p === "object" && (p as { type?: unknown }).type === COMPACTION_PART_TYPE)) continue
       const headText = partsSrc.map((p) => {
         const q = p as Record<string, unknown> | null
         return !!q && q.type === "text" && typeof q.text === "string" ? q.text : ""
@@ -241,7 +244,15 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 非上述分支的 text/reasoning（含 assistant 正文与 assistant/user 的 reasoning）：
               // 同样抹除凭证；非 user 再过 T2S，user 自己输入的文字逐字保留（凭证除外）。
               let text = stripSystemReminders(part.text).replace(GW_TOKEN_RE, "")
-              if (info.role !== "user") text = t2sVisibleText(text)
+              if (type === "text" && info.role === "assistant") {
+                // 2026-10-31：与实时同口径——实时正文经 emitSanitizedDelta 的 stripOutboundFeed/Flush
+                //（内部章节、英文内部思考、/opt/agent-harness 路径→「（内部存档）」、繁→简）再过
+                // scrubVisibleFrame("message.delta")；历史对整段正文跑同一串函数。
+                const strip: PartStripState = { pending: "", suppress: false, fence: false, sawEnglish: false }
+                text = stripOutboundFeed(strip, text) + stripOutboundFlush(strip)
+                const scrubbed = scrubVisibleFrame("message.delta", { text }) as { text?: unknown }
+                if (typeof scrubbed.text === "string") text = scrubbed.text
+              } else if (info.role !== "user") text = t2sVisibleText(text)
               if (text.length === 0) continue
               parts.push(text === part.text ? part : { ...part, text })
               continue

@@ -59,14 +59,17 @@ const SERVER_ABS_PATH_RE = /(?:file:\/\/)?\/opt\/agent-harness\/[^\s"'`,，。�
 /** 用户本机文件桥：路径是用户自己机器上的，原样保留。 */
 const USER_LOCAL_PATH_TOOLS = new Set(["local_files", "local_files_authorize"])
 
+/** 文本里的服务端绝对路径（/opt/agent-harness/…）→ 文件名。 */
+export function basenameServerPathsInText(v: string): string {
+  SERVER_ABS_PATH_RE.lastIndex = 0
+  return v.replace(SERVER_ABS_PATH_RE, (m) => {
+    const trimmed = m.replace(/\/+$/, "")
+    return trimmed.slice(trimmed.lastIndexOf("/") + 1) || "文件"
+  })
+}
+
 function basenameServerPaths(v: unknown, depth: number): unknown {
-  if (typeof v === "string") {
-    SERVER_ABS_PATH_RE.lastIndex = 0
-    return v.replace(SERVER_ABS_PATH_RE, (m) => {
-      const trimmed = m.replace(/\/+$/, "")
-      return trimmed.slice(trimmed.lastIndexOf("/") + 1) || "文件"
-    })
-  }
+  if (typeof v === "string") return basenameServerPathsInText(v)
   if (depth > 4 || v === null || typeof v !== "object") return v
   if (Array.isArray(v)) return v.map((x) => basenameServerPaths(x, depth + 1))
   const out: Record<string, unknown> = {}

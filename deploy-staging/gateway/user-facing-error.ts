@@ -208,6 +208,13 @@ const MODEL_SELF_FIX_CODES = new Set<string>([
   "missing_model", // last_frame_video_chain：工具让模型先 video_quote 查模型再提交
   "invalid_budget", // 模型传了非数/负数预算（image-journal、client.authorizedProjectBudget）
   "invalid_args", // music_gen 参数校验
+  // subagent-dispatch.ts 的机器闸 409（{code, error:「【机器闸·…】先派…再重派本任务」}），
+  // subagent_dispatch 工具原样 fail(code, hint)：写给模型的派遣顺序指令。
+  "lyrics_upstream",
+  "lyrics_first",
+  "music_first",
+  "album_phase",
+  "research_inflight",
   // 不收：budget_locked（扩大预算须用户新预算版本）、project_budget_unknown（image_generate 把
   // 预算查询的任何无码异常都兜成此码，含服务端故障）——这两类用户要看得见。
 ])

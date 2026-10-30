@@ -84,7 +84,7 @@ function ParamLines({ argsSummary, costCoins }: { argsSummary: string; costCoins
       {/* 上游截断过就说出来，不让人以为这就是全部参数。 */}
       {parsed?.truncated && (
         <p className="text-ios-caption1 leading-[1.5] text-foreground/45">
-          上游只回传了参数摘要，可能不完整
+          参数较长，这里只显示了一部分
         </p>
       )}
     </>

@@ -58,7 +58,7 @@ import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } fro
 // user-role message（身份由 opencode 存储决定）；网关侧能做的是把它从「用户发言」语义摘出——
 // messageRole 改记 "system"（isAssistantMessage 仅认 "assistant"，回声抑制语义不变），
 // 并以 turn.status 暂态单行告知前端（不落 transcript，参照 turn-status-transient-row 修法）。
-import { isSystemWakeText, terminalSubagentWakeIndex } from "./system-wake.ts"
+import { isSystemWakeText, terminalSubagentWakeIndex, isCompactionSummaryInfo, COMPACTION_PART_TYPE } from "./system-wake.ts"
 export { isSystemWakeText }
 /** Stop hook loop guard：session state → 已触发 hook 的 turnGen。 */
 export const stopHookTurnGen = new WeakMap<object, number>()
@@ -168,7 +168,7 @@ export function handleOpencodeEvent(event: any): void {
         // isAssistantMessage 放行、把摘要草稿整段灌进用户可见流——模型压缩时前端
         // 秒变复读机（同一份摘要反覆重跑＝反覆上屏）。标成第三种角色 "compaction"
         // 后 text/reasoning 两条流都不再上屏；压缩动作改以 turn.status 一行告知。
-        if (mid && role === "assistant" && info?.summary === true) {
+        if (mid && isCompactionSummaryInfo(info)) {
           state.messageRole.set(mid, "compaction")
           boundMap(state.messageRole, MESSAGE_ROLE_CAP)
         }
@@ -292,7 +292,7 @@ export function handleOpencodeEvent(event: any): void {
             }
             break
           }
-          case "compaction": {
+          case COMPACTION_PART_TYPE: {
             // 压缩动作可见化（前端零改动：走既有 turn.status 通道）。同一 part 只报一次；
             // 该 part 所属讯息一并标非 assistant（摘要不入对话流，见 message.updated 段）。
             if (typeof part.messageID === "string") {
