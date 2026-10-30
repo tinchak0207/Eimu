@@ -11,7 +11,6 @@
 //     confirm.resolved）＋ workflow 节点状态＋DB 里的 settings 回读。
 //
 // 跑法（必带超时）：timeout 180 bun run deploy-staging/gateway/collaborate-gate.test.ts
-import { createHash } from "node:crypto"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -34,29 +33,6 @@ process.env.TURN_WATCHDOG_MS = "800"
 // steer-ledger-db.test.ts 的既有处境）。非 bun 环境下注册一条显式 skip，让
 // `npx tsx --test deploy-staging/gateway/*.test.ts` 不会多出一条假失败。
 async function runGateChecks(): Promise<void> {
-  // 价目夹具（独立事实：站内 /v1/models 目录契约，pricing-gateway.ts 只认 x_coins_per_image／x_billing 币字段）。
-  // 生产 fail-closed：目录无报价 → 「未取得当前目录币值报价…工作流已暂停」（workflow-service.ts preflightBudget），
-  // 所以要测「停点／续跑」，必须先让目录有价；价目服务只回 /v1/models，其余路径 404，仍不对任何真上游发生成请求。
-  const secs = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [String(i + 1), 1]))
-  const catalogServer = Bun.serve({
-    port: 0,
-    fetch(req) {
-      if (new URL(req.url).pathname !== "/v1/models") return new Response("not found", { status: 404 })
-      return Response.json({
-        // pixai-tsubaki2＝模板 config 的生图模型；minimax-h3＝模板视频节点未写 model 时的解析结果。
-        data: [
-          { id: "pixai-tsubaki2", x_coins_per_image: 1 },
-          {
-            id: "minimax-h3",
-            x_coins_per_second: { "720p": 1 },
-            x_capabilities: { defaultResolution: "720p", defaultAudio: false, audio: false },
-            x_billing: { currency: "coins", unit: "per_video", prices: { "720p": secs } },
-          },
-        ],
-      })
-    },
-  })
-  process.env.PLATFORM_BASE = `http://127.0.0.1:${catalogServer.port}`
   const persistence = await import("./persistence.ts")
   const { sessions } = await import("./sessions-core.ts")
   const gw = await import("./workflow-gw.ts")
@@ -64,10 +40,6 @@ async function runGateChecks(): Promise<void> {
   const { settleConfirm } = await import("./media-internal-routes.ts")
 
   const { workflowService, workflowGateApprovals, wfGateContinuations, COLLABORATE_GATE_ROLES } = gw
-  // 暖目录：estimateGraphCoins 只读已暖快取（同步签名），生产由 plan/preflight 先走 catalog* 函数暖热。
-  const pricing = await import("./pricing-gateway.ts")
-  await pricing.catalogUnitCoins("pixai-tsubaki2", "sk-collab-gate-collaborate")
-  await pricing.catalogVideoPerSecondCoins("minimax-h3", "sk-collab-gate-collaborate")
 
   // ── 断言器（逐条印出；失败不中断，结尾以 exit code 表态）──────────────────
   let pass = 0
@@ -155,10 +127,6 @@ async function runGateChecks(): Promise<void> {
   function startDrama(state: SessionState): string {
     const r = workflowService.startFast("shortdrama_visual", templatePlaceholderContent("shortdrama_visual") as never, state)
     if (!("workflowId" in r)) throw new Error(`startFast failed: ${r.error}`)
-    // 视频节点价格 = 目录 × 时长；模板骨架不预设时长（由用户/agent 在 video_gen 配置上定），无时长＝价未知＝fail-closed。
-    // 夹具补上用户会设的 5 秒，让报价可得（走真 workflow-gw-submit.resolveConnectedVideoDuration 路径）。
-    const videoCfg = workflowService.get(r.workflowId)!.graph.nodes.find((x: { role: string; kind: string }) => x.role === "video_gen" && x.kind === "config") as { metadata: Record<string, unknown> } | undefined
-    if (videoCfg) videoCfg.metadata.duration_seconds = 5
     return r.workflowId
   }
   const nodeIdOf = (wfid: string, role: string): string => {
@@ -315,23 +283,6 @@ async function runGateChecks(): Promise<void> {
   check("① 剧本产出 → 挡在剧本批准", roleNow() === "script", String(roleNow()))
   // ② 资产图真的产出（走真 updateNode：image 节点带 content ＝ success＋nodeContent）
   workflowService.updateNode(wfSeq, seqCast, { content: "https://cdn.example.com/cast_card.png" })
-  // 媒体节点「执行成功」≠「质量过关」：generate 先过独立质量审阅（workflow-service.qualityGate），未通过就在协作停点之前
-  // 暂停下游。本节验的是停点依序挡，所以给这张注入的资产图落一份与当前 artifact 绑定的真实形态审阅回执
-  // （critic_verdicts: pass＋RECEIPT 绑定 workflow:<wf>:<node>:<sha256(artifact)>，即 reviewBatch 校验的那一份），
-  // 不绕过、不改生产闸——换一张图（artifact 变）回执即失效。
-  {
-    const artifact = "https://cdn.example.com/cast_card.png"
-    const binding = `workflow:${wfSeq}:${seqCast}:${createHash("sha256").update(artifact).digest("hex")}`
-    const criticRunId = `fixture-critic-${seqCast}`
-    persistence.saveCriticVerdict({
-      sessionId: sSeq.sessionId,
-      runId: criticRunId,
-      agent: "critic",
-      verdict: "pass",
-      verdictText: `RECEIPT:${JSON.stringify({ ok: true, checked: [{ runId: binding, artifact }] })}\nverdict：通过`,
-    })
-    workflowService.recordQualityReview(wfSeq, seqCast, artifact, { state: "pending", requested: true, criticRunId })
-  }
   check("② 资产图产出（但剧本门禁仍未批准）→ 仍挡剧本批准，不越门", roleNow() === "script", String(roleNow()))
   const seqPause1 = await workflowService.generate(wfSeq)
   check("② generate 真的停在剧本批准（回执点名）", seqPause1.ok === false && seqPause1.status.includes("剧本批准"), JSON.stringify(seqPause1))

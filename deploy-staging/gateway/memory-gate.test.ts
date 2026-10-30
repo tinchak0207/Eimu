@@ -32,21 +32,11 @@ function base(over: Partial<CuratorCandidate> = {}): CuratorCandidate {
   }
 }
 
-describe("提出者身份（shared 必带 ownerKeyHint）", () => {
-  it("shared 且无 ownerKeyHint → g4_no_owner 丢弃（无处归属，不得匿名入共享库）", () => {
-    const r = applyMemoryGates(base(), sharedCtx)
-    assert.equal(r.action, "drop")
-    assert.equal(r.reason, "g4_no_owner")
-  })
-})
-
 describe("G1 结构", () => {
   it("合法 shared 候选通过并转驼峰", () => {
-    // 2026-10-19 契约：shared 必须带提出者（ownerKeyHint）才放行，故放行类用例一律用 ownerCtx。
-    const r = applyMemoryGates(base(), ownerCtx)
+    const r = applyMemoryGates(base(), sharedCtx)
     assert.equal(r.action, "accept")
     assert.ok(r.doc)
-    assert.equal(r.doc?.contributorKey, OWNER)
     assert.equal(r.doc?.evidenceKind, "tool_result") // snake→camel 在本档发生
     assert.equal(r.doc?.selfScore, 4)
     assert.ok(!("evidence_kind" in (r.doc ?? {})))
@@ -64,7 +54,7 @@ describe("G1 结构", () => {
   })
   it("description >120 丢弃", () => {
     assert.equal(applyMemoryGates(base({ description: "x".repeat(121) }), sharedCtx).reason, "g1_structure")
-    assert.equal(applyMemoryGates(base({ description: "x".repeat(120) }), ownerCtx).action, "accept")
+    assert.equal(applyMemoryGates(base({ description: "x".repeat(120) }), sharedCtx).action, "accept")
   })
   it("body >2000 丢弃", () => {
     assert.equal(applyMemoryGates(base({ body: "y".repeat(2001) }), sharedCtx).reason, "g1_structure")
@@ -95,7 +85,7 @@ describe("G2 证据（硬线）", () => {
     }
   })
   it("evidence 恰 10 字元放过", () => {
-    assert.equal(applyMemoryGates(base({ evidence: "abcdefghij" }), ownerCtx).action, "accept")
+    assert.equal(applyMemoryGates(base({ evidence: "abcdefghij" }), sharedCtx).action, "accept")
   })
 })
 
@@ -123,14 +113,14 @@ describe("G3 敏感（只回代号、不回显内容）", () => {
     })
   }
   it("普通正文放过", () => {
-    assert.equal(applyMemoryGates(base(), ownerCtx).action, "accept")
+    assert.equal(applyMemoryGates(base(), sharedCtx).action, "accept")
   })
 })
 
 describe("G6 分数线", () => {
   it("shared <4 丢弃、=4 放过", () => {
     assert.equal(applyMemoryGates(base({ self_score: 3 }), sharedCtx).reason, "g6_score")
-    assert.equal(applyMemoryGates(base({ self_score: 4 }), ownerCtx).action, "accept")
+    assert.equal(applyMemoryGates(base({ self_score: 4 }), sharedCtx).action, "accept")
   })
   it("private ≥3 放过、<3 丢弃", () => {
     const p = (score: number) => base({ scope: "private", self_score: score })

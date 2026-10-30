@@ -112,7 +112,6 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   get_agent_settings: {},
   run_agent: { prompt: "画一只猫", session_id: "sess-1", timeout_seconds: 30, session_directive: "简短回复" },
   abort_agent_session: { session_id: "sess-1" },
-  get_agent_generation_task: { session_id: "sess-1", task_id: "task-1" },
   check_delivery_contract: {
     expert_id: "music",
     kind: "music_track",
@@ -175,7 +174,6 @@ test("工具表：必填栏位缺一不可——空物件对有 required 的工�
     get_agent_session: "arguments.session_id",
     run_agent: "arguments.prompt",
     abort_agent_session: "arguments.session_id",
-    get_agent_generation_task: "arguments.session_id",
     check_delivery_contract: "arguments.expert_id",
   };
   for (const tool of MCP_TOOLS) {

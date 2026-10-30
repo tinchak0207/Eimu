@@ -1,17 +1,8 @@
 // 模板守卫 v2（接线契约）真值表测试（2026-10-02）。
 // 直接呼叫守卫函式、喂真 ops 阵列（非源码字串断言）。
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-
-// 沙箱隔离：被测链（canvas-cascade-state → subagent-runs → job-store）在载入后即按 SESSIONS_DB_PATH 开库，
-// 缺省落 /opt/agent-harness/state/sessions.db（dev 机不存在，SQLITE_CANTOPEN）。env 须在加载前设置，故下面用动态 import
-// （与 subagent.test.ts 同法；静态 import 会被提升到 env 赋值之前）。
-const SANDBOX_DIR = mkdtempSync(join(tmpdir(), "template-guard-"))
-process.env.SESSIONS_DB_PATH = join(SANDBOX_DIR, "sessions.db")
-
-const {
+import { describe, expect, test } from "bun:test"
+import { rmSync } from "node:fs"
+import {
   storeCanvasState,
   checkTemplateGuard,
   buildTemplateSlotsFact,
@@ -23,10 +14,9 @@ const {
   markUserAnsweredQuestion,
   getTemplateDeviateToken,
   consumeTemplateDeviateToken,
-} = await import("./canvas-cascade-state.ts")
-const { sessions, dirtySessions } = await import("./sessions-core.ts")
-const { hydrateRow } = await import("./persistence.ts")
-afterAll(() => rmSync(SANDBOX_DIR, { recursive: true, force: true }))
+} from "./canvas-cascade-state.ts"
+import { sessions, dirtySessions } from "./sessions-core.ts"
+import { hydrateRow } from "./persistence.ts"
 import type { SessionState } from "./types-gateway.ts"
 
 // 2026-10-02：偏离 token 住 session 状态（persistence 白名单）——token 测试需要一个真 session。

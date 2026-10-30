@@ -32,20 +32,6 @@ globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
     const owner = ownerByOc[sid]
     return new Response(JSON.stringify(owner ? { ok: true, upload_owner: owner } : { ok: true }), { status: 200 })
   }
-  // 合并预检端点契约（gateway router-internal.ts /internal/tool/precheck）：{ok, plan:{status,body}, permission:{status,body}, hook}。
-  // 计划闸 fail-closed（body 缺显式 inPlanMode 即拒写类工具），所以假网关必须如实回「非计划模式＋权限 allow」，
-  // 否则 D1/D6 要测的断路器与归属水合根本走不到（被计划闸先拦）。
-  if (url.includes("/internal/tool/precheck")) {
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        plan: { status: 200, body: { success: true, inPlanMode: false, read_only_tools: [] } },
-        permission: { status: 200, body: { behavior: "allow" } },
-        hook: null,
-      }),
-      { status: 200 },
-    )
-  }
   if (url.includes("/internal/session/loop-breaker")) {
     try {
       loopBreakerCalls.push(JSON.parse(init?.body ?? "{}"))

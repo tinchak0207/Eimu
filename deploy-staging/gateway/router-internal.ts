@@ -17,31 +17,6 @@ const PRECHECK_BODY_MAX_BYTES = 1024 * 1024
 const PRECHECK_STAGE_TIMEOUT_MS = 800
 const PRECHECK_HOOK_BUDGET_MS = 800
 
-// ── 工程模式 plan 闸（S14，设计文档 §3.7 第 9 点）────────────────────────────
-// 取消「计划模式切到 plan 席位（5 工具）」的做法：主席位工具表在会话内恒定，
-// 计划模式由本端点对三个写/执行/派遣工具返回拒绝（拒绝而非隐藏，schema 不变）。
-export const PROJECT_PLAN_DENIED_TOOLS: ReadonlySet<string> = new Set([
-  "project_patch",
-  "project_run",
-  "subagent_dispatch",
-])
-
-export const PROJECT_PLAN_DENY_REASON =
-  "计划模式只做研究与规划：project_patch（改工程图）／project_run（执行与付费生成）／subagent_dispatch（派遣）在计划模式下被拒绝。请先把完整计划写入 plan_file_path，再调用 exit_plan_mode 请求批准；批准后工具表不变、这三个工具直接可用。"
-
-/** plan 子响应是否确实处于计划模式（HTTP 200 且 inPlanMode 为布尔 true）。 */
-export function planChildInPlanMode(child: PrecheckChild | null): boolean {
-  if (!child || child.status !== 200 || !precheckIsRecord(child.body)) return false
-  return child.body.inPlanMode === true
-}
-
-/** 纯决策：命中三工具且计划模式生效 → 教学式拒绝原因；否则 null。 */
-export function projectPlanDenial(tool: string, plan: PrecheckChild | null): string | null {
-  const name = typeof tool === "string" ? tool.trim().toLowerCase() : ""
-  if (!PROJECT_PLAN_DENIED_TOOLS.has(name)) return null
-  return planChildInPlanMode(plan) ? PROJECT_PLAN_DENY_REASON : null
-}
-
 function precheckIsRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -215,31 +190,5 @@ export async function handleToolPrecheck(req: Request): Promise<Response> {
       }
     : null
 
-  // 工程模式 plan 闸：三工具在计划模式下拒绝（工具表不变）；拒绝同时体现在 plan 子响应
-  // （denied_tool/denied_reason，给调用方与诊断）与 permission 子响应（行为 deny，插件
-  // 现有消费路径会把它变成带原因的工具拒绝）。
-  const planDeniedReason = projectPlanDenial(tool, plan)
-  const planOut = planDeniedReason
-    ? {
-        status: 200,
-        body: {
-          ...(precheckIsRecord(plan?.body) ? plan.body : {}),
-          success: true,
-          inPlanMode: true,
-          denied_tool: tool,
-          denied_reason: planDeniedReason,
-        },
-      }
-    : plan
-  const permissionOut = planDeniedReason
-    ? {
-        status: 200,
-        body: {
-          behavior: "deny",
-          reason: { type: "mode", mode: "plan", source: "mode", reason: planDeniedReason },
-        },
-      }
-    : permission
-
-  return Response.json({ ok: true, plan: planOut, permission: permissionOut, hook: hookBody })
+  return Response.json({ ok: true, plan, permission, hook: hookBody })
 }

@@ -38,11 +38,6 @@ export interface PersistableState {
   tplDeviateToken?: { token: string; at: number } | null
   /** 2026-10-28：首回合用户原文（≤12k），压缩/重启后每回合重注 system。 */
   originalUserPrompt?: string
-  /** S19（设计文档 §7）：会话创建时锁存的席位/工程模式/野兽模式，之后永不变。
-   *  缺这些键的旧会话读回视为 `creator_legacy` / `projectMode=false` / `beast=false`（hydrateRow）。 */
-  projectMode?: boolean
-  seat?: "creator" | "creator_legacy"
-  beast?: boolean
 }
 /** DB row 的 data 栏位 JSON 形状（Map/Set 均序列化为阵列）。 */
 export interface PersistedData {
@@ -71,10 +66,6 @@ export interface PersistedData {
   tplDeviateToken?: { token: string; at: number } | null
   /** 2026-10-28：首回合用户原文镜像。 */
   originalUserPrompt?: string
-  /** S19：席位锁存镜像（见 PersistableState 同名栏位）。 */
-  projectMode?: boolean
-  seat?: "creator" | "creator_legacy"
-  beast?: boolean
 }
 
 export interface PersistedRow {

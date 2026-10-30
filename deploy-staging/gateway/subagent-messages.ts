@@ -1,4 +1,3 @@
-import { opencodeAdmissionFetch } from "./opencode-client"
 import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, clearGenerationProducerCancel } from "./job-store"
 import { currentKernelFingerprint, decideKernelResume } from "./agent-kernel.ts"
 import type { SubagentRun, ResumeOutcome } from "./subagent-types.ts"
@@ -21,7 +20,7 @@ export async function deliverChildTurn(run: SubagentRun, text: string, tag: stri
   const body: Record<string, unknown> = { parts: [{ type: "text", text }] }
   if (run.agent) body.agent = run.agent
   try {
-    const res = await opencodeAdmissionFetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/prompt_async`, {
+    const res = await fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/prompt_async`, {
       method: "POST",
       headers: deps.openCodeHeaders(),
       body: JSON.stringify(body),
@@ -245,7 +244,7 @@ async function resumeTerminalRun(
   // 续跑沿用同一 opencodeSessionId＝新工作代：删掉此前 hard stop 留下的 producer-cancel
   // 封条（该行只应封「停止当时的未来提交」）。放在投递之前，避免续跑的首个提交撞竞态；
   // 投递失败时子会话已失效，清掉也无害。
-  clearGenerationProducerCancel(run.opencodeSessionId, true)
+  clearGenerationProducerCancel(run.opencodeSessionId)
   byChildOc.set(run.opencodeSessionId, run)
   list.push(run)
   byParent.set(run.parentGatewaySessionId, list)
@@ -537,3 +536,4 @@ export function resolveQuestionOnAnswer(run: SubagentRun, questionId: string | u
   console.log(`[gateway] subagent question answered: id=${run.id} question=${questionId}`)
   return true
 }
+

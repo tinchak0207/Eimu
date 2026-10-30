@@ -1,6 +1,5 @@
 import { join, resolve, sep } from "node:path"
 import { TaskStatus } from "./types-gateway.ts"
-import type { NodeId } from "./project/types.ts"
 import { CriticPassTarget } from "./delivery-gate"
 import { messagesInWindow, MessageWindow, SubagentUsageMessage, SubagentEffort } from "./subagent-policy.ts"
 
@@ -73,8 +72,7 @@ export const SUBAGENT_SUMMARY_MAX_CHARS = 4000
 // （index.ts:570 同值；gateway 进程 WorkingDirectory=/opt/agent-harness/gateway，
 // workspace 真身 /opt/agent-harness/workspace，opencode server 的 --dir 就是它）。
 export const SUBAGENT_OUTPUT_REL = "outputs/subagent"
-// 默认生产路径不变；SUBAGENT_OUTPUT_DIR 仅供测试/沙箱隔离（同 SUBAGENT_TRANSCRIPT_DIR 先例）。
-export const SUBAGENT_OUTPUT_DIR = process.env.SUBAGENT_OUTPUT_DIR?.trim() || "/opt/agent-harness/workspace/outputs/subagent"
+export const SUBAGENT_OUTPUT_DIR = "/opt/agent-harness/workspace/outputs/subagent"
 export const SUBAGENT_CHECKPOINTS_DIR = join(SUBAGENT_OUTPUT_DIR, "checkpoints")
 // P0（2026-10-18 路径穿越修复）：from_checkpoint_run_id / from_checkpoint_id 会被拼进
 // `join(checkpointsDir, "<runId>-<cpId>.json")`。此前只 trim、不校验 ⇒ `x/../../..` 可
@@ -129,7 +127,7 @@ export const SIBLING_ROSTER_MAX = 20
 // C1/X8：实时工作日志档。Codex 是事件流由消费方自行拼装；我方父模型只有 read 工具，
 // 故给**可 read 的档**（节流 ≥1000ms，终态强制写，写失败绝不抛错）。
 export const SUBAGENT_LIVE_REL = "outputs/subagent/live"
-export const SUBAGENT_LIVE_DIR = join(SUBAGENT_OUTPUT_DIR, "live") // 默认值 = /opt/agent-harness/workspace/outputs/subagent/live（不变）
+export const SUBAGENT_LIVE_DIR = "/opt/agent-harness/workspace/outputs/subagent/live"
 export const SUBAGENT_LIVE_THROTTLE_MS = 1000
 // X8：工具时间线／正文尾巴的硬上限（Codex MAX_EXEC_OUTPUT_DELTAS_PER_CALL 同旨：
 // 全量仍留档，只有面向父模型的摘要是有界的）。
@@ -381,12 +379,6 @@ export interface SubagentRun {
   // CC 2.1.302 移植：目标验收 run 的终态回调（runGoalEvaluator 注入）。只在本 run
   // 走 finishRun 单一路径时触发一次；不参与 critic 判决、不唤醒父会话。
   goalEvaluator?: (result: { status: "ok" | "error"; text: string; error?: string }) => void
-  // S16（2026-10-28，设计 §3.8）：工程模式子代理。lane=本 run 可写节点集（缺省/空=只读，
-  // 补丁 Actor={kind:"subagent",runId,lane} 由此取）；projectMode=派工时父会话工程模式快照；
-  // seat=实际挂给子会话的席位（工程版 `<expert>_p`，旧会话=原 expert）。
-  lane?: NodeId[]
-  projectMode?: boolean
-  seat?: string
   // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
   // 正文抽取可量测媒体 URL）。只在 maybeRunMachineCriticPass 建立 run 时赋值一次。
   criticReviewed?: CriticPassTarget[]

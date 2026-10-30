@@ -60,9 +60,6 @@ export interface SessionState {
   // 每会话随机。安全边界：不同 apiKey 派生值不同（不跨用户）；不向用户输出；唯一用途
   // 是 authorityRule 与 TAIL_PAYLOAD_MARKER⟦gw:…⟧——故为可选（未产生前 undefined）。
   gwNonce?: string
-  projectMode?: boolean
-  seat?: "creator" | "creator_legacy"
-  beast?: boolean
   clients: Set<SSEClient>
   pendingConfirms: Map<string, PendingConfirm>
   pendingQuestions: Map<string, PendingQuestion>

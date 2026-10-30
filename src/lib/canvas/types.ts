@@ -378,21 +378,6 @@ export interface CanvasNodeMetadata {
   input?: string;
   characterName?: string;
   sceneName?: string;
-  // ── 工程图桥（S10a/S10b，2026-10-28；`bridge-canvas.ts` 的 `projectNodeMetadata` 逐字写入）──
-  /**
-   * 工程图节点 id（本卡在 `project.json` 里的身份键）。清洗端＝`node-metadata-fields.ts`
-   * 的 `project_node_id`（trimmedString）；空／缺键＝非工程卡。人手回写、删除收敛与
-   * 重同步都靠它找回工程节点，漏放行＝卡沦为死卡。
-   */
-  project_node_id?: string;
-  /** 工程签名（`signature` 的 8 位摘要；空字串＝图里有节点但签名未知，必须与缺键区分）。 */
-  project_sig?: string;
-  /** 已钉住（`pin` 边界）；`false` ＝工程卡但未钉住，不能当缺键。 */
-  project_pinned?: boolean;
-  /** 过期／漂移（引擎写结果时发现启动签名≠当前签名即置位）；`false` ＝新鲜。 */
-  project_stale?: boolean;
-  /** 本轮复用了旧产物（未重新生成）；`false` ＝新跑。 */
-  project_reused?: boolean;
 }
 
 /**

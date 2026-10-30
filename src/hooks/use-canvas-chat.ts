@@ -20,7 +20,7 @@
 //   - canvas/use-canvas-cards.ts         角色/场景卡域
 //   - canvas/canvas-event-settler.ts     image.done 对账收敛
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { CANVAS_INITIAL_STATE, layoutGraph } from "@/lib/canvas/reducer";
 import {
@@ -91,7 +91,6 @@ import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent-output-
 import { toast } from "@/hooks/use-toast";
 
 import { useCanvasChatOps } from "./canvas/canvas-chat-ops";
-import { useProjectSyncCanvasReducer } from "./canvas/project-sync";
 
 // ─────────────────────────────────────────── 汇出面（barrel：消费端 import 路径零改动）
 export { canvasReducer } from "./canvas/canvas-reducer-adapter";
@@ -117,9 +116,7 @@ export function useCanvasChat(
    */
   initialSnapshotRev?: number | null,
 ): UseCanvasChatReturn {
-  // S10b：dispatch 的唯一收口——用户动作→工程图回写（Actor=user），event/agent_ops 不回写；
-  // created 帧重发时保留画布上已有的位置/尺寸；工程卡集合变化时后台收敛已删节点的滞留卡。
-  const [canvas, dispatchCanvas] = useProjectSyncCanvasReducer(canvasReducer, CANVAS_INITIAL_STATE, sessionId);
+  const [canvas, dispatchCanvas] = useReducer(canvasReducer, CANVAS_INITIAL_STATE);
   const [plans, setPlans] = useState<CanvasPlanCard[]>([]);
   const [derives, setDerives] = useState<CanvasDeriveCard[]>([]);
   const [budget, setBudget] = useState<CanvasBudget | null>(null);

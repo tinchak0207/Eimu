@@ -108,13 +108,10 @@ export function checkAgentPath(rawPath: string | undefined, sessionID: string, o
     }
   }
   if (DENY_OPENCODE_FILE_RE.test(rel)) return { ok: false, reason: "internal_config" }
-  // 2026-10-29：read 工具指向「目录」时同样会回条目，而 read 在 PATH_TOOLS 里登记的是
-  // listing=false，于是 `read uploads` 把全租户会话目录名一次列了出来（实测 90 条，含他会话 UUID）。
-  // uploads 根一律拒；本会话目录与其中的档案仍按归属放行。
-  if (rel === "uploads") return { ok: false, reason: "uploads_root" }
-  if (rel.startsWith("uploads/")) {
+  if (rel === "uploads") return opts.listing ? { ok: false, reason: "uploads_root" } : { ok: true }
+  if (rel === "uploads" || rel.startsWith("uploads/")) {
     const id = rel.split("/")[1]?.toLowerCase() ?? ""
-    if (!id) return { ok: false, reason: "uploads_root" }
+    if (!id) return opts.listing ? { ok: false, reason: "uploads_root" } : { ok: true }
     if (!allowedUploads(sessionID).has(id)) return { ok: false, reason: "foreign_upload" }
   }
   return { ok: true }

@@ -33,7 +33,7 @@ import {
 } from "./device-bridge-policy.ts"
 
 export type PersistedConsentScope = "session" | "permanent"
-export type PersistedConsentTool = "list_dir" | "read_file" | "grep" | "stat" | "probe_media" | "render_media" | "*"
+export type PersistedConsentTool = "list_dir" | "read_file" | "grep" | "stat" | "*"
 
 /** 持久化的单笔同意（**无任何凭证栏位**）。 */
 export interface PersistedConsentEntry {
@@ -54,7 +54,7 @@ export const DEFAULT_SESSION_CONSENT_TTL_MS = 12 * 60 * 60 * 1000
 /** 载入笔数上限（防被灌爆的档案把记忆体吃爆）。 */
 const MAX_LOADED_ENTRIES = 512
 
-const CONSENT_TOOLS: readonly PersistedConsentTool[] = ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media", "*"]
+const CONSENT_TOOLS: readonly PersistedConsentTool[] = ["list_dir", "read_file", "grep", "stat", "*"]
 
 /** TTL 读取：非有限／<=0 → 预设 12h。 */
 export function sessionConsentTtlMs(env: NodeJS.ProcessEnv = process.env): number {

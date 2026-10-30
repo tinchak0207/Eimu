@@ -46,11 +46,7 @@ export type MetadataCleanerName =
   | "fontSize"
   | "gateConfirm"
   | "approval"
-  | "taskVersions"
-  // S10b：工程桥（S10a）五键。project_sig 允许空字串（signature=null 时 S10a 写 ""，
-  // 「在工程图里、签名未知」与「不是工程卡」是两回事）；三个旗标 false 也是语义。
-  | "projectSig"
-  | "projectFlag";
+  | "taskVersions";
 
 /** 一个耐久化键：键名 ＋ 清洗器名称（型别对应）＋ 为何它必须活著。 */
 export interface DurableFieldSpec {
@@ -129,14 +125,6 @@ export const DURABLE_METADATA_FIELDS: readonly DurableFieldSpec[] = [
     cleaner: "taskVersions",
     note: "任务版本史＋标签＋星标选中（version＝任务时戳，同格重跑追加新版本、旧版本留著；漏放行＝刷新后版本史与采用稿消失）",
   },
-  // ── S10b：工程桥五键（S10a `bridge-canvas.ts` 的 `projectNodeMetadata` 逐字写入）──
-  // 漏放行＝刷新/换装置后画布卡「不再属于工程图」：回写找不到 project_node_id（人手
-  // 改动静默丢弃）、删除收敛与重同步位置保留全部失明（卡片沦为死卡）。
-  { key: "project_node_id", cleaner: "trimmedString", note: "工程图节点 id（回写/收敛/重同步的身份键；空＝非工程卡）" },
-  { key: "project_sig", cleaner: "projectSig", note: "工程签名（空字串＝图里有节点但签名未知；必须与缺键区分）" },
-  { key: "project_pinned", cleaner: "projectFlag", note: "已钉住（false＝工程卡但未钉住，不能当缺键）" },
-  { key: "project_stale", cleaner: "projectFlag", note: "过期/漂移（false＝新鲜，不能当缺键）" },
-  { key: "project_reused", cleaner: "projectFlag", note: "本轮复用旧产物（false＝新跑，不能当缺键）" },
 ];
 
 /** A 必须放行的键名清单（供测试与消费端列举）。 */
@@ -176,11 +164,7 @@ export type AgentFieldTransform =
   /** 门禁凭据清洗（与 A 同一份 `toGateConfirm`）。 */
   | "gateConfirm"
   /** 批准状态清洗（与 A 同一份 `normalizeApprovalState`）。 */
-  | "approval"
-  /** 工程签名（与 A 同一把尺：空字串保留＝「签名未知」，不是缺键）。 */
-  | "projectSig"
-  /** 工程旗标（与 A 同一把尺：true/false 两态都传，false 也是语义）。 */
-  | "projectFlag";
+  | "approval";
 
 /** 分族透传条件：同伴键为指定字串值时，本键才透传。 */
 export interface AgentFieldCondition {
@@ -288,13 +272,6 @@ export const AGENT_METADATA_FIELDS: readonly AgentFieldSpec[] = [
     transform: "truthy",
     note: "任务版本史＋标签＋选中（漏传＝还原后重跑版本史与采用稿消失）",
   },
-  // S10b 工程桥五键：agent 读画布必须看得见「哪张卡是工程节点、签名/钉住/过期/复用」，
-  // 否则同一张画布上工程卡与旧工作流卡无法区分（agent 会去改死卡）。
-  { key: "project_node_id", transform: "truthy", note: "工程图节点 id（漏传＝还原后卡片脱离工程图，回写身份消失）" },
-  { key: "project_sig", transform: "projectSig", note: "工程签名（空字串＝签名未知，也要传）" },
-  { key: "project_pinned", transform: "projectFlag", note: "已钉住（false 同样是语义）" },
-  { key: "project_stale", transform: "projectFlag", note: "过期/漂移（false 同样是语义）" },
-  { key: "project_reused", transform: "projectFlag", note: "本轮复用旧产物（false 同样是语义）" },
 ];
 
 /** B 应透传的键名清单。 */

@@ -16,7 +16,6 @@ import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { planReplay, type ReplayPlan } from "./operation-registry";
 import { pollSupplyTask } from "./supply-registry";
 import type { ProviderTaskPollResult, ProviderProtocol, SupplierRecord, SupplierGenerationOutput } from "./types";
-import { isMissingUpstreamTask, isUndeliveredNoHandle } from "./reconcile-missing-task";
 
 type Row = Record<string, unknown>;
 
@@ -29,7 +28,6 @@ const POLL_BACKOFF_MAX_MS = 15 * 60_000;
  * INC-0831 对帐回圈（架构级整改核心）：上游已提交的 provider task 必须有唯一可证明的
  * 结局 —— 交付（单次结算）、上游确认失败才退款、或窗口耗尽冻结人工对帐。
  * 真相未明前永不退款、永不重投、永不宣判失败。
- * 例外：上游确认任务不存在（HTTP 404 且 Task not found），或任务标识与已保存响应都空，视为未交付并退预扣。有任务标识但查询超时仍只退避，不猜退款。
  *
  * 每轮：
  *  1. 退休已过对帐窗口的 attempt（冻结人工，不退款、不改写真相）。
@@ -227,22 +225,6 @@ export async function runProviderReconciliation(input: {
               WHERE id = ${attemptId}`;
             continue;
           }
-          if (isUndeliveredNoHandle({
-            providerTaskId: claim.provider_task_id,
-            responseCiphertext: claim.response_ciphertext,
-            jobStatus: ctx.job_status,
-          })) {
-            const failed = await confirmReconciledFailure(sql, {
-              executorId: input.executorId,
-              jobId,
-              attemptId,
-              providerTaskId,
-              reason: "上游任务标识为空，没有已保存的响应，未交付，退预扣",
-            });
-            if (failed) summary.confirmedFailed += 1;
-            else summary.exhausted += 1;
-            continue;
-          }
           await sql`UPDATE generation_attempt SET recovery_status='manual',
             recovery_owner='control-plane:manual-reconciliation',
             recovery_detail='Supplier has no configured read-only resultLookupPath; reconcile by upstream_request_key. Never resubmit.',
@@ -258,32 +240,12 @@ export async function runProviderReconciliation(input: {
           const response = await fetch(`${supplier.baseUrl.replace(/\/+$/, '')}${lookup.replace('{request_id}', encodeURIComponent(providerTaskId))}`, {
             method: 'GET', headers: { Authorization: `Bearer ${credential ?? ''}` }, signal: AbortSignal.timeout(30_000),
           });
-          if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            throw new Error(`Read-only response lookup HTTP ${response.status} ${body.slice(0, 300)}; outcome remains unknown.`);
-          }
+          if (!response.ok) throw new Error(`Read-only response lookup HTTP ${response.status}; outcome remains unknown.`);
           const payload = await response.json() as { data?: { url?: string; b64_json?: string }[] };
           const media = payload.data?.[0];
           result = media?.url || media?.b64_json ? { state: 'succeeded', url: media.url ?? null, base64: media.b64_json ?? null } : { state: 'running' };
         }
       } catch (error) {
-        const errorDetail = detailOf(error);
-        if (
-          isMissingUpstreamTask(errorDetail)
-          && (claim.response_ciphertext == null || claim.response_ciphertext === "")
-          && String(ctx.job_status ?? "") === "submit_unknown"
-        ) {
-          const failed = await confirmReconciledFailure(sql, {
-            executorId: input.executorId,
-            jobId,
-            attemptId,
-            providerTaskId,
-            reason: "上游任务不存在，未交付，退预扣",
-          });
-          if (failed) summary.confirmedFailed += 1;
-          else summary.exhausted += 1;
-          continue;
-        }
         // 查询通道失败 ≠ 任务失败：真相未变，退避重试（重放许可问 registry）。
         summary.pollErrors += 1;
         const outcome = await backoffAttempt(sql, {
@@ -291,7 +253,7 @@ export async function runProviderReconciliation(input: {
           jobId,
           executorId: input.executorId,
           pollCount,
-          errorDetail,
+          errorDetail: detailOf(error),
         });
         if (outcome === "retired") summary.exhausted += 1;
         emitJobEvent({
@@ -299,7 +261,7 @@ export async function runProviderReconciliation(input: {
           event: JOB_EVENT.reconcilePolled,
           actor: `reconcile:${input.executorId}`,
           detail: { attempt_id: attemptId, provider_task_id: providerTaskId, outcome: "poll_error" },
-          upstreamRaw: errorDetail,
+          upstreamRaw: detailOf(error),
         }, sql);
         continue;
       }

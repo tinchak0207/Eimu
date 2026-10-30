@@ -18,12 +18,11 @@
 "use strict";
 
 const policy = require("./policy.js");
-const localRender = require("./local-render.js");
 
 // ── 与云端侧一致的常数（device-bridge-policy.ts / device-bridge.ts）──────────
 
-/** 与云端 DEVICE_BRIDGE_TOOLS 同一份。render_media 是唯一写入，argv 由 local-render 固定。 */
-const TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]);
+/** 允许经装置桥执行的工具**最小集合**。无任何写入／删除／执行命令工具。 */
+const TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat"]);
 
 /** 单次回传内容硬上限（与云端 MAX_READ_BYTES 相同）。 */
 const MAX_READ_BYTES = 256 * 1024;
@@ -208,17 +207,7 @@ function sanitizeToolArgs(tool, raw, ctx) {
       return { ok: true, args };
     }
     case "stat":
-    case "probe_media":
       return { ok: true, args: { path: p } };
-    case "render_media": {
-      const output = asString(r.output_path);
-      if (!output) return { ok: false, code: "bad_request", message: "args.output_path is required" };
-      const deniedOut = denyReason(output, ctx);
-      if (deniedOut) return { ok: false, code: deniedOut, message: "output_path is denied by policy" };
-      const cuts = localRender.sanitizeCuts(r.cuts);
-      if (!cuts.ok) return { ok: false, code: "bad_request", message: cuts.message };
-      return { ok: true, args: { path: p, output_path: output, cuts: cuts.cuts } };
-    }
     default:
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(tool)}` };
   }

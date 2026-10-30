@@ -10,18 +10,7 @@ import { resolveConnectedVideoDuration } from "./workflow-gw.ts"
 // 报价只认站内目录明确的x_coins_per_image/x_coins_per_second币字段，TTL10分钟。
 // RMB/供应商价格、模板锚点、历史档位与过期快取不能冒充当前平台币价；未知回null。
 export const PRICE_CATALOG_TTL_MS = 10 * 60 * 1000
-type ImagePriceTiers = { standard?: number; hd?: number }
-export let priceCatalogCache: { at: number; prices: Record<string, number>; imageTiers: Record<string, ImagePriceTiers> } | null = null
-
-function imagePriceTiers(raw: unknown): ImagePriceTiers | null {
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return { standard: raw, hd: raw }
-  if (!raw || typeof raw !== "object") return null
-  const o = raw as Record<string, unknown>
-  const tiers: ImagePriceTiers = {}
-  if (typeof o.standard === "number" && Number.isFinite(o.standard) && o.standard >= 0) tiers.standard = o.standard
-  if (typeof o.hd === "number" && Number.isFinite(o.hd) && o.hd >= 0) tiers.hd = o.hd
-  return tiers.standard !== undefined || tiers.hd !== undefined ? tiers : null
-}
+export let priceCatalogCache: { at: number; prices: Record<string, number> } | null = null
 
 /**
  * S4：查平台目录单价（币/张）。权威来源 = GET /v1/models 的 x_coins_per_image，
@@ -39,7 +28,6 @@ export async function catalogUnitCoins(model: string, apiKey: string): Promise<n
       if (res.ok) {
         const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
         const prices: Record<string, number> = {}
-        const imageTiers: Record<string, ImagePriceTiers> = {}
         for (const m of body.data ?? []) {
           const id = typeof m.id === "string" ? m.id : null
           if (!id) continue
@@ -50,10 +38,8 @@ export async function catalogUnitCoins(model: string, apiKey: string): Promise<n
             const v = typeof o.standard === "number" ? o.standard : typeof o.hd === "number" ? o.hd : null
             if (v !== null && Number.isFinite(v) && v >= 0) prices[id] = v
           }
-          const tiers = imagePriceTiers(raw)
-          if (tiers) imageTiers[id] = tiers
         }
-        priceCatalogCache = { at: now, prices, imageTiers }
+        priceCatalogCache = { at: now, prices }
       }
     } catch {
       // 目录不可达：沿用旧快取；完全没有 → 呼叫方拿到 null（不编数）
@@ -165,11 +151,6 @@ export function invalidateWorkflowPriceCatalog(): void {
   priceCatalogPerSecondCache = null
 }
 
-/** 测试钩子：丢掉模块级价目缓存。生产路径不调用。 */
-export function resetCatalogCacheForTest(): void {
-  invalidateWorkflowPriceCatalog()
-}
-
 // 同步变体：estimateGraphCoins（canvas.plan 热路径，同步签名不可 await）专用。
 // 只读有效目录快取（不发网络请求）；未暖或过期时价格未知。
 export function videoTierPerSecondSync(
@@ -249,24 +230,11 @@ export async function videoTierPerSecond(
   )
 }
 
-/** 不传 quality 时图片仍走 catalogUnitCoins（对象价目回 standard，缺 standard 才回 hd）。 */
-async function imageUnitForEstimate(model: string, apiKey: string, quality: string | undefined): Promise<number | null> {
-  const listed = await catalogUnitCoins(model, apiKey)
-  if (quality === undefined) return listed
-  const tiers = priceCatalogCache?.imageTiers?.[model]
-  // 与 image_generate.ts:403、submit-generation.ts pickImageUnit 同一条：hd 取 hd ?? standard，其余取 standard ?? hd。
-  const unit = tiers ? (quality === "hd" ? (tiers.hd ?? tiers.standard) : (tiers.standard ?? tiers.hd)) : undefined
-  if (typeof unit === "number" && Number.isFinite(unit) && unit >= 0) return unit
-  if (quality === "hd") return null
-  return listed
-}
-
-/** 单节点真实目录币价；视频按实际秒数，缺价格/秒数回null。quality 只作用于 image，不传则目录 standard 单价。 */
+/** 单节点真实目录币价；视频按实际秒数，缺价格/秒数回null。 */
 export async function estimateNodeCoins(
   node: { kind: string; metadata: Record<string, unknown> },
   apiKey: string,
   graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
-  quality?: string,
 ): Promise<number | null> {
   if (node.kind === "video") {
     const nodeId = (node as { id?: string }).id ?? ""
@@ -288,7 +256,7 @@ export async function estimateNodeCoins(
       : graph
         ? resolveNodeModel(nodeId, node, graph)
         : "pixai-tsubaki2"
-  const unit = await imageUnitForEstimate(model, apiKey, quality)
+  const unit = await catalogUnitCoins(model, apiKey)
   if (unit === null) return null
   return Math.round(unit * 1e6) / 1e6
 }

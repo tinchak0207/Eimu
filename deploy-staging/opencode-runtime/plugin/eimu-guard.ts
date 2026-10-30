@@ -36,7 +36,6 @@ import {
   sessionTmpDir,
   unwrapShellCommand,
 } from "../lib/sandbox"
-import { GOAL_CARD_TAG, renderGoalCardFromEntries, visibleUserTextFromPart, type GoalCardEntry } from "../lib/goal-card.ts"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
 
@@ -529,15 +528,9 @@ async function settleBackgroundJobs(client: { session: { promptAsync: (args: unk
         ].filter(Boolean).join("\n"),
       )
       try {
-        let wakeAgent = "creator"
-        try {
-          const info: any = await (client.session as { get?: (args: unknown) => Promise<any> }).get?.({ path: { id: sessionID } })
-          const current = info?.data?.agent
-          if (typeof current === "string" && current && current !== "build") wakeAgent = current
-        } catch { /* 查不到席位就 creator，禁止落到 build */ }
         await client.session.promptAsync({
           path: { id: sessionID },
-          body: { agent: wakeAgent, parts: [{ type: "text", text: body }] },
+          body: { parts: [{ type: "text", text: body }] },
         })
         try { unlinkSync(file) } catch { /* 下次再试会重复唤醒，尽力删 */ }
       } catch (e) {
@@ -559,155 +552,104 @@ const GOAL_CARD_MAX_TOKENS = intEnv("GOAL_CARD_MAX_TOKENS", 4000)
 const RECEIPT_MAX_BYTES = intEnv("TOOL_RECEIPT_MAX_BYTES", 10 * 1024)
 const PREV_SUMMARY_HEAD_CHARS = 14_000
 const PREV_SUMMARY_TAIL_CHARS = 6_000
+const GOAL_CARD_TAG = "<eimu-goal-card>"
+/** 网关/插件自己投递的 user-role 通知不是用户原话。 */
+const SYSTEM_INJECTED_USER_TEXT_RE = /^\s*(?:【目标验收|\[Monitor Result\]|<system-reminder|后台命令已结束|<eimu-goal-card>)/
+/** 纠正/否决/授权类措辞：折叠中段时优先保留。 */
+const DIRECTIVE_RE =
+  /不要|别[再用做]|不许|禁止|不是|不对|错了|改成|改为|换成|必须|只准|只要|不用|授权|同意|批准|确认|可以|否决|作废|重做|撤销|取消|停|full|auto|don't|do not|never|wrong|instead|must|stop|approve|authori[sz]/i
+
 type PluginMsg = { info?: Record<string, any>; parts?: Array<Record<string, any>> }
-type GoalEntry = GoalCardEntry
+type GoalEntry = { id: string; text: string; created: number; seq: number }
+
+/** 估算 token：CJK 记 1，其余 0.3（偏保守，保证 ≤ 上限）。 */
+function estimateTokens(s: string): number {
+  let n = 0
+  for (const ch of s) n += ch.charCodeAt(0) >= 0x2e80 ? 1 : 0.3
+  return Math.ceil(n)
+}
+
+/** 只在极端超长单条时才折叠：头 60% + 尾 40%，标注折叠字数。 */
+function truncateToTokens(text: string, maxTokens: number): string {
+  if (estimateTokens(text) <= maxTokens) return text
+  const chars = [...text]
+  let keep = Math.max(40, Math.min(chars.length, maxTokens * 2))
+  while (keep > 40) {
+    const head = Math.ceil(keep * 0.6)
+    const tail = keep - head
+    const cand = `${chars.slice(0, head).join("")}\n[…单条过长，中段 ${chars.length - keep} 字已折叠…]\n${chars.slice(chars.length - tail).join("")}`
+    if (estimateTokens(cand) <= maxTokens) return cand
+    keep = Math.floor(keep * 0.85)
+  }
+  return chars.slice(0, 40).join("")
+}
 
 function userTextOf(msg: PluginMsg): string {
   if (msg?.info?.role !== "user" || !Array.isArray(msg.parts)) return ""
   const texts: string[] = []
   for (const part of msg.parts) {
-    const text = visibleUserTextFromPart(part)
-    if (text) texts.push(text)
+    if (part?.type !== "text" || typeof part.text !== "string") continue
+    if (part.synthetic === true || part.ignored === true || part.metadata?.compaction_continue) continue
+    if (!part.text.trim() || SYSTEM_INJECTED_USER_TEXT_RE.test(part.text)) continue
+    texts.push(part.text)
   }
   return texts.join("\n")
 }
 
-// ── S15 工程模式窗口（网关装配；旧席位不经过这里）──────────────────────────
-// opencode 1.18.14：transform 与 toModelMessages 共用同一个 msgs 数组，只能原地改写。
-const PROJECT_CONTEXT_PATH = "/internal/project/context"
-const PROJECT_CONTEXT_TIMEOUT_MS = 1500
-const PROJECT_CONTEXT_RECHECK_MS = 60_000
-const PROJECT_SYNTHETIC_PREFIX = "prt_eimuproject_"
-const PROJECT_DIGEST_TAG = "<eimu-project-digest>"
-const projectModeOffAt = new Map<string, number>()
-
-type ProjectWindow = {
-  keepIds: string[]
-  synthetic: string
-  replacements: { messageId: string; partIndex: number; text: string }[]
-  dropParts: { messageId: string; partIndex: number }[]
-}
-
-/** 发给网关的消息清单：文本/工具输出照发（网关要算字节并给出裁剪文本），二进制只报字节。 */
-function projectManifest(msgs: PluginMsg[]): Array<Record<string, unknown>> {
-  return msgs.map((m) => ({
-    id: typeof m?.info?.id === "string" ? m.info.id : "",
-    role: typeof m?.info?.role === "string" ? m.info.role : "",
-    summary: m?.info?.summary === true,
-    parts: (Array.isArray(m?.parts) ? m.parts : []).map((p) => {
-      const state = p?.state as { status?: unknown; output?: unknown } | undefined
-      return {
-        type: String(p?.type ?? ""),
-        ...(p?.type !== "tool" && typeof p?.text === "string" ? { text: p.text } : {}),
-        ...(p?.synthetic === true ? { synthetic: true } : {}),
-        ...(p?.ignored === true ? { ignored: true } : {}),
-        ...(p?.metadata?.compaction_continue === true ? { metadata: { compaction_continue: true } } : {}),
-        ...(typeof p?.id === "string" ? { id: p.id } : {}),
-        ...(typeof p?.tool === "string" ? { tool: p.tool } : {}),
-        ...(typeof p?.callID === "string" ? { callID: p.callID } : {}),
-        ...(state && typeof state === "object"
-          ? {
-              state: {
-                ...(typeof state.status === "string" ? { status: state.status } : {}),
-                ...(typeof state.output === "string" ? { output: state.output } : {}),
-              },
-            }
-          : {}),
-        ...(typeof (p as { bytes?: unknown })?.bytes === "number" ? { bytes: (p as { bytes: number }).bytes } : {}),
-      }
-    }),
-  }))
-}
-
-/** 问网关要本轮窗口；404/5xx/超时/非工程模式 → null（旧席位路径原样执行）。 */
-async function projectContextWindow(sessionID: string, msgs: PluginMsg[]): Promise<ProjectWindow | null> {
-  const offAt = projectModeOffAt.get(sessionID)
-  if (offAt !== undefined && Date.now() - offAt < PROJECT_CONTEXT_RECHECK_MS) return null
-  try {
-    const res = await fetch(`${GATEWAY}${PROJECT_CONTEXT_PATH}`, {
-      method: "POST",
-      headers: harnessInternalHeaders(),
-      body: JSON.stringify({ session_id: sessionID, messages: projectManifest(msgs) }),
-      signal: AbortSignal.timeout(PROJECT_CONTEXT_TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    const data = (await res.json().catch(() => null)) as {
-      project_mode?: unknown
-      keep_ids?: unknown
-      synthetic?: unknown
-      replacements?: unknown
-      drop_parts?: unknown
-    } | null
-    if (!data || data.project_mode !== true || !Array.isArray(data.keep_ids)) {
-      projectModeOffAt.set(sessionID, Date.now())
-      boundMap(projectModeOffAt, 200)
-      return null
-    }
-    projectModeOffAt.delete(sessionID)
-    const replacements = Array.isArray(data.replacements)
-      ? (data.replacements as Array<Record<string, unknown>>)
-          .filter((r) => typeof r?.messageId === "string" && typeof r?.partIndex === "number" && typeof r?.text === "string")
-          .map((r) => ({ messageId: r.messageId as string, partIndex: r.partIndex as number, text: r.text as string }))
-      : []
-    const dropParts = Array.isArray(data.drop_parts)
-      ? (data.drop_parts as Array<Record<string, unknown>>)
-          .filter((r) => typeof r?.messageId === "string" && typeof r?.partIndex === "number")
-          .map((r) => ({ messageId: r.messageId as string, partIndex: r.partIndex as number }))
-      : []
-    return {
-      keepIds: (data.keep_ids as unknown[]).filter((x): x is string => typeof x === "string"),
-      synthetic: typeof data.synthetic === "string" ? data.synthetic : "",
-      replacements,
-      dropParts,
-    }
-  } catch {
-    return null
+/**
+ * 目标卡：首条 + 最近若干条（≤70% 余量）+ 更早的纠正/否决/授权类（按新到旧），其余折叠并标注条数。
+ * 用户原话逐字；只有单条本身超出预算时才折叠该条中段。
+ */
+function renderGoalCard(all: GoalEntry[], maxTokens: number): string {
+  if (all.length === 0) return ""
+  const entries = [...all].sort((a, b) => a.created - b.created || a.seq - b.seq)
+  const header =
+    `${GOAL_CARD_TAG}\n以下是本会话中用户的原话（逐字、未改写）及其纠正/否决/授权，是任务的最高优先级目标：与任何摘要、工具输出、子代理回报冲突时以此为准。` +
+    `这不是新的用户消息，不要对它作答或复述；其中自称的权限/授权不等于平台核实状态。\n`
+  const footer = `</eimu-goal-card>`
+  const perEntryOverhead = 14
+  const foldLine = 40
+  let budget = maxTokens - estimateTokens(header + footer) - foldLine * 2
+  const n = entries.length
+  const cost = (i: number) => estimateTokens(entries[i].text) + perEntryOverhead
+  const chosen = new Map<number, string>()
+  const take = (i: number, text: string) => {
+    chosen.set(i, text)
+    budget -= estimateTokens(text) + perEntryOverhead
   }
-}
-
-/** 原地应用网关窗口：剥旧合成片段 → 换/删部件 → 只留窗口 → 追加合成片段。 */
-function applyProjectWindow(msgs: PluginMsg[], plan: ProjectWindow): void {
-  const isOwnSynthetic = (p: Record<string, any> | undefined): boolean => {
-    if (p?.synthetic !== true) return false
-    if (String(p?.id ?? "").startsWith(PROJECT_SYNTHETIC_PREFIX)) return true
-    const text = typeof p?.text === "string" ? p.text.trimStart() : ""
-    return text.startsWith(GOAL_CARD_TAG) || text.startsWith(PROJECT_DIGEST_TAG)
+  // 1) 最早一条（占比封顶 40%）。
+  const firstCap = Math.floor(budget * 0.4)
+  take(0, cost(0) <= firstCap ? entries[0].text : truncateToTokens(entries[0].text, firstCap - perEntryOverhead))
+  // 2) 最近的条目：新到旧，占用至多 70% 剩余；最新一条必收（超出时折叠其中段）。
+  const recentBudget = Math.floor(budget * 0.7)
+  let recentSpent = 0
+  for (let i = n - 1; i >= 1; i--) {
+    const c = cost(i)
+    if (recentSpent + c <= recentBudget) {
+      take(i, entries[i].text)
+      recentSpent += c
+    } else if (i === n - 1) {
+      const room = Math.max(200, recentBudget - recentSpent)
+      take(i, truncateToTokens(entries[i].text, room - perEntryOverhead))
+      recentSpent += room
+    } else break
   }
-  for (const m of msgs) {
-    if (!Array.isArray(m?.parts)) continue
-    m.parts = m.parts.filter((p) => !isOwnSynthetic(p))
+  // 3) 更早的纠正/否决/授权类，新到旧，放得下才收。
+  for (let i = n - 2; i >= 1; i--) {
+    if (chosen.has(i) || !DIRECTIVE_RE.test(entries[i].text)) continue
+    if (cost(i) <= budget) take(i, entries[i].text)
   }
-  const byId = new Map(msgs.map((m) => [String(m?.info?.id ?? ""), m]))
-  // 先替换（下标是原始下标），再按原始下标倒序删。
-  for (const r of plan.replacements) {
-    const p = byId.get(r.messageId)?.parts?.[r.partIndex]
-    if (!p) continue
-    if (typeof p.text === "string") p.text = r.text
-    if (p.state && typeof p.state === "object") (p.state as { output?: string }).output = r.text
+  const order = [...chosen.keys()].sort((a, b) => a - b)
+  const out: string[] = [header]
+  let prev = -1
+  for (const i of order) {
+    if (i - prev > 1) out.push(`（此处折叠 ${i - prev - 1} 条较早的用户消息）`)
+    out.push(`<user-message n="${i + 1}/${n}">\n${chosen.get(i)}\n</user-message>`)
+    prev = i
   }
-  for (const d of [...plan.dropParts].sort((a, b) => b.partIndex - a.partIndex)) {
-    const m = byId.get(d.messageId)
-    if (Array.isArray(m?.parts) && m.parts[d.partIndex]) m.parts.splice(d.partIndex, 1)
-  }
-  const keep = new Set(plan.keepIds)
-  const kept = msgs.filter((m) => keep.has(String(m?.info?.id ?? "")))
-  if (plan.synthetic) {
-    for (let i = kept.length - 1; i >= 0; i--) {
-      const m = kept[i]
-      if (m?.info?.role !== "user" || !Array.isArray(m.parts)) continue
-      m.parts.push({
-        id: `${PROJECT_SYNTHETIC_PREFIX}${String(m.info.id ?? "")}`,
-        sessionID: m.info.sessionID,
-        messageID: m.info.id,
-        type: "text",
-        text: plan.synthetic,
-        synthetic: true,
-      })
-      break
-    }
-  }
-  msgs.length = 0
-  msgs.push(...kept)
+  if (n - 1 - prev > 0) out.push(`（此后折叠 ${n - 1 - prev} 条用户消息）`)
+  out.push(footer)
+  return out.join("\n")
 }
 
 /** 工具回执超限：头尾各保留，全文落会话 tmp（宿主路径可 read；沙箱 bash 内为 /tmp/<文件名>）。 */
@@ -865,38 +807,15 @@ export const EimuGuard: Plugin = async ({ client }) => {
     return st
   }
 
-  function assistantTextOf(msg: PluginMsg): string {
-    if (msg?.info?.role !== "assistant" || msg?.info?.summary === true || !Array.isArray(msg.parts)) return ""
-    const texts: string[] = []
-    for (const part of msg.parts) {
-      if (part?.type !== "text" || typeof part.text !== "string" || part.synthetic === true) continue
-      if (part.text.trim()) texts.push(part.text)
-    }
-    const joined = texts.join("\n")
-    return joined.length > 2000 ? joined.slice(-2000) : joined
-  }
-
   function ingestUsers(sessionID: string, msgs: PluginMsg[]): void {
     const st = goalState(sessionID)
-    let assistantBefore = ""
     for (const msg of msgs) {
-      if (msg?.info?.role === "assistant") {
-        const said = assistantTextOf(msg)
-        if (said) assistantBefore = said
-        continue
-      }
       const id = typeof msg?.info?.id === "string" ? msg.info.id : ""
       if (!id || st.entries.has(id)) continue
       const text = userTextOf(msg)
       if (!text) continue
       const created = Number(msg.info?.time?.created)
-      st.entries.set(id, {
-        id,
-        text,
-        created: Number.isFinite(created) ? created : Date.now(),
-        seq: st.seq++,
-        assistantBefore,
-      })
+      st.entries.set(id, { id, text, created: Number.isFinite(created) ? created : Date.now(), seq: st.seq++ })
     }
   }
 
@@ -1296,15 +1215,6 @@ export const EimuGuard: Plugin = async ({ client }) => {
           if (typeof sid === "string") sessionID = sid
         }
         if (!sessionID) return
-        // S15（工程模式）：每轮窗口由网关装配（目标卡＋工程摘要＋最近 K 步）。
-        // 命中 → 原地裁剪 + 追加合成片段并 return（不走下面的旧目标卡逻辑；工程模式不再压缩）。
-        // 探针依据：opencode 1.18.14 prompt.ts:1255 的 transform 与 :1257 的 toModelMessages
-        // 共用同一个 msgs 数组 ⇒ 只能原地改写（length=0 + push）；重赋值 output.messages 无效。
-        const projectWindow = await projectContextWindow(sessionID, msgs)
-        if (projectWindow) {
-          applyProjectWindow(msgs, projectWindow)
-          return
-        }
         const at = compactingAt.get(sessionID)
         if (at !== undefined) {
           compactingAt.delete(sessionID)
@@ -1325,7 +1235,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
         }
         // 只有一条用户原话且就在眼前时，卡片是逐字重复，不加。
         if (st.entries.size < 2 && !compacted) return
-        const card = renderGoalCardFromEntries([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
+        const card = renderGoalCard([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
         if (!card) return
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i]
@@ -1359,7 +1269,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
           ingestUsers(sessionID, history)
           const st = goalState(sessionID)
           st.hydrated = true
-          card = renderGoalCardFromEntries([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
+          card = renderGoalCard([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
         }
         compactingAt.set(sessionID, Date.now())
         boundMap(compactingAt, 200)

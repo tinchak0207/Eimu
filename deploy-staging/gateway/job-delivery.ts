@@ -1,10 +1,11 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
-  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner, ProjectNodeRequiredError } from "./job-store"
+  assertGenerationWorkActive,
+  completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
 import { armWatchdogTimer } from "./timers-gw"
-import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate"
+import { emitImageDone, emitVideoDone } from "./events-translate"
 import { emitImageFailed, emitVideoFailed, emitAudioFailed } from "./media-internal-routes"
 import { realpath, stat } from "node:fs/promises"
 import { createReadStream } from "node:fs"
@@ -13,8 +14,6 @@ import path from "node:path"
 import { probeMedia } from "./media-quality"
 import { PLATFORM_BASE } from "./constants-gateway"
 import { resolveCanonicalIdentity } from "./auth-gw"
-import { captureMusicOperation, checkMusicOperation, completeMusicOperation } from "./job-store"
-import { billingAutoApprovalEnabled } from "./charge-approval-policy"
 
 function parentOf(session: string): any {
   return resolveSession(session) ?? (generationParent(session) ? resolveSession(generationParent(session)!.parent_gw) : undefined)
@@ -35,33 +34,6 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
   let input: any
   try { input = await req.json() } catch { return Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }) }
   try {
-    if (route === "/internal/music-operation") {
-      const parent = parentOf(input.session_id || "")
-      if (!parent || typeof input.operation !== "string" || !input.operation || typeof input.invocation !== "string" || !input.invocation)
-        return Response.json({ ok: false, error: "known owner, operation and invocation required" }, { status: 409 })
-      const producer = input.session_id.startsWith("ses_") ? input.session_id : parent.opencodeSessionId
-      try {
-        if (input.phase === "capture") {
-          if (typeof input.started_mono !== "string" || !/^\d+$/.test(input.started_mono)) return Response.json({ ok: false, error: "call start monotonic timestamp required" }, { status: 400 })
-          return Response.json({ ok: true, durable: true, operation: captureMusicOperation(parent.sessionId, producer, input.operation, input.invocation, input.started_mono) })
-        }
-        if (input.phase === "complete") {
-          if (!input.result || typeof input.result.output !== "string") return Response.json({ ok: false, error: "actual tool result required" }, { status: 400 })
-          completeMusicOperation(parent.sessionId, producer, input.operation, input.invocation, input.result)
-          return Response.json({ ok: true, durable: true })
-        }
-        if (input.phase !== "check") return Response.json({ ok: false, error: "invalid phase" }, { status: 400 })
-        const automatic = await billingAutoApprovalEnabled(parent)
-        const confirmation = parent.resolvedConfirms.get(`music:${producer}:${input.operation}`)
-        if (!automatic && confirmation?.outcome !== "approved") return Response.json({ ok: false, error: "music_spend_not_authorized" }, { status: 403 })
-        // Check after the permission lookup yields. This fences old work; it is not
-        // an atomic transaction with the separate runtime's subsequent provider POST.
-        checkMusicOperation(parent.sessionId, producer, input.operation, input.invocation)
-        return Response.json({ ok: true, durable: true })
-      } catch (error) {
-        return Response.json({ ok: false, error: error instanceof Error ? error.message : "music_operation_failed" }, { status: 409 })
-      }
-    }
     if (route === "/internal/project-budget") {
       const parent = parentOf(input.session_id || "")
       if (!parent || typeof input.project !== "string" || !input.project.trim()) return Response.json({ ok: false, error: "known owner and project required" }, { status: 409 })
@@ -113,21 +85,22 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const consumer = input.consumer_session_id || producer
       if (consumer !== producer && consumer !== parent.opencodeSessionId && generationParent(consumer)?.parent_gw !== parent.sessionId)
         return Response.json({ ok: false, error: "consumer owner mismatch" }, { status: 403 })
-      // 登记发生在上游已受理之后。即使取消先到，也必须保留这笔任务的取件/计费责任；
-      // 禁止新提交应在提交边界执行，不能靠拒收已提交 task_id 制造丢单。
-      let receipt: ReturnType<typeof registerGenerationReceipt>
-      try {
-        receipt = registerGenerationReceipt({ task_id: input.task_id, parent_gw: parent.sessionId,
-          producer_oc: producer, consumer_oc: consumer, kind: input.kind,
-          model: input.model, cost_coins: input.cost_coins, frame: input.frame, project: input.project, request_id: input.request_id,
-          requested_count: input.requested_count || 1, size: input.size, reference_version: input.reference_version, style_version: input.style_version,
-          // 工程会话的图片/视频生成必须带 node_id（工程图账本按节点归属）；普通会话本来就不传。
-          node_id: typeof input.node_id === "string" && input.node_id ? input.node_id : undefined })
-      } catch (error) {
-        // 工程会话缺 node_id＝绕过工程图的直接生成：409 明确拒绝，不再落进外层 503（503 会被调用方当存储故障重试）。
-        if (error instanceof ProjectNodeRequiredError) return Response.json({ ok: false, error: error.message }, { status: 409 })
-        throw error
+      // 2026-10-21：用户取消后不得再登记新生成。已提交任务的责任链不得因取消而断——
+      // task_id 已有 receipt 时跳过工作控制闸，直接走 registerGenerationReceipt 的幂等返回；
+      // 只有真正的新 task 才 assert。取消错误回 409，其他异常照旧交给外层 503（不吞成成功）。
+      if (!generationReceipt(input.task_id)) {
+        try {
+          assertGenerationWorkActive(parent.sessionId, producer)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (message.startsWith("generation_work_cancelled")) return Response.json({ ok: false, error: message }, { status: 409 })
+          throw error
+        }
       }
+      const receipt = registerGenerationReceipt({ task_id: input.task_id, parent_gw: parent.sessionId,
+        producer_oc: producer, consumer_oc: consumer, kind: input.kind,
+        model: input.model, cost_coins: input.cost_coins, frame: input.frame, project: input.project, request_id: input.request_id,
+        requested_count: input.requested_count || 1, size: input.size, reference_version: input.reference_version, style_version: input.style_version })
       return Response.json({ ok: true, durable: true, task_id: receipt.task_id, delivery_id: `generation:${receipt.task_id}` })
     }
     const receipt = generationReceipt(input.task_id)
@@ -229,7 +202,6 @@ export async function drainGenerationInbox(): Promise<void> {
           for (const [index, artifact] of receipt.artifacts.entries()) {
             const cost = index === 0 ? receipt.cost_coins : 0
             if (receipt.kind === "video") await emitVideoDone(parent, artifact.url, cost, receipt.task_id)
-            else if (receipt.kind === "audio") await emitAudioDone(parent, artifact.url, cost)
             else await emitImageDone(parent, artifact.url, cost, receipt.task_id)
           }
         } else if (receipt.kind !== "message") {
@@ -287,11 +259,11 @@ export async function drainGenerationInbox(): Promise<void> {
       if (!pending.length) continue
       const jobs = pending.map((r) => ({ task_id: r.task_id, status: r.status, frame: r.frame, project: r.project,
         kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}),
-        download_tool: r.kind === "audio" ? "none_audio_already_persisted" : r.artifacts.some((a) => typeof a?.mimeType === "string" && a.mimeType.startsWith("video/")) ? "video_fetch" : "image_result_download",
+        download_tool: r.artifacts.some((a) => typeof a?.mimeType === "string" && a.mimeType.startsWith("video/")) ? "video_fetch" : "image_result_download",
         delivery_id: `generation:${r.task_id}` }))
       // P3-A1：完整 jobs 仍供 claim/notify 逻辑字段来源；wake 正文只给短列表，禁止 JSON.stringify(jobs) 进模型上下文。
       const jobLines = jobs
-        .map((j) => `- task_id=${j.task_id} delivery_id=${j.delivery_id} kind=${j.kind} status=${j.status} download_tool=${j.download_tool}${j.kind === "audio" ? ` audio_urls=${JSON.stringify(j.artifacts.map((a: any) => a.url))}；真实音频已持久化，按音频URL交付并提交observed ACK，不走图片/视频下载，不重生成。` : ""}`)
+        .map((j) => `- task_id=${j.task_id} delivery_id=${j.delivery_id} kind=${j.kind} status=${j.status} download_tool=${j.download_tool}`)
         .join("\n")
       const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${jobLines}`
       const agent = generationParent(consumer)?.consumer_agent

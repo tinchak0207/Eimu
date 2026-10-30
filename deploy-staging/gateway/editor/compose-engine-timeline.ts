@@ -148,9 +148,7 @@ async function normalizedClipCachePath(c: EditorClip, w: number, h: number, fps:
     h,
     fps,
   }));
-  const workspace = process.env.KUNPENG_WORKSPACE?.replace(/\/+$/, "") ?? "";
-  const cacheRoot = workspace.length > 0 ? `${workspace}/render-cache` : `${home}/.kunpeng/render-cache`;
-  const dir = `${cacheRoot}/segments/${key}`;
+  const dir = `${home}/.kunpeng/render-cache/segments/${key}`;
   return { video: `${dir}/segment.mp4`, done: `${dir}/done.json` };
 }
 

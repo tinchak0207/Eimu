@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import { readFile } from "node:fs/promises";
 import { ok, fail } from "../lib/client";
-import { LOCAL_PATH_HINT, cloudPathRefusal, explainMissingPath } from "../lib/agent-paths";
+import { LOCAL_PATH_HINT, explainMissingPath } from "../lib/agent-paths";
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 const MAX_BYTES = 200 * 1024 * 1024;
@@ -19,8 +19,6 @@ export default tool({
     }
     let payload: Record<string, string>;
     if (localPath) {
-      const refusal = cloudPathRefusal(localPath, process.cwd());
-      if (refusal) return fail("locus_mismatch", refusal);
       // 2026-10-02 更正：本工具跑在 opencode-server 服务内（PrivateTmp），**看不到** agent 沙箱私有的
       // /tmp（那是 <workspace>/.run/<slug>/tmp 被 bind 进沙箱的）；三方 /tmp 互不可见。跨边界交接一律
       // 用 workspace 内同绝对路径（见 lib/agent-paths.ts）。读成 base64 交给网关，网关不碰 agent FS。

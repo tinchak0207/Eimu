@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import { readFile } from "node:fs/promises";
 import { ok, fail } from "../lib/client";
-import { LOCAL_PATH_HINT, cloudPathRefusal, explainMissingPath } from "../lib/agent-paths";
+import { LOCAL_PATH_HINT, explainMissingPath } from "../lib/agent-paths";
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -27,8 +27,6 @@ export default tool({
     const lower = trimmed.toLowerCase();
     const dot = lower.lastIndexOf(".");
     const ext = dot >= 0 ? lower.slice(dot) : "";
-    const refusal = cloudPathRefusal(trimmed, process.cwd());
-    if (refusal) return fail("locus_mismatch", refusal);
     if (!DOC_EXTS.has(ext)) {
       return fail("bad_request", `不支持的扩展名 "${ext || "(无)"}"（仅 md/txt/json/csv/pdf）。影片/音频请用 video_upload，图片请用 image_upload。`);
     }

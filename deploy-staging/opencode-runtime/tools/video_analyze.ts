@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { mkdir, readFile } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import { fail, ok } from "../lib/client"
-import { cloudPathRefusal, explainMissingPath } from "../lib/agent-paths"
+import { explainMissingPath } from "../lib/agent-paths"
 import { blobPath, uploadBlob } from "../lib/img-composite"
 import { analyzeVideo, vlmProbe, type AnalyzeResult } from "../lib/video-analyze"
 
@@ -16,7 +16,6 @@ function msgOf(error: unknown): string {
 }
 
 function classify(message: string): string {
-  if (message.includes("locus=local")) return "locus_mismatch"
   if (/no video stream$/u.test(message)) return "no_video_stream"
   if (/: no audio or video stream$/u.test(message) || /duration is unavailable$/u.test(message) || /Invalid data found/u.test(message)) return "not_media"
   if (/cannot read/u.test(message)) return "unreadable_source"
@@ -97,10 +96,6 @@ export default tool({
       }
       if (typeof args.source !== "string" || !isAbsolute(args.source)) throw new Error("source 必须是绝对路径")
       if (typeof args.frames_dir !== "string" || !isAbsolute(args.frames_dir)) throw new Error("frames_dir 必须是绝对路径")
-      const sourceRefusal = cloudPathRefusal(args.source, process.cwd())
-      if (sourceRefusal) throw new Error(sourceRefusal)
-      const framesRefusal = cloudPathRefusal(args.frames_dir, process.cwd())
-      if (framesRefusal) throw new Error(framesRefusal)
       if (!existsSync(args.source)) throw new Error(`cannot read ${args.source}: 来源档案不存在${explainMissingPath(args.source) ?? ""}`)
       await mkdir(args.frames_dir, { recursive: true })
 

@@ -421,19 +421,8 @@ export function sanitizeToolArgs(
       return { ok: true, args }
     }
     case "stat":
-    case "probe_media":
-      // 只读：path。denylist 已于函式开头套用。
+      // stat 仅需 path（无额外冻结栏位）；denylist 已于函式开头套用。
       return { ok: true, args: { path: p } }
-    case "render_media": {
-      const output = asString(r.output_path)
-      if (!output) return { ok: false, code: "bad_request", message: "args.output_path is required" }
-      if (isHardDeniedPath(output) || isSensitivePath(output)) {
-        return { ok: false, code: "sensitive_path", message: "output_path is denied by policy" }
-      }
-      const cuts = sanitizeRenderCuts(r.cuts)
-      if (!cuts.ok) return { ok: false, code: "bad_request", message: cuts.message }
-      return { ok: true, args: { path: p, output_path: output, cuts: cuts.cuts } }
-    }
     default:
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(tool)}` }
   }
@@ -443,35 +432,7 @@ export function sanitizeToolArgs(
 const BINARY_FFFD_RATIO = 0.005
 /** 二进位读取的人话指引（装置回的是位元组被 utf8 解码后的结果，闸道据此判定）。 */
 const BINARY_READ_NOTE =
-  "这是二进制文件，文字通道不传字节。locus=local。媒体用 local_files op=probe_media 看时长和流，op=render_media 在使用者电脑上剪完并写回已授权目录。不要派云端 editor，不要把空正文当成已读完。"
-
-/** 与 desktop/lib/local-render.js 同一数值界。滤镜只接受这些数字。 */
-function sanitizeRenderCuts(raw: unknown): { ok: true; cuts: { in_sec: number; out_sec: number; speed: number }[] } | { ok: false; message: string } {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 48) {
-    return { ok: false, message: "cuts must be an array of 1..48 segments" }
-  }
-  const cuts: { in_sec: number; out_sec: number; speed: number }[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== "object") return { ok: false, message: "cut must be an object" }
-    const row = item as Record<string, unknown>
-    const inn = typeof row.in_sec === "number" ? row.in_sec : Number.NaN
-    const out = typeof row.out_sec === "number" ? row.out_sec : Number.NaN
-    if (!Number.isFinite(inn) || !Number.isFinite(out) || inn < 0 || out > 86400 || !(out > inn)) {
-      return { ok: false, message: "cut in_sec/out_sec out of range" }
-    }
-    let speed = 1
-    if (row.speed !== undefined && row.speed !== null) {
-      speed = typeof row.speed === "number" ? row.speed : Number.NaN
-      if (!Number.isFinite(speed) || speed < 0.25 || speed > 8) return { ok: false, message: "speed must be 0.25..8" }
-    }
-    cuts.push({
-      in_sec: Math.round(inn * 1000) / 1000,
-      out_sec: Math.round(out * 1000) / 1000,
-      speed: Math.round(speed * 1000) / 1000,
-    })
-  }
-  return { ok: true, cuts }
-}
+  "这是二进制文件（图片/压缩/可执行等），无法当文字读取；请改用附件/下载路径获取原始内容。"
 
 /**
  * 二进位判定（可证标准）：文字含 NUL 位元组（`\u0000`，纯文字不可能有）＝二进位；

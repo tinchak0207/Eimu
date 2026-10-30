@@ -28,10 +28,8 @@
 const path = require("node:path");
 const os = require("node:os");
 const nodeFs = require("node:fs");
-const { spawn } = require("node:child_process");
 const policy = require("./policy.js");
 const proto = require("./bridge-protocol.js");
-const localRender = require("./local-render.js");
 // 第二道防线（W6c）：本机独立复核的权限决策（硬 denylist／safety-check／规则／模式）。
 // 与 gateway 同一条判定序（见 permission-rules.js 档头）；本档只负责在**执行前**
 // 以本机自身状态（模式／规则／授权根／home）再判一次，云端被绕过也挡得住。
@@ -48,36 +46,6 @@ const MAX_GREP_DEPTH = 12;
  */
 const MAX_GREP_FILE_BYTES = proto.MAX_FILE_READ_BYTES;
 const GREP_LINE_MAX = 400;
-
-function defaultRun(bin, args, timeoutMs) {
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    let timer = null;
-    let child = null;
-    const finish = (row) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolve(row);
-    };
-    try {
-      child = spawn(bin, args, { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    } catch (err) {
-      finish({ code: -1, stdout: "", stderr: String(err && err.message), spawnError: true });
-      return;
-    }
-    timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch { /* 进程已退出 */ }
-      finish({ code: -1, stdout, stderr: `${stderr}\n[timeout ${timeoutMs}ms]`, timedOut: true });
-    }, timeoutMs);
-    child.stdout.on("data", (d) => { if (stdout.length < 1000000) stdout += d.toString(); });
-    child.stderr.on("data", (d) => { if (stderr.length < 8000) stderr += d.toString(); });
-    child.on("error", (err) => finish({ code: -1, stdout, stderr: String(err && err.message), spawnError: true }));
-    child.on("close", (code) => finish({ code: code === null ? -1 : code, stdout, stderr }));
-  });
-}
 
 class BridgeError extends Error {
   constructor(code, status, detail) {
@@ -125,9 +93,6 @@ function createBridgeExecutor(options = {}) {
     typeof options.home === "function"
       ? options.home
       : () => (typeof options.home === "string" ? options.home : undefined);
-  const run = typeof options.run === "function" ? options.run : defaultRun;
-  const ffmpegBin = typeof options.ffmpegBin === "string" ? options.ffmpegBin : "ffmpeg";
-  const ffprobeBin = typeof options.ffprobeBin === "string" ? options.ffprobeBin : "ffprobe";
 
   /** 当前家目录（未注入＝os.homedir()）。 */
   const currentHome = () => {
@@ -245,7 +210,7 @@ function createBridgeExecutor(options = {}) {
    *       → 第二道防线（permission-rules）→ 存在性。
    * 既有检查（policy denylist／allowlist 必填）在前且一行不放宽；第二道防线为纯加严。
    */
-  function authorizePath(raw, tool, grantedRoots) {
+  function requireLocalPath(raw, tool = "read_file", grantedRoots) {
     if (typeof raw !== "string" || raw.length === 0 || raw.includes("\0")) {
       throw new BridgeError("bad_path", 400);
     }
@@ -268,24 +233,7 @@ function createBridgeExecutor(options = {}) {
     // 第二道防线（执行前独立复核）：以本机真值判 deny/ask/allow；grantedRoots 产生
     // allow 规则，使「已同意」的根走 rule_allow 放行（未同意者仍 needs_authorization）。
     enforcePermission(tool, raw, abs, grantedRoots);
-    return abs;
-  }
-
-  function requireLocalPath(raw, tool = "read_file", grantedRoots) {
-    const abs = authorizePath(raw, tool, grantedRoots);
     if (!fs.existsSync(abs)) throw new BridgeError("not_found", 404);
-    return abs;
-  }
-
-  /** 输出档可以尚不存在；父目录必须已在授权根内。 */
-  function requireOutputPath(raw, tool, grantedRoots) {
-    const abs = authorizePath(raw, tool, grantedRoots);
-    if (fs.existsSync(abs)) {
-      if (fs.statSync(abs).isDirectory()) throw new BridgeError("not_a_file", 400);
-      return abs;
-    }
-    const parent = path.dirname(abs);
-    if (!fs.existsSync(parent)) throw new BridgeError("not_found", 404, "output directory");
     return abs;
   }
 
@@ -472,54 +420,6 @@ function createBridgeExecutor(options = {}) {
    * 执行工具。第三参数 opts.grantedRoots（可选）：本次请求可用的「已在对话内同意的根」，
    * 并入 allowlist 与第二道防线的 allow 规则；硬 denylist／safety-check 不受影响。
    */
-  async function toolProbe(args, grantedRoots) {
-    const abs = requireLocalPath(args.path, "probe_media", grantedRoots);
-    const probed = await run(ffprobeBin, localRender.buildProbeArgs(abs), 15000);
-    if (probed.spawnError) throw new BridgeError("ffmpeg_missing", 502, probed.stderr || "ffprobe");
-    if (probed.timedOut) throw new BridgeError("timeout", 504, "ffprobe");
-    if (probed.code !== 0) throw new BridgeError("ffmpeg_failed", 502, String(probed.stderr || "ffprobe failed").slice(-400));
-    let parsed;
-    try {
-      parsed = JSON.parse(probed.stdout);
-    } catch {
-      throw new BridgeError("ffmpeg_failed", 502, "ffprobe json");
-    }
-    return { path: abs, locus: "local", agent: "local", ...localRender.summarizeProbe(parsed) };
-  }
-
-  async function toolRender(args, grantedRoots) {
-    const input = requireLocalPath(args.path, "render_media", grantedRoots);
-    const output = requireOutputPath(args.output_path, "render_media", grantedRoots);
-    const cuts = localRender.sanitizeCuts(args.cuts);
-    if (!cuts.ok) throw new BridgeError("bad_request", 400, cuts.message);
-    const tmp = `${output}.eimu-partial.mp4`;
-    requireOutputPath(tmp, "render_media", grantedRoots);
-    let audio = true;
-    const probed = await run(ffprobeBin, localRender.buildProbeArgs(input), 15000);
-    if (probed.code === 0) {
-      try {
-        audio = localRender.hasAudio(JSON.parse(probed.stdout));
-      } catch {
-        audio = true;
-      }
-    }
-    const rendered = await run(ffmpegBin, localRender.buildRenderArgs(input, tmp, cuts.cuts, { audio }), 300000);
-    if (rendered.spawnError) throw new BridgeError("ffmpeg_missing", 502, rendered.stderr || "ffmpeg");
-    if (rendered.timedOut) throw new BridgeError("timeout", 504, "ffmpeg");
-    if (rendered.code !== 0) {
-      try { fs.unlinkSync(tmp); } catch { /* 部分档留下也无妨，下次覆盖 */ }
-      throw new BridgeError("ffmpeg_failed", 502, String(rendered.stderr || "ffmpeg failed").slice(-600));
-    }
-    fs.renameSync(tmp, output);
-    return {
-      path: output,
-      size: fs.statSync(output).size,
-      locus: "local",
-      agent: "local",
-      cuts: cuts.cuts.length,
-    };
-  }
-
   async function executeTool(tool, args, opts) {
     const grantedRoots = opts && typeof opts === "object" ? opts.grantedRoots : undefined;
     switch (tool) {
@@ -531,10 +431,6 @@ function createBridgeExecutor(options = {}) {
         return toolGrep(args, grantedRoots);
       case "stat":
         return toolStat(args, grantedRoots);
-      case "probe_media":
-        return toolProbe(args, grantedRoots);
-      case "render_media":
-        return toolRender(args, grantedRoots);
       default:
         throw new BridgeError("tool_not_allowed", 403, String(tool));
     }

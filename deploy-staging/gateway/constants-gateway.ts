@@ -253,7 +253,7 @@ export const CANVAS_EMIT_ALLOWED = new Set([
 // 内网（VPS ufw 8081/tcp ALLOW 172.16.0.0/12，非公网可达）。
 export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "video.failed", "audio.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
 
-export const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
+export const WORKSPACE_DIR = "/opt/agent-harness/workspace"
 export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
 // TTS 音频落盘与对外 URL 基址：文件存 gateway 本地静态目录，
 // 公网走 nginx 已有的 /agent/ 反代（store.tinchak0207.xyz/agent/* → 本网关）。

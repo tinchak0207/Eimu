@@ -1,4 +1,3 @@
-import { opencodeAdmissionFetch } from "./opencode-client"
 // 生产 gateway 唯一真源快照（2026-09-15 拉回，8306 行）。勿以 .gateway-work/ 下旧目录为准（PRD D7）。
 import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
@@ -31,8 +30,6 @@ import { startMonitorReaper } from "./session-monitors.ts"
 import { startCronTicker } from "./scheduled-crons.ts"
 import { installGoalEvalTeardown, setPendingSubagentWakeFlusher } from "./opencode-event-handler.ts"
 import { startWorkflowWakeScanner } from "./workflow-gw.ts"
-// S9：工程图子系统（默认执行器 + 崩溃恢复扫描），启动时调一次。
-import { initProjectSubsystem } from "./project/routes.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -253,7 +250,7 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
   )
   const body = { ...beastAgentField(parentState), parts: [{ type: "text", text: content }] }
   try {
-    const res = await opencodeAdmissionFetch(`${OPENCODE_URL}/session/${parentState.opencodeSessionId}/prompt_async`, {
+    const res = await fetch(`${OPENCODE_URL}/session/${parentState.opencodeSessionId}/prompt_async`, {
       method: "POST",
       headers: opencodeHeaders(),
       body: JSON.stringify(body),
@@ -312,7 +309,7 @@ async function deliverSubagentWakes(state: any, runs: SubagentWakeRun[]): Promis
   )
   state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
   const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
-  const res = await opencodeAdmissionFetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+  const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     headers: opencodeHeaders(),
     body: JSON.stringify(body),
@@ -452,12 +449,6 @@ try {
 // 父会话可 lazy 恢复；探针与 wake 都带超时，失败留记录交下次重启，不卡启动）。
 setTimeout(() => {
   void recoverReworkRunsOnStartup().catch((e) => console.error("[gateway] rework recovery scan failed:", e))
-}, 3000)
-
-// S9（§3.4 崩溃恢复）：工程图子系统启动一次——注册默认执行器，再扫 projects/* 按 action 接续。
-// 延后一拍让会话可 lazy 恢复（恢复 resubmit 需要 apiKey）；会话不可恢复的工程整档跳过，保持 inflight 原样。
-setTimeout(() => {
-  void initProjectSubsystem().catch((e) => console.error("[gateway] project subsystem init failed:", e))
 }, 3000)
 
 console.log(`[gateway] listening on :${server.port}, opencode=${OPENCODE_URL}`)

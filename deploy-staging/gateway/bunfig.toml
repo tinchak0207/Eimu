@@ -1,5 +1,0 @@
-[test]
-# bun 1.4.2 解析器没有 isolate 键（true/false 都只评估一次模块）。
-# 每文件清空模块表靠 test-preload.ts 转成 CLI --isolate。
-isolate = true
-preload = ["./test-preload.ts"]

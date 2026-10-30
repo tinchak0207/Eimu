@@ -59,10 +59,6 @@ export function toolErrorPayload(
   return { code, message, human_message: humanMessageFor(message, code) }
 }
 
-/** 工程图读写跑三工具：报错由模型按回执自行修正。 */
-const PROJECT_GRAPH_TOOLS = new Set(["project_get", "project_patch", "project_run"])
-const PROJECT_TOOL_RETRY_USER_SOFT = "工程图这一步没成功，模型会按报错调整后重试。"
-
 /**
  * 取第一个非空字串。本机档案授权的附带栏位（root／reason）可能落在顶层或 error 内
  * （不同上游版本形状不同），统一收敛。
@@ -552,16 +548,7 @@ if (status === "pending" || status === "running") {
     // S2a：error 态的 tool.result 同样补齐三栏位错误合同。
     // 闸门/运行时错误：模型侧 message 仍保留原文；用户可见 human_message 换成产品句。
     const gateErr = !isQuestionFreezeAbort && isRuntimeGateErrorText(message)
-    // 工程图三工具的报错（参数写坏、校验不过、网关短暂不可达）是模型下一步自行修正的回路，
-    // 不是用户要处理的故障：卡片写实情，不套「上游原因」，也不弹红气泡。原文仍完整回给模型。
-    const projectToolErr = !isQuestionFreezeAbort && !gateErr && PROJECT_GRAPH_TOOLS.has(toolName)
-    const userFacing = isQuestionFreezeAbort
-      ? message
-      : gateErr
-        ? RUNTIME_GATE_USER_SOFT
-        : projectToolErr
-          ? PROJECT_TOOL_RETRY_USER_SOFT
-          : humanMessageFor(message)
+    const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : humanMessageFor(message)
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
@@ -582,10 +569,6 @@ if (status === "pending" || status === "running") {
     // 闸门/运行时错误：工具卡已有产品句，不再弹 session.error 红气泡（原文只给模型）。
     if (gateErr) {
       console.log(`[gateway] runtime gate tool_error card suppressed: callId=${callId} tool=${toolName}`)
-      return
-    }
-    if (projectToolErr) {
-      console.log(`[gateway] project tool_error (model retries): callId=${callId} tool=${toolName} message=${message.slice(0, 300)}`)
       return
     }
     emitSessionError(state, "tool_error", message)

@@ -231,7 +231,7 @@ test("接线探针：hook 的 auth 回报 → Surface → PromptInput → ImageP
   // <1000 行重构：hook 的 options 型别与发信分支分居子模组；Surface 的 props 型别在 .types.ts。
   const hook = [
     read("../../hooks/use-agent-chat.ts"),
-    ...["commands", "connection", "core", "types", "logged-out-start"].map((m) => read(`../../hooks/use-agent-chat/${m}.ts`)),
+    ...["commands", "connection", "core", "types"].map((m) => read(`../../hooks/use-agent-chat/${m}.ts`)),
   ].join("\n");
   const surface = [
     read("../agent-chat/AgentChatSurface.tsx"),
@@ -244,8 +244,7 @@ test("接线探针：hook 的 auth 回报 → Surface → PromptInput → ImageP
 
   // hook：认得出「送不出去是因为登入」，且只在 auth 这一种才上抛。
   assert.match(hook, /onSendBlockedByAuth\?: \(text: string\) => void/);
-  assert.match(hook, /keepSentenceOnSend\([\s\S]{0,500}onSendBlockedByAuth\?\.\(sentence\)/);
-  assert.match(hook, /closedReason === "auth"/);
+  assert.match(hook, /closedReasonRef\.current === "auth"[\s\S]{0,120}onSendBlockedByAuth\?\.\(trimmed\)/);
   // 三层转传（漏一层＝整条断）。
   assert.match(surface, /onSendBlockedByAuth\?: \(text: string\) => void/);
   assert.match(surface, /onSendBlockedByAuth \? \{ onSendBlockedByAuth \} : \{\}/);

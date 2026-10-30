@@ -19,7 +19,7 @@ const POSIX = { home: HOME, platform: "linux" };
 // 工具白名单
 // ---------------------------------------------------------------------------
 test("isToolAllowed: 只放行四个唯读工具，其余（含写入/执行类）一律拒", () => {
-  for (const t of ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]) assert.equal(proto.isToolAllowed(t), true, t);
+  for (const t of ["list_dir", "read_file", "grep", "stat"]) assert.equal(proto.isToolAllowed(t), true, t);
   for (const t of ["write_file", "delete", "exec", "shell", "bash", "", null, 1, {}, ["read_file"]]) {
     assert.equal(proto.isToolAllowed(t), false, String(t));
   }

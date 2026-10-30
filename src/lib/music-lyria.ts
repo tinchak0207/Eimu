@@ -232,7 +232,6 @@ function requireVertexApiKey(): string {
 }
 
 export interface GenerateLyriaTrackOptions {
-  beforeSubmit?: () => Promise<void>
   /** 风格/情绪 prompt（可用 buildLyriaStylePrompt 从情绪契约拼出）。 */
   prompt: string
   /** 自订歌词（含 [Verse]/[Chorus]/[Bridge] 段落标签或 [0:00-0:10] 时间戳）。缺省=纯器乐倾向。 */
@@ -280,7 +279,7 @@ function stripDoubleWavHeader(bytes: Buffer): Buffer {
 /** Vertex express lyria-002：纯器乐 30s。歌词/参考图无法兑现 → 回报 ignoredInputs，不假装。 */
 async function generateLyriaVertexTrack(
   apiKey: string,
-  opts: { beforeSubmit?: () => Promise<void>; prompt: string; lyrics?: string; imagesBase64: string[] },
+  opts: { prompt: string; lyrics?: string; imagesBase64: string[] },
 ): Promise<GenerateLyriaTrackResult> {
   const ignored: string[] = []
   if (opts.lyrics?.trim()) ignored.push("lyrics（lyria-002 仅纯器乐，无人声）")
@@ -298,7 +297,6 @@ async function generateLyriaVertexTrack(
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), LYRIA_VERTEX_TIMEOUT_MS)
     try {
-      await opts.beforeSubmit?.()
       response = await fetch(LYRIA_VERTEX_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -312,7 +310,6 @@ async function generateLyriaVertexTrack(
       }
       break
     } catch (e) {
-      if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
       clearTimeout(timer)
       lastErr = controller.signal.aborted ? `超时 ${LYRIA_VERTEX_TIMEOUT_MS} ms` : `网络层：${(e as Error)?.message ?? String(e)}`
       if (attempt >= 3) throw new Error(`Lyria(Vertex ${LYRIA_VERTEX_MODEL}) 请求失败（已重试 2 次）：${lastErr}`)
@@ -350,7 +347,7 @@ async function generateLyriaVertexTrack(
 /** generativelanguage lyria-3.5／lyria-3-clip-preview：`POST models/<model>:generateContent`。 */
 async function generateLyriaStudioTrack(
   apiKey: string,
-  opts: { beforeSubmit?: () => Promise<void>; prompt: string; lyrics?: string; model: LyriaModelId; imagesBase64: string[] },
+  opts: { prompt: string; lyrics?: string; model: LyriaModelId; imagesBase64: string[] },
 ): Promise<GenerateLyriaTrackResult> {
   const model = opts.model
   const payload = {
@@ -361,7 +358,6 @@ async function generateLyriaStudioTrack(
   const timer = setTimeout(() => controller.abort(), LYRIA_TIMEOUT_MS)
   let response: Response
   try {
-    await opts.beforeSubmit?.()
     response = await fetch(`${LYRIA_API_BASE_URL}/models/${model}:generateContent`, {
       method: "POST",
       headers: {
@@ -372,7 +368,6 @@ async function generateLyriaStudioTrack(
       signal: controller.signal,
     })
   } catch (e) {
-    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
     clearTimeout(timer)
     if (controller.signal.aborted) {
       throw new Error(`Lyria 生成超时（上限 ${LYRIA_TIMEOUT_MS} ms，模型 ${model}）。整歌生成较慢，可改用 duration_hint="clip30" 的 30 秒片段重试。`)
@@ -418,14 +413,8 @@ export async function generateLyriaTrack(opts: GenerateLyriaTrackOptions): Promi
 
   if (hasGeminiStudioApiKey()) {
     const apiKey = requireGeminiStudioApiKey()
-    return generateLyriaStudioTrack(apiKey, {
-      beforeSubmit: opts.beforeSubmit,
-      prompt,
-      lyrics: opts.lyrics,
-      model: opts.model ?? LYRIA_MODELS.full,
-      imagesBase64: images,
-    })
+    return generateLyriaStudioTrack(apiKey, { prompt, lyrics: opts.lyrics, model: opts.model ?? LYRIA_MODELS.full, imagesBase64: images })
   }
   // 无 Gemini Studio 付费 key → Vertex lyria-002 降级（纯器乐 30s，回执 degraded:true）。
-  return generateLyriaVertexTrack(requireVertexApiKey(), { beforeSubmit: opts.beforeSubmit, prompt, lyrics: opts.lyrics, imagesBase64: images })
+  return generateLyriaVertexTrack(requireVertexApiKey(), { prompt, lyrics: opts.lyrics, imagesBase64: images })
 }

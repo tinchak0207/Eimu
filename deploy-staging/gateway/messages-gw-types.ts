@@ -11,9 +11,6 @@ import { resolveCanonicalIdentity } from "./auth-gw.ts"
 import { collectRuntimeEnvironment, renderEnvironmentSection, type CollectEnvironmentInputs, type RuntimeEnvironment } from "./environment-facts.ts"
 import type { SessionState, GatewayPromptPart } from "./types-gateway.ts"
 import { PROMPT_TOTAL_BUDGET_CHARS, type PromptSection } from "./prompt-registry.ts"
-// S15 ingress：工程模式 brief[] 落盘（S2 store）与目标卡渲染（纯函数）。
-import { ensureProject } from "./project/store.ts"
-import { appendBriefEntry } from "./project/brief.ts"
 
 // 从 index.ts 无损抽取（2026-09-19 第二阶段 Wave2）：0918 前缀快取尾端注入
 // （TAIL_PAYLOAD_MARKER/appendSystemPayloadToTurnTail）、handleSendMessage 全函数
@@ -428,100 +425,6 @@ export function rememberPinnedConstraints(state: SessionState, content: string):
   if (bag.originalUserPrompt === undefined && (state.turnGen ?? 0) === 0) {
     const raw = String(content ?? "").trim()
     if (raw) bag.originalUserPrompt = raw.slice(0, ORIGINAL_USER_PROMPT_CAP)
-  }
-  // S15 ingress：工程模式下每条真实用户消息逐字进 brief[]（首条自动建工程）。
-  // 非工程模式一字不动；建图/落盘由 S2 的 store 承担（本档不建第二套存储）。
-  if (state.projectMode === true) void ingressProjectBrief(state, String(content ?? ""))
-}
-
-// ── S15 ingress：工程模式 brief[]（模型无写入口；§3.1）──────────────────────────
-// 本档只做三件事：①原话逐字交给 sink（sink 内 ensureProject + appendBriefEntry）；
-// ②首条消息自动建工程（first=true）；③意图命中时给配方 id（复用 buildTemplateSkeletonForPrompt
-// 同一个判定函式 classifyDispatchMeta，不另写一套）。
-export interface ProjectIngressRecord {
-  sessionId: string
-  messageId: string
-  /** 用户原话（逐字；不做 LLM 摘要/改写）。 */
-  text: string
-  at: string
-  /** 首个真实用户消息（=ensureProject 的时机）。 */
-  first: boolean
-  /** 意图命中的配方 id（=旧工作流模板 id，13 个同名）；null=未命中。 */
-  recipe: string | null
-}
-/** sink 实现方（S2 store 接线）：ensureProject(sessionId) → appendBriefEntry(graph.brief, record) → 命中 recipe 时 apply_recipe。 */
-export type ProjectIngressSink = (record: ProjectIngressRecord) => Promise<void> | void
-
-let projectIngressSink: ProjectIngressSink | null = null
-
-export function installProjectIngressSink(sink: ProjectIngressSink | null): void {
-  projectIngressSink = sink
-}
-
-/**
- * 默认 sink（S2 store）：ensureProject（首条自动建图）→ brief[] 追加原话 → 命中意图时 apply_recipe。
- * 只在 projectMode=true 的会话被调用；非工程模式不碰 store。
- */
-async function projectIngressStore(record: ProjectIngressRecord): Promise<void> {
-  const { store, created } = await ensureProject(record.sessionId, {
-    ...(record.first && record.recipe ? { templateId: record.recipe } : {}),
-  })
-  const added = await store.update((g) => {
-    const entry = appendBriefEntry(g.brief, { at: record.at, messageId: record.messageId, text: record.text })
-    return entry !== null
-  })
-  if (!added) return
-  await store.appendEvents([
-    {
-      kind: "brief",
-      data: { messageId: record.messageId, chars: [...record.text].length, recipe: record.recipe ?? "", created },
-    },
-  ])
-  if (record.first && record.recipe) {
-    // 配方注册表由 S11z 注入 store 的 opts.recipes；缺注册表时引擎回 UNKNOWN_RECIPE，只记录不阻断 ingress。
-    const outcome = await store.applyPatches(
-      { ops: [{ op: "apply_recipe", recipe: record.recipe, params: {} }] },
-      { kind: "user" },
-    )
-    if (outcome.receipt.rejected.length > 0) {
-      console.warn(
-        `[gateway] project apply_recipe rejected: session=${record.sessionId} recipe=${record.recipe} ${outcome.receipt.rejected.map((r) => r.code).join(",")}`,
-      )
-    }
-  }
-}
-installProjectIngressSink(projectIngressStore)
-
-/** 配方 id 与旧工作流模板 id 一一同名（S11 的 13 个配方）。 */
-const PROJECT_RECIPE_IDS = new Set([
-  "single_image", "character_sheet", "scene_setup", "single_video", "feature_film", "novel_film",
-  "novel_ip", "ecom_launch", "ecom_model", "shortdrama_visual", "shortdrama_poster", "art_curation", "art_style",
-])
-
-async function ingressProjectBrief(state: SessionState, content: string): Promise<void> {
-  const sink = projectIngressSink
-  if (!sink) return
-  const text = String(content ?? "")
-  if (!text.trim()) return
-  const turn = state.turnGen ?? 0
-  // messageId 由回合号 + 正文哈希决定：同一回合重复调用天然幂等（appendBriefEntry 按 messageId 去重）。
-  const messageId = `u${turn}_${createHash("sha256").update(text).digest("hex").slice(0, 16)}`
-  const first = turn === 0
-  let recipe: string | null = null
-  // 旧席位自己决定要不要用工程图，不替它铺 30 个待办节点（2026-10-29：画布被没人填的节点淹没）。
-  if (first && state.seat === "creator") {
-    try {
-      const meta = await classifyDispatchMeta(text)
-      const id = meta.template?.templateId ?? ""
-      if (PROJECT_RECIPE_IDS.has(id)) recipe = id
-    } catch {
-      /* 意图判定失败：只记 brief，不套配方（不是用户消息的错） */
-    }
-  }
-  try {
-    await sink({ sessionId: state.sessionId, messageId, text, at: new Date().toISOString(), first, recipe })
-  } catch (e) {
-    console.warn(`[gateway] project ingress failed session=${state.sessionId}: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 

@@ -263,8 +263,8 @@ export interface InternalDeviceRouteDeps {
   bridge?: DeviceBridge
 }
 
-/** op → `DeviceBridgeTool` 的一对一映射，与 DEVICE_BRIDGE_TOOLS 同一份。 */
-const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat", "probe_media", "render_media"]
+/** op → 既有 `DeviceBridgeTool` 的**一对一**映射（不得新增／改名工具）。 */
+const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat"]
 
 function isInternalDeviceOp(v: string): v is DeviceBridgeTool {
   return (INTERNAL_DEVICE_OPS as readonly string[]).includes(v)
@@ -335,14 +335,6 @@ function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, un
       if (body.max_bytes !== undefined) args.max_file_bytes = body.max_bytes
       return args
     }
-    case "probe_media":
-      return { path }
-    case "render_media":
-      return {
-        path,
-        output_path: typeof body.output_path === "string" ? body.output_path : "",
-        cuts: body.cuts,
-      }
     default:
       return { path }
   }

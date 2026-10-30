@@ -1,4 +1,3 @@
-import { opencodeAdmissionFetch } from "./opencode-client"
 import { createHash } from "node:crypto"
 import { WorkflowService } from "./workflow-service"
 import { estimateTtsCoins } from "./pricing-and-validation"
@@ -597,7 +596,7 @@ async function postWorkflowWake(state: SessionState, wfid: string, content: stri
   const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
   let res: Response
   try {
-    res = await opencodeAdmissionFetch(`${OPENCODE_URL}/session/${ocId}/prompt_async`, {
+    res = await fetch(`${OPENCODE_URL}/session/${ocId}/prompt_async`, {
       method: "POST",
       headers: opencodeHeaders(),
       body: JSON.stringify(body),

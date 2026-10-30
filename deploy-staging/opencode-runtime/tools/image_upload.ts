@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, ok, fail, publicImageUrl, uploadImageBytes } from "../lib/client"
-import { LOCAL_PATH_HINT, cloudPathRefusal } from "../lib/agent-paths"
+import { LOCAL_PATH_HINT } from "../lib/agent-paths"
 
 export default tool({
   description:
@@ -12,11 +12,6 @@ export default tool({
   },
   async execute(args, context) {
     try {
-      const source = args.image_url
-      if (typeof source === "string" && !/^https?:\/\//i.test(source) && !source.startsWith("data:")) {
-        const refusal = cloudPathRefusal(source, process.cwd())
-        if (refusal) return fail("locus_mismatch", refusal)
-      }
       // mediaId 来自平台 /v1/uploads（best-effort）：它只保证回 mediaId，不保证回公网 url，
       // 且该上游端点可能暂时故障（实测 HTTP 502）。任一种都不得让「取得公网 URL」失败。
       let mediaId: string | null = null

@@ -16,7 +16,6 @@ import {
 import { clearPersisted, type PersistedAgentChat } from "@/lib/agent-chat-persistence";
 import type { FrameBatcher } from "@/lib/agent-chat-frame-batch";
 import { INITIAL_BACKOFF_MS, newSteerId, type AgentChatAction } from "./core";
-import { keepSentenceOnSend } from "./logged-out-start";
 import type { ResumableAgentChat, UseAgentChatReturn } from "./types";
 
 interface AgentChatCommandsProps {
@@ -125,23 +124,19 @@ export function useAgentChatCommands(P: AgentChatCommandsProps): {
       // 关闭）时 sid 仍 null——不能把使用者的话回声进 transcript，否则留下一句
       // 永久的「幽灵」用户发言，且没有任何办法标记它其实从未送达。
       const sid = sessionIdRef.current;
-      const outcome = keepSentenceOnSend({
-        sessionId: sid,
-        closed: closedRef.current,
-        closedReason: closedReasonRef.current,
-        text: trimmed,
-        keep: (sentence) => {
-          // 登入失效这一种要分开处理：那句话没送出去（也不是使用者放弃），
-          // 交给呼叫端留住、登入后补送——否则未登入访客在主输入区打的字当场消失
-          // （composer 已清空，且 GitHub 登入是整页跳转，回来什么都不剩）。
-          onSendBlockedByAuth?.(sentence);
+      if (!sid) {
+        // 登入失效这一种要分开处理：那句话没送出去（也不是使用者放弃），
+        // 交给呼叫端留住、登入后补送——否则未登入访客在主输入区打的字当场消失
+        // （composer 已清空，且 GitHub 登入是整页跳转，回来什么都不剩）。
+        // 文案也要说得出路，不能只回一句「无法发送」。
+        if (closedRef.current && closedReasonRef.current === "auth") {
+          onSendBlockedByAuth?.(trimmed);
           dispatchNotice("error", "这条消息还没发出去（需要登录）——登录完成后会自动发出。");
-        },
-        drop: () => {
-          dispatchNotice("error", "尚未建立会话，无法发送消息。");
-        },
-      });
-      if (outcome !== "deliver") return;
+          return;
+        }
+        dispatchNotice("error", "尚未建立会话，无法发送消息。");
+        return;
+      }
       // 记录发送时刻：僵尸自愈要区分「turn.done 之后用户又发了新消息」——
       // 那之后的内容帧属于新回合，不算还魂证据。
       lastSendAtRef.current = Date.now();

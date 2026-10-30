@@ -239,7 +239,7 @@ function readGateway(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 }
 
-test("D2-1a 接线锁：受理闸同时看 turnInFlight 与 turnAborted，且闸在身份落地与入队之前", () => {
+test("D2-1a 接线锁：受理闸同时看 turnInFlight 与 turnAborted，且闸在注入腿之前", () => {
   const gw = readGateway("./steer-gw.ts");
   assert.match(gw, /gateSteerAcceptance\(\{/, "受理端必须走纯核心的闸（不是单凭 turnInFlight）");
   assert.match(gw, /turnAborted: state\.turnAborted === true/, "闸必须看 abort 状态");
@@ -247,14 +247,10 @@ test("D2-1a 接线锁：受理闸同时看 turnInFlight 与 turnAborted，且闸
   // D-6 接线：闸必须拿到中止来源（否则系统中止窗口会被当成用户停止误拒）；真值验收见
   // steer-ledger-db.test.ts 的 ⑧（真 Request/Response）。
   assert.match(gw, /turnAbortSource: state\.turnAbortSource/, "闸必须带上中止来源（D-6）");
-  // 注入腿已删除（steer-gw.ts「① 一律排队」：question 断点没有可信注入接口）——中止轮、有断点的轮一律只能排队，
-  // 真值验收见 steer-ledger-db.test.ts ⑥（有断点 → queued、上游零回灌）。接线锁改钉两件：
-  // 注入腿不得复活；闸必须排在身份落地（steerLedger.begin）与入队之前，否则 abort 后仍会受理指引。
-  assert.doesNotMatch(gw, /injectEligible/, "注入腿已删除，不得复活");
+  assert.match(gw, /const injectEligible = state\.turnAborted !== true && state\.pendingQuestions\.size > 0/, "中止轮不得走注入腿（任何来源）");
   const gateAt = gw.indexOf("gateSteerAcceptance({");
-  const beginAt = gw.indexOf("steerLedger.begin({");
-  const enqueueAt = gw.indexOf("enqueueSteer(queue");
-  assert.ok(gateAt > -1 && beginAt > gateAt && enqueueAt > beginAt, "闸必须排在身份落地与入队之前");
+  const injectAt = gw.indexOf("const injectEligible =");
+  assert.ok(gateAt > -1 && injectAt > gateAt, "闸必须排在注入腿之前——否则 abort 后仍会把指引当答覆 POST 进已中止回合");
   // 409 的两种来历都要诚实回报（前端据 code/status 落回正常送出）。
   assert.match(gw, /gate\.reason === "turn_aborted"/);
 });
