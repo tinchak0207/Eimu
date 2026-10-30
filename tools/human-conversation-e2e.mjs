@@ -418,7 +418,7 @@ async function sceneMvKeyframes(scene, reasons) {
         frame.handled = true
         const qs = Array.isArray(obj?.questions) ? obj.questions : [{}]
         const answers = qs.map((q) => {
-          const opts = (Array.isArray(q?.options) ? q.options : []).filter((o) => !/视频|video/i.test(`${o?.label || ""} ${o?.description || ""}`))
+          const opts = (Array.isArray(q?.options) ? q.options : []).filter((o) => !/视频|video|动态镜头|运镜|镜头.{0,4}段|\d+\s*段/i.test(`${o?.label || ""} ${o?.description || ""}`))
           const pick = opts.find((o) => /关键帧|图|推荐/.test(String(o?.label || ""))) || opts[0]
           return [pick?.label || "先只做关键帧和音乐，视频先不做"]
         })
