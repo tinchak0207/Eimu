@@ -4,7 +4,8 @@
 #
 # 用法：
 #   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--skip-recon] [--dry-run] [--force] [--fast]
+#   bash deploy/vps/gateway-release.sh guard --sha <commit>   # 唯读：只跑发版祖先闸（对真线上）
+#   bash deploy/vps/gateway-release.sh release --sha <commit> [--skip-recon] [--dry-run] [--force] [--fast] [--override-ancestry "<理由>"]
 #   bash deploy/vps/gateway-release.sh rollback [--dry-run] [--force]
 #   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
 #
@@ -16,6 +17,10 @@
 #
 # --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即 build+重启。
 #   用于提示词/文案这类短改：目标 <60s，不再为在途回合等 180s。中断的回合由耐久续接处理。
+#
+# 发版祖先闸（2026-10-30，见 release-ancestry-guard.sh）：release 必须显式 --sha；候选必须包含
+#   线上 meta.env GIT_SHA 及该 release 目录 HOTPATCH.log 里热装过的 commit，否则拒发并列出缺的
+#   commit。--fast/--skip-recon/--force 均不跳过；唯一覆盖 --override-ancestry "<理由>"（写审计）。
 #
 # 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
 #   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
@@ -70,6 +75,8 @@ ACTIVATION_LOCK="${HARNESS_ACTIVATION_LOCK:-$HARNESS_ROOT/.harness-activation.lo
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC_SUBDIR="deploy-staging/gateway"
+# shellcheck source=release-ancestry-guard.sh
+. "$SCRIPT_DIR/release-ancestry-guard.sh"
 RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-gateway-recon.sh"
 
 DRY_RUN=0
@@ -312,7 +319,10 @@ usage() {
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
+  guard --sha C           唯读：只跑发版祖先闸（候选是否包含线上全部 commit），不发
+  release --sha C [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
+          [--override-ancestry "<理由>"]
+                          --sha 必填；候选不含线上 commit 时拒发，覆盖须带理由并写审计
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
                           → drain 闸门 → md5 manifest → 原子切 symlink → deploy.sh 闸门 → 验证
                           必须发布完整的已提交 commit 快照；--files 在本地立即拒绝。
@@ -337,6 +347,7 @@ parse_flags() {
       --force) FORCE=1 ;;
       --fast) SKIP_RECON=1; FORCE=1; SKIP_MEDIA_WF_COVERAGE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
+      --override-ancestry) shift; guard_set_override "${1:-}" ;;
       --files) die "--files 已禁用：gateway 必须发布完整的已提交 commit 快照，请使用 release --sha <commit>" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
@@ -375,6 +386,52 @@ current_release_sha() {
     "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null || true" 2>/dev/null | head -1 || true
 }
 
+
+# 发版祖先闸的线上读取（只读 SSH；--dry-run 照样读真线上）。输出：
+#   LINK link:<当前 release files 绝对路径>   SHA <meta.env GIT_SHA>   HOT <HOTPATCH.log 热装 commit>…
+gateway_online_state() {
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" bash -s -- "$GATEWAY_PATH" <<'REMOTE'
+set -u
+cur="$(readlink -f "$1" 2>/dev/null || true)"
+[ -n "$cur" ] || exit 0
+echo "LINK link:$cur"
+d="$(dirname "$cur")"
+sed -n 's/^GIT_SHA=//p' "$d/meta.env" 2>/dev/null | head -1 | sed 's/^/SHA /'
+[ -f "$d/HOTPATCH.log" ] && grep -o 'hot-install [0-9a-f]\{7,40\}' "$d/HOTPATCH.log" | awk '{print "HOT " $2}'
+exit 0
+REMOTE
+}
+
+guard_remote_append() {
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "sudo tee -a '$1' >/dev/null"
+}
+
+# $1=候选完整 sha。须在 GW_EXPECTED 抓取之后调用（见 release-ancestry-guard.sh 竞态说明）。
+gateway_ancestry_gate() {
+  local cand="$1" state link="" k v
+  local -a online=()
+  state="$(gateway_online_state)" || die "读线上 gateway 版本失败（SSH）→ 不发"
+  while read -r k v; do
+    case "$k" in
+      LINK) link="$v" ;;
+      SHA|HOT) case "$v" in *[!0-9a-f]*|'') online=(); link="BAD:$v"; break ;; *) online+=("$v") ;; esac ;;
+    esac
+  done <<< "$state"
+  case "$link" in BAD:*) log "线上 meta.env GIT_SHA=${link#BAD:} 不是 commit"; online=() ;; esac
+  if [ "$DRY_RUN" -eq 0 ] && [ -n "${GW_EXPECTED:-}" ] && [ "$link" != "$GW_EXPECTED" ]; then
+    die "祖先闸读到的线上（$link）与激活身份（$GW_EXPECTED）不一致：有人正在并行发版 → 不发"
+  fi
+  guard_check_ancestry gateway "$cand" "$REPO_ROOT" "$DRY_RUN" guard_remote_append "${online[@]}"
+}
+
+cmd_guard() {
+  preflight_local
+  guard_require_explicit_sha "$SHA" "gateway-release.sh guard"
+  DRY_RUN=1
+  local sha_full
+  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  gateway_ancestry_gate "$sha_full"
+}
 
 # 2026-10-11 修画布：近 N 天媒体会话 workflow_write 覆盖率发版门（默认 7 天 ≥15%）。
 # 只读查 VPS ledger + opencode.db；样本不足（<5）跳过不挡。可用 --skip-media-wf-coverage 跳过。
@@ -477,14 +534,17 @@ REMOTE
 
 cmd_release() {
   preflight_local
+  guard_require_explicit_sha "$SHA" "gateway-release.sh release"
   assert_gateway_tree_clean
   local sha_full sha_short ts rel
-  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"
+  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  # 先抓激活身份再跑祖先闸：此后若有人并行发版，激活阶段 ACTIVATION_CONFLICT 会拦下。
+  local GW_EXPECTED
+  GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
+  gateway_ancestry_gate "$sha_full"
   if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha_full" --repo "$REPO_ROOT"; fi
   sha_short="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha_full")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"; rel="$sha_short-$ts-$$"
-  local GW_EXPECTED
-  GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
   run_recon
   # 2026-10-28 用户裁定：媒体会话 workflow_write 覆盖率不再作为发版门（run_media_wf_coverage 保留但不调用，见根因 note）。
   local stage_tar="/tmp/gw-release-$rel.tar" stage_dir="/tmp/gw-release-$rel"
@@ -608,6 +668,7 @@ main() {
   case "$cmd" in
     __emit-drain) declare -f drain_gate maintenance_control maintenance_begin maintenance_end ;;
     status) parse_flags "$@"; cmd_status ;;
+    guard) parse_flags "$@"; cmd_guard ;;
     release) parse_flags "$@"; cmd_release ;;
     rollback) parse_flags "$@"; cmd_rollback ;;
     adopt) parse_flags "$@"; cmd_adopt ;;

@@ -5,7 +5,8 @@
 # 用法：
 #   bash deploy/vps/opencode-release.sh status            # 唯读：现况＋健康
 #   bash deploy/vps/opencode-release.sh plan [--sha C]    # 唯读：列出将变更的档
-#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force] [--fast] [--prompts-only]
+#   bash deploy/vps/opencode-release.sh guard --sha C     # 唯读：只跑发版祖先闸（对真线上）
+#   bash deploy/vps/opencode-release.sh release --sha C [--skip-recon] [--dry-run] [--force] [--fast] [--prompts-only] [--override-ancestry "<理由>"]
 #   bash deploy/vps/opencode-release.sh rollback [--dry-run] [--force]   # 回复最新备份
 #
 # --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即重启。
@@ -13,6 +14,10 @@
 #   harness 的耐久续接处理；需要保护在途长任务时不要用 --fast。
 # --prompts-only：更快（目标 <5s）——只装 AGENTS.md + skills/_prompt-routing，不打包、
 #   不备份、不删档、不重启。只适用于这两处提示词资产的改动。
+# 发版祖先闸（2026-10-30，见 release-ancestry-guard.sh）：release/--prompts-only 都必须显式 --sha；
+#   候选必须包含 opencode-history.log 推出的线上生效 commit（最近全量 release ＋ 其后 prompts-only；
+#   rollback 后回到上一次全量之前），否则拒发。--fast/--skip-recon/--force 不跳过；
+#   唯一覆盖 --override-ancestry "<理由>"（写审计）。
 #
 # F8（2026-10-04）断面 A｜重启前 drain（默认开启）：
 #   restart 之前先只读探测「有没有在途回合/子代理」，有则轮询等到清空（上界 180s，
@@ -43,6 +48,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC_SUBDIR="deploy-staging/opencode-runtime"
 RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-opencode-recon.sh"
+# shellcheck source=release-ancestry-guard.sh
+. "$SCRIPT_DIR/release-ancestry-guard.sh"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 WORKSPACE_DIR="${OC_WORKSPACE_DIR:-$(dirname "$VPS_DIR")}"
@@ -221,6 +228,7 @@ parse_flags() {
       --fast) SKIP_RECON=1; FORCE=1 ;;
       --prompts-only) PROMPTS_ONLY=1; SKIP_RECON=1; FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
+      --override-ancestry) shift; guard_set_override "${1:-}" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
     esac
@@ -258,6 +266,28 @@ run_recon() {
   RECON_BASE="$base" bash "$RECON_SCRIPT" || die "recon 未通过（生产被手改或故障）→ 先收编再发布"
 }
 
+# 发版祖先闸：只读读 history（--dry-run 照样读真线上），推出线上生效 commit 集合。
+# 须在 OC_EXPECTED 抓取之后调用：之后若有人并行发版，激活阶段 ACTIVATION_CONFLICT 会拦下。
+guard_remote_append() {
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "sudo tee -a '$1' >/dev/null"
+}
+opencode_ancestry_gate() {
+  local cand="$1" hist
+  local -a online=()
+  hist="$(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "sudo cat '$HISTORY_LOG'")" \
+    || die "读线上 opencode history 失败（SSH/权限）→ 不发"
+  mapfile -t online < <(printf '%s\n' "$hist" | guard_opencode_online_from_history)
+  guard_check_ancestry opencode "$cand" "$REPO_ROOT" "$DRY_RUN" guard_remote_append "${online[@]}"
+}
+cmd_guard() {
+  preflight_local
+  guard_require_explicit_sha "$SHA" "opencode-release.sh guard"
+  DRY_RUN=1
+  local sha
+  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  opencode_ancestry_gate "$sha"
+}
+
 # 把 commit 的镜像展开到 $1；印出预期档案清单到 $2
 stage_from_commit() {
   local stage="$1" exp="$2" sha="$3"
@@ -274,7 +304,8 @@ stage_from_commit() {
 release_prompts_only() {
   assert_tree_clean
   local sha sha12 ts tmp r_tar
-  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"
+  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  opencode_ancestry_gate "$sha"
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   tmp="$(mktemp -d /tmp/oc-prompts.XXXXXX)"
@@ -376,11 +407,13 @@ cmd_plan() {
 cmd_release() {
   preflight_local
   local OC_EXPECTED
+  guard_require_explicit_sha "$SHA" "opencode-release.sh release"
   OC_EXPECTED="$(capture_runtime_identity)" || die "无法读取当前 runtime 内容身份"
   if [ "$PROMPTS_ONLY" -eq 1 ]; then release_prompts_only; return; fi
   assert_tree_clean
   local sha sha12 ts stage exp tar_file
-  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "无法解析 commit"
+  sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  opencode_ancestry_gate "$sha"
   if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -511,6 +544,7 @@ main() {
   case "$cmd" in
     status) parse_flags "$@"; cmd_status ;;
     plan) parse_flags "$@"; cmd_plan ;;
+    guard) parse_flags "$@"; cmd_guard ;;
     release) parse_flags "$@"; cmd_release ;;
     rollback) parse_flags "$@"; cmd_rollback ;;
     -h|--help|help) usage ;;
