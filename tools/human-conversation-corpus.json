@@ -52,6 +52,20 @@
       "turns": [
         "随便生成一张图片"
       ]
+    },
+    {
+      "id": "mv-keyframes-no-video",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 80,
+      "max_coins_per_confirm": 80,
+      "cap_note": "暴君原话会走关键帧＋音乐＋视频。只批准图片确认卡（关键帧那批）；视频确认卡一律拒绝并中止会话，验的是关键帧/音乐阶段 UI 不漏内部错误。",
+      "source": {
+        "session": "ses_e7211ef0dffe7S6KleX7YB4F1Q"
+      },
+      "turns": [
+        "做一个Billboard级别的MV, 邓紫棋风格"
+      ]
     }
   ]
 }

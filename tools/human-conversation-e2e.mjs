@@ -357,7 +357,110 @@ async function sceneImage(scene, reasons) {
   return { sid, names: [...new Set(turn.names)].slice(0, 40), approved: turn.approved, maxQuoted: turn.maxQuoted, receipts: facts.receipts, seat: facts.seat, reply: turn.reply.slice(0, 400) }
 }
 
+
+// MV 关键帧场景（2026-10-31）：只批准图片确认卡；视频确认卡拒绝并中止会话。
+// 断言：至少一个 image.done；用户可见帧与历史端点都不含内部自修提示／内部端点／挽具路径。
+const LEAK_RE = /未提交|改好尺寸|再调用|project_lock_changed|127\.0\.0\.1|\/opt\/|_prompt-routing|\.opencode|上游只回传/g
+function visibleFieldsOf(ev, obj) {
+  if (!obj) return []
+  if (ev === "tool.result") return [obj.error?.message, obj.error?.human_message].map((v) => [`tool.result:${obj.tool}`, v])
+  if (ev === "tool.invoke") return [[`tool.invoke:${obj.tool}`, obj.args_summary]]
+  if (ev === "message.delta") return [["message.delta", obj.text]]
+  if (ev === "session.error") return [["session.error", obj.message], ["session.error", obj.human_message]]
+  return []
+}
+function leakHits(pairs) {
+  const hits = []
+  for (const [where, v] of pairs) {
+    if (typeof v !== "string" || !v) continue
+    for (const m of v.matchAll(LEAK_RE)) hits.push({ where, match: m[0], ctx: v.slice(Math.max(0, m.index - 60), m.index + 60) })
+  }
+  return hits
+}
+async function sceneMvKeyframes(scene, reasons) {
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const sent = await fetch(`${BASE}/sessions/${sid}/messages`, {
+    method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ content: scene.turns[0] }),
+  })
+  if (!sent.ok && sent.status !== 202) throw new Error(`发消息 http=${sent.status}`)
+  const t0 = Date.now()
+  const capMs = Number(process.env.HUMAN_E2E_MV_MS || 30 * 60 * 1000)
+  const log = { confirms: [], questions: [], videoConfirm: null, aborted: false }
+  let spent = 0, lastNew = Date.now(), seen = 0, stopAt = 0
+  while (Date.now() - t0 < capMs) {
+    await sleep(2000)
+    if (sse.frames.length !== seen) { seen = sse.frames.length; lastNew = Date.now() }
+    for (const frame of sse.frames) {
+      if (frame.handled) continue
+      const { ev, obj } = parseFrame(frame.raw)
+      const rid = obj?.request_id ?? obj?.id
+      if (ev === "confirm.request" && rid) {
+        frame.handled = true
+        const amount = Number(obj?.amount_coins ?? 0)
+        const desc = String(obj?.description || "")
+        const isVideo = /视频|video|\d+\s*秒/i.test(desc)
+        const allow = !isVideo && /图|image/i.test(desc) && amount > 0 && amount <= scene.max_coins_per_confirm && spent + amount <= scene.max_coins
+        await fetch(`${BASE}/sessions/${sid}/confirm`, {
+          method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, approved: allow }),
+        }).catch(() => null)
+        if (allow) spent += amount
+        log.confirms.push({ at: Math.round((Date.now() - t0) / 1000), amount, desc, approved: allow })
+        if (isVideo && !log.videoConfirm) {
+          log.videoConfirm = { amount, desc }
+          const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+          log.aborted = !!ab?.ok
+          stopAt = Date.now() + 15000
+        }
+        lastNew = Date.now()
+      }
+      if (ev === "question.request" && rid) {
+        frame.handled = true
+        const qs = Array.isArray(obj?.questions) ? obj.questions : [{}]
+        const answers = qs.map((q) => {
+          const opts = (Array.isArray(q?.options) ? q.options : []).filter((o) => !/视频|video/i.test(`${o?.label || ""} ${o?.description || ""}`))
+          const pick = opts.find((o) => /关键帧|图|推荐/.test(String(o?.label || ""))) || opts[0]
+          return [pick?.label || "先只做关键帧和音乐，视频先不做"]
+        })
+        log.questions.push({ questions: qs.map((q) => ({ q: q?.question, options: (q?.options || []).map((o) => o?.label) })), answers })
+        await fetch(`${BASE}/sessions/${sid}/question`, {
+          method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, answers }),
+        }).catch(() => null)
+        lastNew = Date.now()
+      }
+    }
+    if (stopAt && Date.now() > stopAt) break
+    const names = eventNames(sse.frames, 0)
+    const raw = sse.frames.map((f) => f.raw).join("\n")
+    const musicDone = /"tool":"music_gen"[^\n]*"ok"|event: audio\.(?:done|failed)/.test(raw) || /music_gen[^\n]*(?:ok|error)/.test(sse.frames.filter((f) => parseFrame(f.raw).ev === "tool.result").map((f) => f.raw).join("\n"))
+    const imgDone = names.includes("image.done")
+    const quiet = Date.now() - lastNew >= QUIET_MS
+    if (quiet && names.includes("turn.done") && imgDone && musicDone) break
+    if (Date.now() - lastNew >= 5 * 60 * 1000) break
+  }
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
+  const pairs = sse.frames.flatMap((f) => { const { ev, obj } = parseFrame(f.raw); return visibleFieldsOf(ev, obj) })
+  const sseHits = leakHits(pairs)
+  const names = eventNames(sse.frames, 0)
+  const imageUrls = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "image.done").map((x) => x.obj?.url)
+  await sse.stop()
+  const hres = await fetch(`${BASE}/sessions/${sid}/messages`, { headers: AUTH })
+  const hist = await hres.json().catch(() => ({}))
+  fs.writeFileSync(path.join(OUT, `${scene.id}.history.json`), JSON.stringify(hist))
+  const histPairs = []
+  for (const m of hist.messages || []) for (const p of m.parts || []) {
+    if (p.type === "tool") histPairs.push([`hist.tool.input:${p.tool}`, p.state?.input], [`hist.tool.error:${p.tool}`, typeof p.state?.error === "string" ? p.state.error : p.state?.error?.message])
+    else if (typeof p.text === "string") histPairs.push([`hist.${m.info?.role}.${p.type}`, p.text])
+  }
+  const histHits = leakHits(histPairs)
+  if (!imageUrls.length) fail(reasons, `${scene.id} 没有 image.done`)
+  if (sseHits.length) fail(reasons, `${scene.id} SSE 用户可见字段命中 ${sseHits.length}`)
+  if (histHits.length) fail(reasons, `${scene.id} 历史端点命中 ${histHits.length}`)
+  return { sid, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
+}
+
 const runners = {
+  "mv-keyframes-no-video": sceneMvKeyframes,
   "image-first-try": sceneImage,
   "quote-before-generate": sceneQuote,
   "same-turn-text": sceneText,
