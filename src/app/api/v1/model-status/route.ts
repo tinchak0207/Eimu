@@ -169,6 +169,12 @@ export async function GET(req: NextRequest) {
       const reason = supplierSignal.reasonByModel[key] ?? "执行侧无可用供应商";
       return { ...withBalance, availability: "unavailable" as const, note: `${reason}，请稍后重试或换其他模型` };
     }
+    // 2026-10-31：探测从 Vercel 出口打上游 /models，yyds 对 Vercel IP 一律 403（同一 key 在 VPS 上 200、
+    // 真实出图 200）。探测面不可达≠执行面不可达：执行侧健康供应商明确可用、且无欠费/熔断信号时，
+    // 以执行侧为准，否则 agent 读到「不可用」就弃用 gpt-image 改走 Blender。
+    if (executionAvailable === true && !balance && model.availability === "unavailable") {
+      return { ...withBalance, availability: "available" as const, note: "执行侧供应商健康可用（探测出口被上游拦截，以控制面为准）" };
+    }
     return withBalance;
   }).map(toPublicModel);
 
