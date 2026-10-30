@@ -50,6 +50,7 @@ export async function emitImageDone(
   cost_coins?: number,
   task_id?: string,
   recipe?: { prompt?: string; model?: string; size?: string; lora?: string },
+  media_kind?: "upload",
 ): Promise<void> {
   if (!url) return
   // Dedup on the RAW url: the same task resolved twice yields two different
@@ -58,7 +59,7 @@ export async function emitImageDone(
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
   const publicUrl = await resolveResultUrl(url, state.apiKey)
-  emitToSession(state, "image.done", { url: publicUrl, cost_coins, task_id, ...(recipe ? { recipe } : {}) })
+  emitToSession(state, "image.done", { url: publicUrl, cost_coins, task_id, ...(recipe ? { recipe } : {}), ...(media_kind ? { media_kind } : {}) })
   // 自动制画布：task 挂过 unit 就更新该 unit 的结果图片节点。
   if (task_id) {
     emitCanvasResult(state, task_id, publicUrl, cost_coins)

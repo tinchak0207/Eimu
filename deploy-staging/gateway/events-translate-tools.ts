@@ -352,8 +352,13 @@ if (status === "pending" || status === "running") {
       if (ok && typeof parsed?.url === "string" && parsed.url.length > 0) {
         // P1-E1：image.done 附带真实配方（prompt/model/size/lora），前端
         // 「存为资产」直接拿，不必再从 transcript 对应。
-        const cfg = st.input != null ? readGenerateInput(st.input) : undefined
-        void emitImageDone(state, parsed.url, parsed.cost_coins, parsed.task_id, cfg ? { prompt: cfg.prompt, model: cfg.model, size: cfg.size, lora: cfg.lora } : undefined)
+        // 2026-10-30：配方只给真的会出图的工具（同 AUTO_CANVAS_TOOLS）。image_upload／
+        // image_get_result 等的 input 没有 prompt/model/size，readGenerateInput 会补成
+        // 「gpt-image-2.5-flare · 1024x1024」假配方——会话 22d9825a 实锤：agent 截帧裁脸
+        // 放大后 image_upload，被冒充成生图。上传类改标 media_kind:"upload"（同 video.done 写法）。
+        const generative = AUTO_CANVAS_TOOLS.has(toolName)
+        const cfg = generative && st.input != null ? readGenerateInput(st.input) : undefined
+        void emitImageDone(state, parsed.url, parsed.cost_coins, parsed.task_id, cfg ? { prompt: cfg.prompt, model: cfg.model, size: cfg.size, lora: cfg.lora } : undefined, toolName === "image_upload" ? "upload" : undefined)
       }
     } else {
       // R1（2026-09-11）刀4：非 image_ 工具的 tool.result 补回填载荷。评测实锤 10 条
