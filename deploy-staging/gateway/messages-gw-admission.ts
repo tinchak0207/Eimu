@@ -291,6 +291,14 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   if (OPENUI_SYSTEM_PROMPT) {
     systemSections.push(systemStaticSection("openui-program", `${OPENUI_SYSTEM_PROMPT}\n\n${OPENUI_USAGE_POLICY}`))
   }
+  // 2026-10-29（R26 拣回）：可核事实必须有依据，全席位生效。规则只在派遣手册里，而手册只在野兽模式注入，
+  // 直聊面压力下会凭记忆背法条、凭目录价报币数；这里用一段短文本兜住所有席位。
+  systemSections.push(
+    systemStaticSection(
+      "evidence-basis",
+      "【可核事实】说具体法条编号或条文、平台政策、版权与商用条款、价格币数之前，要么给本回合的真实工具回执，要么明写「凭已有知识、未核验」。报价先跑 quote_bundle；工具表里没有它就直说没有、没报价，不要凭记忆报数。",
+    ),
+  )
   // 刀2A（2026-09-19）：用户输入越狱/注入闸（权威）。便宜前置过滤＋单次 Jev 呼叫
   // （≤2s，仅可疑输入付此延迟）；任一题 noul>0.8 → 400 拒绝（防越狱不是 LLM 的
   // 决策，AGENTS.md §7 的机器化前置层）。扫描器故障 → 放行（fail-open＝现状）。
