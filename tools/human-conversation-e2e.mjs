@@ -561,7 +561,24 @@ for sid in ids:
                       "fallback_reason": str(out.get("fallback_reason") or "")[:200] or None, "degraded": bool(out.get("degraded")),
                       "error_code": err.get("code") if isinstance(err, dict) else None, "notes": out.get("notes")})
         calls.append(c)
-calls.sort(key=lambda c: c["at"])
+# 子代理 opencode 会话收尾即删、part 不落库：退读 music_gen 自己写的 prompt 链（只在生成成功后落档）。
+seen = {c["session"] for c in calls}
+try:
+    for line in open("/opt/agent-harness/workspace/outputs/music-prompt-chain.jsonl", encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if r.get("session_id") not in ids or r.get("session_id") in seen:
+            continue
+        lyr = r.get("lyrics") or {}
+        calls.append({"session": r["session_id"], "at": r.get("ts"), "status": "completed", "probe": False, "source": "prompt-chain",
+                      "has_lyrics": int(lyr.get("chars") or 0) > 0, "output_parsed": True, "ok": bool(r.get("upstream_titles")),
+                      "channel": r.get("channel"), "fallback_from": r.get("fallback_from"), "fallback_reason": None, "degraded": False,
+                      "error_code": None, "notes": None, "titles": r.get("upstream_titles")})
+except FileNotFoundError:
+    pass
+calls.sort(key=lambda c: str(c["at"]))
 print(json.dumps({"opencode_session": ids[0] if ids else None, "calls": calls, "tts": tts}, ensure_ascii=False))
 `
   const out = await sshPy(code)
