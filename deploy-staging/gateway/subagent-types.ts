@@ -360,6 +360,9 @@ export interface SubagentRun {
   artifacts: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }>
   // 2026-10-05：子代理工具状态帧（subagent.tool）的每 callID 已发状态，防重复刷帧。
   toolStatusEmitted: Map<string, string>
+  // 2026-10-31：子代理 music_gen 投影进父会话画布——已建单元／已落终态的 canvas 键（sub:<run>:<call>）。
+  canvasCalls?: Set<string>
+  canvasSettled?: Set<string>
   // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
   // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
   // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。

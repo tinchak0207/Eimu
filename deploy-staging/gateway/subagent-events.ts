@@ -1,5 +1,5 @@
 import { appendTranscript } from "./subagent-transcript.ts"
-import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask } from "./events-translate.ts"
+import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
@@ -181,6 +181,26 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               appendTranscript(run.id, { t: Date.now(), k: "tool", id: callId, name: toolName, status: frameStatus })
               // C1：工具状态**变化**是实时工作日志档最有价值的时点——节流仍 ≥1000ms。
               writeLiveLog(run)
+            }
+            // 2026-10-31 第 1 刀补口：野兽模式下 music_gen 由 Expert 子代理调用，父会话的 tool 分支看不见 ⇒
+            // 画布从不出音频节点。子代理 music_gen 同样投影进父会话画布；键带 run id，防与父会话 callID 撞号。
+            if (toolName === "music_gen" && part.state?.input != null && wantsAutoCanvas(toolName, part.state.input)) {
+              const canvasKey = `sub:${run.id}:${callId}`
+              if (!parentState.canvasUnitByCall.has(canvasKey) && !run.canvasCalls?.has(canvasKey)) {
+                if (!run.canvasCalls) run.canvasCalls = new Set()
+                run.canvasCalls.add(canvasKey)
+                boundSet(run.canvasCalls, 200)
+                void autoCreateCanvasUnit(parentState, toolName, part.state.input, canvasKey)
+              }
+              if (frameStatus !== "running" && !run.canvasSettled?.has(canvasKey)) {
+                if (!run.canvasSettled) run.canvasSettled = new Set()
+                run.canvasSettled.add(canvasKey)
+                boundSet(run.canvasSettled, 200)
+                const out = parseToolOutput(part.state?.output) as Record<string, unknown> | null
+                const ok = frameStatus === "ok" && out?.ok !== false
+                const err = (out?.error && typeof out.error === "object" ? out.error : { message: typeof part.state?.error === "string" ? part.state.error : "" }) as { code?: unknown; message?: unknown; human_message?: unknown }
+                void settleMusicCanvasUnit(parentState, canvasKey, ok, out, err)
+              }
             }
           }
         }

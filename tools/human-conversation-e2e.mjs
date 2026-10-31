@@ -110,6 +110,25 @@ function eventNames(frames, from) {
   return frames.slice(from).map((f) => parseFrame(f.raw).ev)
 }
 
+// 第 1 刀画布投影：把 cu_* 单元的 created/updated/deleted 帧回放成最终节点状态，只留结果节点。
+function canvasResultNodes(frames) {
+  const nodes = new Map()
+  for (const f of frames) {
+    const { ev, obj } = parseFrame(f.raw)
+    if (!String(obj?.unit_id || "").startsWith("cu_")) continue
+    if (ev === "canvas.node.created" && obj?.node?.id) {
+      const m = obj.node.metadata || {}
+      nodes.set(obj.node.id, { type: obj.node.type, status: m.status, content: m.content || "", result: obj.target_kind === "result", code: null })
+    } else if (ev === "canvas.node.updated" && nodes.has(obj?.node_id)) {
+      const n = nodes.get(obj.node_id), p = obj.patch || {}
+      if (p.status) n.status = p.status
+      if (typeof p.content === "string") n.content = p.content
+      if (p.errorDetails?.code) n.code = p.errorDetails.code
+    } else if (ev === "canvas.node.deleted") nodes.delete(obj?.node_id)
+  }
+  return [...nodes.entries()].filter(([, n]) => n.result).map(([id, n]) => ({ id, ...n }))
+}
+
 async function sshPy(code) {
   const r = spawnSync("ssh", [
     "-i", SSH_KEY, "-p", SSH_PORT, "-o", "ConnectTimeout=12", SSH_TARGET, "python3", "-",
@@ -442,7 +461,7 @@ async function sceneMvKeyframes(scene, reasons) {
       }
     }
     if (!log.videoSubmit) {
-      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && /"kind":"video"/.test(String(obj?.args_summary || "")) })
+      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && !/quote/i.test(String(obj?.tool || "")) && /"kind":"video"/.test(String(obj?.args_summary || "")) })
       if (vf) {
         // 低价视频（≤0.1 币）不弹确认卡，只能从 tool.invoke 看见：立刻中止。
         log.videoSubmit = { at: Math.round((Date.now() - t0) / 1000), args: String(parseFrame(vf.raw).obj?.args_summary || "").slice(0, 200) }
@@ -510,6 +529,8 @@ gw = sqlite3.connect("file:/opt/agent-harness/state/sessions.db?mode=ro", uri=Tr
 row = gw.execute("SELECT opencode_session_id FROM sessions WHERE id=?", (${JSON.stringify(sessionId)},)).fetchone()
 db = sqlite3.connect("file:/opt/agent-harness/workspace/.local/share/opencode/opencode.db?mode=ro", uri=True)
 ids = [row[0]] if row and row[0] else []
+# 网关派遣的子代理是独立 opencode 会话（不挂 parent_id），映射在 subagent_durable_runs。
+ids += [r[0] for r in gw.execute("SELECT child_oc FROM subagent_durable_runs WHERE parent_gw=? AND child_oc IS NOT NULL", (${JSON.stringify(sessionId)},)) if r[0] not in ids]
 i = 0
 while i < len(ids):
     ids += [r[0] for r in db.execute("SELECT id FROM session WHERE parent_id=?", (ids[i],))]
@@ -556,8 +577,8 @@ async function sceneMvVocalSong(scene, reasons) {
   if (!sent.ok && sent.status !== 202) throw new Error(`发消息 http=${sent.status}`)
   const t0 = Date.now()
   const capMs = Number(process.env.HUMAN_E2E_MV_MS || 30 * 60 * 1000)
-  const log = { confirms: [], questions: [], videoConfirm: null, aborted: false }
-  let spent = 0, lastNew = Date.now(), seen = 0, stopAt = 0, lastMusicPoll = 0
+  const log = { confirms: [], questions: [], videoConfirm: null, aborted: false, followups: [] }
+  let spent = 0, lastNew = Date.now(), seen = 0, stopAt = 0, lastMusicPoll = 0, turnIdx = 1
   while (Date.now() - t0 < capMs) {
     await sleep(2000)
     if (sse.frames.length !== seen) { seen = sse.frames.length; lastNew = Date.now() }
@@ -577,13 +598,22 @@ async function sceneMvVocalSong(scene, reasons) {
         }).catch(() => null)
         if (allow) spent += amount
         log.confirms.push({ at: Math.round((Date.now() - t0) / 1000), amount, desc, approved: allow })
-        if (isVideo && !log.videoConfirm) {
-          log.videoConfirm = { amount, desc }
-          const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
-          log.aborted = !!ab?.ok
-          stopAt = Date.now() + 15000
-        }
+        // 视频卡拒绝即可（闸门已挡住扣费），不中止：本场景要等到人声整歌出来。
+        if (isVideo && !log.videoConfirm) log.videoConfirm = { amount, desc }
         lastNew = Date.now()
+      }
+      // 回合收尾仍没碰 music_gen（只报价／问方向）→ 发下一句用户原话推进。
+      if (ev === "turn.done") {
+        frame.handled = true
+        const musicInvoked = sse.frames.some((f) => parseFrame(f.raw).obj?.tool === "music_gen")
+        if (!musicInvoked && turnIdx < scene.turns.length) {
+          const text = scene.turns[turnIdx++]
+          await fetch(`${BASE}/sessions/${sid}/messages`, {
+            method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ content: text }),
+          }).catch(() => null)
+          log.followups.push({ at: Math.round((Date.now() - t0) / 1000), text })
+          lastNew = Date.now()
+        }
       }
       if (ev === "question.request" && rid) {
         frame.handled = true
@@ -610,7 +640,7 @@ async function sceneMvVocalSong(scene, reasons) {
       }
     }
     if (!log.videoSubmit) {
-      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && /"kind":"video"/.test(String(obj?.args_summary || "")) })
+      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && !/quote/i.test(String(obj?.tool || "")) && /"kind":"video"/.test(String(obj?.args_summary || "")) })
       if (vf) {
         // 低价视频（≤0.1 币）不弹确认卡，只能从 tool.invoke 看见：立刻中止。
         log.videoSubmit = { at: Math.round((Date.now() - t0) / 1000), args: String(parseFrame(vf.raw).obj?.args_summary || "").slice(0, 200) }
@@ -674,9 +704,21 @@ async function sceneMvVocalSong(scene, reasons) {
   }
   if ((music.tts || []).length) fail(reasons, `${scene.id} 调用了 audio_first_timeline ${music.tts.length} 次（TTS 冒充演唱）`)
   if (log.videoSubmit) fail(reasons, `${scene.id} 出现视频提交（无确认卡）：${log.videoSubmit.args.slice(0, 80)}`)
+  // 画布投影验收（第 1 刀）：成功的音乐/出图都要落成画布结果节点；音频节点不许转圈；被拒的调用不留节点。
+  const canvas = canvasResultNodes(sse.frames)
+  const audioOk = canvas.filter((n) => n.type === "audio" && n.status === "success" && /^https?:\/\//.test(n.content))
+  if (gens.some((c) => c.ok === true) && audioOk.length < gens.filter((c) => c.ok === true).length) {
+    fail(reasons, `${scene.id} 成功 music_gen ${gens.filter((c) => c.ok === true).length} 次，画布成功音频节点只有 ${audioOk.length}`)
+  }
+  const audioStuck = canvas.filter((n) => n.type === "audio" && n.status === "loading")
+  if (audioStuck.length) fail(reasons, `${scene.id} 画布音频节点卡在生成中：${audioStuck.map((n) => n.id).join(",")}`)
+  const unprojected = imageUrls.filter((u) => u && !canvas.some((n) => n.status === "success" && n.content === u))
+  if (unprojected.length) fail(reasons, `${scene.id} ${unprojected.length} 张出图没投影到画布结果节点`)
+  const rejectedLeft = canvas.filter((n) => /reject|declin/i.test(String(n.code || "")))
+  if (rejectedLeft.length) fail(reasons, `${scene.id} 被拒的调用仍留在画布：${rejectedLeft.map((n) => n.id).join(",")}`)
   if (sseHits.length) fail(reasons, `${scene.id} SSE 用户可见字段命中 ${sseHits.length}`)
   if (histHits.length) fail(reasons, `${scene.id} 历史端点命中 ${histHits.length}`)
-  return { sid, music, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
+  return { sid, music, canvas, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
 }
 
 const runners = {

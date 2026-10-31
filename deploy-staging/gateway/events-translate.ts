@@ -130,7 +130,7 @@ export function triggerIdleStepBreaker(
 }
 export { eventSessionId, boundMap, boundSet, isAssistantMessage, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 export { resolveResultUrl, emitImageDone, registerSessionArtifact, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
-export { canvasUnitId, summarizeCanvasTitle, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, emitCanvasResult } from "./events-translate-canvas.ts"
+export { canvasUnitId, summarizeCanvasTitle, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, emitCanvasResult, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate-canvas.ts"
 export { bashDenyCache, parseBashDenyPatterns, loadBashDenyPatterns, denyGlobToRegExp, denyHintFor, bashDenyAttribution, classifyDenySource, bashDenyProvenance, DENY_AUDIT_PATH, appendDenyAudit, detectShadowedBashDenyRules, logShadowedBashDenyRules } from "./events-translate-deny.ts"
 export { toolErrorPayload, findUploadsByBasename, ABS_PATH_RE, resolveInvisibleUploadPaths, deniedOperationLabel, trackTurnNodeTerminal, workflowStartSchemaHint, handleToolPartUpdate } from "./events-translate-tools.ts"
 export type { AudioDoneMeta, DenySource, DenyProvenance, DenyAuditRecord, ShadowedRule } from "./events-translate-types.ts"
