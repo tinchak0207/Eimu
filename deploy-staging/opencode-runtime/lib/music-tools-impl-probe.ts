@@ -293,14 +293,16 @@ export async function probeMusicChannels(): Promise<{
     c.status === "ready" && !(c.channel === "lyria_gemini" && !hasGeminiStudioApiKey())
   const canVocal = channels.some(vocalCapable)
   const canInstrumental = channels.some((c) => c.status === "ready")
-  // 2026-10-20：探针诚实性——真实路由以 YuE2 为首选，YuE2 瞬时不可达会直接 fail 且不回落，
-  // 此时 first_ready 指向的 FlowMusic／Lyria 并不会接管带歌词的整歌。
+  // 2026-10-31 用户裁定：YuE2 瞬时故障恢复回落（见 music-tools-impl-core 的 generateYue2TrackResilient）。
+  // YuE2 不可用但另有能唱的通路就绪时，带歌词的整歌会由该通路接管出人声（回执写明 fallback_from），
+  // 故人声就绪＝任一能唱的通路就绪；只有全部能唱的通路都不可用才给 blocking_reason。
   const yue2Probe = channels.find((c) => c.channel === "yue2_modal")
-  const yue2RouteBlocked = isYue2ModalEnabled() && yue2Probe !== undefined && yue2Probe.status !== "ready"
-  const vocalReady = canVocal && !yue2RouteBlocked
-  const blockingReason = yue2RouteBlocked
-    ? `YuE2 当前${yue2Probe.label}，而真实路由以 YuE2 为首选且瞬时故障不回落：带歌词的整歌会直接失败，FlowMusic2API／Lyria 不会接管。纯器乐或不带歌词的短档仍可走 ${firstReady ?? "无可用通路"}。`
-    : null
+  const yue2Down = isYue2ModalEnabled() && yue2Probe !== undefined && yue2Probe.status !== "ready"
+  const vocalReady = canVocal
+  const blockingReason =
+    yue2Down && !canVocal
+      ? `YuE2 当前${yue2Probe.label}，且没有其他能出人声的通路就绪：带歌词的整歌暂时做不了。纯器乐仍可走 ${firstReady ?? "无可用通路"}。`
+      : null
   return {
     channels,
     can_generate_vocal_song: canVocal,

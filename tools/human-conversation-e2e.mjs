@@ -502,8 +502,186 @@ async function sceneMvKeyframes(scene, reasons) {
   return { sid, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
 }
 
+// 主会话＋全部子代理的 music_gen／audio_first_timeline 调用（SSE 只给子代理工具状态，参数与回执要从 opencode 库取）。
+async function musicGenFacts(sessionId) {
+  const code = `
+import json, sqlite3
+gw = sqlite3.connect("file:/opt/agent-harness/state/sessions.db?mode=ro", uri=True)
+row = gw.execute("SELECT opencode_session_id FROM sessions WHERE id=?", (${JSON.stringify(sessionId)},)).fetchone()
+db = sqlite3.connect("file:/opt/agent-harness/workspace/.local/share/opencode/opencode.db?mode=ro", uri=True)
+ids = [row[0]] if row and row[0] else []
+i = 0
+while i < len(ids):
+    ids += [r[0] for r in db.execute("SELECT id FROM session WHERE parent_id=?", (ids[i],))]
+    i += 1
+calls, tts = [], []
+for sid in ids:
+    for (t, d) in db.execute("SELECT time_created, data FROM part WHERE session_id=? AND (data LIKE '%music_gen%' OR data LIKE '%audio_first_timeline%') ORDER BY time_created", (sid,)):
+        j = json.loads(d)
+        if j.get("type") != "tool":
+            continue
+        st = j.get("state") or {}
+        if j.get("tool") == "audio_first_timeline":
+            tts.append({"session": sid, "at": t, "status": st.get("status")})
+            continue
+        if j.get("tool") != "music_gen":
+            continue
+        inp = st.get("input") or {}
+        out = None
+        try:
+            out = json.loads(st.get("output") or "")
+        except Exception:
+            pass
+        c = {"session": sid, "at": t, "status": st.get("status"), "probe": inp.get("probe") in (True, "true"),
+             "has_lyrics": bool(str(inp.get("lyrics") or "").strip()), "output_parsed": isinstance(out, dict)}
+        if isinstance(out, dict):
+            err = out.get("error") or {}
+            c.update({"ok": out.get("ok"), "channel": out.get("channel"), "fallback_from": out.get("fallback_from"),
+                      "fallback_reason": str(out.get("fallback_reason") or "")[:200] or None, "degraded": bool(out.get("degraded")),
+                      "error_code": err.get("code") if isinstance(err, dict) else None, "notes": out.get("notes")})
+        calls.append(c)
+calls.sort(key=lambda c: c["at"])
+print(json.dumps({"opencode_session": ids[0] if ids else None, "calls": calls, "tts": tts}, ensure_ascii=False))
+`
+  const out = await sshPy(code)
+  return JSON.parse(out.trim().split("\n").pop())
+}
+
+async function sceneMvVocalSong(scene, reasons) {
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const sent = await fetch(`${BASE}/sessions/${sid}/messages`, {
+    method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ content: scene.turns[0] }),
+  })
+  if (!sent.ok && sent.status !== 202) throw new Error(`发消息 http=${sent.status}`)
+  const t0 = Date.now()
+  const capMs = Number(process.env.HUMAN_E2E_MV_MS || 30 * 60 * 1000)
+  const log = { confirms: [], questions: [], videoConfirm: null, aborted: false }
+  let spent = 0, lastNew = Date.now(), seen = 0, stopAt = 0, lastMusicPoll = 0
+  while (Date.now() - t0 < capMs) {
+    await sleep(2000)
+    if (sse.frames.length !== seen) { seen = sse.frames.length; lastNew = Date.now() }
+    for (const frame of sse.frames) {
+      if (frame.handled) continue
+      const { ev, obj } = parseFrame(frame.raw)
+      const rid = obj?.request_id ?? obj?.id
+      if (ev === "confirm.request" && rid) {
+        frame.handled = true
+        const amount = Number(obj?.amount_coins ?? 0)
+        const desc = String(obj?.description || "")
+        const isMusic = /音乐|music|歌/i.test(desc)
+        const isVideo = /视频|video/i.test(desc) || (!isMusic && /\d+\s*秒/.test(desc))
+        const allow = !isVideo && (/图|image/i.test(desc) || isMusic) && amount > 0 && amount <= scene.max_coins_per_confirm && spent + amount <= scene.max_coins
+        await fetch(`${BASE}/sessions/${sid}/confirm`, {
+          method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, approved: allow }),
+        }).catch(() => null)
+        if (allow) spent += amount
+        log.confirms.push({ at: Math.round((Date.now() - t0) / 1000), amount, desc, approved: allow })
+        if (isVideo && !log.videoConfirm) {
+          log.videoConfirm = { amount, desc }
+          const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+          log.aborted = !!ab?.ok
+          stopAt = Date.now() + 15000
+        }
+        lastNew = Date.now()
+      }
+      if (ev === "question.request" && rid) {
+        frame.handled = true
+        const qs = Array.isArray(obj?.questions) ? obj.questions : [{}]
+        const answers = qs.map((q) => {
+          const all = Array.isArray(q?.options) ? q.options : []
+          const txt = (o) => `${o?.label || ""} ${o?.description || ""}`
+          const VIDEO_RE = /视频|video|动态|运镜|镜头.{0,4}段|\d+\s*段/i
+          const EXPLICIT_NO = /不要(?:动态镜头|动态|视频)|不做视频|去掉视频|只做(?:静帧|图|关键帧)/
+          const planHasVideo = VIDEO_RE.test(String(q?.question || ""))
+          const noVideo = all.filter((o) => EXPLICIT_NO.test(txt(o)) || (!planHasVideo && !VIDEO_RE.test(txt(o))))
+            .filter((o) => !/只做歌|画面暂停|不要画面/.test(txt(o)))
+          let pick = noVideo.find((o) => /不要(?:动态镜头|视频)|不做视频|去掉视频/.test(txt(o))) || noVideo.find((o) => /关键帧|图|推荐/.test(String(o?.label || ""))) || noVideo[0]
+          let how = "no-video"
+          if (!pick && all.length) { pick = all.map((o) => ({ o, c: optionCoins(o) ?? Infinity })).sort((a, b) => a.c - b.c)[0].o; how = "smallest" }
+          log.pickHow = how
+          return [pick?.label || "先只做关键帧和音乐，视频先不做"]
+        })
+        log.questions.push({ questions: qs.map((q) => ({ q: q?.question, options: (q?.options || []).map((o) => o?.label) })), answers })
+        await fetch(`${BASE}/sessions/${sid}/question`, {
+          method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, answers }),
+        }).catch(() => null)
+        lastNew = Date.now()
+      }
+    }
+    if (!log.videoSubmit) {
+      const vf = sse.frames.find((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "tool.invoke" && /"kind":"video"/.test(String(obj?.args_summary || "")) })
+      if (vf) {
+        // 低价视频（≤0.1 币）不弹确认卡，只能从 tool.invoke 看见：立刻中止。
+        log.videoSubmit = { at: Math.round((Date.now() - t0) / 1000), args: String(parseFrame(vf.raw).obj?.args_summary || "").slice(0, 200) }
+        const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+        log.aborted = !!ab?.ok
+        stopAt = Date.now() + 10000
+      }
+    }
+    if (stopAt && Date.now() > stopAt) break
+    // 等到非 probe 的 music_gen 结果落库（主会话或音乐子代理），再静 QUIET_MS 就收。
+    const musicSeen = sse.frames.some((f) => { const { ev, obj } = parseFrame(f.raw); return /^audio\.(?:done|failed)$/.test(ev) || (obj?.tool === "music_gen" && (ev === "tool.result" || (ev === "subagent.tool" && obj?.status !== "running"))) })
+    if (!stopAt && musicSeen && Date.now() - lastMusicPoll >= 20000) {
+      lastMusicPoll = Date.now()
+      const facts = await musicGenFacts(sid).catch(() => null)
+      if (facts?.calls?.some((c) => !c.probe && c.output_parsed)) {
+        stopAt = Date.now() + QUIET_MS
+        log.musicResultAt = Math.round((Date.now() - t0) / 1000)
+      }
+    }
+    if (Date.now() - lastNew >= 5 * 60 * 1000) break
+  }
+  if (!log.aborted) {
+    const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
+    log.aborted = !!ab?.ok
+    await sleep(3000)
+  }
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
+  // delta 帧是逐 token 碎片，逐帧扫会漏掉跨帧的命中：同类 delta 先拼接再扫。
+  const DELTA = new Set(["message.delta", "reasoning.delta", "subagent.delta"])
+  const joined = {}
+  const pairs = sse.frames.flatMap((f) => {
+    const { ev, obj } = parseFrame(f.raw)
+    if (DELTA.has(ev)) { joined[ev] = (joined[ev] || "") + (typeof obj?.text === "string" ? obj.text : ""); return [] }
+    return visibleFieldsOf(ev, obj)
+  })
+  for (const [ev, text] of Object.entries(joined)) pairs.push([ev, text])
+  const reasoningHits = leakHits(pairs.filter(([w]) => w === "reasoning.delta"))
+  const sseHits = leakHits(pairs.filter(([w]) => w !== "reasoning.delta"))
+  const names = eventNames(sse.frames, 0)
+  const imageUrls = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "image.done").map((x) => x.obj?.url)
+  await sse.stop()
+  const hres = await fetch(`${BASE}/sessions/${sid}/messages`, { headers: AUTH })
+  const hist = await hres.json().catch(() => ({}))
+  fs.writeFileSync(path.join(OUT, `${scene.id}.history.json`), JSON.stringify(hist))
+  const histPairs = []
+  for (const m of hist.messages || []) for (const p of m.parts || []) {
+    if (p.type === "tool") histPairs.push([`hist.tool.input:${p.tool}`, p.state?.input], [`hist.tool.error:${p.tool}`, typeof p.state?.error === "string" ? p.state.error : p.state?.error?.message])
+    else if (typeof p.text === "string") histPairs.push([`hist.${m.info?.role}.${p.type}`, p.text])
+  }
+  const histReasoningHits = leakHits(histPairs.filter(([w]) => /\.reasoning$/.test(w)))
+  const histHits = leakHits(histPairs.filter(([w]) => !/\.reasoning$/.test(w)))
+  // 人声整歌断言（2026-10-31 回退 bug：yue2_unreachable 未回落 → 器乐版＋TTS 念白冒充演唱）。
+  const music = await musicGenFacts(sid).catch((e) => ({ error: String(e?.message || e), calls: [], tts: [] }))
+  const gens = (music.calls || []).filter((c) => !c.probe)
+  const vocalOk = gens.find((c) => c.ok === true && c.has_lyrics && !c.degraded)
+  const unreachableIdx = gens.findIndex((c) => c.error_code === "yue2_unreachable")
+  if (music.error) fail(reasons, `${scene.id} 取 music_gen 记录失败：${music.error}`)
+  if (!vocalOk) fail(reasons, `${scene.id} 没有带歌词的成功 music_gen（${gens.map((c) => `${c.ok ? "ok" : c.error_code || "fail"}${c.has_lyrics ? "+词" : "+器乐"}`).join("，") || "无调用"}）`)
+  if (unreachableIdx >= 0 && !gens.slice(unreachableIdx + 1).some((c) => c.ok === true && c.has_lyrics && c.fallback_from)) {
+    fail(reasons, `${scene.id} 出现 yue2_unreachable 且其后没有成功回落`)
+  }
+  if ((music.tts || []).length) fail(reasons, `${scene.id} 调用了 audio_first_timeline ${music.tts.length} 次（TTS 冒充演唱）`)
+  if (log.videoSubmit) fail(reasons, `${scene.id} 出现视频提交（无确认卡）：${log.videoSubmit.args.slice(0, 80)}`)
+  if (sseHits.length) fail(reasons, `${scene.id} SSE 用户可见字段命中 ${sseHits.length}`)
+  if (histHits.length) fail(reasons, `${scene.id} 历史端点命中 ${histHits.length}`)
+  return { sid, music, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
+}
+
 const runners = {
   "mv-keyframes-no-video": sceneMvKeyframes,
+  "mv-vocal-song": sceneMvVocalSong,
   "image-first-try": sceneImage,
   "quote-before-generate": sceneQuote,
   "same-turn-text": sceneText,

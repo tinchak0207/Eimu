@@ -67,6 +67,20 @@
         "做一个Billboard级别的MV, 邓紫棋风格"
       ],
       "stop_after_first_image_ms": 30000
+    },
+    {
+      "id": "mv-vocal-song",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 90,
+      "max_coins_per_confirm": 80,
+      "cap_note": "暴君原话会走关键帧＋音乐＋视频。批准图片确认卡和音乐确认卡；视频确认卡一律拒绝并中止会话。等到 music_gen 的结果回来就收工。验的是 YuE2 不可用时带歌词的整歌回落 FlowMusic 出人声（回执带 fallback_from），不退成器乐版、不拿 audio_first_timeline（TTS）念白冒充演唱。",
+      "source": {
+        "session": "ses_e7211ef0dffe7S6KleX7YB4F1Q"
+      },
+      "turns": [
+        "做一个Billboard级别的MV, 邓紫棋风格"
+      ]
     }
   ]
 }

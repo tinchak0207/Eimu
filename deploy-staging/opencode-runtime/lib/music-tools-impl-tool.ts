@@ -21,7 +21,7 @@ export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
     // <harness-only>
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 vocal_generation_ready 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。YuE2 的**瞬时**不可用（HTTP 429 繁忙／服务不可达／请求超时）会自动退避重试同一通路（间隔 5s/15s），仍失败则如实报错（错误码 yue2_busy／yue2_unreachable 等）且不回落、不扣费；只有 YuE2 的**硬失败**（上游语义错误等）才按优先序回落下一通路。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。",
+    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 vocal_generation_ready 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。YuE2 失败时自动按优先序回落下一通路（带歌词＝下一通路照样出人声整歌）：繁忙（HTTP 429）先退避重试同一通路（间隔 5s/15s），服务不可达／请求超时不重试、直接交给下一通路；回落成功的回执 channel 是实际通路，并带 fallback_from／fallback_reason 与 notes 人话，须如实转告用户换了通路。带 abc 或 source_audio 的委托不回落（如实报错）。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。",
     // </harness-only>
   args: {
     probe: {
@@ -87,7 +87,7 @@ export const musicGenTool: MusicToolDef = {
           title: report.vocal_generation_ready
             ? `音乐通路可用（${report.first_ready}）`
             : report.blocking_reason
-              ? "人声整歌暂不可用（YuE2 不回落）"
+              ? "人声整歌暂不可用"
               : report.can_generate_instrumental
                 ? `仅纯器乐可用（${report.first_ready}），不能出人声歌曲`
                 : "音乐通路全部不可用",
@@ -298,9 +298,11 @@ export const musicGenTool: MusicToolDef = {
       // 委托语义，agent 拿到的是一首语义无关的歌却以为编辑已生效——比直接失败更糟
       //（诚实铁律：能力不匹配要如实报错，绝不静默降级）。
       // 2026-09-19 片 O 同款：带 source_audio（翻唱）的委托抛错同样不回落。
-      // 2026-10-11 例外（本日事故）：YuE2 的**瞬时**故障（429 busy／服务不可达／超时）不回落，
-      // 见上方 generateYue2TrackResilient——按退避重试同一通路，穷尽后如实 fail（未扣费）。
-      // 硬失败（语义错误等）才走这条回落链，行为不变。
+      // 2026-10-31 用户裁定（事故 ses_e7211ef0dffe7S6KleX7YB4F1Q）：YuE2 的**瞬时**故障
+      //（不可达／超时／busy 退避后仍忙）同样并入这条回落链。10-11 曾改成「瞬时不回落」，
+      // 起因是静默换付费通路扣费；病根是**静默**而非回落——回落后回执必须明说换了通路
+      //（fallback_from／fallback_reason／channel＋notes 人话），带歌词的委托由下一通路出人声整歌。
+      // 重试口径见 core 的 generateYue2TrackResilient（只有 busy 退避，不可达／超时首败即交棒）。
       const hasScoreSemantics = abc !== undefined || sourceAudioRaw !== undefined
       const lyriaEnabled = hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
       const channelChain: Array<"yue2" | "flowmusic" | "lyria"> = []
@@ -313,6 +315,7 @@ export const musicGenTool: MusicToolDef = {
       let fallbackFrom: string | null = null
       let fallbackReason: string | null = null
       const channelFailures: string[] = []
+      let yue2TransientCodeSeen: string | null = null
       for (let i = 0; i < channelChain.length; i += 1) {
         const channel = channelChain[i]
         activeChannel = channel
@@ -343,9 +346,13 @@ export const musicGenTool: MusicToolDef = {
                 : await generateLyriaTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
           break
         } catch (e) {
-          // YuE2 瞬时故障穷尽：不回落、直接如实 fail（未扣费）。硬失败与其余通路走既有回落链。
-          if (e instanceof Yue2TransientExhaustedError) return fail(e.code, e.message, { human_message: e.humanMessage })
+          // YuE2 瞬时失败：带乐谱语义（abc／翻唱）或已无下一通路 → 如实 fail（未扣费）；
+          // 否则与硬失败一样并入回落链（记 channelFailures／fallbackFrom／fallbackReason）。
+          if (e instanceof Yue2TransientExhaustedError && (hasScoreSemantics || i === channelChain.length - 1)) {
+            return fail(e.code, e.message, { human_message: e.humanMessage })
+          }
           if (hasScoreSemantics) throw e
+          if (e instanceof Yue2TransientExhaustedError) yue2TransientCodeSeen = e.code
           if (i === channelChain.length - 1) {
             // 单通路失败照旧抛原错误；多通路全灭则每一路原因都要在回执里看得见。
             if (channelFailures.length === 0) throw e
@@ -509,6 +516,18 @@ export const musicGenTool: MusicToolDef = {
       // 人话回执（2026-10-04 F-06／220）：把规则层「动了什么」用人能懂的话带出，
       // 不只丢内部 tag（使用者看不到 agent 的 tool part 细节，这条要 agent 能直接转述）。
       const notes: string[] = []
+      // 回落如实告知（2026-10-31）：YuE2 主通路失败、最终通路仍出人声整歌时，给 agent 一句可直接转述的人话。
+      if (fallbackFrom === "yue2_modal" && lyrics && degradedReasons.length === 0) {
+        const why =
+          yue2TransientCodeSeen === "yue2_busy"
+            ? "繁忙"
+            : yue2TransientCodeSeen === "yue2_timeout"
+              ? "响应超时"
+              : yue2TransientCodeSeen !== null
+                ? "连不上"
+                : "出错"
+        notes.push(`人声主通路暂时${why}，这首已换另一条通路做成带人声的整歌。`)
+      }
       if (strippedLyrics.hadTimestamp && activeChannel !== "lyria") {
         notes.push(
           "歌词里的时间码（如 [0:00 - 0:10]）这次没有送进模型——当前通路不认时间码，已按段落标签处理（[Verse]/[Chorus] 等原样保留），除时间码外的歌词文字未改动。",
