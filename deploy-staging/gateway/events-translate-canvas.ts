@@ -286,7 +286,8 @@ function createMusicCanvasUnit(state: SessionState, input: unknown, callID: stri
   const audioNode = {
     id: `${unitId}-audio`,
     type: "audio",
-    title: "音乐生成中…",
+    // 前端 reducer 的 updated 只合并 metadata、不改 title：标题用中性的「音乐」，进度交给状态徽标（成功后不再挂「生成中…」）。
+    title: "音乐",
     position: { x: 0, y: 0 },
     width: 340,
     height: 240,
