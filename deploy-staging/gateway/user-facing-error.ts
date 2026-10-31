@@ -83,6 +83,9 @@ function redactForLog(raw: string): string {
 }
 
 function reasonOf(raw: string): string {
+  if (/heredoc write target cannot be statically determined/i.test(raw)) {
+    return "这个写法不被允许：heredoc（cat > 文件 <<EOF）在当前环境无法静态确认落点。改用 python3 -c 内联脚本、printf 重定向，或者直接用写文件工具"
+  }
   if (/plan mode|计划模式|权限求值|fail-closed/i.test(raw)) return "运行时的安全检查暂时不可用，写入类操作被保守拦下"
   const cls = classifyUpstreamError(raw).class
   const byClass = CLASS_REASON[cls]

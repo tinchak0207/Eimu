@@ -85,6 +85,11 @@ export function noteToolInFlight(state: SessionState, part: any): void {
     m.delete(callId)
   }
 }
+/** 该 session 当前是否有工具在跑（in-flight）。中段停滞哨据此区分「工具在跑」与「turn 冻结」。 */
+export function hasInFlightTool(state: SessionState): boolean {
+  const m = inFlightToolsBySession.get(state.sessionId)
+  return !!m && m.size > 0
+}
 /** 取出并清空该 session 的孤儿候选（failover 消费一次；正常 turn 结束亦清，防泄漏）。 */
 export function takeInFlightTools(state: SessionState): OrphanToolUse[] {
   const m = inFlightToolsBySession.get(state.sessionId)

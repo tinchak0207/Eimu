@@ -305,6 +305,8 @@ export interface SessionState {
   midturnStallTimer?: ReturnType<typeof setTimeout> | null
   /** 中段停滞哨是否已重投过一次（防风暴，每 turn 一次）。volatile。 */
   midturnStallRetried?: boolean
+  /** R31：工具 in-flight 导致的中段等待次数（用于最终诚实收尾的上限判定）。 */
+  midturnInFlightWaits?: number
   /** 本轮是否为恢复轮（watchdog 重投/redrive/中段哨重投）——收尾兜底结语用。 */
   recoveryRound?: boolean
   // ── R4-A（2026-08-28）：三死线修复的新增状态（全部 volatile，不进持久化白名单）──

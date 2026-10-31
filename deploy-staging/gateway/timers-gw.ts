@@ -9,7 +9,7 @@
 // emitRecoveryClosingIfSilent/isInterrogativeMessage/releasePendingVideoWorkflows）
 // （原 index.ts 5821–6368 行，逐行原样搬运）。
 import type { SessionState } from "./types-gateway.ts"
-import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
+import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, MIDTURN_INFLIGHT_MAX_WAITS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
 import { sessions, markDirty, isRestoredGatewayTurn } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { personaPatienceMul } from "./sessions-http.ts"
@@ -17,6 +17,7 @@ import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
+import { hasInFlightTool } from "./opencode-event-handler-hooks.ts"
 // 2026-10-04 W：看门狗/心跳等守卫家族固定文案的书写体镜像已整体拆除——一律简体。
 // TODO(整合 Wave3)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build
 // 对未 export 的 named import 报错，已实测 2026-09-19）。依第一阶段占位符法（记忆
@@ -131,6 +132,9 @@ export function clearMidturnStallTimer(state: SessionState): void {
   if (state.midturnStallTimer) {
     clearTimeout(state.midturnStallTimer)
     state.midturnStallTimer = null
+    // R31：撤哨（含 session.idle 收尾 / 新一轮布防）＝本轮结束，工具在途等待计数一并清零。
+    // 只在真有活计时器时清：回调内自续时计时器已先置 null，等待次数不会被抹掉。
+    state.midturnInFlightWaits = 0
   }
 }
 
@@ -148,8 +152,24 @@ export function armMidturnStallTimer(state: SessionState): void {
     if (cur.pendingQuestions.size > 0 || cur.pendingConfirms.size > 0) return
     const last = cur.turnLastFrameAt ?? 0
     if (!(last > 0 && Date.now() - last >= MIDTURN_STALL_MS)) {
+      cur.midturnInFlightWaits = 0 // R31：已有真实新帧＝不在工具等待链上
       armMidturnStallTimer(cur) // 还有帧进来：滚动续盯，直到 idle 撤哨
       return
+    }
+    // R31（2026-10-31）：工具在跑 ≠ turn 冻结。长工具（ffmpeg／numpy 扫整段音频）从
+    // tool.invoke 到 tool.result 零帧，实测被误判成中段冻结后重投（用户消息重复注入、
+    // 模型从头上跑）再收起 turn，成品归零。工具在途期间只发进度心跳并续等；绝不重投。
+    if (hasInFlightTool(cur)) {
+      const waits = (cur.midturnInFlightWaits ?? 0) + 1
+      cur.midturnInFlightWaits = waits
+      if (waits <= MIDTURN_INFLIGHT_MAX_WAITS) {
+        console.log(`[gateway] R5-C midturn-stall: tool in flight, waiting (${waits}/${MIDTURN_INFLIGHT_MAX_WAITS}) — session=${cur.sessionId}`)
+        emitToSession(cur, "turn.status", { text: "这一步还在跑，我继续等，好了就回你。" })
+        armMidturnStallTimer(cur)
+        return
+      }
+      // 超过上限仍不重投（重投＝用户消息重复注入＋双跑）：跳过第一咬，直接落如实收尾。
+      cur.midturnStallRetried = true
     }
     if (!cur.midturnStallRetried) {
       // ── 第一咬：告警 + 单次重投（复用 watchdog 模式）──
@@ -191,6 +211,7 @@ export function armMidturnStallTimer(state: SessionState): void {
     })
     emitToSession(cur, "turn.done", {})
     cur.lastTurnActiveAt = 0
+    cur.midturnInFlightWaits = 0 // R31：回合已收尾，等待计数不留给下一轮
     markDirty(cur)
   }, MIDTURN_STALL_MS)
 }
