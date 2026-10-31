@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { initPersistence, saveSession, loadSessionById, loadSessionByOpencodeId, deleteSessionRow, hydrateRow } from "./persistence"
-import { forgetCriticPassState, forgetSessionWorkspaceState } from "./subagent"
+import { forgetCriticPassState, forgetSessionWorkspaceState, stopSubagentsForParent } from "./subagent"
 import type { SessionState } from "./types-gateway.ts"
 import { OPENCODE_URL, UPLOADS_DIR, RESTORED_TURN_NOTICE_MS, RESTORED_TURN_REAP_MS } from "./constants-gateway.ts"
 import { lastOcActivityAt, liveChildCount } from "./session-activity.ts"
@@ -571,6 +571,8 @@ export function teardownSession(id: string, state: SessionState, reason: string,
 export async function handleDeleteSession(key: string, id: string): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+  // 删除会话后父代理不再存在，残留子代理会继续重试上游（2026-11-01 实测：删除后仍跑 attempt 1/7→3/7）。
+  const stopped = stopSubagentsForParent(id, "user", "会话已删除，子代理一并停止")
   teardownSession(id, state, "deleted")
   await deleteOpencodeSession(state.opencodeSessionId)
   const delUploadDir = path.join(UPLOADS_DIR, state.sessionId)
@@ -579,6 +581,6 @@ export async function handleDeleteSession(key: string, id: string): Promise<Resp
       console.error(`[gateway] upload cleanup error for ${id}:`, e)
     })
   }
-  console.log(`[gateway] session deleted: ${id}`)
+  console.log(`[gateway] session deleted: ${id} (subagents stopped: ${stopped})`)
   return Response.json({ ok: true })
 }
