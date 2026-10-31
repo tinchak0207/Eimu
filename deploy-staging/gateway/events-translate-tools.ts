@@ -25,7 +25,7 @@ import { canvasResultNodeId } from "./canvas-cascade-state.ts"
 import { MODEL_SELF_FIX_CODE, isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
-import { AUTO_CANVAS_TOOLS, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask } from "./events-translate-canvas.ts"
+import { readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, wantsAutoCanvas, settleMusicCanvasUnit, settleCanvasUnitWithoutTask } from "./events-translate-canvas.ts"
 import { bashDenyAttribution, bashDenyProvenance, appendDenyAudit } from "./events-translate-deny.ts"
 import type { DenyProvenance } from "./events-translate-types.ts"
 /**
@@ -258,7 +258,7 @@ if (status === "pending" || status === "running") {
     })
     // 自动制画布：image_* 工具首次建立画布单元。deepseek 完全不知道——
     // 它只是提交请求，gateway 拦截参数自动建文本/配置/图片节点。
-    if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId) && st.input != null) {
+    if (st.input != null && wantsAutoCanvas(toolName, st.input) && !state.canvasUnitByCall.has(callId)) {
       void autoCreateCanvasUnit(state, toolName, st.input, callId)
     }
   } else if (status === "completed") {
@@ -273,7 +273,10 @@ if (status === "pending" || status === "running") {
         args_summary: visibleToolArgs(toolName, st.input),
       })
       // 同上：跑到 completed 才见到 input 的工具（理论上不会，但保险起见）。
-      if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId)) {
+      // 无 task_id 的同步拒绝（ok:false）不补建：没提交的调用不留节点。
+      const early = parseToolOutput(st.output) as { ok?: unknown; task_id?: unknown } | null
+      const syncRejected = early !== null && typeof early === "object" && early.ok === false && !(typeof early.task_id === "string" && early.task_id)
+      if (wantsAutoCanvas(toolName, st.input) && !state.canvasUnitByCall.has(callId) && (toolName === "music_gen" || !syncRejected)) {
         void autoCreateCanvasUnit(state, toolName, st.input, callId)
       }
     }
@@ -337,6 +340,9 @@ if (status === "pending" || status === "running") {
       // 自动制画布：submit 完成后把 task_id 挂回 unit，完成事件才够关联。
       if (ok && typeof parsed?.task_id === "string" && parsed.task_id) {
         attachCanvasTask(state, callId, parsed.task_id)
+      } else if (!ok && !(typeof parsed?.task_id === "string" && parsed.task_id) && wantsAutoCanvas(toolName, st.input)) {
+        // 同步拒绝（未拿到 task_id）：画布单元不能永远 loading——拒收删单元，提交未知置 error。
+        void settleCanvasUnitWithoutTask(state, callId, toolErr, false)
       }
       emitToSession(state, "tool.result", {
         tool: toolName,
@@ -418,6 +424,8 @@ if (status === "pending" || status === "running") {
           if (bits.length) quoteSummary = bits.join("，")
         }
       }
+      // 音乐上画布：music_gen 同步回执即终态，按 callId 回写音频节点（probe 未建单元 ⇒ 无操作）。
+      if (toolName === "music_gen") void settleMusicCanvasUnit(state, callId, ok, parsedObj, toolErr)
       const subagentTimeout = toolName === "subagent_dispatch" && !ok && /超过预定时间/.test(toolErr?.message ?? "")
       emitToSession(state, "tool.result", {
         tool: toolName,
@@ -494,6 +502,14 @@ if (status === "pending" || status === "running") {
         : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : "tool failed"
+    // 生成工具抛错收尾（提交结果未知）：已铺的单元结果节点置 error＋人话原因，不留转圈节点。
+    if (wantsAutoCanvas(toolName, st.input)) {
+      const aborted = /\b(aborted?|cancel(?:led|ed) by user|interrupted by user)\b/i.test(message)
+      const canvasErr = { code: aborted ? "aborted" : "tool_error", message, human_message: aborted ? "本次生成已中止。" : humanMessageFor(message) }
+      if (toolName === "music_gen") void settleMusicCanvasUnit(state, callId, false, null, canvasErr)
+      // 自修提示（`…未提交。`）＝确定没提交 ⇒ 按拒收删单元；其余抛错提交结果未知 ⇒ 置 error。
+      else void settleCanvasUnitWithoutTask(state, callId, canvasErr, !isModelSelfFixError(message))
+    }
     // 2026-10-31：自修判定只看工具 throw 的原文（下方 deny/workflow_start 改写之前）。
     const rawToolMessage = message
     // 0919 断点②修复：question 工具以 aborted 收尾≠用户中止——是 orchestrator

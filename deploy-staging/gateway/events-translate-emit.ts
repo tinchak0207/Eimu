@@ -119,6 +119,10 @@ export async function emitVideoDone(
   registerSessionArtifact(state, { url, kind: media_kind === "film" ? "film" : "video", task_id })
   // 影片/成片 content 已是绝对公开 URL，无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "video.done", { url, cost_coins, task_id, media_kind })
+  // 自动制画布：与 emitImageDone 同构——task 挂过 unit（image_generate kind:"video"）就回写结果节点，否则永远转圈。
+  if (task_id) {
+    emitCanvasResult(state, task_id, url, cost_coins)
+  }
   void appendLedgerFor(state, {
     kind: "video",
     event: "done",
