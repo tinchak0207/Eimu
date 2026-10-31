@@ -2,7 +2,7 @@
 import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
 import { createHash } from "node:crypto"
-import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, UPLOADS_DIR } from "./constants-gateway.ts"
+import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, AUDIO_UPLOAD_MAX_BYTES, AUDIO_UPLOAD_EXTS, UPLOADS_DIR } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 export function sanitizeUploadName(raw: string): string | null {
@@ -114,11 +114,15 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     const planned: { file: File; safeName: string }[] = []
     for (const file of files) {
       if (!(file instanceof File)) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
-      if (file.size > UPLOAD_MAX_BYTES) {
-        return jsonError(413, "file exceeds 4MB limit", "payload_too_large", "payload_too_large")
-      }
       // 无 filename 的 part 会让 file.name 为 undefined；此处统一按空名处理，避免 path.extname 抛错。
       const rawName = typeof file.name === "string" ? file.name : ""
+      // 音频走单独的 50MB 上限：4MB 只够 23 秒立体声 WAV，音乐素材（翻唱/参考/粗剪）根本传不上来。
+      const isAudio = AUDIO_UPLOAD_EXTS.has(path.extname(rawName).toLowerCase())
+      const maxBytes = isAudio ? AUDIO_UPLOAD_MAX_BYTES : UPLOAD_MAX_BYTES
+      if (file.size > maxBytes) {
+        const mb = Math.round(maxBytes / (1024 * 1024))
+        return jsonError(413, `file exceeds ${mb}MB limit`, "payload_too_large", "payload_too_large")
+      }
       const safeName = sanitizeUploadName(rawName)
       if (!safeName) {
         return jsonError(400, `disallowed file type: ${path.extname(rawName)}`, "bad_request", "bad_request")

@@ -260,6 +260,10 @@ export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
 export const TTS_AUDIO_DIR = path.join(WORKSPACE_DIR, "tts-audio")
 export const TTS_PUBLIC_BASE = (process.env.TTS_PUBLIC_BASE || "https://store.tinchak0207.xyz/agent/v1/audio").replace(/\/+$/, "")
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024 // 4MB per file
+// 音频单独放宽（2026-10-31 实测：10.9MB 的 62 秒 WAV 被 4MB 闸挡下，音乐用户传不了自己的素材）。
+// 4MB 对立体声 WAV 只够 23 秒；视频已有 100MB 直传，音频给到 50MB（约 4.7 分钟 CD 质量 WAV）。
+export const AUDIO_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+export const AUDIO_UPLOAD_EXTS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"])
 export const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（浏览器原片直传）
 export const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])
 export const ALLOWED_UPLOAD_EXTS = new Set([
