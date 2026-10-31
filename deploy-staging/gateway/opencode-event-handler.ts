@@ -145,6 +145,10 @@ export function handleOpencodeEvent(event: any): void {
         state.pendingCompact = true
         console.warn(`[gateway] context-overflow upstream error → pendingCompact=1 — session=${state.sessionId}`)
       }
+      // 上游报错或引擎重启（含 OOM 被杀）后，在跑的工具不会再回 tool.result，
+      // in-flight 表必须清掉，否则中段停滞哨会把「工具还在跑」当成常态一直等下去
+      // （2026-10-31 实测：opencode 被 OOM 杀后幽灵 in-flight 让 turn 多等了 6 分钟以上）。
+      clearInFlightTools(state)
       emitSessionError(state, opencodeErrorCode(err), errMessage)
       return
     }

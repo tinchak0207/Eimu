@@ -89,7 +89,8 @@ export const MIDTURN_STALL_MS = Number.parseInt(process.env.MIDTURN_STALL_MS || 
 // R31（2026-10-31）：工具在跑时不算冻结。单次 bash（ffmpeg／numpy 扫 20 分钟音频）超过 90 秒
 // 是音乐类任务的常态，实测会被中段停滞哨误判、重投并最终收起 turn，成品归零。
 // 工具 in-flight 期间改为发进度心跳并续等，最多 MIDTURN_INFLIGHT_MAX_WAITS 次后仍按诚实收尾处理。
-export const MIDTURN_INFLIGHT_MAX_WAITS = Number.parseInt(process.env.MIDTURN_INFLIGHT_MAX_WAITS || "12", 10) || 12
+// 6 次 × 90 秒 ≈ 9 分钟，给真正的长工具（ffmpeg 扫整段音频）留足余量，同时不让人干等 18 分钟。
+export const MIDTURN_INFLIGHT_MAX_WAITS = Number.parseInt(process.env.MIDTURN_INFLIGHT_MAX_WAITS || "6", 10) || 6
 // R8-B 工单 #3（2026-08-29）：question pending 心跳周期——pending 期间每 30s
 // 一帧用户可见心跳（R8 实锤：question 卡后 129s 零帧死寂）。
 export const QUESTION_HEARTBEAT_MS = Number.parseInt(process.env.QUESTION_HEARTBEAT_MS || "30000", 10) || 30_000
