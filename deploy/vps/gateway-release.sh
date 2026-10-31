@@ -229,6 +229,8 @@ gateway_prepare() {
   maintenance_begin "${12}"
   drain_gate "${@:8:6}"
   # 维护/共享锁已持有；recent 时间窗不能替代执行端真实空闲。
+  # --force（暴君 2026-10-31「给我强行发布」）：跳过执行端空闲检查，在途回合由耐久续接处理。
+  if [ "$8" = "1" ]; then echo "OPENCODE_IDLE_SKIPPED (--force)"; else
   sudo python3 - <<'PY'
 import base64, json, subprocess, urllib.request
 pid = subprocess.check_output(['systemctl', 'show', 'agent-gateway', '-p', 'MainPID', '--value'], text=True).strip()
@@ -243,6 +245,7 @@ if active:
     raise SystemExit('OPENCODE_NOT_IDLE: activation refused count=' + str(active))
 print('OPENCODE_IDLE_CONFIRMED under maintenance and activation lock')
 PY
+  fi
 }
 
 gateway_identity() {
