@@ -48,29 +48,74 @@ export function writeCachedAgentSettings(settings: AgentSettings): void {
 }
 
 /**
- * 挂载时回读网关设定：网关为准，缺项用默认。任何失败（未登录 / 网关不可达 /
- * 响应形状不对）静默回默认值 —— 设定不可用不能挡聊天。永不 reject。
+ * 设定读写结果（2026-10-31 修复「默认值覆盖服务端」）：失败是显式状态，不再伪装成默认值。
+ * 旧实现 GET 失败静默回 DEFAULT_AGENT_SETTINGS，调用方把它写进缓存，随后任意改动把整份
+ * 默认值 POST 回网关 ⇒ 用户账号 beast_mode 等栏位被默认值覆盖（10-29 17:19:28 SGT 实案）。
  */
-export async function getAgentSettings(): Promise<AgentSettings> {
-  try {
-    const data = await agentFetch("/api/agent/settings", { method: "GET" });
-    return sanitizeAgentSettings(data);
-  } catch {
-    return { ...DEFAULT_AGENT_SETTINGS };
-  }
+export type AgentSettingsResult =
+  | { ok: true; settings: AgentSettings }
+  | { ok: false; message: string };
+
+function settingsErrorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error && e.message ? e.message : fallback;
 }
 
 /**
- * 保存设定：先把合并结果写进本地缓存（立即生效，send 下一拍就能读到），
- * 再异步持久化到网关；网络失败静默 —— 本地已经生效，不打扰对话。
+ * 回读网关设定：成功＝网关为准（缺项用默认）；失败（未登录 / 网关不可达 / 响应形状不对）
+ * 回 `{ ok: false }`——调用方**不得**把失败当成默认值写缓存或拿来保存。永不 reject。
  */
-export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<void> {
-  const merged = sanitizeAgentSettings({ ...readCachedAgentSettings(), ...patch });
-  writeCachedAgentSettings(merged);
+export async function getAgentSettings(): Promise<AgentSettingsResult> {
   try {
-    await agentFetch("/api/agent/settings", { method: "POST", body: JSON.stringify(merged) });
-  } catch {
-    // 持久化失败不上抛：设定是体验增强，不是对话的前置条件。
+    const data = await agentFetch("/api/agent/settings", { method: "GET" });
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { ok: false, message: "设置读取失败" };
+    }
+    return { ok: true, settings: sanitizeAgentSettings(data) };
+  } catch (e) {
+    return { ok: false, message: settingsErrorMessage(e, "设置读取失败") };
+  }
+}
+
+/** 只保留 patch 里显式给出且合法的栏位（patch 语义：未改的栏位一个字不发）。 */
+function sanitizeAgentSettingsPatch(patch: Partial<AgentSettings>): Partial<AgentSettings> {
+  const full = sanitizeAgentSettings(patch);
+  const out: Partial<AgentSettings> = {};
+  for (const k of Object.keys(patch) as (keyof AgentSettings)[]) {
+    if (!(k in full) || patch[k] === undefined) continue;
+    // 非法值（sanitize 后与原值不同）直接丢弃，不拿默认值顶替。
+    if (k === "beast_mode" ? typeof patch[k] !== "boolean" : full[k] !== patch[k]) continue;
+    (out as Record<string, unknown>)[k] = full[k];
+  }
+  return out;
+}
+
+/**
+ * 保存设定（patch 语义）：只 POST 用户改动的栏位，网关读旧值合并，未改栏位不会被默认值覆盖。
+ * 先乐观写本地缓存（send 下一拍就读得到）；网关失败则**回滚缓存**并回 `{ ok: false }`，
+ * 由调用方给用户可见提示——不再静默。成功以网关回的整份合并结果刷新缓存。永不 reject。
+ */
+export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<AgentSettingsResult> {
+  const clean = sanitizeAgentSettingsPatch(patch);
+  if (Object.keys(clean).length === 0) return { ok: false, message: "设置无效，未保存" };
+  const prevRaw = typeof window === "undefined" ? null : (() => {
+    try { return window.localStorage.getItem(AGENT_SETTINGS_STORAGE_KEY); } catch { return null; }
+  })();
+  writeCachedAgentSettings({ ...readCachedAgentSettings(), ...clean });
+  try {
+    const data = await agentFetch("/api/agent/settings", { method: "POST", body: JSON.stringify(clean) });
+    const merged = sanitizeAgentSettings({ ...readCachedAgentSettings(), ...(data as object), ...clean });
+    writeCachedAgentSettings(merged);
+    return { ok: true, settings: merged };
+  } catch (e) {
+    if (typeof window !== "undefined") {
+      try {
+        if (prevRaw === null) window.localStorage.removeItem(AGENT_SETTINGS_STORAGE_KEY);
+        else window.localStorage.setItem(AGENT_SETTINGS_STORAGE_KEY, prevRaw);
+      } catch {
+        // 隐私模式：回滚失败只影响冷启动初值。
+      }
+    }
+    return { ok: false, message: settingsErrorMessage(e, "保存失败") };
   }
 }
 
@@ -99,6 +144,19 @@ export function inferAgentThinkingLevel(settings: AgentSettings): AgentThinkingL
     }
   }
   return null;
+}
+
+/**
+ * 服务端设定 → 档位（对账用，服务端为准）：四档表命中直接用；组合不在表里时按
+ * beast_mode > persona > cost_mode 就近归档（只决定显示，不改写 settings）。
+ */
+export function serverAgentThinkingLevel(settings: AgentSettings): AgentThinkingLevel {
+  const exact = inferAgentThinkingLevel(settings);
+  if (exact) return exact;
+  if (settings.beast_mode) return "extreme";
+  if (settings.persona === "thoughtful") return "high";
+  if (settings.cost_mode === "economy") return "low";
+  return "medium";
 }
 
 /** 读取显式保存的思考级别（无记录 / 脏数据 → null）。 */

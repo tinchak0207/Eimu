@@ -687,7 +687,7 @@ if (req.method === "GET" && pathname === "/agent/v1/sessions") {
 }
 
 // S7（2026-08-29）：用户级 settings（key 维度，持久化 sessions.db，重启不丢）。
-// GET 无记录回默认值 steer/efficient/balanced；POST 同 shape 部分更新，
+// GET 无记录回默认值 steer/efficient/balanced；POST 同 shape 部分更新（读旧值合并，缺栏保持旧值），
 // 未知栏位/非法值一律 400，不静默吞。
 if (req.method === "GET" && pathname === "/agent/v1/settings") {
   return Response.json({ ...normalizeUserSettings(loadUserSettings(key)), beast_mode: loadUserSettings(key)?.beast_mode === true })
@@ -710,9 +710,12 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
       return jsonError(400, `invalid settings field: ${k}`, "bad_request", "bad_request")
     }
   }
-  const next: UserSettingsShape = { ...normalizeUserSettings(loadUserSettings(key)), ...(body as Partial<UserSettingsShape>) }
-  // beast_mode sanitize：显式栏位放行（显式列出、缺栏=保持现值；枚举白名单会剥布林栏）。
+  const prev = loadUserSettings(key)
+  const next: UserSettingsShape = { ...normalizeUserSettings(prev), ...(body as Partial<UserSettingsShape>) }
+  // beast_mode：显式布尔放行；缺栏＝保持旧值（2026-10-31 修复：normalizeUserSettings 会剥布尔栏，
+  // 旧码缺栏走 delete ⇒ 任何不带 beast_mode 的部分保存都把已开启的野兽模式抹成 OFF）。
   if (typeof body.beast_mode === "boolean") next.beast_mode = body.beast_mode
+  else if (prev?.beast_mode === true) next.beast_mode = true
   else delete next.beast_mode
   saveUserSettings(key, next)
   return Response.json(next)

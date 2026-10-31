@@ -472,6 +472,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
       // 的意义），也不要在停点外多问（其余环节自动，决策第 1 条）。
       adaptLines.push("【互动模式】协作模式：逐步确认。系统会在三个停点真的停下等你批准——剧本批准（出人物资产前）、资产确认（主演三视图出来后、进分镜前）、分镜确认（渲染关键帧前）；停点由系统机制执行，你只需要在停点前后如实说明「已暂停，等待确认」。已批准后系统会自动从断点续跑（已完成节点沿用产物、不重跑不重复扣费），你不要为此再发起整包授权或重复弹扣费确认；停点之外（预演/关键帧/配音/视频/成片等）按计划自动推进，不要额外逐项询问。用户驳回停点时，停下等他指定怎么改，不要擅自重新生成或擅自花钱。")
     }
+    adaptLines.push(`【野兽模式】野兽模式：${loadUserSettings(key)?.beast_mode === true ? "开" : "关"}`)
     appendSystemPayloadToTurnTail(state, promptBody, adaptLines.join("\n"), "【本轮设置·真实状态】", { id: "settings", priority: 5 })
     // ── 野兽模式（MOE 改革，2026-09-08）：Orchestrator 派工协议注入 ──────────
     // settings.beast_mode（布林，缺=false）ON 时：把派遣手册全文＋Expert 注册表

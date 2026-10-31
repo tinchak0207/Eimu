@@ -82,4 +82,6 @@ export {
   readCachedAgentThinkingLevel,
   writeCachedAgentThinkingLevel,
   resolveAgentThinkingLevel,
+  serverAgentThinkingLevel,
+  type AgentSettingsResult,
 } from "./agent-chat-client/settings";

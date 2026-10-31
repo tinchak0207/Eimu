@@ -11,8 +11,9 @@
 // 状态管理三层（保留）：
 // 1. localStorage 缓存（agent-settings-v1）是 send() 的即时数据源——改设定先写
 //    缓存，下一拍发送就读得到，不等网络；
-// 2. 挂载时 GET 回读合并（网关为准，缺项用默认），失败静默——设定不可用不挡聊天；
-// 3. 改值走 saveAgentSettings：写缓存 + 异步持久化到网关，网络失败不打扰对话。
+// 2. 挂载时 GET 回读（网关为准，缺项用默认）；失败显式标记「读取失败」，**不写缓存、
+//    不允许基于默认值保存**（2026-10-31：旧实现把失败默认值写缓存后整份 POST 覆盖服务端）；
+// 3. 改值走 saveAgentSettings：只发改动栏位（patch），失败回滚并在弹层内提示。
 //
 // 样式：lg-sheet 小卡，定位写法与历史记录 dropdown 一致（absolute top-full right-0
 // z-50），点外面收起。
@@ -51,21 +52,41 @@ export function AgentSettingsPopover() {
   // 初值直接吃本地缓存：弹层打开立即是用户上次的值，不等网络。
   const [settings, setSettings] = useState<AgentSettings>(() => readCachedAgentSettings());
   const rootRef = useRef<HTMLDivElement | null>(null);
+  /** 网关回读状态：只有 ok 才允许改值保存；error 时显示「设置读取失败，重试」。 */
+  const [loadState, setLoadState] = useState<"loading" | "ok" | "error">("loading");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const aliveRef = useRef(true);
 
-  // 挂载时 GET 回读合并：网关为准，缺项用默认；失败 getAgentSettings 静默回
-  // 默认值——设定不可用不能挡聊天。回读结果落缓存，send() 下一拍就读得到
-  // （persona / cost_mode / beast_mode 由思考级别菜单消费，本层不再显示它们）。
-  useEffect(() => {
-    let alive = true;
-    void getAgentSettings().then((remote) => {
-      if (!alive) return;
-      setSettings(remote);
-      writeCachedAgentSettings(remote);
+  // 回读：网关为准，成功才落缓存（send() 下一拍就读得到）；失败不写缓存、不顶默认值。
+  const reload = useCallback((): void => {
+    setLoadState("loading");
+    void getAgentSettings().then((res) => {
+      if (!aliveRef.current) return;
+      if (!res.ok) {
+        setLoadState("error");
+        return;
+      }
+      setSettings(res.settings);
+      writeCachedAgentSettings(res.settings);
+      setLoadState("ok");
     });
-    return () => {
-      alive = false;
-    };
   }, []);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    reload();
+    return () => {
+      aliveRef.current = false;
+    };
+  }, [reload]);
+
+  // 每次打开弹层都再对账一次（读失败过的也借此自动重试）。
+  useEffect(() => {
+    if (open) {
+      setSaveError(null);
+      reload();
+    }
+  }, [open, reload]);
 
   // 开着时点外面就收——与历史记录 dropdown 同一条规矩（pointerdown + contains）。
   // 例外：「我的技能」对话框已 portal 到 document.body（2026-10-04），不再是 rootRef 子树，
@@ -84,11 +105,22 @@ export function AgentSettingsPopover() {
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, [open]);
 
-  /** 改一项：本地立即生效（saveAgentSettings 内部先写缓存）+ 异步持久化到网关。 */
+  /** 改一项：未读到服务端设定时拒绝保存；保存只发这一栏，失败回滚并提示。 */
   const update = useCallback((p: Partial<AgentSettings>): void => {
-    void saveAgentSettings(p);
-    setSettings((prev) => ({ ...prev, ...p }));
-  }, []);
+    if (loadState !== "ok") return;
+    const before = settings;
+    setSettings({ ...before, ...p });
+    setSaveError(null);
+    void saveAgentSettings(p).then((res) => {
+      if (!aliveRef.current) return;
+      if (res.ok) {
+        setSettings(res.settings);
+        return;
+      }
+      setSettings(before);
+      setSaveError("保存失败，未生效");
+    });
+  }, [loadState, settings]);
 
   const interactionIndex = Math.max(0, INTERACTION_MODES.indexOf(settings.interaction_mode));
 
@@ -152,7 +184,7 @@ export function AgentSettingsPopover() {
                 <span className="text-ios-footnote font-medium text-foreground">互动模式</span>
                 <span className="text-ios-caption1 font-medium text-ios-blue">{INTERACTION_TIERS[interactionIndex]}</span>
               </div>
-              <div className="relative mt-2 flex h-5 items-center">
+              <div className={`relative mt-2 flex h-5 items-center${loadState !== "ok" ? " opacity-40" : ""}`}>
                 <div className="h-1.5 w-full rounded-full bg-black/[0.12]" />
                 <div
                   className="absolute h-1.5 rounded-full bg-ios-blue"
@@ -166,8 +198,9 @@ export function AgentSettingsPopover() {
                   value={interactionIndex}
                   aria-label="互动模式"
                   aria-valuetext={INTERACTION_TIERS[interactionIndex]}
+                  disabled={loadState !== "ok"}
                   onChange={(e) => update({ interaction_mode: INTERACTION_MODES[Number(e.target.value)] ?? "preset" })}
-                  className="absolute inset-0 h-5 w-full cursor-pointer appearance-none bg-transparent focus:outline-none [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-moz-range-track]:h-5 [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)]"
+                  className="absolute inset-0 h-5 w-full cursor-pointer appearance-none disabled:cursor-not-allowed bg-transparent focus:outline-none [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)] [&::-moz-range-track]:h-5 [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.3)]"
                 />
               </div>
               {/* 三个刻度点：当前档位点亮。 */}
@@ -180,6 +213,19 @@ export function AgentSettingsPopover() {
                 ))}
               </div>
               <p className="mt-1 text-ios-caption2 leading-relaxed text-foreground/45">{INTERACTION_HINTS[INTERACTION_MODES[interactionIndex]]}</p>
+              {loadState === "error" && (
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <span className="text-ios-caption2 leading-relaxed text-ios-red">设置读取失败，暂不能修改</span>
+                  <button
+                    type="button"
+                    onClick={reload}
+                    className="cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue transition-colors hover:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
+              {saveError && <p className="mt-1 text-ios-caption2 leading-relaxed text-ios-red">{saveError}</p>}
             </div>
           </div>
         </div>

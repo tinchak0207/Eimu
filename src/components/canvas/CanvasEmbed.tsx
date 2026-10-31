@@ -341,11 +341,11 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     return () => window.removeEventListener("keydown", onKey);
   }, [historyOpen]);
 
-  /** 档位回读（网关为准，失败静默落预设——与 getAgentSettings 自身契约一致，永不 reject）。 */
+  /** 档位回读（网关为准；读取失败保持当前值，不拿默认值顶替——getAgentSettings 永不 reject）。 */
   useEffect(() => {
     let cancelled = false;
-    void getAgentSettings().then((settings) => {
-      if (!cancelled) setInteractionMode(settings.interaction_mode);
+    void getAgentSettings().then((res) => {
+      if (!cancelled && res.ok) setInteractionMode(res.settings.interaction_mode);
     });
     return () => {
       cancelled = true;

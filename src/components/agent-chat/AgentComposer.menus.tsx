@@ -16,9 +16,13 @@ import {
   AGENT_THINKING_LEVEL_LABELS,
   AGENT_THINKING_LEVELS,
   agentThinkingLevelPatch,
+  getAgentSettings,
   readCachedAgentSettings,
+  readCachedAgentThinkingLevel,
   resolveAgentThinkingLevel,
   saveAgentSettings,
+  serverAgentThinkingLevel,
+  writeCachedAgentSettings,
   writeCachedAgentThinkingLevel,
   type AgentThinkingLevel,
 } from "@/lib/agent-chat-client";
@@ -199,7 +203,9 @@ export function MenuOptionRow({
  * 状态归属：沿用设定既有的 localStorage 缓存 + 网关持久化链路——
  *   · 读：显式级别记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
  *   · 写：writeCachedAgentThinkingLevel（跨重载保留）+ saveAgentSettings(三栏 patch)
- *     （既有唯一写入者；interrupt_mode 由合并语义原样保留）。不另开 store。
+ *     （既有唯一写入者；只发三栏 patch，其余栏位由网关读旧值合并保留）。不另开 store。
+ *   · 对账（2026-10-31）：挂载与每次打开都 GET 网关，服务端为准回写本地档位；本地记的是
+ *     「极限」而服务端 beast_mode≠true 时在面板顶部提示；保存失败回滚并重新打开面板提示。
  *
  * 交互：真 button 元素（Tab 可达 / Enter / Space 可开），Esc 关，焦点环走 --ring 主题，
  * 点击外部收起（与历史 dropdown / 设定弹层同一条 outside-click 规矩）。
@@ -212,11 +218,50 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   // 展开面板已 portal 到 document.body（见 AnchoredMenuPanel），座标由此共用 hook 量测。
   const { panelRef, coords } = useAnchoredPanel(open, rootRef);
+  /** 面板顶部提示：warn＝本地与服务端不一致；error＝读/写失败（retry 显示「重试」）。 */
+  const [notice, setNotice] = useState<{ tone: "warn" | "error"; text: string; retry?: boolean } | null>(null);
+  const aliveRef = useRef(true);
+  /** 保存在途时不让对账结果覆盖用户刚选的档。 */
+  const savingRef = useRef(0);
+
+  // 与网关对账：服务端为准，回写本地 settings 缓存与档位记录。
+  const reconcile = useCallback((): void => {
+    void getAgentSettings().then((res) => {
+      if (!aliveRef.current || savingRef.current > 0) return;
+      if (!res.ok) {
+        setNotice({ tone: "error", text: "设置读取失败，档位可能不准", retry: true });
+        return;
+      }
+      writeCachedAgentSettings(res.settings);
+      const local = readCachedAgentThinkingLevel();
+      const server = serverAgentThinkingLevel(res.settings);
+      if (local === "extreme" && res.settings.beast_mode !== true) {
+        setNotice({
+          tone: "warn",
+          text: `服务端未开启野兽模式，实际按「${AGENT_THINKING_LEVEL_LABELS[server]}」运行；重选「极限」即可开启`,
+        });
+      } else {
+        // 只清掉「读取失败」（带 retry）；保存失败与不一致提示留到用户重新选档。
+        setNotice((prev) => (prev?.retry ? null : prev));
+      }
+      writeCachedAgentThinkingLevel(server);
+      setLevel(server);
+    });
+  }, []);
 
   useEffect(() => {
-    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到显示「中」。
+    aliveRef.current = true;
+    // 挂载后先用本地即时显示（显式记录优先，否则由缓存 settings 反推），再与网关对账。
     setLevel(resolveAgentThinkingLevel(readCachedAgentSettings()));
-  }, []);
+    reconcile();
+    return () => {
+      aliveRef.current = false;
+    };
+  }, [reconcile]);
+
+  useEffect(() => {
+    if (open) reconcile();
+  }, [open, reconcile]);
 
   // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
   // 面板在 portal（document.body）内、不在 rootRef 子树，所以两棵树都要算「里面」。
@@ -243,12 +288,23 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   }, [open]);
 
   const pick = useCallback((next: AgentThinkingLevel): void => {
+    const prev = level;
     setLevel(next);
+    setNotice(null);
     writeCachedAgentThinkingLevel(next);
-    // 既有唯一写入者：saveAgentSettings 合并当前缓存 + 三栏 patch（interrupt_mode 不动）。
-    void saveAgentSettings(agentThinkingLevelPatch(next));
     setOpen(false);
-  }, []);
+    savingRef.current += 1;
+    // 既有唯一写入者：saveAgentSettings 只发三栏 patch（其余栏位网关读旧值合并）。
+    void saveAgentSettings(agentThinkingLevelPatch(next)).then((res) => {
+      savingRef.current -= 1;
+      if (!aliveRef.current || res.ok) return;
+      // 保存失败：回滚档位并重新打开面板给出可见提示，不再静默。
+      setLevel(prev);
+      writeCachedAgentThinkingLevel(prev);
+      setNotice({ tone: "error", text: `保存失败，仍为「${AGENT_THINKING_LEVEL_LABELS[prev]}」，请重试` });
+      setOpen(true);
+    });
+  }, [level]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -273,8 +329,8 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`思考级别：${label}（低/中/高/极限）`}
-        title={`思考级别：${label}（低/中/高/极限）`}
+        aria-label={`思考级别：${label}（低/中/高/极限）${notice ? `，${notice.text}` : ""}`}
+        title={notice ? notice.text : `思考级别：${label}（低/中/高/极限）`}
         className={cn(
           // 2026-10-03 暴君定案：收起态＝脑图标＋级别字＋小 chevron，零框零底零影零胶囊，
           // 与同排「+」「↑」同一套无框语汇（旧的白底细边玻璃胶囊已删）。
@@ -291,7 +347,7 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
       >
         {/* lucide Brain（与同排 Plus / ArrowUp 同一套家族图标，风格统一）。装饰用，对辅助技术隐藏。 */}
         <Brain className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
-        <span className="whitespace-nowrap text-ios-footnote font-medium">{label}</span>
+        <span className={cn("whitespace-nowrap text-ios-footnote font-medium", notice && "text-ios-orange")}>{label}</span>
         {/* 尾端小 chevron：展开时 rotate-180（纯 transform，零 layout shift）。 */}
         <ChevronDown
           className={cn(
@@ -303,6 +359,22 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
       </button>
       {open && (
         <AnchoredMenuPanel panelRef={panelRef} coords={coords} ariaLabel="思考级别">
+          {notice && (
+            <div className="flex max-w-[17rem] items-start justify-between gap-2 px-2.5 py-2">
+              <p role="status" className={cn("text-ios-caption2 leading-snug", notice.tone === "error" ? "text-ios-red" : "text-ios-orange")}>
+                {notice.text}
+              </p>
+              {notice.retry && (
+                <button
+                  type="button"
+                  onClick={reconcile}
+                  className="shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue transition-colors hover:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+                >
+                  重试
+                </button>
+              )}
+            </div>
+          )}
           {AGENT_THINKING_LEVELS.map((lv) => (
             <MenuOptionRow
               key={lv}
