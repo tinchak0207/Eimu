@@ -20,7 +20,7 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText, stripOutboundFeed, stripOutboundFlush, type PartStripState } from "./outbound-sanitize.ts"
-import { scrubVisibleFrame } from "./delivery-gate-scrub.ts"
+import { scrubVisibleFrame, OPT_HARNESS_PATH_RE } from "./delivery-gate-scrub.ts"
 import { isModelSelfFixError, visibleToolError } from "./user-facing-error.ts"
 import { parseToolOutput } from "./events-translate-core.ts"
 import { visibleToolArgs } from "./humanize-gw.ts"
@@ -233,6 +233,8 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 而历史端点是用户可见通道（SSE 干净、只有此处漏）。凭证一律抹为空串
               // （不换成「已移除」字样：不在用户正文里发明文字）。
               text = text.replace(GW_TOKEN_RE, "")
+              // 编排注入的 user 消息（子代理轮询/唤醒指令）会带工作区绝对路径；用户本人不会输入这个前缀。
+              if (info.role === "user") text = text.replace(OPT_HARNESS_PATH_RE, "（内部存档）")
               if (info.role !== "user") text = t2sVisibleText(text)
               // 剥离后为空串：该 text part 的内容全部是网关注入（无 text part 的罕见分支里，
               // nudge 以标记开头被整段截掉）——整块丢弃，避免前端渲染出空气泡。

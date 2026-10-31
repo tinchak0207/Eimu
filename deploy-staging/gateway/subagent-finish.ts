@@ -10,7 +10,7 @@ import { HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, isShellTool, SUMMARY_MAX_CHARS,
 import { fireSubagentHook, deps, byParent, byChildOc, completed, resumable, pendingCriticTargets, deliveredByParent, noteDurableTerminalRetry, CRITIC_PENDING_CAP, parentStateOf, boundMap, removeFromRegistries } from "./subagent-runs.ts"
 import { oldestPendingTool, persistRunOutput, childUsageSnapshot } from "./subagent-liveness.ts"
 import { dispatchAttempt } from "./subagent-attempt.ts"
-import { maybeDrainCriticQueue } from "./subagent-events.ts"
+import { maybeDrainCriticQueue, settleOpenSubagentCanvas } from "./subagent-events.ts"
 import { writeLiveLog, appendTranscriptEnd } from "./subagent-live.ts"
 import { deliverChildTurn, findRunById, forkResultDeliveryTarget } from "./subagent-messages.ts"
 import { checkPendingResumeQueue } from "./subagent-suspend.ts"
@@ -135,6 +135,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   const softStop = run.softStopping
   run.softStopping = undefined
   run.status = status
+  settleOpenSubagentCanvas(run)
   // CC 2.1.302 结果契约：usage 必须随完成通知/status 返回。summarizeChild 路径已算过；
   // 超时/上游错误等收尾路径在此补一次（幂等：已有值不重算）。
   if (!run.usage) run.usage = await childUsageSnapshot(run)

@@ -40,6 +40,8 @@ const INTERNAL_ENDPOINT_URL_RE =
 const BARE_LOOPBACK_RE = /(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?|localhost:\d+/gi
 
 /** F11：内部路径 / 源码路径行号 / runId / token 计数——用户可见文字里出现即泄漏。 */
+// 2026-10-31：子代理回执的 artifact_path 等绝对工作区路径（e2e 6117e082 subagent.done 实锤外泄）。
+export const OPT_HARNESS_PATH_RE = /\/opt\/agent-harness\/[^\s`"'，。；、（）()「」\[\]]+/g
 const INTERNAL_PATH_RE = /outputs\/subagent\/[^\s`"'）)】]*|\.opencode\/[^\s`"'）)】]*/gi
 const SOURCE_REF_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|json|md):\d+(?::\d+)?/gi
 const RUN_ID_RE = /\brunId\b[\s:：=]*[0-9a-zA-Z_-]*/gi
@@ -475,7 +477,7 @@ export function scrubVisibleFrame(name: string, data: unknown, where?: string): 
   const at = where ? `${name} ${where}` : name
   if (name === "subagent.done") {
     if (typeof d.summary !== "string") return data
-    const cleaned = scrubSubagentPayload(d.summary)
+    const cleaned = scrubSubagentPayload(d.summary).replace(OPT_HARNESS_PATH_RE, "（内部存档）")
     return cleaned === d.summary ? data : { ...d, summary: cleaned }
   }
   if (name === "subagent.delta") {

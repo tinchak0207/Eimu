@@ -363,6 +363,8 @@ export interface SubagentRun {
   // 2026-10-31：子代理 music_gen 投影进父会话画布——已建单元／已落终态的 canvas 键（sub:<run>:<call>）。
   canvasCalls?: Set<string>
   canvasSettled?: Set<string>
+  // 子代理正文增量出站清洗状态（stripOutboundFeed 的跨帧扣留）。
+  deltaStrip?: { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; hi?: string }
   // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
   // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
   // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。

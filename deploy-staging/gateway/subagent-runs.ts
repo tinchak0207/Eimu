@@ -9,7 +9,7 @@ import type { TypedArtifact, ScratchpadEntry, SubagentRun, SubagentResult, Subag
 import { COMPLETED_TTL_MS, SUBAGENT_SOFT_STOP_GRACE_MS, userFacingSubagentLabel, partialBodyOf, unrefTimer, isOpenCodeSessionId } from "./subagent-types.ts"
 import { emitSubagentCompletedStatus } from "./subagent-finish.ts"
 import { startLivenessWatch, persistRunOutput } from "./subagent-liveness.ts"
-import { maybeDrainCriticQueue } from "./subagent-events.ts"
+import { maybeDrainCriticQueue, settleOpenSubagentCanvas } from "./subagent-events.ts"
 import { writeLiveLog, appendTranscriptEnd } from "./subagent-live.ts"
 import { deliverChildTurn } from "./subagent-messages.ts"
 import { checkPendingResumeQueue } from "./subagent-suspend.ts"
@@ -303,6 +303,7 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   removeFromRegistries(run)
   // 硬停是另一条终态路径（不经 finishRun）→ 同样触发 SubagentStop。
   fireSubagentHook("SubagentStop", run, { status: "stopped", stopped_by: by, reason: text.slice(0, 2000) })
+  settleOpenSubagentCanvas(run)
   // 修 1：停止也释放槽位——补跑被挤掉的 critic 与挂起队列。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   checkPendingResumeQueue(run.parentGatewaySessionId)

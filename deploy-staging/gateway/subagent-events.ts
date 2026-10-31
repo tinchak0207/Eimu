@@ -1,4 +1,5 @@
 import { appendTranscript } from "./subagent-transcript.ts"
+import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
@@ -114,7 +115,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // G3（2026-10-10）：reasoning 增量不再转发父会话——评测 A/B/C 数万～十几万
           // subagent.delta 主因是英文思考洪流；存活感已由 turn.status 心跳覆盖。正文 delta 照常。
           if (!hideBody && kind !== "reasoning") {
-            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: p.delta })
+            emitSubagentDelta(parentState, run, p.delta)
             appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(p.delta) })
           } else if (hideBody && kind !== "reasoning" && run.transcriptHideNoted !== true) {
             run.transcriptHideNoted = true
@@ -184,13 +185,16 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
             }
             // 2026-10-31 第 1 刀补口：野兽模式下 music_gen 由 Expert 子代理调用，父会话的 tool 分支看不见 ⇒
             // 画布从不出音频节点。子代理 music_gen 同样投影进父会话画布；键带 run id，防与父会话 callID 撞号。
-            if (toolName === "music_gen" && part.state?.input != null && wantsAutoCanvas(toolName, part.state.input)) {
+            const canvasInput = part.state?.input
+            // input 在 pending 阶段是空对象（probe 也认不出）：等带参数的 running/终态再建单元。
+            const inputReady = canvasInput != null && typeof canvasInput === "object" && Object.keys(canvasInput).length > 0
+            if (toolName === "music_gen" && inputReady && wantsAutoCanvas(toolName, canvasInput)) {
               const canvasKey = `sub:${run.id}:${callId}`
               if (!parentState.canvasUnitByCall.has(canvasKey) && !run.canvasCalls?.has(canvasKey)) {
                 if (!run.canvasCalls) run.canvasCalls = new Set()
                 run.canvasCalls.add(canvasKey)
                 boundSet(run.canvasCalls, 200)
-                void autoCreateCanvasUnit(parentState, toolName, part.state.input, canvasKey)
+                void autoCreateCanvasUnit(parentState, toolName, canvasInput, canvasKey)
               }
               if (frameStatus !== "running" && !run.canvasSettled?.has(canvasKey)) {
                 if (!run.canvasSettled) run.canvasSettled = new Set()
@@ -266,7 +270,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           const suffix = part.text.slice(emittedLen)
           // G3：reasoning part 后缀不转发（同上）；正文照常。
           if (!hideBody && part.type !== "reasoning") {
-            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: suffix })
+            emitSubagentDelta(parentState, run, suffix)
             appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(suffix) })
           } else if (hideBody && part.type !== "reasoning" && run.transcriptHideNoted !== true) {
             run.transcriptHideNoted = true
@@ -628,4 +632,25 @@ export function forgetSessionWorkspaceState(sessionId: string): void {
 export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: string; label: string; runId: string; text: string }> {
   if (!parentId) return []
   return (pendingCriticTargets.get(parentId) ?? []).slice()
+}
+
+// 子代理正文增量的出站清洗：token 级碎片里的 /opt/agent-harness/… 路径逐帧匹配不到，
+// 走主会话同一套 stripOutboundFeed（含路径的尾词扣留到拼完整再改写）。
+function emitSubagentDelta(parentState: Parameters<NonNullable<typeof deps>["emitToSession"]>[0], run: SubagentRun, text: string): void {
+  if (!run.deltaStrip) run.deltaStrip = { pending: "", suppress: false, fence: false, sawEnglish: false }
+  const safe = stripOutboundFeed(run.deltaStrip as PartStripState, text)
+  if (safe) deps!.emitToSession(parentState, "subagent.delta", { id: run.id, text: safe })
+}
+
+// 子代理收尾／被停：已投影但未落终态的 music_gen 画布单元一律置失败，不让音频节点永远转圈。
+export function settleOpenSubagentCanvas(run: SubagentRun): void {
+  if (!run.canvasCalls?.size) return
+  const parentState = parentStateOf(run)
+  if (!parentState) return
+  for (const key of run.canvasCalls) {
+    if (run.canvasSettled?.has(key)) continue
+    if (!run.canvasSettled) run.canvasSettled = new Set()
+    run.canvasSettled.add(key)
+    void settleMusicCanvasUnit(parentState, key, false, null, { code: "aborted", human_message: "音乐生成未完成（任务已停止），本次未出成品。" })
+  }
 }
