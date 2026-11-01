@@ -1,8 +1,10 @@
 // RFC 9728 OAuth Protected Resource Metadata（MCP 端点的免授权发现文件）。
 //
 // 用途：coding agent 对 POST /api/mcp 发未授权请求 → 401 + WWW-Authenticate: Bearer，
-// 接著靠这份文件（零凭证、零登入）找到资源位址、授权伺服器与可用 scope，
-// 再决定是「带 B 端密钥」还是「走 OAuth」。
+// 接着靠这份文件（零凭证、零登入）找到资源位址与可用 scope。
+// 当前鉴权只有静态 Bearer sk-biz-；完整 OAuth 2.1 授权服务器尚未上线。
+// 因此本档**不公告 authorization_servers**——公告却指向不存在的
+// /.well-known/oauth-authorization-server（404）会让严格客户端卡死发现链（2026-11-01 实测）。
 //
 // 本档只汇出 GET：Next.js 对 route 档的汇出做白名单型别检查，
 // 值汇出滞留本档会炸 `next build`（2026-09-23 远端建置实锤，见 src/app/api/v1/quota/route.ts 档头）。
@@ -52,10 +54,11 @@ const SCOPES_SUPPORTED = [
 export function GET(): Response {
   const origin = getSiteUrlFromEnv();
 
+  // 刻意不返回 authorization_servers：真 AS 上线前公告只会把客户端导向 404。
+  // 客户端应使用 Authorization: Bearer sk-biz-…（见 /mcp 安装说明）。
   return Response.json(
     {
       resource: `${origin}/api/mcp`,
-      authorization_servers: [origin],
       scopes_supported: SCOPES_SUPPORTED,
       resource_documentation: `${origin}/mcp`,
       bearer_methods_supported: ["header"],

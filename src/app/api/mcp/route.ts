@@ -56,6 +56,7 @@ import {
 import { MCP_TOOLS, callTool, createHttpDispatcher } from "@/lib/mcp/tools";
 import { HARNESS_PROMPTS, HARNESS_RESOURCES, type HarnessPrompt } from "@/lib/mcp/harness-guide";
 import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,13 +116,28 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 /**
  * **公开站点 origin**（只喂 401 的 `WWW-Authenticate: resource_metadata`）：
- * 显式配置优先（反向代理/自订域名下最稳），否则用本次请求的 origin。
- * 注意：这是「使用者连进来的域名」，生产＝Cloudflare 前置的 `https://eimu.dev`；
- * **不可**拿它当工具转发目标（Vercel 出口会被 CF 挑战，见档头）。
+ * 1. 显式 `MCP_SELF_ORIGIN`（生产应设为 `https://eimu.dev`；反向代理/自订域名下最稳）；
+ * 2. 否则用本次请求的 origin——但要丢掉不可达宿主（`0.0.0.0` / `::`）：
+ *    Next/Vercel 绑 `0.0.0.0` 时 `req.url.origin` 会吐 `https://0.0.0.0:3000`，
+ *    客户端顺着 `resource_metadata` 去发现就死（2026-11-01 生产实测）；
+ * 3. 再回落 `getSiteUrlFromEnv()`（默认 `https://eimu.dev`）。
+ * 注意：这是「使用者连进来的域名」；**不可**拿它当工具转发目标（Vercel 出口会被 CF 挑战，见档头）。
  */
+function isUnusablePublicHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  return host === "0.0.0.0" || host === "::" || host === "0:0:0:0:0:0:0:0";
+}
+
 function resolvePublicOrigin(req: NextRequest): string {
   const configured = process.env.MCP_SELF_ORIGIN?.trim().replace(/\/+$/, "");
-  return configured || new URL(req.url).origin;
+  if (configured) return configured;
+  try {
+    const fromReq = new URL(req.url).origin;
+    if (!isUnusablePublicHost(new URL(fromReq).hostname)) return fromReq;
+  } catch {
+    // fall through
+  }
+  return getSiteUrlFromEnv();
 }
 
 /** 控制面 origin（已 trim、去尾斜线；未配置回空字串）。 */
