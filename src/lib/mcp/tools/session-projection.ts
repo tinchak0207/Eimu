@@ -33,7 +33,8 @@ export function projectAgentSession(payload: unknown, args: Record<string, unkno
     if (!Array.isArray(entry.parts)) return "";
     return entry.parts.filter(isPlainObject).filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
   };
-  const latest = assistant.slice(-2).map((entry) => {
+  // 只取有正文的 assistant 条目：纯工具调用／空 text 的条目不占 latest_messages 名额（P2 2026-11-01）。
+  const latest = assistant.filter((entry) => textOf(entry).trim() !== "").slice(-2).map((entry) => {
     const text = redactSecrets(textOf(entry));
     return { role: "assistant", text: text.slice(-700), text_chars: text.length, truncated: text.length > 700 };
   });

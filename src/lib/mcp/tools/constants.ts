@@ -31,3 +31,25 @@ export const EIMU_QUOTE_ESTIMATE_COINS = {
   plan: 2,
   full: 20,
 } as const;
+
+/** 报价回落常数的对外标注：没读到价目表时 estimated_coins 只是常数占位，不是算出来的。 */
+export const EIMU_QUOTE_PLACEHOLDER_LABEL = "常数占位";
+
+/**
+ * 报价「典型出图张数」：estimated = 价目表（GET /api/v1/models 图像模型 x_coins_per_image.standard 中位数）× 张数。
+ * full 取电商套图典型 6 张（主图＋卖点×N＋细节＋场景）；plan 只出方案不出图，走常数占位。
+ * 不含视频／音频与重试——只作 preflight 提示，正式扣费以帐本为准。
+ */
+export const EIMU_QUOTE_TYPICAL_IMAGES = {
+  plan: 0,
+  full: 6,
+} as const;
+
+/** 价目表端点（与 list_models 同一条 dispatcher 路径）。 */
+export const MODELS_PATH = "/api/v1/models";
+
+/**
+ * 「idle 但回覆声称还在生成、且无产物」最多判 processing 多久（距 last_activity_at）；
+ * 超过即回 stalled，避免永远 processing。
+ */
+export const EIMU_IDLE_CLAIM_STALL_MS = 15 * 60_000;

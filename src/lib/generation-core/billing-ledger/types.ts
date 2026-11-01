@@ -1,4 +1,5 @@
 import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
+import { BillingRelayUnavailableError } from "../billing-relay";
 import type { BillingReplayOperation, ReplayPlan } from "../operation-registry";
 import type { FailureClass, GenerationJob } from "../types";
 
@@ -43,6 +44,9 @@ export function detailOf(error: unknown): string {
 }
 
 export function rejectedFailureClass(error: unknown): FailureClass {
+  // 计费通道故障（relay 非 JSON / 平台错误头）≠ 余额不足：归 network（可重试的平台侧故障），
+  // 不再因透传上游 402 被判 quota_exhausted 叫用户充值（2026-11-01 MCP 实测 I-2）。
+  if (error instanceof BillingRelayUnavailableError) return "network";
   if (error instanceof ImageBillingGatewayError) {
     if (error.status === 402) return "quota_exhausted";
     if (error.status === 401 || error.status === 403) return "authentication";
