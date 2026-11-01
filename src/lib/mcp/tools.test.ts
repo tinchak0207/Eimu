@@ -1148,7 +1148,8 @@ test("鉴权正负对照：无 Bearer → 401，形状错的金钥 → 401，未
 
   const valid = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { auth: `Bearer ${VALID_KEY}` });
   assert.equal(valid.status, 200, "登记过的金钥必须放行（正向对照）");
-  assert.ok(((rpcBody(valid.text).result?.tools as unknown[]) ?? []).length >= 8);
+  // 默认 toolset=director 只露导演面（b11c0f3b4），至少 eimu_direct／eimu_job＋会话三件。
+  assert.ok(((rpcBody(valid.text).result?.tools as unknown[]) ?? []).length >= 5);
 });
 
 test("金钥不回声：任何鉴权回应的 body 与标头都不得出现 key 片段", async () => {

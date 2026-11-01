@@ -490,7 +490,10 @@ function defineTools(): ToolDefinition[] {
     {
       name: "list_agent_sessions",
       title: "列出 agent 会话",
-      description: "列出本账号 agent／导演会话（id／status／title／updated_at），由新到旧。同网页 AI 助理账户空间。",
+      description: bilingual(
+        "列出本账号 agent／导演会话（id／status／title／updated_at），由新到旧。同网页 AI 助理账户空间。",
+        "List agent/director sessions for this account (id / status / title / updated_at), newest first. Same account space as the web AI assistant.",
+      ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       run: (args, ctx) =>
         runForwardProjected({ method: "GET", path: AGENT_SESSIONS_PATH }, "list_agent_sessions", args, ctx, (payload) => {
@@ -510,7 +513,10 @@ function defineTools(): ToolDefinition[] {
     {
       name: "get_agent_session",
       title: "读取 agent 会话",
-      description: "读 agent／导演会话：view=summary|transcript|raw。返回摘要、最新回复与 artifacts（成片／中间产物）；长内容用 pagination.next_cursor 翻页。",
+      description: bilingual(
+        "读 agent／导演会话：view=summary|transcript|raw。返回摘要、最新回复与 artifacts（成片／中间产物）；长内容用 pagination.next_cursor 翻页。",
+        "Read an agent/director session: view=summary|transcript|raw. Returns summary, latest reply and artifacts (film / intermediates); page long content with pagination.next_cursor.",
+      ),
       inputSchema: {
         type: "object",
         properties: {
@@ -576,7 +582,10 @@ function defineTools(): ToolDefinition[] {
     {
       name: "abort_agent_session",
       title: "中止 agent 会话",
-      description: "中止本账号正在运行的 agent／导演会话（打断当前回合）。",
+      description: bilingual(
+        "中止本账号正在运行的 agent／导演会话（打断当前回合）。",
+        "Abort a running agent/director session owned by this account (interrupts the current turn).",
+      ),
       inputSchema: {
         type: "object",
         properties: {

@@ -16,7 +16,7 @@ import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
 import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders, isCompactionSummaryInfo, COMPACTION_PART_TYPE } from "./system-wake.ts"
-import { getOwnedSession } from "./sessions-core.ts"
+import { getOwnedSession, resolveSessionRuntimeStatus } from "./sessions-core.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText, stripOutboundFeed, stripOutboundFlush, type PartStripState } from "./outbound-sanitize.ts"
@@ -122,6 +122,29 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
   } catch {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   }
+}
+
+/** 最小只读会话运行态（MCP 导演完成判定用）。白名单字段，不含内部凭证。 */
+export async function handleGetSessionStatus(key: string, id: string): Promise<Response> {
+  const state = getOwnedSession(key, id)
+  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+  const status = resolveSessionRuntimeStatus(state)
+  const pending_questions = state.pendingQuestions?.size ?? 0
+  const pending_confirms = state.pendingConfirms?.size ?? 0
+  const phase =
+    status === "waiting" ? "awaiting_input" : status === "running" ? "running" : "idle"
+  return Response.json({
+    session_id: id,
+    opencode_session_id: state.opencodeSessionId,
+    status,
+    phase,
+    terminal: status === "idle",
+    pending_questions,
+    pending_confirms,
+    last_turn_active_at: state.lastTurnActiveAt ?? 0,
+    last_activity_at: state.lastActivityAt ?? null,
+    title: state.sessionTitle ?? null,
+  })
 }
 
 // P1-E1：对话 transcript 端点。真源是 opencode（gateway 不另存 messages，

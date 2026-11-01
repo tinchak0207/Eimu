@@ -90,8 +90,8 @@ test("well-known oauth-protected-resource：直呼 GET 回 200，resource 指向
     "resource 必须落在 /api/mcp",
   );
 
-  assert.ok(Array.isArray(body.authorization_servers), "authorization_servers 必须是数组");
-  assert.ok((body.authorization_servers as unknown[]).length > 0, "authorization_servers 不得为空");
+  // beb21bc45：真 AS 上线前刻意不公告 authorization_servers（公告即把客户端导向 404）。
+  assert.equal(body.authorization_servers, undefined, "真 AS 上线前不得公告 authorization_servers");
 
   assert.ok(Array.isArray(body.scopes_supported), "scopes_supported 必须是数组");
   const scopes = body.scopes_supported as unknown[];

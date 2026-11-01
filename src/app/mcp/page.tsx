@@ -284,7 +284,7 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surfa
     description:
       "对已生成完成的影片／图片／音频做确定性量测硬检（分辨率／时长／文件大小／音轨等）；服务器端量测不可用时诚实回 probe_unavailable。",
   },
-]];
+];
 
 const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
   {

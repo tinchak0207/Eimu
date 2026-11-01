@@ -25,7 +25,7 @@ import {
   EIMU_QUOTE_ESTIMATE_COINS,
   QUOTA_PATH,
 } from "./constants";
-import { compact, pickString } from "./helpers";
+import { bilingual, compact, pickString } from "./helpers";
 import type { McpDispatchResponse, McpToolContext, ToolDefinition } from "./types";
 import { isPlainObject } from "./validation";
 
@@ -760,8 +760,10 @@ export function defineDirectorTools(): ToolDefinition[] {
     {
       name: "eimu_direct",
       title: "导演派工",
-      description:
+      description: bilingual(
         "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价；正式跑须 budget_cap 或 confirm=true。终态产物含成片与分镜／brief／首尾帧／配音。",
+        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge); a real run requires budget_cap (coins) or confirm=true. Terminal results include film, storyboard, brief, bible, keyframes and audio.",
+      ),
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -821,8 +823,10 @@ export function defineDirectorTools(): ToolDefinition[] {
     {
       name: "eimu_job",
       title: "导演任务",
-      description:
+      description: bilingual(
         "对导演 job_id 执行 get|wait|reply|approve|revise|cancel。wait≤45s，超时仍 processing，勿重提交。终态看会话 idle/waiting，交付成片与中间产物。",
+        "Act on a director job_id: get|wait|reply|approve|revise|cancel. Bounded wait <=45s; still processing on timeout - do NOT resubmit. Completion uses the gateway session status (idle/waiting), returning the film and intermediate artifacts.",
+      ),
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,

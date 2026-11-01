@@ -15,7 +15,7 @@ import { WORKSPACE_DIR, TTS_AUDIO_DIR, UPLOADS_DIR, VIDEO_UPLOAD_MAX_BYTES, VIDE
 import { jsonError, getBearer } from "./gw-lib.ts"
 import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS, DEVICE_TICKET_PREFIX, redeemDeviceTicket } from "./auth-gw.ts"
 import { sessions, markDirty, getOwnedSession, resolveSession, issueSseTicket, redeemSseTicket, handleDeleteSession } from "./sessions-core.ts"
-import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
+import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionStatus, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
 import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle, persistenceStatus } from "./persistence.ts"
 import { fetchOpencodeTitle } from "./opencode-client.ts"
 import { openEventStream } from "./sse-core.ts"
@@ -831,6 +831,11 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/steer$/)
     if (req.method === "POST" && m) {
       return handleSteer(key, m[1], req)
+    }
+
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/status$/)
+    if (req.method === "GET" && m) {
+      return handleGetSessionStatus(key, m[1])
     }
 
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)$/)

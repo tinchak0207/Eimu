@@ -408,6 +408,24 @@ export function hydrateFromDb(id: string): SessionState | null {  const row = lo
   return state
 }
 
+/** 与 GET /sessions 列表三态同口径：waiting > running > idle。 */
+export const SESSION_TURN_RUNNING_WINDOW_MS = 15 * 60 * 1000
+
+export type SessionRuntimeStatus = "waiting" | "running" | "idle"
+
+export function resolveSessionRuntimeStatus(
+  state: SessionState | null | undefined,
+  persistedLastTurnActiveAt?: number,
+): SessionRuntimeStatus {
+  const waiting = (state?.pendingQuestions?.size ?? 0) + (state?.pendingConfirms?.size ?? 0) > 0
+  const startedAt = state?.lastTurnActiveAt ?? persistedLastTurnActiveAt ?? 0
+  const turnInFlight = startedAt > 0 && Date.now() - startedAt < SESSION_TURN_RUNNING_WINDOW_MS
+  const genInFlight = state?.sessionTasks
+    ? [...state.sessionTasks.values()].some((t) => t.status === "queued" || t.status === "running")
+    : false
+  return waiting ? "waiting" : turnInFlight || genInFlight ? "running" : "idle"
+}
+
 export function getOwnedSession(key: string, id: string): SessionState | null {
   const state = sessions.get(id) ?? hydrateFromDb(id)
   if (!state || state.apiKey !== key) return null
