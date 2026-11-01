@@ -165,6 +165,8 @@ function controlPlaneOrigin(): string {
  *    被 Cloudflare 发 managed challenge（`Just a moment` 403）。生产值＝
  *    `https://image.tinchak0207.xyz`（同 Vercel 专案、`server: Vercel`、不挂 CF 的自订域名）；
  *    换值**必须**是不挂 Cloudflare 的 origin——换回公开域名（`eimu.dev`）等于复发。
+ *    2026-11-01 起站点自托管在 VPS（eimu-site 容器，Vercel 暂停）：生产值改为 `http://127.0.0.1:3000`
+ *    （容器自身，不经 CF／nginx）。注意 `eimu.dev` 顶级域对 GET 一律 301→www，回落到公开 origin 会拿到 301。
  * 2. 对 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路径表（唯一真源＝
  *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不挂 CF 的控制面 origin。
  *    匹配规则：source 形如 `/api/v1/:path*` 者做「前缀 + 捕获剩余段」；其余 source 精确相等。

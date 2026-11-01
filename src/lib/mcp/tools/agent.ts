@@ -83,8 +83,9 @@ function readAgentMessageCount(payload: unknown): number | null {
 const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g)(?:[?#]|$)/i;
 const ARTIFACT_VIDEO_EXTENSION = /\.(mp4|webm|mov)(?:[?#]|$)/i;
 const ARTIFACT_AUDIO_EXTENSION = /\.(mp3|wav|flac|m4a)(?:[?#]|$)/i;
-const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}]+/g;
-const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
+/** 非 ASCII（全形标点／中文）一律视为 URL 边界：回覆常写「…/a.png（2.31 MB）」，不截会把「（2.31」吞进 URL（2026-11-01 生产实测）。合法 URL 的非 ASCII 字元应已 percent-encode。 */
+const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}\u0080-\uFFFF]+/g;
+const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s\u0080-\uFFFF]+)\s*\)/g;
 /** 既知媒体目录：即使无副档名也当产物（kind=file）。 */
 const ARTIFACT_MEDIA_PATH = "/image-data/files/";
 

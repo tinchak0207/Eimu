@@ -1722,3 +1722,15 @@ test("漂移探针：每支 MCP 工具的转发目标都能落地，且没有被
     `MCP 工具目标被控面代理遮蔽（路由写了却跑不到）：\n  ${shadowed.join("\n  ")}`,
   );
 });
+
+test("产物 URL 抽取：全形标点／中文是边界，不吞进 URL（2026-11-01 生产实测 .png（2.31）", async () => {
+  const { extractAgentArtifacts } = await import("./tools/agent");
+  const got = extractAgentArtifacts(
+    "首帧 https://store.example/image-data/files/a/000-b7.png（2.31 MB），成片：https://store.example/x/film.mp4。另见 ![k](https://store.example/k.webp)",
+  );
+  assert.deepEqual(got.map((a) => a.url).sort(), [
+    "https://store.example/image-data/files/a/000-b7.png",
+    "https://store.example/k.webp",
+    "https://store.example/x/film.mp4",
+  ]);
+});
