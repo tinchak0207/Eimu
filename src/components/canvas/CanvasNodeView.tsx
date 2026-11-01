@@ -102,7 +102,7 @@ export interface CanvasNodeViewProps {
   adjacent?: boolean;
   /** A10：标题就地重命名（双击标题触发）。 */
   onRename?: (nodeId: string, title: string) => void;
-  /** A11：文本节点就地编辑提交（双击正文触发）。 */
+  /** A11：文本节点就地编辑提交（单击正文触发）。 */
   onUpdateText?: (nodeId: string, text: string) => void;
   /** reference 节点角色切换（复用 ReferenceImageRole 枚举）。 */
   onUpdateReferenceRole?: (nodeId: string, role: ReferenceImageRole) => void;
@@ -129,6 +129,10 @@ export interface CanvasNodeViewProps {
   boardInputs?: readonly InspectInput[];
   /** 正在被透析：卡片抬起（置顶、青色柔光）。 */
   engineeringFocused?: boolean;
+  /** 右键「重命名」：nonce 变化且 id 命中时，标题进入卡片内输入框。 */
+  titleEditRequest?: { id: string; nonce: number } | null;
+  /** 提示词面板逐字写回 metadata。不点生成也要留下。history 由面板决定。 */
+  onPromptDraft?: (nodeId: string, prompt: string, opts?: { history?: boolean }) => void;
 }
 
 export function CanvasNodeView({
@@ -188,11 +192,14 @@ export function CanvasNodeView({
   xrayVisible = false,
   boardInputs = NO_INPUTS,
   engineeringFocused = false,
+  titleEditRequest = null,
+  onPromptDraft,
 }: CanvasNodeViewProps) {
   const [mounted, setMounted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   // A10：就地编辑态（null = 未在编辑）
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const titleEditSeen = useRef(0);
 
   const {
     handleScrollAreaDown,
@@ -204,7 +211,15 @@ export function CanvasNodeView({
     handleResizeStart,
     handleResizeMove,
     endResize,
+    gestureMovedRef,
   } = useNodeGestures({ node, scale, onSelect, onInteractionStart, onMove, onResize, onNodeClick });
+
+  useEffect(() => {
+    if (!titleEditRequest || titleEditRequest.id !== node.id) return;
+    if (titleEditRequest.nonce === titleEditSeen.current) return;
+    titleEditSeen.current = titleEditRequest.nonce;
+    setEditingTitle(node.title);
+  }, [titleEditRequest, node.id, node.title]);
 
   useEffect(() => {
     setMounted(true);
@@ -322,6 +337,7 @@ export function CanvasNodeView({
             }
           : undefined
       }
+      onDragStart={(e) => e.preventDefault()}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
@@ -386,6 +402,7 @@ export function CanvasNodeView({
               value={editingTitle}
               onChange={(e) => setEditingTitle(e.target.value)}
               onPointerDown={(e) => e.stopPropagation()}
+              onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === "Enter") {
@@ -577,6 +594,7 @@ export function CanvasNodeView({
             onRetry={onRetry}
             onEditPrompt={onEditPrompt}
             onUpdateText={onUpdateText}
+            gestureMovedRef={gestureMovedRef}
             onPatchMetadata={onPatchMetadata}
             onScrollAreaPointerDown={handleScrollAreaDown}
             onScrollAreaPointerMove={handleScrollAreaMove}
@@ -608,6 +626,7 @@ export function CanvasNodeView({
           isRunning={isGenerating}
           onClose={onClosePromptPanel}
           onGenerate={onGenerateFromNode}
+          onPromptDraft={onPromptDraft}
           referenceCandidates={referenceCandidates}
           selectedReferenceIds={selectedReferenceIds}
           onToggleReference={onToggleReference}

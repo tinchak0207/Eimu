@@ -140,6 +140,10 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   const reduceMotion = usePrefersReducedMotion();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptPanelNodeId, setPromptPanelNodeId] = useState<string | null>(null);
+  const [titleEditRequest, setTitleEditRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const beginRename = useCallback((nodeId: string) => {
+    setTitleEditRequest({ id: nodeId, nonce: Date.now() });
+  }, []);
   // 面板行内 @ 引用的素材卡 id（与 panelRefIds 同级同生命周期；生成时收窄参考集）。
   const [panelEntityIds, setPanelEntityIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -370,12 +374,16 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     if (canvas.nodes.length === 0 || viewportSize.width === 0 || viewportSize.height === 0) return;
     if (!didFitRef.current) {
       didFitRef.current = true;
+      lastFitCountRef.current = canvas.nodes.length;
       const isFreshViewport = canvas.viewport.x === 0 && canvas.viewport.y === 0 && canvas.viewport.k === 1;
-      if (isFreshViewport) fitView(viewportSize.width, viewportSize.height);
+      // 只有一张卡时适应视图会把它放大到填满视口（人手建第一张文本卡时 100% → 约 182%）。
+      // 一批节点同时落地才适应。
+      if (isFreshViewport && canvas.nodes.length >= 2) fitView(viewportSize.width, viewportSize.height);
       return;
     }
     if (!expanded && canvas.nodes.length !== lastFitCountRef.current) {
       lastFitCountRef.current = canvas.nodes.length;
+      if (canvas.nodes.length < 2) return;
       const t = setTimeout(() => {
         fitView(viewportSize.width, viewportSize.height);
       }, 400);
@@ -672,6 +680,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         handleDeleteNode,
         deleteSelected,
         openEngineering,
+        beginRename,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard],
@@ -991,6 +1000,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
         referenceCandidatesFor, entityCandidatesFor, shotEntityCardIdsFor, handleRerun, handleEditWorkflowNode,
         handleRegenerateAsset, handleReplaceAsset, handleRejectAsset, handleApproveAllAssets, handleRejectShot,
         handleApproveAllShots, handleEditorProduce, generateChildFromSource,
+        titleEditRequest,
       }}
     />
   );

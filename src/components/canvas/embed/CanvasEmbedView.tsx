@@ -125,6 +125,7 @@ interface CanvasEmbedViewProps {
   handleApproveAllShots: (shotIds: readonly string[]) => void;
   handleEditorProduce: (results: CanvasImageEditResult[], _mode: CanvasImageEditMode) => void;
   generateChildFromSource: (sourceId: string, title: string, params: { prompt: string; referenceUrls?: string[] }) => void;
+  titleEditRequest: { id: string; nonce: number } | null;
 }
 
 export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
@@ -141,7 +142,7 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
     handleReviewStage, handleSelectLod, openEngineering, referenceCandidatesFor, entityCandidatesFor,
     shotEntityCardIdsFor, handleRerun, handleEditWorkflowNode, handleRegenerateAsset, handleReplaceAsset,
     handleRejectAsset, handleApproveAllAssets, handleRejectShot, handleApproveAllShots, handleEditorProduce,
-    generateChildFromSource,
+    generateChildFromSource, titleEditRequest,
   } = P;
   const {
     selectedIds, setSelectedIds, selectedConnectionId, setSelectedConnectionId, setHoveredNodeId, menu, setMenu,
@@ -305,6 +306,8 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
                 onStartPortDrag={startPortDrag}
                 onNodeContextMenu={openNodeMenu}
                 onRename={canvas.renameNode}
+                titleEditRequest={titleEditRequest}
+                onPromptDraft={(nid, prompt, opts) => canvas.patchNodeMetadata(nid, { prompt }, opts)}
                 onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text })}
                 onUpdateReferenceRole={(nid, role) => canvas.patchNodeMetadata(nid, { referenceRole: role })}
                 onPatchMetadata={(nid, patch) => canvas.patchNodeMetadata(nid, patch)}

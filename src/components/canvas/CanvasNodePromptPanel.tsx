@@ -73,6 +73,7 @@ export function CanvasNodePromptPanel({
   initialCount = 1,
   isRunning,
   onClose,
+  onPromptDraft,
   onGenerate,
   referenceCandidates = [],
   selectedReferenceIds = [],
@@ -107,6 +108,29 @@ export function CanvasNodePromptPanel({
   const prevChipIdsRef = useRef<Set<string>>(new Set());
   /** 上一轮输入框内出现过的素材卡 id 集合，供删除对账（chip 消失 → 取消引用）。 */
   const prevEntityChipIdsRef = useRef<Set<string>>(new Set());
+  const onPromptDraftRef = useRef(onPromptDraft);
+  onPromptDraftRef.current = onPromptDraft;
+  const selectedReferenceIdsRef = useRef(selectedReferenceIds);
+  selectedReferenceIdsRef.current = selectedReferenceIds;
+  const initialPromptRef = useRef(initialPrompt);
+  initialPromptRef.current = initialPrompt;
+  /** 本轮打开后是否已经为草稿推过一格撤销。 */
+  const draftHistoryRef = useRef(false);
+
+  // 关掉面板（任何路径卸载）时把编辑器里的字写回节点。不点生成也留下。
+  // 不在每次按键时写：写 metadata 会让整卡重渲染，contentEditable 的光标会被清掉。
+  useEffect(() => {
+    return () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const text = serializeEditor(editor, selectedReferenceIdsRef.current);
+      const publish = onPromptDraftRef.current;
+      if (!publish) return;
+      if (!draftHistoryRef.current && text === initialPromptRef.current) return;
+      publish(nodeId, text, { history: !draftHistoryRef.current });
+      draftHistoryRef.current = true;
+    };
+  }, [nodeId]);
 
   // 首挂载灌入 initialPrompt（纯文字；历史 prompt 不回填 chip）。
   useEffect(() => {
@@ -516,6 +540,15 @@ export function CanvasNodePromptPanel({
               syncFromEditor();
             }}
             onBlur={() => {
+              const editor = editorRef.current;
+              if (editor) {
+                const text = serializeEditor(editor, selectedReferenceIdsRef.current);
+                const publish = onPromptDraftRef.current;
+                if (publish && (draftHistoryRef.current || text !== initialPromptRef.current)) {
+                  publish(nodeId, text, { history: !draftHistoryRef.current });
+                  draftHistoryRef.current = true;
+                }
+              }
               // 延时关闭，让选单项的 click 先落地。
               if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
               blurTimerRef.current = window.setTimeout(closeMention, 120);
