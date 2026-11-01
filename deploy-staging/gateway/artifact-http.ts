@@ -187,7 +187,9 @@ export async function handleArtifact(req: Request, pathname: string, deliverySes
         const error =
           result.state === "no_row"
             ? "没有探测结果（artifact 无 url），不能宣称干净"
-            : `探测未通过：${result.reason ?? "unknown"}（status=${result.status ?? "none"}）`
+            : result.reason === "auth_required"
+              ? "交付链接是账号鉴权下载，未带凭证探测一定会 401（不是参数错误）。要核对内容请用 artifact_get 看 sha256 并与工作区文件比对；不要重复调用 artifact_verify。"
+              : `探测未通过：${result.reason ?? "unknown"}（status=${result.status ?? "none"}）`
         return Response.json({ ok: false, code, error, ...result, verify: result }, { status: result.state === "no_row" ? 409 : 422 })
       }
       return Response.json({ ok: true, ...result, verify: result })

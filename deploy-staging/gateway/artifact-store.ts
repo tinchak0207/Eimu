@@ -226,6 +226,16 @@ export function setAcl(input: SetAclInput): ArtifactVersionView {
   const live = versionRow(Number(updated.id), Number(updated.latest_version))
   return rowView(updated, live)
 }
+// 本平台交付下载地址走账号鉴权：不带凭证的 HEAD 探测必然 401，
+// 这不是「参数错误」，也不能据此宣称链接干净，只是拿不到匿名探测结果。
+function isPlatformAuthDownloadUrl(rawUrl: string): boolean {
+  try {
+    const { pathname } = new URL(rawUrl)
+    return /^\/api\/agent\/biz\/(?:sessions\/[^/]+\/artifacts\/\d+\/versions\/\d+\/download|.+\/download)\/?$/.test(pathname)
+  } catch {
+    return false
+  }
+}
 export async function verifyArtifact(input: VerifyArtifactInput): Promise<VerifyArtifactResult> {
   const sessionId = requiredText(input.sessionId, "session_id", MAX_NAME_LENGTH)
   const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
@@ -279,9 +289,12 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
     // SSRF 拦截等安全拒绝必须原样上报，不能混成普通 unreachable。
     reason = probe.error === "private_address" || probe.error === "unsupported_url_scheme" || probe.error === "too_many_redirects" || probe.error === "dns_resolution_failed"
       ? probe.error
-      : probe.status === null
-        ? "unreachable"
-        : "http_status"
+      : (probe.status === 401 || probe.status === 403) && isPlatformAuthDownloadUrl(view.url)
+        // 账号鉴权下载地址不带凭证探测必然 401：不是参数错误，也不能据此宣称链接干净。
+        ? "auth_required"
+        : probe.status === null
+          ? "unreachable"
+          : "http_status"
   } else if (probe.partial) {
     reason = "body_partial"
   } else if ((probe.bytes ?? 0) <= 0 && input.allowEmpty !== true) {

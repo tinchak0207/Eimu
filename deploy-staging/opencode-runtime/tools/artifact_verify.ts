@@ -33,6 +33,13 @@ export default tool({
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || !data?.ok) {
+        if (data?.reason === "auth_required") {
+          return fail(
+            "verify_auth_required",
+            data?.error || "交付链接是账号鉴权下载，未带凭证探测一定会 401（不是参数错误）。要核对内容请用 artifact_get 看 sha256 并与工作区文件比对；不要重复调用 artifact_verify。",
+            { title: "需要账号鉴权，无法匿名探测", http_status: resp.status },
+          )
+        }
         return fail(
           typeof data?.code === "string" && data.code ? data.code : "artifact_verify_failed",
           data?.error || `HTTP ${resp.status}`,
