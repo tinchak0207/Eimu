@@ -5,6 +5,7 @@
 Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工具，拿回**成片**与中间产物（分镜、brief、首尾帧、配音等）。把这个包交给你的 coding agent（Claude Code、Codex、Cursor、OpenClaw 或任何会说 MCP 的客户端），默认只会看到导演工具面。
 
 - 插件文件清单：https://eimu.dev/plugin/
+- 整包下载：https://eimu.dev/plugin/eimu-plugin.tar.gz
 - 本说明：https://eimu.dev/plugin/eimu/README.md
 - 接入页（含喂到嘴边的安装 prompt）：https://eimu.dev/mcp
 - **主路径端点（远端 HTTP MCP）**：`https://eimu.dev/api/mcp`（JSON-RPC 2.0 / Streamable HTTP）
@@ -76,10 +77,19 @@ url = "https://eimu.dev/api/mcp"
 bearer_token_env_var = "EIMU_BIZ_KEY"
 ```
 
+```bash
+# Claude Code（--header 的值用单引号：单引号让字面的 ${EIMU_BIZ_KEY} 写进配置文件、
+# 由客户端加载时插值；用双引号会在 shell 里当场把你的真密钥展开、烘进配置文件）
+claude mcp add --transport http eimu https://eimu.dev/api/mcp \
+  --header 'Authorization: Bearer ${EIMU_BIZ_KEY}'
+```
+
 装完让 agent 调 `tools/list`：默认应看到导演工具（约 5 个），而不是整包原子工具。真 oracle＝`tools/call get_quota`（需 `toolset=expert`）或导演派工回执；`✔ Connected` 只证明握手。
+
 
 ### 装法二：复制插件目录到本机
 
+0. 最快：`curl --fail --location https://eimu.dev/plugin/eimu-plugin.tar.gz -o eimu-plugin.tar.gz && tar -xzf eimu-plugin.tar.gz`（得到 `plugin/marketplace.json` 与 `plugin/eimu/`）。
 1. 建本地插件目录，放入本包文件（Codex 常见 `~/.codex/plugins/`，以你客户端约定为准）。
 2. 让客户端读取 `.codex-plugin/plugin.json` 与 `.mcp.json`（已含 `Authorization: Bearer ${EIMU_BIZ_KEY}`）。
 3. 把 `skills/` 三个目录拷进 agent 技能目录。

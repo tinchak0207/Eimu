@@ -334,7 +334,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
-
   // Bug1b：会话恢复回填。refresh/重进后左聊天续上（本地存档 resume），但右画布
   // 空白 —— 快照此前只有上行没有下行。监听 currentSessionId：每个新拿到的 sid 拉
   // 一次闸道存档（GET 同上行端点），仅当 nodes>0 才回填；拉取异步到达时 sessionId

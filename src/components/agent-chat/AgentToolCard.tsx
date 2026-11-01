@@ -514,9 +514,9 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
           <div className="flex items-start gap-2">
             <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <p className="text-ios-footnote font-medium text-foreground/80">这是二进制文件，无法当文字读取</p>
+              <p className="text-ios-footnote font-medium text-foreground/80">这是本机媒体，文字通道不传字节</p>
               <p className="mt-0.5 break-words text-ios-caption1 text-foreground/55 [overflow-wrap:anywhere]">
-                请改用附件下载查看原始内容；直接按文字读只会得到乱码。
+                本机 agent 用 probe_media 看片，用 render_media 在这台电脑上剪完写回。不要当成已经读完。
               </p>
               {(item.readBytes !== undefined || item.totalBytes !== undefined) && (
                 <p className="mt-0.5 text-ios-caption1 tabular-nums text-foreground/45">

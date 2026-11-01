@@ -40,6 +40,7 @@ const EXPECTED_TOOL_NAMES = [
   "workflow_rollback",
   "list_agent_sessions",
   "get_agent_session",
+  "get_agent_generation_task",
   "get_agent_settings",
   "run_agent",
   "abort_agent_session",

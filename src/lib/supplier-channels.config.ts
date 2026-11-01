@@ -208,9 +208,9 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     sitePriority: 11,
     chatImageModels: [],
     claims: [
-      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate"] },
-      { modelId: "gpt-image-2.5-flare", supplierModelId: null, kinds: ["image_generate"] },
-      { modelId: "gpt-image-2.5-sunburst", supplierModelId: null, kinds: ["image_generate"] },
+      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-flare", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-sunburst", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
     ],
   },
 

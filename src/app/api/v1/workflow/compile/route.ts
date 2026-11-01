@@ -12,6 +12,8 @@ import { readBearerToken } from "@/lib/biz-api-keys";
 import { jsonWithTrace, pixaiAuthError } from "@/lib/pixai-proxy";
 import { getOrCreateTraceId } from "@/lib/request-trace";
 import { compileWorkflow, type WorkflowCompileInput } from "@/lib/workflow-dsl/compile";
+import { compileProjectDsl, normalizeProjectCurrent } from "@/lib/workflow-dsl/project-ops";
+import { decompileProject } from "@/lib/workflow-dsl/decompile";
 import type { WorkflowDslSource } from "@/lib/workflow-dsl/schema";
 
 export const runtime = "nodejs";
@@ -48,11 +50,26 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const { source, current: rawCurrent, label } = body as {
+  const { source, current: rawCurrent, label, target, action } = body as {
     source?: unknown;
     current?: unknown;
     label?: unknown;
+    target?: unknown;
+    action?: unknown;
   };
+  // target 缺省 = "canvas"（旧行为一字不变）；"project" = DSL v2 编译成工程图 PatchOp[]。
+  if (target !== undefined && target !== "canvas" && target !== "project") {
+    return NextResponse.json(
+      { success: false, error: "target 只接受 canvas 或 project。", code: "invalid_request" },
+      { status: 400 },
+    );
+  }
+  if (action === "decompile" && target === "project") {
+    const current = rawCurrent && typeof rawCurrent === "object" ? rawCurrent as Record<string, unknown> : {};
+    const normalized = normalizeProjectCurrent(current.nodes);
+    const dsl = decompileProject(normalized);
+    return NextResponse.json({ success: true, target: "project", dsl, ...(dsl === null && normalized.nodes.length ? { dsl_omitted: "schema_or_budget" } : {}) }, { headers: { "Cache-Control": "no-store" } });
+  }
   if (source === undefined || source === null) {
     return NextResponse.json(
       { success: false, error: "缺少 source。", code: "invalid_request" },
@@ -62,6 +79,20 @@ export async function POST(req: NextRequest) {
 
   const currentObj =
     rawCurrent && typeof rawCurrent === "object" ? (rawCurrent as Record<string, unknown>) : {};
+  if (target === "project") {
+    // current.nodes = project_get 的节点摘要（数组或 {id: node} 对象）；缺席按空工程算。
+    const projectResult = compileProjectDsl(source, normalizeProjectCurrent(currentObj.nodes));
+    if (!projectResult.ok) {
+      return NextResponse.json(
+        { success: false, code: "workflow_dsl_invalid", target: "project", errors: projectResult.errors },
+        { status: 422 },
+      );
+    }
+    return NextResponse.json(
+      { success: true, target: "project", ops: projectResult.ops, summary: projectResult.summary, label: typeof label === "string" ? label : null },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const current: WorkflowCompileInput = {
     nodes: Array.isArray(currentObj.nodes) ? (currentObj.nodes as WorkflowCompileInput["nodes"]) : [],
     connections: Array.isArray(currentObj.connections)

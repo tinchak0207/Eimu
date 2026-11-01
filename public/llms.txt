@@ -141,6 +141,7 @@ Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
 | workflow_rollback | eimu:canvas:write | Roll a canvas node's content back to a version (or the previous one); restores title and metadata only, never positions |
 | list_agent_sessions | eimu:agent:read | List your Eimu AI assistant (agent) sessions: title, time and status |
 | get_agent_session | eimu:agent:read | Read one agent session's conversation and artifacts (generated image/video URLs are in the reply text); optional view = summary / transcript / raw |
+| get_agent_generation_task | eimu:agent:read | (expert) Read one durably registered generation task and its ledger cost in your own agent session; needs session_id + task_id; read-only, unknown cost stays null |
 | get_agent_settings | eimu:agent:read | Read this account's agent settings, including the beast_mode switch; same settings the web AI assistant uses |
 | eimu_direct | eimu:agent:write | Director entry: bounded wait ≤45s; preflight/quote; real run needs budget_cap or confirm; do not resubmit — use eimu_job |
 | eimu_job | eimu:agent:write | Poll/control director job_id (get/wait/reply/approve/revise/cancel); wait ≤45s; structured artifacts incl. audio |

@@ -20,7 +20,7 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 const SITE_URL = getSiteUrlFromEnv();
 const MCP_ENDPOINT = `${SITE_URL}/api/mcp`;
 const WELL_KNOWN_URL = `${SITE_URL}/.well-known/oauth-protected-resource`;
-const PLUGIN_URL = `${SITE_URL}/plugin/`;
+const PLUGIN_URL = `${SITE_URL}/plugin/eimu-plugin.tar.gz`;
 const PLUGIN_README_URL = `${SITE_URL}/plugin/eimu/README.md`;
 const KEY_PLACEHOLDER = "sk-biz-你的密钥";
 
@@ -154,6 +154,12 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surfa
     scope: "eimu:agent:read",
     surface: "director",
     description: "读某个 agent 会话的对话与产物（成片／中间产物 URL）；view 可选 summary / transcript / raw。",
+  },
+  {
+    name: "get_agent_generation_task",
+    scope: "eimu:agent:read",
+    surface: "expert",
+    description: "读自有 agent 会话里登记的某个生成订单与真实费用（需 session_id + task_id；只读，费用查不到回 unknown）。",
   },
   {
     name: "abort_agent_session",
@@ -528,9 +534,9 @@ export default function McpPage() {
           <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
             不想手写配置的话，Eimu 还提供一个 coding agent 插件包：一份{" "}
             <InlineCode>plugin.json</InlineCode> 声明能力与图标，一份 <InlineCode>.mcp.json</InlineCode>{" "}
-            指向本文的 MCP 端点，外加三个随包技能。目前没有打包好的 zip／tar.gz，文件都是静态的，逐个文件取回即可，不需要装任何东西：
-            <a href={PLUGIN_URL} className="font-semibold text-[#007AFF] lg-transition hover:underline">
-              {PLUGIN_URL}
+            指向本文的 MCP 端点，外加三个随包技能。下载整包后解压，再按 README 配置客户端：
+            <a href={PLUGIN_URL} download className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              下载 Eimu 插件包（tar.gz）
             </a>
             （入口说明：
             <a

@@ -56,6 +56,15 @@ import {
 } from "./schema";
 import { HARNESS_TOOL_IDS } from "../harness-tool-ids";
 import { workflowNodeId, type WorkflowNodeMetadata } from "./compile";
+import type { ProjectCompileInput } from "./project-ops";
+import {
+  PROJECT_NODE_ID_PATTERN,
+  PROJECT_NODE_KINDS,
+  validateProjectDsl,
+  type ProjectDslInputRef,
+  type ProjectDslSource,
+  type ProjectDslStep,
+} from "./schema";
 
 /** schema 接受的 kind 值域（schema.ts 的 STEP_KINDS 未导出，此处按契约镜像）。 */
 const STEP_KINDS = new Set(["image", "text", "video", "audio", "director"]);
@@ -464,4 +473,45 @@ export function decompileWorkflow(
   // 「读到的 dsl 原样交回 compile 必须成功」的核心承诺在此兑现。
   const nodeById = new Map(current.nodes.map((n) => [n.id, n]));
   return enforceCompileValidity(sources, nodeById);
+}
+
+/**
+ * 工程图节点摘要 → DSL v2 源码（compileProjectDsl 的逆操作，规范形式）。
+ * 规范形式：kind=NodeType、内容全放 params（不用 prompt/model/size/count 快捷字段）、
+ * 输入口名==来源节点且主口 → needs，其余 → inputs；节点按传入顺序输出（传拓扑序即得拓扑序）。
+ * forEach 实例（derivedFrom）与 scratch 草稿不是作者写的，跳过。
+ * 读到的 dsl 原样交回 compileProjectDsl 必须成功且零 op；steps 数不在 1..256 或
+ * 反推结果过不了 schema ⇒ 返回 null（读面不得说谎，同旧 decompileWorkflow 的整份不输出）。
+ */
+export function decompileProject(current: ProjectCompileInput): ProjectDslSource | null {
+  const kinds = new Set<string>(PROJECT_NODE_KINDS);
+  const steps: ProjectDslStep[] = [];
+  for (const node of current.nodes) {
+    if (node.derivedFrom || node.scratch || !kinds.has(node.type) || !STEP_ID_PATTERN.test(node.id)) continue;
+    const step: ProjectDslStep = { id: node.id, kind: node.type as ProjectDslStep["kind"] };
+    if (typeof node.intent === "string" && node.intent.length > 0) step.intent = node.intent;
+    if (node.params && Object.keys(node.params).length > 0) step.params = { ...node.params };
+    const needs: string[] = [];
+    const inputs: Record<string, ProjectDslInputRef> = {};
+    for (const [name, ref] of Object.entries(node.inputs ?? {})) {
+      if (!ref || typeof ref.from !== "string" || !PROJECT_NODE_ID_PATTERN.test(ref.from)) continue;
+      if (ref.port === undefined && name === ref.from) needs.push(name);
+      else inputs[name] = ref.port === undefined ? { from: ref.from } : { from: ref.from, port: ref.port };
+    }
+    if (needs.length > 0) step.needs = needs;
+    if (Object.keys(inputs).length > 0) step.inputs = inputs;
+    if (Array.isArray(node.refs) && node.refs.length > 0) step.refs = node.refs as ProjectDslStep["refs"];
+    if (node.forEach && typeof node.forEach === "object") step.forEach = node.forEach as ProjectDslStep["forEach"];
+    if (node.takes && typeof node.takes === "object") step.takes = node.takes as ProjectDslStep["takes"];
+    if (node.onFail && typeof node.onFail === "object") step.onFail = node.onFail as ProjectDslStep["onFail"];
+    const pin = node.pinned;
+    if (pin === true) step.pinned = true;
+    else if (pin && typeof pin === "object") {
+      step.pinned = pin.take === undefined && pin.reason === undefined ? true : { ...(pin.take !== undefined ? { take: pin.take } : {}), ...(pin.reason !== undefined ? { reason: pin.reason } : {}) };
+    }
+    steps.push(step);
+  }
+  if (steps.length < WORKFLOW_STEPS_MIN || steps.length > WORKFLOW_STEPS_MAX) return null;
+  const source: ProjectDslSource = { steps };
+  return validateProjectDsl(source).ok ? source : null;
 }
