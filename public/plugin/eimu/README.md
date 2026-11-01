@@ -17,7 +17,7 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 
 | 工具 | 作用 |
 |---|---|
-| `eimu_direct` | 一句话派工给导演，返回 `job_id`（可 `mode=quote\|plan\|full`，`full` 建议带 `budget_cap`） |
+| `eimu_direct` | 一句话派工给导演，返回 `job_id`（可 `mode=quote\|plan\|full`，`full` 建议带 `budget_cap`；**极限模式＝`thinking_level=extreme`**，开拍前写入账号设置＝野兽模式开） |
 | `eimu_job` | 对 job 做 get／wait／reply／approve／revise／cancel；终态含成片与中间产物 |
 | `list_agent_sessions` | 列本账号 agent／导演会话 |
 | `get_agent_session` | 读会话对话与产物 |
@@ -33,7 +33,7 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 - 或请求头：`X-Eimu-Toolset: expert`
 - 或 `initialize`／`tools/list` 的 `params.toolset = "expert"`
 
-专家面含生图／改图／生视频／TTS／画布产线／harness 闸门等原子工具；**成片主路径仍应走导演工具**，不要把逐镜手拼写成默认教法。
+专家面含生图／改图／生视频／TTS／画布产线／harness 闸门等原子工具，以及 `get_agent_settings`／`save_agent_settings`（读写账号级思考档位与野兽模式，免费）；**成片主路径仍应走导演工具**，不要把逐镜手拼写成默认教法。
 
 ## 包内文件
 

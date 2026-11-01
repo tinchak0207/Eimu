@@ -30,6 +30,7 @@ Eimu 是 **Vibe Directing / Cursor of video**。口号：**不用学提示词设
 - `prompt`：用户原话 + 你对齐过的约束（时长／画幅／风格／参考 URL）
 - `mode`：先 `quote`（若用户要先看价）或直接 `full`
 - `budget_cap`：`full` 时带上
+- `thinking_level`：用户说「极限模式／野兽模式／最高质量」时带 `extreme`（＝极限＝野兽模式，开拍前写入账号设置，对之后的会话也生效）；`low|medium|high` 对应站内低／中／高。也可只给 `beast_mode=true`。报价（quote/preflight）不写设置
 - `reference_urls`：用户给的参考素材公网链接
 
 拿到 `job_id` 后立刻进入下一步。若工具回 `not_ready`（并行路尚未合入），按回执里的 `interim` 过渡：`toolset=expert` + `run_agent` 派工，再用 `get_agent_session` 取产物——**仍然按「交出去 → 拿成片」叙事交付**，不要改回逐镜手拼。

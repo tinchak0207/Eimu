@@ -13,6 +13,7 @@ import { filterToolsByToolset, type McpToolset } from "./toolset";
 import type { McpToolContext, McpToolDescriptor, ToolDefinition, ToolInputSchema } from "./types";
 import { isPlainObject, validateToolArguments } from "./validation";
 import { projectAgentSession } from "./session-projection";
+import { saveAgentSettingsTool, saveSettingsInputSchema } from "./settings";
 
 // 生图/改图的模型 id（`generate_image` 的 `model` 上游是必填，schema 同步宣告为必填）。
 const SKILL_FAMILIES = Object.keys(AGENT_SKILL_FAMILY_LABELS) as string[];
@@ -568,12 +569,23 @@ function defineTools(): ToolDefinition[] {
       name: "get_agent_settings",
       title: "读取 agent 设置",
       description: bilingual(
-        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野兽模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。",
+        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野兽模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。写入用 save_agent_settings（或 eimu_direct 的 thinking_level）。",
         "Read the account-level Eimu agent settings (including beast_mode). Read-only, no charge.",
       ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       run: (args, ctx) =>
         runForward({ method: "GET", path: AGENT_SETTINGS_PATH }, "get_agent_settings", args, ctx),
+    },
+    {
+      name: "save_agent_settings",
+      title: "保存 agent 设置",
+      description: bilingual(
+        "写入本 API key 所属账号的 Eimu agent 设置（部分更新：只发给出的栏位，其余保留）。thinking_level=low|medium|high|extreme 与站内「低/中/高/极限」同一张表；extreme＝极限＝野兽模式（persona=thoughtful、cost_mode=premium、beast_mode=true）。也可单独给 beast_mode / interrupt_mode / persona / cost_mode / interaction_mode。不产生费用；返回网关合并后的整份设置。",
+        "Save account-level Eimu agent settings (partial update). thinking_level=extreme means extreme/beast mode (thoughtful + premium + beast_mode=true). No charge; returns the merged settings.",
+      ),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: saveSettingsInputSchema(),
+      run: (args, ctx) => saveAgentSettingsTool(args, ctx),
     },
     {
       name: "run_agent",

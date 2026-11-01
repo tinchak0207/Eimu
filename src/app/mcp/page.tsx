@@ -135,7 +135,7 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surfa
     name: "eimu_direct",
     scope: "eimu:agent:write",
     surface: "director",
-    description: "导演派工：有界等待≤45s；超时回 processing＋job_id（勿重提交，用 eimu_job）；preflight/quote 只报价；正式跑须 budget_cap 或 confirm。",
+    description: "导演派工：有界等待≤45s；超时回 processing＋job_id（勿重提交，用 eimu_job）；preflight/quote 只报价；正式跑须 budget_cap 或 confirm。极限＝thinking_level=extreme（野兽模式）。",
   },
   {
     name: "eimu_job",
@@ -269,6 +269,12 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surfa
     scope: "eimu:agent:read",
     surface: "expert",
     description: "读该账号的 agent 设定，包含 beast_mode 野兽模式开关；它和网页版 AI 助理共用同一份设定。",
+  },
+  {
+    name: "save_agent_settings",
+    scope: "eimu:agent:write",
+    surface: "expert",
+    description: "写该账号的 agent 设定（部分更新）；thinking_level=extreme＝极限＝野兽模式；与网页版共用同一份设定，免费。",
   },
   {
     name: "run_agent",

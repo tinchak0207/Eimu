@@ -26,6 +26,7 @@ import {
   QUOTA_PATH,
 } from "./constants";
 import { bilingual, compact, pickString } from "./helpers";
+import { BEAST_MODE_SCHEMA, THINKING_LEVEL_SCHEMA, buildAgentSettingsPatch, postAgentSettings } from "./settings";
 import type { McpDispatchResponse, McpToolContext, ToolDefinition } from "./types";
 import { isPlainObject } from "./validation";
 
@@ -462,6 +463,12 @@ async function waitForTerminal(opts: {
   return okResult("导演任务处理中（有界等待超时；勿重提交）。", body);
 }
 
+/** 把「本次已写入的设置」挂到 structuredContent（不改原结果语义；无设置时原样返回）。 */
+function withSettingsApplied(result: McpToolCallResult, applied: Record<string, unknown> | undefined): McpToolCallResult {
+  if (!applied) return result;
+  return { ...result, structuredContent: { ...(result.structuredContent ?? {}), settings_applied: applied } };
+}
+
 export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolCallResult> {
   const prompt = pickString(args, "prompt") ?? "";
   if (!prompt) {
@@ -487,6 +494,14 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
   const sleep = ctx.sleep ?? defaultSleep;
   const startedAt = now();
 
+  // 极限＝thinking_level=extreme：先校验（失败即回 machineError，不读余额、不建会话）。
+  const settingsPlan = buildAgentSettingsPatch(args, ["thinking_level", "beast_mode"]);
+  if (!settingsPlan.ok) return settingsPlan.error;
+  const hasSettingsPatch = Object.keys(settingsPlan.patch).length > 0;
+  const plannedSettings = hasSettingsPatch
+    ? { ...(settingsPlan.thinking_level ? { thinking_level: settingsPlan.thinking_level } : {}), patch: settingsPlan.patch }
+    : undefined;
+
   const quota = await fetchQuotaCoins(ctx, "eimu_direct");
   if (quota.error && preflight) return quota.error;
   const quote = buildQuotePayload(mode === "quote" ? "quote" : mode, quota.balance_coins, quota.currency);
@@ -499,6 +514,7 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
       next_action: "confirm_or_set_budget",
       elapsed_ms: now() - startedAt,
       note: "preflight/quote 只报价，未建会话、未扣费。正式跑请带 budget_cap 或 confirm=true。",
+      ...(plannedSettings ? { settings_planned: plannedSettings, settings_note: "报价不写设置；正式跑时先写入再开拍。" } : {}),
     };
     return okResult("报价完成（未提交）。", body);
   }
@@ -534,12 +550,20 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
     return structuredResult(JSON.stringify(body, null, 2), body, true);
   }
 
+  // 提交前先写账号级设置（与 save_agent_settings 同一 POST AGENT_SETTINGS_PATH）；写失败不开拍。
+  let settingsApplied: Record<string, unknown> | undefined;
+  if (plannedSettings) {
+    const saved = await postAgentSettings(settingsPlan.patch, ctx, "eimu_direct");
+    if (!saved.ok) return saved.error;
+    settingsApplied = { ...plannedSettings, settings: saved.settings };
+  }
+
   const ensured = await ensureSession(args, ctx, "eimu_direct");
-  if ("error" in ensured) return ensured.error;
+  if ("error" in ensured) return withSettingsApplied(ensured.error, settingsApplied);
   const jobId = ensured.sessionId;
 
   const before = await fetchSessionDetail(jobId, ctx, "eimu_direct");
-  if (before.error) return before.error;
+  if (before.error) return withSettingsApplied(before.error, settingsApplied);
   const baselineCount = before.message_count;
 
   const built = buildDirectorPrompt(args, mode, budgetCap);
@@ -552,10 +576,10 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
     body: compact({ content: built.content, session_directive: built.session_directive }),
   });
   if (sent.status < 200 || sent.status >= 300) {
-    return upstreamFailure("POST", agentSessionPath(jobId, "/messages"), sent);
+    return withSettingsApplied(upstreamFailure("POST", agentSessionPath(jobId, "/messages"), sent), settingsApplied);
   }
 
-  return waitForTerminal({
+  const result = await waitForTerminal({
     jobId,
     ctx,
     toolName: "eimu_direct",
@@ -565,6 +589,7 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
     sleep,
     startedAt,
   });
+  return withSettingsApplied(result, settingsApplied);
 }
 
 export async function eimuJob(args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolCallResult> {
@@ -761,8 +786,8 @@ export function defineDirectorTools(): ToolDefinition[] {
       name: "eimu_direct",
       title: "导演派工",
       description: bilingual(
-        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价；正式跑须 budget_cap 或 confirm=true。终态产物含成片与分镜／brief／首尾帧／配音。",
-        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge); a real run requires budget_cap (coins) or confirm=true. Terminal results include film, storyboard, brief, bible, keyframes and audio.",
+        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价；正式跑须 budget_cap 或 confirm=true。终态产物含成片与分镜／brief／首尾帧／配音。极限模式＝thinking_level=extreme（开拍前先写账号设置，野兽模式开）。",
+        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge); a real run requires budget_cap (coins) or confirm=true. Terminal results include film, storyboard, brief, bible, keyframes and audio. Extreme mode = thinking_level=extreme (saved to account settings before the run; turns beast mode on).",
       ),
       annotations: {
         readOnlyHint: false,
@@ -814,6 +839,8 @@ export function defineDirectorTools(): ToolDefinition[] {
             description: "参考图／视频／音频的公网 URL 列表。",
           },
           style: { type: "string", description: "风格关键词（可选）。" },
+          thinking_level: THINKING_LEVEL_SCHEMA,
+          beast_mode: BEAST_MODE_SCHEMA,
         },
         required: ["prompt"],
         additionalProperties: false,

@@ -143,7 +143,8 @@ Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
 | get_agent_session | eimu:agent:read | Read one agent session's conversation and artifacts (generated image/video URLs are in the reply text); optional view = summary / transcript / raw |
 | get_agent_generation_task | eimu:agent:read | (expert) Read one durably registered generation task and its ledger cost in your own agent session; needs session_id + task_id; read-only, unknown cost stays null |
 | get_agent_settings | eimu:agent:read | Read this account's agent settings, including the beast_mode switch; same settings the web AI assistant uses |
-| eimu_direct | eimu:agent:write | Director entry: bounded wait ≤45s; preflight/quote; real run needs budget_cap or confirm; do not resubmit — use eimu_job |
+| save_agent_settings | eimu:agent:write | (expert) Save account agent settings (partial update); thinking_level=extreme = extreme/beast mode; free |
+| eimu_direct | eimu:agent:write | Director entry: bounded wait ≤45s; preflight/quote; real run needs budget_cap or confirm; do not resubmit — use eimu_job; extreme mode = thinking_level=extreme |
 | eimu_job | eimu:agent:write | Poll/control director job_id (get/wait/reply/approve/revise/cancel); wait ≤45s; structured artifacts incl. audio |
 | run_agent | eimu:agent:write | Hand a whole task to Eimu's agent orchestrator and get back a reply (it creates the session and polls to completion); this really consumes account quota and may trigger billed generation |
 | abort_agent_session | eimu:agent:write | Abort a running agent session; already-produced output is kept |

@@ -116,52 +116,79 @@ export function guessArtifactMime(url: string, kind: AgentArtifactKind): string 
   return "application/octet-stream";
 }
 
-/** 导演产物分类（film / storyboard / brief / bible / keyframes / audio）。 */
-export type DirectorArtifactCategory = "film" | "storyboard" | "brief" | "bible" | "keyframes" | "audio";
+/**
+ * 导演产物分类（film / storyboard / brief / bible / keyframes / stills / audio）。
+ * keyframes 只承接首尾帧／镜头帧语义；非分镜板的成品静帧（电商主图、卖点、细节、包装等）进 stills。
+ */
+export type DirectorArtifactCategory = "film" | "storyboard" | "brief" | "bible" | "keyframes" | "stills" | "audio";
+
+export const DIRECTOR_ARTIFACT_CATEGORIES: readonly DirectorArtifactCategory[] = [
+  "film",
+  "storyboard",
+  "brief",
+  "bible",
+  "keyframes",
+  "stills",
+  "audio",
+];
 
 export interface ClassifiedArtifact {
   url: string;
   mime: string;
+  /** 回覆里贴着该 URL 的标签（markdown alt／同行前缀，如「主图」「卖点2」）；抽不到时回落为分类名。 */
   label: string;
   kind: AgentArtifactKind;
   category: DirectorArtifactCategory;
 }
 
-export function classifyArtifactCategory(url: string, kind: AgentArtifactKind): DirectorArtifactCategory {
+/** 明确的首尾帧／关键帧语义（URL 或标签）。 */
+const KEYFRAME_STRONG = /keyframe|key.?frame|first.?frame|last.?frame|end.?frame|start.?frame|首帧|尾帧|末帧|关键帧|起始帧|结束帧|起幅|落幅/;
+/** 弱镜头帧线索：仅 URL 命名或「镜头N」标签，排在电商词之后。 */
+const KEYFRAME_WEAK_URL = /shot[-_]|frame[-_]/;
+const KEYFRAME_WEAK_LABEL = /镜头|第\s*\d+\s*镜|\bshot\s*\d/;
+const STORYBOARD_URL = /storyboard|story-board|story_board|board\b|panel/;
+const STORYBOARD_LABEL = /storyboard|分镜|故事板/;
+/** 电商／成品静帧词：标签中文词，或 URL 里较不歧义的英文 slug。 */
+const STILLS_LABEL = /主图|副图|卖点|细节|特写|包装|尺寸|场景图|白底|详情|套图|海报|商品|产品图|模特|上身|平铺|kv\b|banner|hero|detail|packag|lifestyle|product/;
+const STILLS_URL = /hero|main[-_]?image|detail|packag|lifestyle|white[-_]?bg|ecom|product|poster|banner/;
+const BIBLE_LABEL = /设定集|世界观|美术设定|角色设定|角色卡|风格指南/;
+
+export function classifyArtifactCategory(url: string, kind: AgentArtifactKind, label = ""): DirectorArtifactCategory {
   const u = url.toLowerCase();
+  const l = label.toLowerCase();
   if (kind === "audio" || ARTIFACT_AUDIO_EXTENSION.test(url)) return "audio";
   if (kind === "video" || ARTIFACT_VIDEO_EXTENSION.test(url)) {
-    if (/storyboard|story-board|story_board/.test(u)) return "storyboard";
+    if (/storyboard|story-board|story_board/.test(u) || STORYBOARD_LABEL.test(l)) return "storyboard";
     return "film";
   }
   if (/\bbrief\b|treatment|synopsis/.test(u)) return "brief";
-  if (/bible|world.?build|lore|art.?direction|character.?sheet|style.?guide/.test(u)) return "bible";
-  if (/storyboard|story-board|story_board|board\b|panel/.test(u)) return "storyboard";
-  if (/keyframe|first.?frame|last.?frame|end.?frame|start.?frame|shot[-_]|frame[-_]/.test(u)) return "keyframes";
-  if (kind === "image") return "keyframes";
+  if (/bible|world.?build|lore|art.?direction|character.?sheet|style.?guide/.test(u) || BIBLE_LABEL.test(l)) return "bible";
+  if (STORYBOARD_URL.test(u)) return "storyboard";
+  if (KEYFRAME_STRONG.test(u) || KEYFRAME_STRONG.test(l)) return "keyframes";
+  if (STORYBOARD_LABEL.test(l)) return "storyboard";
+  if (STILLS_LABEL.test(l) || STILLS_URL.test(u)) return "stills";
+  if (KEYFRAME_WEAK_URL.test(u) || KEYFRAME_WEAK_LABEL.test(l)) return "keyframes";
+  if (kind === "image") return "stills";
   return "brief";
 }
 
 export function classifyDirectorArtifacts(
-  items: Array<{ url: string; kind: AgentArtifactKind }>,
+  items: Array<{ url: string; kind: AgentArtifactKind; label?: string }>,
 ): Record<DirectorArtifactCategory, ClassifiedArtifact[]> {
-  const buckets: Record<DirectorArtifactCategory, ClassifiedArtifact[]> = {
-    film: [],
-    storyboard: [],
-    brief: [],
-    bible: [],
-    keyframes: [],
-    audio: [],
-  };
+  const buckets = Object.fromEntries(DIRECTOR_ARTIFACT_CATEGORIES.map((c) => [c, []])) as unknown as Record<
+    DirectorArtifactCategory,
+    ClassifiedArtifact[]
+  >;
   const seen = new Set<string>();
   for (const item of items) {
     if (seen.has(item.url)) continue;
     seen.add(item.url);
-    const category = classifyArtifactCategory(item.url, item.kind);
+    const hint = item.label?.trim() ?? "";
+    const category = classifyArtifactCategory(item.url, item.kind, hint);
     buckets[category].push({
       url: item.url,
       mime: guessArtifactMime(item.url, item.kind),
-      label: category,
+      label: hint || category,
       kind: item.kind,
       category,
     });
@@ -170,13 +197,44 @@ export function classifyDirectorArtifacts(
 }
 
 /**
+ * URL 前同一行的短标签：取上一处 URL／换行之后、最后一个句读之后的片段，去掉 markdown 记号与尾冒号。
+ * 例：「- **主图（白底）**：https://…」→「主图（白底）」；「（2.31 MB），成片：https://…」→「成片」。
+ */
+function labelBefore(text: string, index: number): string {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  let seg = text.slice(lineStart, index);
+  const prevUrl = seg.search(/https?:\/\/\S*$/) >= 0 ? -1 : seg.lastIndexOf("http");
+  if (prevUrl >= 0) seg = seg.slice(prevUrl).replace(/^https?:\/\/[^\s\u0080-\uFFFF]*/, "");
+  const parts = seg.split(/[，。；;,|]|\s[-–—]\s/);
+  let tail = "";
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const cleaned = parts[i]
+      .replace(/[!*_`#>[\]()]/g, "")
+      .replace(/^\s*(?:[-+]|\d+[.)、])\s*/, "")
+      .replace(/[\s:：=→\-–—]+$/, "")
+      .trim();
+    if (cleaned) {
+      tail = cleaned;
+      break;
+    }
+  }
+  return tail.length > 40 ? tail.slice(-40) : tail;
+}
+
+/**
  * 从回覆文字抽出成品媒体 URL：图片／影片／音频（mp3/wav/flac/m4a），以及 markdown 图片
  * `![alt](url)`。非媒体的普通连结不列入。保持出现顺序、同 URL 去重，
  * kind 以「更明确者优先」（image/video/audio 不被 file 覆盖）。
+ * 对外形状维持 { url, kind }（get_agent_session 等既有契约）；带标签版见 extractLabeledAgentArtifacts。
  */
 export function extractAgentArtifacts(text: string): Array<{ url: string; kind: AgentArtifactKind }> {
-  const found = new Map<string, AgentArtifactKind>();
-  const consider = (raw: string, viaMarkdownImage: boolean) => {
+  return extractLabeledAgentArtifacts(text).map(({ url, kind }) => ({ url, kind }));
+}
+
+/** 同 extractAgentArtifacts，另带 label：markdown alt 优先，否则取同行前缀（导演分类用）。 */
+export function extractLabeledAgentArtifacts(text: string): Array<{ url: string; kind: AgentArtifactKind; label?: string }> {
+  const found = new Map<string, { kind: AgentArtifactKind; label: string }>();
+  const consider = (raw: string, viaMarkdownImage: boolean, label: string) => {
     const url = raw.replace(/[.,;:!?]+$/, "");
     if (!/^https?:\/\//i.test(url)) return;
     const kind = artifactKind(url);
@@ -184,18 +242,26 @@ export function extractAgentArtifacts(text: string): Array<{ url: string; kind: 
     if (!viaMarkdownImage && kind === "file" && !url.includes(ARTIFACT_MEDIA_PATH)) return;
     const resolved = viaMarkdownImage && kind === "file" ? "image" : kind;
     const existing = found.get(url);
-    if (existing === "image" || existing === "video" || existing === "audio") return;
-    found.set(url, resolved);
+    if (existing) {
+      if (!existing.label && label) existing.label = label;
+      if (existing.kind === "image" || existing.kind === "video" || existing.kind === "audio") return;
+      existing.kind = resolved;
+      return;
+    }
+    found.set(url, { kind: resolved, label });
   };
-  for (const match of text.matchAll(ARTIFACT_MARKDOWN_IMAGE_PATTERN)) consider(match[1], true);
-  for (const match of text.matchAll(ARTIFACT_URL_PATTERN)) consider(match[0], false);
-  return [...found.entries()].map(([url, kind]) => ({ url, kind }));
+  for (const match of text.matchAll(ARTIFACT_MARKDOWN_IMAGE_PATTERN)) {
+    const alt = (match[0].match(/^!\[([^\]]*)\]/)?.[1] ?? "").trim();
+    consider(match[1], true, alt || labelBefore(text, match.index ?? 0));
+  }
+  for (const match of text.matchAll(ARTIFACT_URL_PATTERN)) consider(match[0], false, labelBefore(text, match.index ?? 0));
+  return [...found.entries()].map(([url, v]) => (v.label ? { url, kind: v.kind, label: v.label } : { url, kind: v.kind }));
 }
 
 /** 从多段文字合并抽产物并分类。 */
 export function collectClassifiedArtifacts(texts: string[]): Record<DirectorArtifactCategory, ClassifiedArtifact[]> {
-  const merged: Array<{ url: string; kind: AgentArtifactKind }> = [];
-  for (const text of texts) merged.push(...extractAgentArtifacts(text));
+  const merged: Array<{ url: string; kind: AgentArtifactKind; label?: string }> = [];
+  for (const text of texts) merged.push(...extractLabeledAgentArtifacts(text));
   return classifyDirectorArtifacts(merged);
 }
 
