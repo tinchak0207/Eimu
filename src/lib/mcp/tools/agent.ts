@@ -82,24 +82,99 @@ function readAgentMessageCount(payload: unknown): number | null {
 
 const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g)(?:[?#]|$)/i;
 const ARTIFACT_VIDEO_EXTENSION = /\.(mp4|webm|mov)(?:[?#]|$)/i;
+const ARTIFACT_AUDIO_EXTENSION = /\.(mp3|wav|flac|m4a)(?:[?#]|$)/i;
 const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}]+/g;
 const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
 /** 既知媒体目录：即使无副档名也当产物（kind=file）。 */
 const ARTIFACT_MEDIA_PATH = "/image-data/files/";
 
-function artifactKind(url: string): "image" | "video" | "file" {
+export type AgentArtifactKind = "image" | "video" | "audio" | "file";
+
+function artifactKind(url: string): AgentArtifactKind {
   if (ARTIFACT_VIDEO_EXTENSION.test(url)) return "video";
+  if (ARTIFACT_AUDIO_EXTENSION.test(url)) return "audio";
   if (ARTIFACT_IMAGE_EXTENSION.test(url)) return "image";
   return "file";
 }
 
+export function guessArtifactMime(url: string, kind: AgentArtifactKind): string {
+  const lower = url.toLowerCase();
+  if (lower.includes(".webm")) return "video/webm";
+  if (lower.includes(".mov")) return "video/quicktime";
+  if (lower.includes(".mp4")) return "video/mp4";
+  if (lower.includes(".webp")) return "image/webp";
+  if (lower.includes(".png")) return "image/png";
+  if (lower.includes(".jpg") || lower.includes(".jpeg")) return "image/jpeg";
+  if (lower.includes(".mp3")) return "audio/mpeg";
+  if (lower.includes(".wav")) return "audio/wav";
+  if (lower.includes(".flac")) return "audio/flac";
+  if (lower.includes(".m4a")) return "audio/mp4";
+  if (kind === "video") return "video/mp4";
+  if (kind === "audio") return "audio/mpeg";
+  if (kind === "image") return "image/png";
+  return "application/octet-stream";
+}
+
+/** 导演产物分类（film / storyboard / brief / bible / keyframes / audio）。 */
+export type DirectorArtifactCategory = "film" | "storyboard" | "brief" | "bible" | "keyframes" | "audio";
+
+export interface ClassifiedArtifact {
+  url: string;
+  mime: string;
+  label: string;
+  kind: AgentArtifactKind;
+  category: DirectorArtifactCategory;
+}
+
+export function classifyArtifactCategory(url: string, kind: AgentArtifactKind): DirectorArtifactCategory {
+  const u = url.toLowerCase();
+  if (kind === "audio" || ARTIFACT_AUDIO_EXTENSION.test(url)) return "audio";
+  if (kind === "video" || ARTIFACT_VIDEO_EXTENSION.test(url)) {
+    if (/storyboard|story-board|story_board/.test(u)) return "storyboard";
+    return "film";
+  }
+  if (/\bbrief\b|treatment|synopsis/.test(u)) return "brief";
+  if (/bible|world.?build|lore|art.?direction|character.?sheet|style.?guide/.test(u)) return "bible";
+  if (/storyboard|story-board|story_board|board\b|panel/.test(u)) return "storyboard";
+  if (/keyframe|first.?frame|last.?frame|end.?frame|start.?frame|shot[-_]|frame[-_]/.test(u)) return "keyframes";
+  if (kind === "image") return "keyframes";
+  return "brief";
+}
+
+export function classifyDirectorArtifacts(
+  items: Array<{ url: string; kind: AgentArtifactKind }>,
+): Record<DirectorArtifactCategory, ClassifiedArtifact[]> {
+  const buckets: Record<DirectorArtifactCategory, ClassifiedArtifact[]> = {
+    film: [],
+    storyboard: [],
+    brief: [],
+    bible: [],
+    keyframes: [],
+    audio: [],
+  };
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.url)) continue;
+    seen.add(item.url);
+    const category = classifyArtifactCategory(item.url, item.kind);
+    buckets[category].push({
+      url: item.url,
+      mime: guessArtifactMime(item.url, item.kind),
+      label: category,
+      kind: item.kind,
+      category,
+    });
+  }
+  return buckets;
+}
+
 /**
- * 从回覆文字抽出成品媒体 URL：`/image-data/files/…` 的图片/影片，以及 markdown 图片
- * `![alt](url)`（作者已宣告是图）。非媒体的普通连结不列入。保持出现顺序、同 URL 去重，
- * kind 以「更明确者优先」（image/video 不被 file 覆盖）。
+ * 从回覆文字抽出成品媒体 URL：图片／影片／音频（mp3/wav/flac/m4a），以及 markdown 图片
+ * `![alt](url)`。非媒体的普通连结不列入。保持出现顺序、同 URL 去重，
+ * kind 以「更明确者优先」（image/video/audio 不被 file 覆盖）。
  */
-export function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image" | "video" | "file" }> {
-  const found = new Map<string, "image" | "video" | "file">();
+export function extractAgentArtifacts(text: string): Array<{ url: string; kind: AgentArtifactKind }> {
+  const found = new Map<string, AgentArtifactKind>();
   const consider = (raw: string, viaMarkdownImage: boolean) => {
     const url = raw.replace(/[.,;:!?]+$/, "");
     if (!/^https?:\/\//i.test(url)) return;
@@ -108,12 +183,19 @@ export function extractAgentArtifacts(text: string): Array<{ url: string; kind: 
     if (!viaMarkdownImage && kind === "file" && !url.includes(ARTIFACT_MEDIA_PATH)) return;
     const resolved = viaMarkdownImage && kind === "file" ? "image" : kind;
     const existing = found.get(url);
-    if (existing === "image" || existing === "video") return;
+    if (existing === "image" || existing === "video" || existing === "audio") return;
     found.set(url, resolved);
   };
   for (const match of text.matchAll(ARTIFACT_MARKDOWN_IMAGE_PATTERN)) consider(match[1], true);
   for (const match of text.matchAll(ARTIFACT_URL_PATTERN)) consider(match[0], false);
   return [...found.entries()].map(([url, kind]) => ({ url, kind }));
+}
+
+/** 从多段文字合并抽产物并分类。 */
+export function collectClassifiedArtifacts(texts: string[]): Record<DirectorArtifactCategory, ClassifiedArtifact[]> {
+  const merged: Array<{ url: string; kind: AgentArtifactKind }> = [];
+  for (const text of texts) merged.push(...extractAgentArtifacts(text));
+  return classifyDirectorArtifacts(merged);
 }
 
 /**

@@ -1,52 +1,62 @@
 ---
 name: film-production
-description: 从一句话、一段剧本或一张参考图走到可交付成片素材的完整流程：对齐预算、拆分镜、锚定角色与场景、逐镜出图出视频、配音与放大，最后交一份带链接的分镜清单。适合「给我做一条 30 秒短片」这类从零到成的请求；不要用于单张出图或单次改图。
+description: 把模糊需求交给 Eimu 导演，拿到成片与中间产物。适合「给我做一条 30 秒短片」「把这段故事拍出来」这类从零到成的请求；不要用于单张出图或单次改图。
 ---
 
-# 一句话到成片
+# 一句话到成片（导演主路径）
+
+Eimu 是 **Vibe Directing / Cursor of video**。口号：**不用学提示词设计和分镜，现在你也是导演。**
+
+你的工作不是手拼分镜原子工具，而是把需求交出去、盯进度、把成片与中间产物交回用户。
 
 ## 铁律
 
-- 任何付费调用（`generate_image` / `edit_image` / `generate_video` / `tts` / `upscale`）之前先 `get_quota` 看余额，并把这次的费用范围讲清楚；用户对上一镜的授权不等于对下一镜重跑的授权。
-- 模型 id 一律先用 `list_models` 取，不要凭记忆写模型名；报价用返回里的 `x_coins_per_image` / `x_coins_per_second`。
-- 本流程的每一步都在对话里交付文本与链接。Eimu 的 MCP 没有成片导出工具；画布产线虽有声明式读写工具（`list_canvas_projects` / `canvas_get_state` / `workflow_read` / `workflow_history` / `workflow_write` / `workflow_rollback`），但本流程不依赖它们，也不要向用户要「画布上的节点」。
-- 素材是否符合要求由用户判定；不要用静态帧宣称运动、口型或音画同步已经合格。
+- **主路径只有一条**：`eimu_direct` → 轮询 `eimu_job` → 交付成片与中间产物（分镜／brief／首尾帧／配音等）。
+- **禁止**教用户或自己用 `generate_image` / `generate_video` / `tts` 等原子工具逐镜手拼来「替代导演」。原子工具在 `toolset=expert` 里，只给专家排障，不是成片主路径。
+- 付费前先说清预算：`eimu_direct` 的 `mode=quote` 只报价；`full` 建议带 `budget_cap`。用户对上一镜的授权不等于对整片重跑的授权。
+- 同一任务**勿重提交**；续查、改片、批准、取消一律走 `eimu_job`。
+- 成片与中间产物是导演 job 的终态交付；禁止把交付说成「只到素材、用户自己拼片」。
 
 ## 步骤
 
-### 0. 对齐与预算
+### 0. 对齐一句目标
 
-1. `get_quota` —— 报告余额与币种，作为本次预算上限。
-2. `list_models` —— 记录可用图像与视频模型、端点归属与计价。
-3. 用一句话确认：总时长、画幅、镜头数、风格与预算。确认后进入下一步。
+用用户的话确认：总时长、画幅、风格、预算上限。缺硬事实再问；能猜的别问卷。
 
-### 1. 分镜
+### 1. 派给导演
 
-4. `list_skills` 按题材家族或关键词检索公开技能条目（含适用场景、输入面、交付物），需要细节时 `get_skill` 读完整条目；把它当作风格与结构的参考，不要当成硬模板。
-5. 在对话里输出分镜表：镜号 / 秒数 / 画面 / 运镜 / 台词或旁白 / 需要的模型能力。此时不生成任何素材，等用户确认。
+调用 `eimu_direct`：
 
-### 2. 锚定角色与场景
+- `prompt`：用户原话 + 你对齐过的约束（时长／画幅／风格／参考 URL）
+- `mode`：先 `quote`（若用户要先看价）或直接 `full`
+- `budget_cap`：`full` 时带上
+- `reference_urls`：用户给的参考素材公网链接
 
-6. `generate_image` 生成角色定妆（三视图或正面全身，白底），prompt 里写死一份外形描述块。
-7. `generate_image` 生成每个场景的第一张空镜；同一场景需要第二个角度时，用 `reference_images` 指向第一张，不要两个角度各自独立生成。
+拿到 `job_id` 后立刻进入下一步。若工具回 `not_ready`（并行路尚未合入），按回执里的 `interim` 过渡：`toolset=expert` + `run_agent` 派工，再用 `get_agent_session` 取产物——**仍然按「交出去 → 拿成片」叙事交付**，不要改回逐镜手拼。
 
-### 3. 逐镜出图
+### 2. 轮询与协作
 
-8. 每镜关键帧用 `generate_image`：prompt 写画面与构图，`reference_images` 带上角色定妆与所属场景图（合计不超过 5 张），`size` 取项目画幅，`n` 按需要 1-4。
-9. 只改局部时用 `edit_image`（`image` 为上一步产物 URL，`prompt` 为修改指令，`size` 取 `1k` 或 `2k`），不要整镜重出。
-10. 需要更高分辨率的定稿帧用 `upscale`（`factor` 1-4，`size` 取 `2k`）。
+循环调用 `eimu_job`：
 
-### 4. 出视频
+- `action=get`：看阶段、进度、待回答问题、已产出的中间产物
+- `action=wait`：有界等待（≤45s），超时继续 get，不要空转重提 `eimu_direct`
+- `action=reply` / `approve`：回答导演补问或批准预算
+- `action=revise`：对同一 job 追加改片意见
+- `action=cancel`：用户明确叫停
 
-11. 每镜 `generate_video`（异步）：prompt 里把画面描述与运镜描述合成一段，`duration_seconds` 取该镜秒数，`size` 取项目画幅，有现场声就开 `generate_audio`。
-12. 用 `get_result`（`kind: "video"`, `id` 为返回的 id）轮询到终态；失败先读报错再决定是否重跑，不要盲目重跑扣费。
-13. 静帧到动起来这一镜如果只有单帧素材，把该帧当起点，构图要留出运动的余量。
+也可用 `list_agent_sessions` / `get_agent_session` 回读会话与产物链接；需要中止时用 `abort_agent_session`。
 
-### 5. 配音
+### 3. 交付
 
-14. 旁白与台词用 `tts`（`input` 为文本，`voice` 选音色，`model` 默认 `tts-default`），再用 `get_result`（`kind: "tts"`）取结果。
+终态时向用户交付：
 
-### 6. 交付
+1. **成片**链接（mp4 等）
+2. **中间产物**：brief／分镜表／世界观或美术设定／各镜首尾帧／配音或 BGM（有则给）
+3. 本次花费与是否触碰 `budget_cap`
+4. 若要改一版：对**同一** `job_id` 走 `eimu_job action=revise`，不要新开一条无关任务重烧整片
 
-15. 输出交付表：镜号 / 时长 / 成片链接 / 配音链接 / 该镜是否重跑过及原因。
-16. 明说剪辑、拼接与字幕由用户在本地完成；本流程交付到素材为止。用户需要修改时，从对应镜号的链接继续，不要重跑整片。
+## 明确不做
+
+- 不把「拆镜 → 逐镜 generate_* → 用户自己拼片」写成标准流程
+- 不把交付降级成「只交素材」
+- 不把画布节点编排界面塞给普通用户当主路径

@@ -20,6 +20,8 @@ const ORIGIN = getSiteUrlFromEnv();
 const ENDPOINT = `${ORIGIN}/api/mcp`;
 
 const EXPECTED_TOOL_NAMES = [
+  "eimu_direct",
+  "eimu_job",
   "list_skills",
   "get_skill",
   "list_models",
@@ -147,7 +149,14 @@ test("漂移探针：/mcp 页与 llms.txt 的工具清单＝src/lib/mcp/tools.ts
     join(process.cwd(), "src/lib/mcp/tools/tools-definitions.ts"),
     "utf8",
   );
-  const parsed = [...toolsSrc.matchAll(/^\s{6}name: "([a-z][a-z0-9_]*)",$/gm)].map((match) => match[1]);
+  const directorSrc = readFileSync(
+    join(process.cwd(), "src/lib/mcp/tools/director.ts"),
+    "utf8",
+  );
+  const parsed = [
+    ...toolsSrc.matchAll(/^\s{6}name: "([a-z][a-z0-9_]*)",$/gm),
+    ...directorSrc.matchAll(/^\s{6}name: "([a-z][a-z0-9_]*)",$/gm),
+  ].map((match) => match[1]);
   assert.equal(
     parsed.length,
     EXPECTED_TOOL_NAMES.length,

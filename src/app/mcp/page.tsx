@@ -26,7 +26,7 @@ const KEY_PLACEHOLDER = "sk-biz-你的密钥";
 
 const TITLE = "MCP 接入：把 Eimu 接到你的 coding agent";
 const DESCRIPTION =
-  "Eimu Remote MCP 端点是 POST https://eimu.dev/api/mcp（JSON-RPC 2.0 / Streamable HTTP），认证用 Authorization: Bearer sk-biz-…。Codex、Claude Code、Cursor、OpenClaw 与通用 MCP 客户端的可复制配置片段，以及 tools/list 的工具清单。";
+  "Eimu 是 Vibe Directing／Cursor of video：远端 MCP 默认只露导演工具（eimu_direct／eimu_job／会话读写），原子工具用 toolset=expert。认证 Authorization: Bearer sk-biz-…。含可复制配置与喂到嘴边的安装 prompt。";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -129,125 +129,162 @@ bearer_token_env_var = "EIMU_BIZ_KEY"`,
 // tools/list 的工具清单（名称＋一句话＋所需 scope）。
 // 名称与行为以 src/lib/mcp/tools.ts 的定义为单一真源（本页只做发现面摘要）；
 // 本页测试有一道漂移探针：tools.ts 新增或改名工具而本页没跟上会红。
-const MCP_TOOLS: Array<{ name: string; scope: string; description: string }> = [
+const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surface?: "director" | "expert" }> = [
+  // ── 默认导演面（tools/list 无 toolset=expert 时只回这些）
   {
-    name: "list_skills",
-    scope: "eimu:skills:read",
-    description: "列出公开技能库（内建 / 配方 / 模板三个来源），可按关键词与题材家族筛选；私有技能永不出现。",
+    name: "eimu_direct",
+    scope: "eimu:agent:write",
+    surface: "director",
+    description: "导演派工：有界等待≤45s；超时回 processing＋job_id（勿重提交，用 eimu_job）；preflight/quote 只报价；正式跑须 budget_cap 或 confirm。",
   },
   {
-    name: "get_skill",
-    scope: "eimu:skills:read",
-    description: "按 id 读一条公开技能的完整条目：适用场景、输入面、交付物、可调用工具与主责专家。",
-  },
-  {
-    name: "list_models",
-    scope: "eimu:models:read",
-    description: "列出当前密钥可用的图像 / 视频模型、端点归属与计价；生成前先用它取 model id。",
-  },
-  {
-    name: "generate_image",
-    scope: "eimu:image:write",
-    description: "按提示词生成图像（默认回成品链接），与 /v1/images/generations 是同一条扣费路径。",
-  },
-  {
-    name: "edit_image",
-    scope: "eimu:image:write",
-    description: "对一张输入图按提示词做编辑，与 /v1/images/edits 同一条路径。",
-  },
-  {
-    name: "generate_video",
-    scope: "eimu:video:write",
-    description: "提交视频生成任务（异步，返回 id），再用 get_result 轮询。",
-  },
-  {
-    name: "tts",
-    scope: "eimu:audio:write",
-    description: "提交文本转语音任务（异步，返回 id），再用 get_result 轮询。",
-  },
-  {
-    name: "upscale",
-    scope: "eimu:image:write",
-    description: "放大一张图像；含幂等预留与失败退款。",
-  },
-  {
-    name: "get_quota",
-    scope: "eimu:quota:read",
-    description: "查当前密钥绑定账户的余额与币种，与 /v1/quota 同源账本。",
-  },
-  {
-    name: "get_result",
-    scope: "eimu:tasks:read",
-    description: "按任务 id 取异步结果：kind = image / video / tts。",
-  },
-  {
-    name: "list_canvas_projects",
-    scope: "eimu:canvas:read",
-    description: "列出本密钥账号自己的画布项目摘要（id / 名称 / 时间 / 节点数）；拿到 project_id 才能写画布产线。",
-  },
-  {
-    name: "canvas_get_state",
-    scope: "eimu:canvas:read",
-    description: "读取某个 agent 会话当前的画布快照（节点 / 连线 / 选中 / 视口，含可逆声明 dsl 与节点版本索引）。",
-  },
-  {
-    name: "workflow_read",
-    scope: "eimu:canvas:read",
-    description: "只投影某会话画布的可逆声明 dsl 与节点版本索引（像读代码一样读产线）；要完整节点坐标用 canvas_get_state。",
-  },
-  {
-    name: "workflow_history",
-    scope: "eimu:canvas:read",
-    description: "读取画布节点的版本史（每节点的 version / 时间 / 原因 / 标题）；给 node_id 只回该节点。",
-  },
-  {
-    name: "workflow_write",
-    scope: "eimu:canvas:write",
-    description: "把整份工作流声明（dsl）编译成画布操作；给了属于本账号的 project_id 才真的落图，否则只编译回 ops。",
-  },
-  {
-    name: "workflow_rollback",
-    scope: "eimu:canvas:write",
-    description: "把某节点的内容回滚到指定版本（省略 version = 上一版）；只还原 title 与 metadata，不动坐标。",
+    name: "eimu_job",
+    scope: "eimu:agent:write",
+    surface: "director",
+    description: "导演任务 get|wait|reply|approve|revise|cancel；wait≤45s；产物含 film/storyboard/brief/bible/keyframes/audio。",
   },
   {
     name: "list_agent_sessions",
     scope: "eimu:agent:read",
+    surface: "director",
     description: "列出你在 Eimu 的 AI 助理（agent）会话：标题、时间与状态，用来找回之前做过的工作。",
   },
   {
     name: "get_agent_session",
     scope: "eimu:agent:read",
-    description: "读某个 agent 会话的对话与产物（生成的图片／影片 URL 就在回复文字里）；view 可选 summary / transcript / raw。",
+    surface: "director",
+    description: "读某个 agent 会话的对话与产物（成片／中间产物 URL）；view 可选 summary / transcript / raw。",
+  },
+  {
+    name: "abort_agent_session",
+    scope: "eimu:agent:write",
+    surface: "director",
+    description: "中止一个正在跑的 agent 会话，已经产出的部分不浪费。",
+  },
+  // ── 专家面（?toolset=expert 或头 X-Eimu-Toolset: expert）
+  {
+    name: "list_skills",
+    scope: "eimu:skills:read",
+    surface: "expert",
+    description: "列出公开技能库（内建 / 配方 / 模板三个来源），可按关键词与题材家族筛选；私有技能永不出现。",
+  },
+  {
+    name: "get_skill",
+    scope: "eimu:skills:read",
+    surface: "expert",
+    description: "按 id 读一条公开技能的完整条目：适用场景、输入面、交付物、可调用工具与主责专家。",
+  },
+  {
+    name: "list_models",
+    scope: "eimu:models:read",
+    surface: "expert",
+    description: "列出当前密钥可用的图像 / 视频模型、端点归属与计价；生成前先用它取 model id。",
+  },
+  {
+    name: "generate_image",
+    scope: "eimu:image:write",
+    surface: "expert",
+    description: "按提示词生成图像（默认回成品链接），与 /v1/images/generations 是同一条扣费路径。",
+  },
+  {
+    name: "edit_image",
+    scope: "eimu:image:write",
+    surface: "expert",
+    description: "对一张输入图按提示词做编辑，与 /v1/images/edits 同一条路径。",
+  },
+  {
+    name: "generate_video",
+    scope: "eimu:video:write",
+    surface: "expert",
+    description: "提交视频生成任务（异步，返回 id），再用 get_result 轮询。",
+  },
+  {
+    name: "tts",
+    scope: "eimu:audio:write",
+    surface: "expert",
+    description: "提交文本转语音任务（异步，返回 id），再用 get_result 轮询。",
+  },
+  {
+    name: "upscale",
+    scope: "eimu:image:write",
+    surface: "expert",
+    description: "放大一张图像；含幂等预留与失败退款。",
+  },
+  {
+    name: "get_quota",
+    scope: "eimu:quota:read",
+    surface: "expert",
+    description: "查当前密钥绑定账户的余额与币种，与 /v1/quota 同源账本。",
+  },
+  {
+    name: "get_result",
+    scope: "eimu:tasks:read",
+    surface: "expert",
+    description: "按任务 id 取异步结果：kind = image / video / tts。",
+  },
+  {
+    name: "list_canvas_projects",
+    scope: "eimu:canvas:read",
+    surface: "expert",
+    description: "列出本密钥账号自己的画布项目摘要（id / 名称 / 时间 / 节点数）；拿到 project_id 才能写画布产线。",
+  },
+  {
+    name: "canvas_get_state",
+    scope: "eimu:canvas:read",
+    surface: "expert",
+    description: "读取某个 agent 会话当前的画布快照（节点 / 连线 / 选中 / 视口，含可逆声明 dsl 与节点版本索引）。",
+  },
+  {
+    name: "workflow_read",
+    scope: "eimu:canvas:read",
+    surface: "expert",
+    description: "只投影某会话画布的可逆声明 dsl 与节点版本索引（像读代码一样读产线）；要完整节点坐标用 canvas_get_state。",
+  },
+  {
+    name: "workflow_history",
+    scope: "eimu:canvas:read",
+    surface: "expert",
+    description: "读取画布节点的版本史（每节点的 version / 时间 / 原因 / 标题）；给 node_id 只回该节点。",
+  },
+  {
+    name: "workflow_write",
+    scope: "eimu:canvas:write",
+    surface: "expert",
+    description: "把整份工作流声明（dsl）编译成画布操作；给了属于本账号的 project_id 才真的落图，否则只编译回 ops。",
+  },
+  {
+    name: "workflow_rollback",
+    scope: "eimu:canvas:write",
+    surface: "expert",
+    description: "把某节点的内容回滚到指定版本（省略 version = 上一版）；只还原 title 与 metadata，不动坐标。",
   },
   {
     name: "get_agent_settings",
     scope: "eimu:agent:read",
+    surface: "expert",
     description: "读该账号的 agent 设定，包含 beast_mode 野兽模式开关；它和网页版 AI 助理共用同一份设定。",
   },
   {
     name: "run_agent",
     scope: "eimu:agent:write",
-    description: "把整件工作交给 Eimu 的 agent orchestrator 执行并取回回复（它自己建会话、轮询到出结果）；会真实消耗账号额度、可能触发扣费生成。",
-  },
-  {
-    name: "abort_agent_session",
-    scope: "eimu:agent:write",
-    description: "中止一个正在跑的 agent 会话，已经产出的部分不浪费。",
+    surface: "expert",
+    description: "专家面过渡：把整件工作交给 orchestrator 并取回回复；导演主路径请用 eimu_direct／eimu_job。会真实消耗额度。",
   },
   {
     name: "check_delivery_contract",
     scope: "eimu:harness:read",
+    surface: "expert",
     description:
-      "按 Expert 域对交付物做契约栏位层的确定性校验：必填栏位是否齐全、qc 签名是否与内容对得上；它不是品质评分——ok:true 只代表栏位层合格，不代表成品可用（成品好不好请看 evaluate_media_quality）。",
+      "按 Expert 域对交付物做契约栏位层的确定性校验：必填栏位是否齐全、qc 签名是否与内容对得上；它不是品质评分。",
   },
   {
     name: "evaluate_media_quality",
     scope: "eimu:harness:read",
+    surface: "expert",
     description:
-      "对已生成完成的影片／图片／音频做确定性量测硬检（分辨率／时长／文件大小／音轨等，套用我方政策阈值），不调用任何模型；服务器端量测不可用时诚实回 probe_unavailable——那不等于通过。呼叫方也可自带 ffprobe 结果，我们只负责套政策。",
+      "对已生成完成的影片／图片／音频做确定性量测硬检（分辨率／时长／文件大小／音轨等）；服务器端量测不可用时诚实回 probe_unavailable。",
   },
-];
+]];
 
 const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
   {
@@ -287,19 +324,16 @@ const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
 
 // 插件包（public/plugin/ 就是静态根，一份真源，部署后即可访问）。
 // 这里只做发现面摘要：包内文件清单与一段可直接喂给 agent 的安装指令。
-// 诚实边界：Eimu 目前没有公开的插件市集仓，`plugin marketplace add` 这一步跑不通，
-// 文案必须标明「待发布」，不得宣称今天就能一键装。
-const PLUGIN_TREE = `plugin/
-├── marketplace.json                    # 市集索引：只声明 eimu 这一个插件
-└── eimu/
-    ├── .codex-plugin/plugin.json       # 插件元数据：名称、描述、logo、默认提问
-    ├── .mcp.json                       # MCP 端点 + Authorization 头（引用 \${EIMU_BIZ_KEY} 环境变量，不含任何密钥）
-    ├── assets/eimu-icon.svg            # 图标
-    ├── README.md                       # 安装说明
-    └── skills/                         # 三个随包技能
-        ├── film-production/SKILL.md            # 一句话到成片
-        ├── character-consistency/SKILL.md      # 角色一致性
-        └── camera-motion/SKILL.md              # 运镜与镜头运动`;
+// 本路不做市集上架：安装走静态 key + 喂到嘴边 prompt，不推 marketplace 一键装。
+const PLUGIN_TREE = `plugin/eimu/
+├── .codex-plugin/plugin.json       # 插件元数据：名称、描述、logo、默认提问
+├── .mcp.json                       # 远端 HTTP MCP + Authorization（引用 \${EIMU_BIZ_KEY}，不含密钥）
+├── assets/eimu-icon.svg            # 图标
+├── README.md                       # 安装说明（主路径＝导演工具面）
+└── skills/                         # 三个随包技能
+    ├── film-production/SKILL.md            # 一句话到成片（eimu_direct → eimu_job）
+    ├── character-consistency/SKILL.md      # 角色一致性
+    └── camera-motion/SKILL.md              # 运镜与镜头运动`;
 
 // 一键安装指令：整段复制给使用者本机的 coding agent。
 // 这是 template literal，三处转义是刻意的、不能动：
@@ -309,7 +343,7 @@ const PLUGIN_TREE = `plugin/
 // 渲染 oracle 在 page.test.ts 的「承载体」用例：转义错了就红。
 const AGENT_INSTALL_PROMPT = `帮我把 Eimu 的 MCP 接进你（就是你这个 coding agent），装完要能真的用。
 
-Eimu 提供生图／改图、生视频、配音、放大，以及公开技能库与画布产线工具。远端 MCP 端点：
+Eimu 是 Vibe Directing／Cursor of video：不用学提示词设计和分镜，现在你也是导演。默认 tools/list 只露导演工具（eimu_direct／eimu_job／会话）；原子工具要 ?toolset=expert。远端 MCP 端点：
 · URL：${MCP_ENDPOINT}（JSON-RPC 2.0，Streamable HTTP，只收 POST）
 · 认证：请求头 Authorization: Bearer sk-biz-…
 
@@ -456,24 +490,22 @@ export default function McpPage() {
         <section id="tools" className="mt-8 scroll-mt-28">
           <h2 className="text-ios-title2 font-semibold text-[rgba(0,0,0,0.85)]">先看能做什么</h2>
           <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-            装了 MCP 的 agent 不只能调生成工具，还能把整件工作交给 Eimu 的 agent（orchestrator）去做，拿回带成品
-            URL 的回复；它和网页版 AI 助理共用同一个 orchestrator 与同一份账号设置（包括 beast_mode
-            野兽模式：确定性 prompt／契约注入＋Expert 派遣＋critic）。入口是{" "}
-            <InlineCode>run_agent</InlineCode>，会话与产物可用 <InlineCode>list_agent_sessions</InlineCode>／
-            <InlineCode>get_agent_session</InlineCode> 回读。
+            Eimu 是 Vibe Directing／Cursor of video：<span className="font-semibold text-[rgba(0,0,0,0.72)]">不用学提示词设计和分镜，现在你也是导演。</span>
+            默认 <InlineCode>tools/list</InlineCode> 只返回导演工具——入口是{" "}
+            <InlineCode>eimu_direct</InlineCode>，用 <InlineCode>eimu_job</InlineCode> 轮询拿成片与中间产物；会话可用{" "}
+            <InlineCode>list_agent_sessions</InlineCode>／<InlineCode>get_agent_session</InlineCode>／
+            <InlineCode>abort_agent_session</InlineCode>。
           </p>
           <p className="mt-3 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-            <InlineCode>tools/list</InlineCode>{" "}
-            返回下面这些工具：名字是意图，不是模型名，agent 不用记住任何供应商细节。生成类工具会真实扣费，规矩是先{" "}
-            <InlineCode>get_quota</InlineCode> 看余额、再 <InlineCode>list_models</InlineCode> 取 model id；异步任务用{" "}
-            <InlineCode>get_result</InlineCode> 轮询。每个工具各自要一个 scope。
+            原子工具（生图／生视频／画布／harness 等）收在专家面：URL 加{" "}
+            <InlineCode>?toolset=expert</InlineCode>，或请求头 <InlineCode>X-Eimu-Toolset: expert</InlineCode>。
+            下面清单导演面在前、专家面在后；名字是意图，不是模型名。扣费工具会真实消耗额度——勿对同一导演任务重复提交。
           </p>
           <p className="mt-3 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-            装好 MCP 的 agent 还能取用站内的生成品质 harness：交付契约与验收纪律——八域必填栏位、媒体硬检政策、critic 只在独立量测时才 enforce 的 7 分门槛。入口有三条：工具{" "}
-            <InlineCode>check_delivery_contract</InlineCode>（契约栏位层校验）与{" "}
-            <InlineCode>evaluate_media_quality</InlineCode>（确定性媒体硬检）、资源{" "}
-            <InlineCode>eimu://harness/guide</InlineCode>／<InlineCode>eimu://harness/delivery-contracts</InlineCode>、提示模板{" "}
-            <InlineCode>eimu-harness</InlineCode>。边界要说清楚：资源与提示模板是使用者／客户端主动取用的，不会像站内那样每轮自动注入系统提示；平台侧那套自动强制机制（子代理派遣执行面、强制交付闸与自动重派、会话记忆注入）外部没有，契约要靠外部自己的循环遵守。
+            专家面另含品质 harness：<InlineCode>check_delivery_contract</InlineCode>／
+            <InlineCode>evaluate_media_quality</InlineCode>，以及资源{" "}
+            <InlineCode>eimu://harness/guide</InlineCode>／提示模板 <InlineCode>eimu-harness</InlineCode>。
+            资源与模板需客户端主动取用，不会像站内那样每轮自动注入。
           </p>
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
             {MCP_TOOLS.map((tool) => (
@@ -481,6 +513,9 @@ export default function McpPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <code className="font-mono text-ios-footnote font-semibold text-[#007AFF]">{tool.name}</code>
                   <code className="font-mono text-ios-caption1 text-[rgba(0,0,0,0.45)]">{tool.scope}</code>
+                  <code className="font-mono text-ios-caption1 text-[rgba(0,0,0,0.45)]">
+                    {tool.surface === "director" ? "director" : "expert"}
+                  </code>
                 </div>
                 <p className="mt-1.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{tool.description}</p>
               </li>
@@ -531,9 +566,7 @@ export default function McpPage() {
                 >
                   一键：把这段发给你的 agent
                 </a>
-                」一节，整段复制给你本机的 agent 即可。若要走市集一键装，它依赖一个 Eimu 公开的插件市集仓，
-                <span className="font-semibold text-[rgba(0,0,0,0.68)]">该仓尚未发布，这一步现在跑不通</span>
-                ；今天要用插件包请照该节里 agent 的提示走。
+                」一节，整段复制给你本机的 agent 即可。本路不走插件市集一键装；按该节静态 key＋喂到嘴边 prompt 即可。
               </p>
             </div>
           </div>

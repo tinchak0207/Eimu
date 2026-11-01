@@ -2,7 +2,7 @@
  * `/api/mcp` —— Eimu 的 MCP（Model Context Protocol）端点，Streamable HTTP 传输。
  *
  * 定位：这是**第二个入口，不是第二套系统**。外部 coding agent（Codex / Claude Code /
- * OpenClaw…）透过 MCP 驱动 Eimu 的生图/生视频/TTS/放大与公开技能库，但：
+ * OpenClaw…）透过 MCP 把需求交给 Eimu 导演拿成片；默认 tools/list 只露导演面，原子工具须 toolset=expert。底层仍：
  * - 鉴权逐字复用 B 端那把闸（`authenticateBizApiKey` + `readBearerToken`），
  *   没有第二套验 key 的路径；
  * - 业务与计费零重写——工具把参数转发给既有 `/api/v1/**`，扣费/配额/幂等/退款
@@ -53,7 +53,7 @@ import {
   type JsonRpcId,
   type McpInitializeResult,
 } from "@/lib/mcp/protocol";
-import { MCP_TOOLS, callTool, createHttpDispatcher } from "@/lib/mcp/tools";
+import { listMcpTools, parseMcpToolset, callTool, createHttpDispatcher, type McpToolset } from "@/lib/mcp/tools";
 import { HARNESS_PROMPTS, HARNESS_RESOURCES, type HarnessPrompt } from "@/lib/mcp/harness-guide";
 import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
@@ -63,11 +63,21 @@ export const dynamic = "force-dynamic";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SERVER_INSTRUCTIONS = [
-  "Eimu 提供图像生成/编辑、视频生成、文本转语音、放大，以及公开技能库检索。",
-  "生成类工具会真实扣费：先用 get_quota 看余额、用 list_models 取 model id 再生成。",
-  "异步任务（generate_video / tts）返回 id，用 get_result 轮询。",
-  "本 server 另提供 harness 指南（资源 eimu://harness/guide 与 prompt eimu-harness），用于提升生成质量的交付契约与验收纪律。",
+  "Eimu 是 Vibe Directing／Cursor of video：不用学提示词设计和分镜，现在你也是导演。",
+  "默认 tools/list 只返回导演工具：eimu_direct → eimu_job 轮询，终态交付成片与中间产物；另有 list/get/abort_agent_session。",
+  "原子工具（生图／生视频／TTS／画布／harness 等）须显式 toolset=expert（URL ?toolset=expert、头 X-Eimu-Toolset、或 params.toolset）。",
+  "生成会真实扣费；eimu_direct 正式跑须 budget_cap 或 confirm。有界等待超时只轮询、勿重提交。",
 ].join(" ");
+
+/** 解析本次请求的 toolset（query → 头 → params）。 */
+function resolveRequestToolset(req: NextRequest, params: unknown): McpToolset {
+  return parseMcpToolset({
+    searchParams: req.nextUrl.searchParams,
+    header: req.headers.get("x-eimu-toolset") ?? req.headers.get("X-Eimu-Toolset"),
+    altHeader: req.headers.get("mcp-toolset") ?? req.headers.get("Mcp-Toolset"),
+    params,
+  });
+}
 
 function noStore(status: number, body: unknown, traceId: string, headers?: Record<string, string>) {
   const response = new NextResponse(body === undefined ? null : JSON.stringify(body), {
@@ -273,8 +283,10 @@ export async function POST(req: NextRequest) {
     case "ping":
       return rpcOk(traceId, id, {});
 
-    case "tools/list":
-      return rpcOk(traceId, id, { tools: MCP_TOOLS });
+    case "tools/list": {
+      const toolset = resolveRequestToolset(req, parsed.params);
+      return rpcOk(traceId, id, { tools: listMcpTools(toolset) });
+    }
 
     case "tools/call": {
       const params = typeof parsed.params === "object" && parsed.params !== null

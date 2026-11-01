@@ -83,16 +83,18 @@ export default function DocsMcpPage() {
         <SectionTitle icon={Plug}>把助理带走</SectionTitle>
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
           助理不只会在这站网页里干活，也能装进你已有的 AI 工具——通过 MCP（Model Context Protocol），Claude、Codex、Cursor 里的
-          agent 说一句话，就能出图、出视频并拿到成品 URL，背后走的是同一套计费与队列。
+          agent 把一句话交给 Eimu 导演，拿回成片与中间产物。产品是 Vibe Directing／Cursor of video：不用学提示词设计和分镜，现在你也是导演。
         </p>
         {/* ---- 远端接入：一等公民，今天就能用 ---- */}
         <div className="mt-4">
           <KeyCard icon={Plug} title="远程接入（推荐，今天就能用）">
             <p>
               不用克隆仓库、不用构建：直接连 eimu.dev 的远端 MCP 端点{" "}
-              <InlineCode>POST {REMOTE_MCP_ENDPOINT}</InlineCode>，认证走{" "}
-              <InlineCode>Authorization: Bearer sk-biz-…</InlineCode>。工具比本机 server 更全，Codex、
-              Claude Code、Cursor、OpenClaw 与任意 MCP 客户端逐份可复制的配置都在{" "}
+              <InlineCode>POST {REMOTE_MCP_ENDPOINT}</InlineCode>（这是主路径），认证走{" "}
+              <InlineCode>Authorization: Bearer sk-biz-…</InlineCode>。默认{" "}
+              <InlineCode>tools/list</InlineCode> 只露导演工具；原子工具用{" "}
+              <InlineCode>?toolset=expert</InlineCode>。Codex、Claude Code、Cursor、OpenClaw 与任意 MCP
+              客户端逐份可复制的配置都在{" "}
               <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
                 /mcp 接入页
               </a>
@@ -137,7 +139,7 @@ export default function DocsMcpPage() {
           进阶：本机自架 MCP server（需仓库权限）
         </h3>
         <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-          本机路线要自己跑一个 stdio MCP server：
+          本机 stdio（仓库 mcp-server/）不是对外主路径；远端 HTTP MCP 才是。本机路线要自己跑一个 stdio MCP server：
           <span className="font-semibold text-[rgba(0,0,0,0.68)]">需要本仓库的存取权限（仓库未公开发布）</span>
           ，外部使用者拿不到克隆地址，所以下面只说明做法，不提供可直接照抄的仓库 URL。
         </p>
@@ -163,7 +165,7 @@ export default function DocsMcpPage() {
           </KeyCard>
           <KeyCard icon={ListChecks} title="本机 server 提供的 4 个工具">
             <p className="mb-3">
-              远端 MCP 的工具清单（23 个）见{" "}
+              远端 MCP 默认导演面约 5 个工具，专家面（toolset=expert）展开原子工具，清单见{" "}
               <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
                 /mcp 接入页
               </a>
