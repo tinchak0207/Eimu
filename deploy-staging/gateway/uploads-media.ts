@@ -105,7 +105,12 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     // 0 字节文件在 Bun 里可能被解析成 String（无 filename 的 part），file.name 为 undefined，
     // sanitizeUploadName 的 path.basename(undefined) 抛 TypeError → 500「upload failed」。
     // 空文件是坏请求，统一回 400（2026-10-28 实测：用户传空 wav 只看到一句上传失败，没有原因）。
-    if (files.some((file) => file.size === 0)) return jsonError(400, "empty file", "bad_request", "bad_request")
+    // 一次可传多个 part，失败时必须点名是哪一个文件，否则用户不知道改谁。
+    const emptyFile = files.find((file) => file.size === 0)
+    if (emptyFile) {
+      const emptyName = typeof emptyFile.name === "string" && emptyFile.name ? emptyFile.name : "(unnamed)"
+      return jsonError(400, `empty file: ${emptyName}`, "bad_request", "bad_request")
+    }
     const uploadDir = path.join(UPLOADS_DIR, state.sessionId)
     await mkdir(uploadDir, { recursive: true })
     // 整批预校验后落盘：旧码边验边写，一批里后一项不合格（超 4MB／扩展名不允许／路径不合法）
@@ -121,11 +126,12 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
       const maxBytes = isAudio ? AUDIO_UPLOAD_MAX_BYTES : UPLOAD_MAX_BYTES
       if (file.size > maxBytes) {
         const mb = Math.round(maxBytes / (1024 * 1024))
-        return jsonError(413, `file exceeds ${mb}MB limit`, "payload_too_large", "payload_too_large")
+        const overName = typeof file.name === "string" && file.name ? file.name : "(unnamed)"
+        return jsonError(413, `file exceeds ${mb}MB limit: ${overName}`, "payload_too_large", "payload_too_large")
       }
       const safeName = sanitizeUploadName(rawName)
       if (!safeName) {
-        return jsonError(400, `disallowed file type: ${path.extname(rawName)}`, "bad_request", "bad_request")
+        return jsonError(400, `disallowed file type: ${path.extname(rawName) || "(no extension)"}（${rawName || "(unnamed)"}）`, "bad_request", "bad_request")
       }
       const plannedDest = path.join(uploadDir, safeName)
       if (!path.resolve(plannedDest).startsWith(path.resolve(UPLOADS_DIR))) {
