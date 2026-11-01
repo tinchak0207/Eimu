@@ -51,6 +51,8 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     startScrollTop: number;
     moved: boolean;
   } | null>(null);
+  /** 这次按下之后是否真的拖动/卷动过。正文单击用它避开「拖完松手又进入编辑」。 */
+  const gestureMovedRef = useRef(false);
 
   const handleScrollAreaDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -76,6 +78,7 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     const dy = d.startY - e.clientY;
     if (!d.moved && Math.abs(dy) < 4) return;
     d.moved = true;
+    gestureMovedRef.current = true;
     const el = e.currentTarget;
     const k = scale > 0 ? scale : 1;
     el.scrollTop = d.startScrollTop + dy / k;
@@ -93,9 +96,11 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest("[data-canvas-interactive]")) return;
     onSelect(node.id);
+    gestureMovedRef.current = false;
     // 内容卷动区：内容有溢出时只选取、不启用拖动（交给内容自己的卷动手势）；
     // 没溢出则照常可拖动节点。
     const scroller = target.closest<HTMLElement>(".canvas-node-scroll");
@@ -110,8 +115,9 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
       startY: node.position.y,
       started: false,
     };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.preventDefault();
+    // 不在 pointerdown 里 preventDefault，也不在这里 setPointerCapture。
+    // Chrome 上 pointerdown 的 preventDefault 会取消后续 click / dblclick，
+    // 标题双击和正文单击因此进不了编辑。捕获推迟到越过拖动死区。
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -121,7 +127,15 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
       const dist = Math.hypot(e.clientX - drag.startPointerX, e.clientY - drag.startPointerY);
       if (dist < MOVE_THRESHOLD_PX) return;
       drag.started = true;
+      gestureMovedRef.current = true;
       onInteractionStart?.();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer 已结束时 capture 会抛错，忽略 */
+      }
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
     }
     const dx = (e.clientX - drag.startPointerX) / scale;
     const dy = (e.clientY - drag.startPointerY) / scale;
@@ -187,5 +201,6 @@ export function useNodeGestures({ node, scale, onSelect, onInteractionStart, onM
     handleResizeStart,
     handleResizeMove,
     endResize,
+    gestureMovedRef,
   };
 }

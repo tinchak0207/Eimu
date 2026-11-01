@@ -158,8 +158,10 @@ export interface NodeBodyProps {
   onRetry?: (nodeId: string) => void;
   /** A4：空图片节点「生成图片」入口。 */
   onEditPrompt: (nodeId: string) => void;
-  /** A11：文本节点就地编辑提交（双击正文触发）。 */
+  /** A11：文本节点就地编辑提交（单击正文触发）。 */
   onUpdateText?: (nodeId: string, text: string) => void;
+  /** 这次按下已经拖动或卷动过：松手不要进入编辑。 */
+  gestureMovedRef?: React.RefObject<boolean>;
   /**
    * 影片节点动作（2026-09-28）：「截帧」= 取当前播放时刻一帧；「序列帧」= 等距中点抽一组。
    * 宿主负责呼叫 /api/canvas/video-frames 拿计画、用既有 extractFramesAtTimes 抽像素、落成图片节点。
@@ -187,6 +189,7 @@ export function NodeBody({
   onRetry,
   onEditPrompt,
   onUpdateText,
+  gestureMovedRef,
   onExtractVideoFrames,
   extractingVideoFrames = false,
   onPatchMetadata,
@@ -199,6 +202,49 @@ export function NodeBody({
   const [useProxy, setUseProxy] = useState(false);
   // A11：就地编辑态（null = 未在编辑）
   const [editingText, setEditingText] = useState<string | null>(null);
+  const savedBodyRef = useRef("");
+  savedBodyRef.current = node.metadata?.content ?? node.metadata?.prompt ?? "";
+  const onUpdateTextRef = useRef(onUpdateText);
+  onUpdateTextRef.current = onUpdateText;
+  const commitGuard = useRef(false);
+  // 点画布空白时焦点不一定离开 textarea（画布 pointerdown 会捕获指针）。
+  // 用捕获阶段的按下直接读框里的字并提交，Esc 同样留下，不把刚打的字丢掉。
+  useEffect(() => {
+    if (editingText === null) {
+      commitGuard.current = false;
+      return;
+    }
+    const commit = (area: HTMLTextAreaElement) => {
+      if (commitGuard.current) return;
+      commitGuard.current = true;
+      const value = area.value;
+      if (value !== savedBodyRef.current) {
+        savedBodyRef.current = value;
+        onUpdateTextRef.current?.(node.id, value);
+      }
+      setEditingText(null);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const area = document.activeElement;
+      if (!(area instanceof HTMLTextAreaElement) || area.getAttribute("aria-label") !== "编辑文本内容") return;
+      if (event.target instanceof Node && area.contains(event.target)) return;
+      commit(area);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" && !(event.key === "Enter" && (event.ctrlKey || event.metaKey))) return;
+      const area = document.activeElement;
+      if (!(area instanceof HTMLTextAreaElement) || area.getAttribute("aria-label") !== "编辑文本内容") return;
+      event.preventDefault();
+      event.stopPropagation();
+      commit(area);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [editingText, node.id]);
   /** 影片节点：本体那个 <video> 的引用，只为读 currentTime（「截帧」的取样时刻）。 */
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -505,10 +551,10 @@ export function NodeBody({
         const isPipelineGenCard = typeof metaRecord?.stepIndex === "number";
         const emptyHint =
           node.type === CanvasNodeType.Prompt
-            ? "（未填写提示词，双击编辑）"
+            ? "（未填写提示词，单击编辑）"
             : isPipelineGenCard && node.type === CanvasNodeType.Text
               ? "等待 agent 回填产出"
-              : "（未填写内容，双击编辑）";
+              : "（未填写内容，单击编辑）";
         // 后端骨架 text 节点（如「镜头 1 脚本」）也会带产出合同：复用步骤头卡胶囊样式。
         const deliverableText = metadata?.deliverable?.trim();
         // A11：双击直编。textarea 盖满正文区，blur/Ctrl+Enter 提交、Esc 取消。
@@ -522,15 +568,15 @@ export function NodeBody({
               onPointerDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === "Escape") {
-                  setEditingText(null);
-                } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                  if (editingText !== (text ?? "")) onUpdateText?.(node.id, editingText);
-                  setEditingText(null);
-                }
               }}
-              onBlur={() => {
-                if (editingText !== (text ?? "")) onUpdateText?.(node.id, editingText);
+              onBlur={(e) => {
+                if (commitGuard.current) return;
+                commitGuard.current = true;
+                const value = e.currentTarget.value;
+                if (value !== savedBodyRef.current) {
+                  savedBodyRef.current = value;
+                  onUpdateText?.(node.id, value);
+                }
                 setEditingText(null);
               }}
               className="flex-1 resize-none whitespace-pre-wrap break-words border-0 bg-ios-blue/5 p-3 leading-relaxed text-foreground outline-none"
@@ -617,12 +663,17 @@ export function NodeBody({
             onPointerMove={onScrollAreaPointerMove}
             onPointerUp={onScrollAreaPointerEnd}
             onPointerCancel={onScrollAreaPointerEnd}
+            onClick={(e) => {
+              if (!onUpdateText || gestureMovedRef?.current) return;
+              e.stopPropagation();
+              setEditingText(text ?? "");
+            }}
             onDoubleClick={(e) => {
               if (!onUpdateText) return;
               e.stopPropagation();
               setEditingText(text ?? "");
             }}
-            title={onUpdateText ? "双击编辑文字" : undefined}
+            title={onUpdateText ? "单击编辑文字" : undefined}
             className="canvas-node-scroll touch-pan-y overscroll-contain overflow-auto whitespace-pre-wrap break-words p-3 leading-relaxed text-foreground"
             style={{ fontSize }}
           >
