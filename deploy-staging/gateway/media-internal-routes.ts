@@ -503,6 +503,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   state.pendingConfirms.set(request_id, {
     timer,
     ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
+    ...(description ? { description } : {}),
   })
 
   // Surface the billing request to the frontend, then return immediately.
@@ -558,7 +559,11 @@ export function settleConfirm(
   clearTimeout(pending.timer)
   state.pendingConfirms.delete(requestId)
 
-  state.resolvedConfirms.set(requestId, { outcome, resolvedAt: Date.now() })
+  state.resolvedConfirms.set(requestId, {
+    outcome,
+    resolvedAt: Date.now(),
+    ...(pending.ledger && typeof pending.ledger.amount_coins === "number" ? { amount_coins: pending.ledger.amount_coins } : {}),
+  })
   if (state.resolvedConfirms.size > CONFIRM_RESOLVED_CAP) {
     const oldest = state.resolvedConfirms.keys().next()
     if (!oldest.done) state.resolvedConfirms.delete(oldest.value)

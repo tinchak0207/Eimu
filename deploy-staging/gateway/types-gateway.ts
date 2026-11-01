@@ -13,6 +13,9 @@ export type GatewayPromptPart =
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
   ledger?: { amount_coins: number; task_id?: string; model?: string }
+  // 2026-11-01 MCP 可执行确认卡：与 SSE confirm.request 同一段说明文字，供 GET /status 只读投影
+  //（外部 MCP 客户端收不到 SSE，否则看不到卡在批什么）。仅内存，不入持久化。
+  description?: string
 }
 
 export interface PendingQuestion {
@@ -34,6 +37,9 @@ export type ConfirmOutcome = "approved" | "denied" | "expired"
 export interface ResolvedConfirm {
   outcome: ConfirmOutcome
   resolvedAt: number
+  // 2026-11-01：扣费卡（有 ledger）结算时抄下金额，GET /status 投影「近窗已批准合计」
+  //（随 CONFIRM_RESOLVED_TTL_MS 一并回收；MCP budget_cap 自动批准的保守累计用）。
+  amount_coins?: number
 }
 
 export interface SSEClient {

@@ -17,6 +17,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
 import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders, isCompactionSummaryInfo, COMPACTION_PART_TYPE } from "./system-wake.ts"
 import { getOwnedSession, resolveSessionRuntimeStatus } from "./sessions-core.ts"
+import { liveChildCount } from "./session-activity.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { t2sVisibleText, stripOutboundFeed, stripOutboundFlush, type PartStripState } from "./outbound-sanitize.ts"
@@ -131,16 +132,47 @@ export async function handleGetSessionStatus(key: string, id: string): Promise<R
   const status = resolveSessionRuntimeStatus(state)
   const pending_questions = state.pendingQuestions?.size ?? 0
   const pending_confirms = state.pendingConfirms?.size ?? 0
+  // 2026-11-01 MCP 假完成修复：主回合 idle ≠ 任务完成——异步子代理／生成任务仍在跑时，
+  // 只读投影既有 sessions-core 数据（不改 status 三态口径，与 GET /sessions 列表一致）。
+  const active_children = liveChildCount(state.sessionId)
+  const inflight_generations = state.sessionTasks
+    ? [...state.sessionTasks.values()].filter((t) => t.status === "queued" || t.status === "running").length
+    : 0
+  // 确认卡明细：与 SSE confirm.request 同口径（request_id / amount_coins / description），
+  // 外加 ledger 上既有 model / task_id；charge=false 为非扣费闸（协作/计划/目标），金额恒 0。
+  const pending_confirm_items = [...(state.pendingConfirms?.entries() ?? [])].map(([request_id, c]) => ({
+    request_id,
+    charge: !!c.ledger,
+    amount_coins: c.ledger?.amount_coins ?? 0,
+    model: c.ledger?.model ?? null,
+    task_id: c.ledger?.task_id ?? null,
+    description: c.description ?? null,
+  }))
+  let recent_approved_coins = 0
+  for (const rec of state.resolvedConfirms?.values() ?? []) {
+    if (rec.outcome === "approved" && typeof rec.amount_coins === "number") recent_approved_coins += rec.amount_coins
+  }
+  const backgroundBusy = active_children > 0 || inflight_generations > 0
   const phase =
-    status === "waiting" ? "awaiting_input" : status === "running" ? "running" : "idle"
+    status === "waiting"
+      ? "awaiting_input"
+      : status === "running"
+        ? "running"
+        : backgroundBusy
+          ? "background_running"
+          : "idle"
   return Response.json({
     session_id: id,
     opencode_session_id: state.opencodeSessionId,
     status,
     phase,
-    terminal: status === "idle",
+    terminal: status === "idle" && !backgroundBusy,
     pending_questions,
     pending_confirms,
+    active_children,
+    inflight_generations,
+    pending_confirm_items,
+    recent_approved_coins,
     last_turn_active_at: state.lastTurnActiveAt ?? 0,
     last_activity_at: state.lastActivityAt ?? null,
     title: state.sessionTitle ?? null,
