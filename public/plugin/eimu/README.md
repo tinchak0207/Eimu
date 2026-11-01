@@ -18,7 +18,7 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 | 工具 | 作用 |
 |---|---|
 | `eimu_direct` | 一句话派工给导演，返回 `job_id`（可 `mode=quote\|plan\|full`，`full` 建议带 `budget_cap`；**极限模式＝`thinking_level=extreme`**，开拍前写入账号设置＝野兽模式开） |
-| `eimu_job` | 对 job 做 get／wait／reply／approve／revise／cancel；终态含成片与中间产物 |
+| `eimu_job` | 对 job 做 get／wait／reply／approve／revise／cancel；终态含成片与中间产物（`artifacts` 分 film／storyboard／brief／bible／keyframes 首尾帧／stills 成品静帧如电商主图·卖点·细节／audio，各项带原标签 `label`） |
 | `list_agent_sessions` | 列本账号 agent／导演会话 |
 | `get_agent_session` | 读会话对话与产物 |
 | `abort_agent_session` | 中止正在跑的会话 |

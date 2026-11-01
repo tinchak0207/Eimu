@@ -141,7 +141,7 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string; surfa
     name: "eimu_job",
     scope: "eimu:agent:write",
     surface: "director",
-    description: "导演任务 get|wait|reply|approve|revise|cancel；wait≤45s；产物含 film/storyboard/brief/bible/keyframes/audio。",
+    description: "导演任务 get|wait|reply|approve|revise|cancel；wait≤45s；产物含 film/storyboard/brief/bible/keyframes/stills/audio（stills＝电商主图／卖点／细节等成品静帧，带 label）。",
   },
   {
     name: "list_agent_sessions",

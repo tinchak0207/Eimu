@@ -52,7 +52,7 @@ Eimu 是 **Vibe Directing / Cursor of video**。口号：**不用学提示词设
 终态时向用户交付：
 
 1. **成片**链接（mp4 等）
-2. **中间产物**：brief／分镜表／世界观或美术设定／各镜首尾帧／配音或 BGM（有则给）
+2. **中间产物**：brief／分镜表／世界观或美术设定／各镜首尾帧（`artifacts.keyframes`）／配音或 BGM（有则给）；电商套图、海报等成品静帧在 `artifacts.stills`，按每项 `label`（主图／卖点／细节／包装…）交付，不要当首尾帧
 3. 本次花费与是否触碰 `budget_cap`
 4. 若要改一版：对**同一** `job_id` 走 `eimu_job action=revise`，不要新开一条无关任务重烧整片
 

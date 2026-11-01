@@ -4,7 +4,7 @@
  * - 有界等待默认 ≤45s；超时回 processing + job_id + poll_after_seconds，明说勿重提交。
  * - 完成判定走网关会话运行态（status idle|running|waiting），不是「第一条 assistant 文本」。
  * - 花费闸：preflight / mode=quote 只报价；正式跑须 budget_cap 或 confirm=true。
- * - 产物 structuredContent 分类 film/storyboard/brief/bible/keyframes/audio。
+ * - 产物 structuredContent 分类 film/storyboard/brief/bible/keyframes/stills/audio（stills＝非分镜板的成品静帧，如电商主图／卖点／细节；label 保留回覆原标签）。
  * job_id 当前等价于 agent session_id（与 biz 闸道同一身分空间）。
  */
 
@@ -12,6 +12,7 @@ import { machineError, structuredResult, type McpToolCallResult } from "../proto
 import {
   agentSessionPath,
   collectClassifiedArtifacts,
+  DIRECTOR_ARTIFACT_CATEGORIES,
   type DirectorArtifactCategory,
 } from "./agent";
 import {
@@ -152,7 +153,10 @@ function buildQuotePayload(mode: DirectorMode, balanceCoins: number | null, curr
 }
 
 function emptyArtifacts(): Record<DirectorArtifactCategory, Array<{ url: string; mime: string; label: string }>> {
-  return { film: [], storyboard: [], brief: [], bible: [], keyframes: [], audio: [] };
+  return Object.fromEntries(DIRECTOR_ARTIFACT_CATEGORIES.map((c) => [c, []])) as unknown as Record<
+    DirectorArtifactCategory,
+    Array<{ url: string; mime: string; label: string }>
+  >;
 }
 
 function slimArtifacts(classified: ReturnType<typeof collectClassifiedArtifacts>) {
@@ -786,8 +790,8 @@ export function defineDirectorTools(): ToolDefinition[] {
       name: "eimu_direct",
       title: "导演派工",
       description: bilingual(
-        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价；正式跑须 budget_cap 或 confirm=true。终态产物含成片与分镜／brief／首尾帧／配音。极限模式＝thinking_level=extreme（开拍前先写账号设置，野兽模式开）。",
-        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge); a real run requires budget_cap (coins) or confirm=true. Terminal results include film, storyboard, brief, bible, keyframes and audio. Extreme mode = thinking_level=extreme (saved to account settings before the run; turns beast mode on).",
+        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价；正式跑须 budget_cap 或 confirm=true。终态产物含成片与分镜／brief／首尾帧／成品静帧 stills（电商主图／卖点／细节等，带原标签）／配音。极限模式＝thinking_level=extreme（开拍前先写账号设置，野兽模式开）。",
+        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge); a real run requires budget_cap (coins) or confirm=true. Terminal results include film, storyboard, brief, bible, keyframes (first/last frames), stills (finished stills such as e-commerce main/detail images, with their labels) and audio. Extreme mode = thinking_level=extreme (saved to account settings before the run; turns beast mode on).",
       ),
       annotations: {
         readOnlyHint: false,
