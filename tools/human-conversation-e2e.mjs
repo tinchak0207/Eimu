@@ -738,7 +738,74 @@ async function sceneMvVocalSong(scene, reasons) {
   return { sid, music, canvas, elapsed_s: Math.round((Date.now() - t0) / 1000), spent, ...log, imageUrls, sseHits, histHits, reasoningHits: reasoningHits.length, histReasoningHits: histReasoningHits.length, history_http: hres.status, eventCounts: names.reduce((a, n) => ((a[n] = (a[n] || 0) + 1), a), {}) }
 }
 
+// 长期可改场景（2026-11-02）：先给模糊要求，再只改一层。
+// 断言只看会话席位落盘（userRevisions/pinnedConstraints）和第二回合真实送出的生成参数，不看模型自述「已保留」。
+async function revisionFacts(sessionId) {
+  const code = `
+import json, sqlite3
+sid = ${JSON.stringify(sessionId)}
+db = sqlite3.connect("file:/opt/agent-harness/state/sessions.db?mode=ro", uri=True)
+row = db.execute("SELECT data FROM sessions WHERE id=?", (sid,)).fetchone()
+d = json.loads(row[0]) if row else {}
+rec = [json.loads(r[0]) for r in db.execute("SELECT data FROM generation_receipts WHERE parent_gw=? ORDER BY created_at", (sid,)).fetchall()]
+prompts = [str(r.get("prompt") or (r.get("request") or {}).get("prompt") or json.dumps(r, ensure_ascii=False)[:1200]) for r in rec]
+print(json.dumps({"seat": d.get("seat"), "original": d.get("originalUserPrompt"), "pinned": d.get("pinnedConstraints"), "revisions": d.get("userRevisions"), "receipts": len(rec), "prompts": prompts}, ensure_ascii=False))
+`
+  const out = await sshPy(code)
+  return JSON.parse(out.trim().split("\n").pop())
+}
+
+function invokedGenArgs(frames, from) {
+  return frames.slice(from).map((f) => parseFrame(f.raw)).filter(({ ev, obj }) => ev === "tool.invoke" && /image|generate|workflow_write/i.test(String(obj?.tool || "")) && !/quote/i.test(String(obj?.tool || ""))).map(({ obj }) => `${obj.tool} ${obj.args_summary || ""}`)
+}
+
+async function waitImage(sse, from, ms) {
+  for (let t = 0; t < ms; t += 3000) {
+    const names = eventNames(sse.frames, from)
+    if (names.includes("image.done") || names.includes("image.failed")) return names
+    await sleep(3000)
+  }
+  return eventNames(sse.frames, from)
+}
+
+async function sceneLayerRevision(scene, reasons) {
+  if (scene.spend && NO_SPEND) return { skipped: true }
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turns = []
+  for (const [i, content] of scene.turns.entries()) {
+    const from = sse.frames.length
+    const turn = await runTurn(sid, content, { sse, spend: !!scene.spend, maxCoins: scene.max_coins || 0 })
+    if (scene.spend) turn.names = await waitImage(sse, from, 180000)
+    turns.push({ i, from, reply: turn.reply.slice(0, 1200), names: [...new Set(turn.names)], approved: turn.approved, approvedCoins: turn.approvedCoins, picks: turn.picks, gen: invokedGenArgs(sse.frames, from).map((s) => s.slice(0, 1500)) })
+    if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有结束`)
+    if (!scene.spend && turn.mediaDone) fail(reasons, `${scene.id} 不花钱的场景出现了成片事件`)
+    if (scene.spend && !turn.names.includes("image.done")) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有 image.done`)
+  }
+  const facts = await revisionFacts(sid)
+  if (facts.seat !== "creator_legacy") fail(reasons, `${scene.id} 席位是 ${facts.seat}`)
+  if (!String(facts.original || "").includes(scene.turns[0].slice(0, 12))) fail(reasons, `${scene.id} originalUserPrompt 不是第一句原话`)
+  if (typeof facts.pinned !== "string") fail(reasons, `${scene.id} pinnedConstraints 没有落盘`)
+  const revs = Array.isArray(facts.revisions) ? facts.revisions : []
+  for (const content of scene.turns.slice(1)) {
+    if (!revs.some((r) => r.includes(content.slice(0, 12)))) fail(reasons, `${scene.id} 后续修订没有进 userRevisions：${content.slice(0, 20)}`)
+  }
+  // 未点名的层：第二回合真实送出的生成参数里必须还在
+  const lastGen = [...turns[turns.length - 1].gen, ...facts.prompts.slice(1)].join("\n")
+  for (const keep of scene.keep_layers || []) {
+    if (!new RegExp(keep).test(lastGen)) fail(reasons, `${scene.id} 第二回合生成参数丢了未点名的层「${keep}」`)
+  }
+  for (const want of scene.changed_layer || []) {
+    if (!new RegExp(want).test(lastGen + turns[turns.length - 1].reply)) fail(reasons, `${scene.id} 点名要改的层「${want}」没体现`)
+  }
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
+  await sse.stop()
+  return { sid, turns, facts }
+}
+
 const runners = {
+  "layer-revision-still": sceneLayerRevision,
+  "layer-revision-mv-text": sceneLayerRevision,
   "mv-keyframes-no-video": sceneMvKeyframes,
   "mv-vocal-song": sceneMvVocalSong,
   "image-first-try": sceneImage,

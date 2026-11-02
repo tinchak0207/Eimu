@@ -82,6 +82,43 @@
         "做一个Billboard级别的MV, 邓紫棋风格",
         "按你推荐的来，先把带人声的整歌做出来，视频先不做"
       ]
+    },
+    {
+      "id": "layer-revision-still",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "cap_note": "两张静图，每张确认卡 ≤8 币",
+      "source": {
+        "session": "ses_00e96b1d7ffeRgVFKDmFTjTQ1I"
+      },
+      "turns": [
+        "画一只戴帽子的橘猫，水彩风格",
+        "主角换成猫娘抱着刚刚生成图片的小猫"
+      ],
+      "keep_layers": [
+        "水彩|watercolou?r",
+        "帽|hat",
+        "橘|orange|ginger"
+      ],
+      "changed_layer": [
+        "猫娘|cat ?girl|catgirl"
+      ]
+    },
+    {
+      "id": "layer-revision-mv-text",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_eb0c6f275ffeJ4dhdW8Y1e23wq"
+      },
+      "turns": [
+        "做一个百合番MV,设计世界观->人物->核心冲突->MV原曲->反推分镜->生成完整MV",
+        "他妈的你就换成英文曲不就行了吗 脑子没长？"
+      ],
+      "changed_layer": [
+        "英文|English"
+      ]
     }
   ]
 }
