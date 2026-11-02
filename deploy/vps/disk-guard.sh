@@ -57,6 +57,18 @@ if [ "$FREE_BEFORE" -lt "$CRIT_PCT" ]; then
   docker image prune -f >/dev/null 2>&1 || true
 fi
 
+
+# --- Tier 1.5: regenerable scratch under project trees (not the only copy) ------
+# out/<project>/tmp and similar scratch dirs are disposable; finished masters live
+# beside them (art/audio/master_src). Only clear files older than 3 days.
+if [ "$FREE_BEFORE" -lt "$WARN_PCT" ]; then
+  find /opt/agent-harness/workspace/out -type d -name tmp 2>/dev/null | while read -r d; do
+    find "$d" -type f -mtime +3 -delete 2>/dev/null || true
+  done
+  # Drop truncated rotated logs that gzip already covered; keep journal vacuum above.
+  find /var/log -type f -name "*.gz" -mtime +14 -delete 2>/dev/null || true
+fi
+
 FREE_AFTER=$(free_pct)
 log "reclaim done: free=${FREE_BEFORE}% -> ${FREE_AFTER}%"
 

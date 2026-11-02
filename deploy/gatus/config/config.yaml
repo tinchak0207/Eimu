@@ -126,6 +126,28 @@ endpoints:
       hide-port: true
       hide-errors: false
 
+  # 计费中继存活：未签名 POST 期望 401 JSON。
+  # 2026-11-01 Vercel DEPLOYMENT_DISABLED 曾回 402 text/plain，被上层误报「余额不足」，无人报警。
+  # 走 docker 内网 eimu-site，与控面 GENERATION_BILLING_RELAY_URL 同路径。
+  - name: 计费中继（billing relay）
+    group: Production
+    url: "http://eimu-site:3000/api/internal/generation-billing"
+    method: POST
+    interval: 5m
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+    client:
+      timeout: 15s
+    conditions:
+      - "[STATUS] == 401"
+      - "[BODY].ok == false"
+      # 402 text/plain（Vercel 停用）无 JSON .ok → 条件失败即告警
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
+
 # 告警密钥未配置，外发保持关闭。不要在仓库里写 Telegram token。
 # alerting:
 #   telegram:
