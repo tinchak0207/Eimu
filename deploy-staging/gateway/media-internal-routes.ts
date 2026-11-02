@@ -24,6 +24,7 @@ import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, rec
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 import { notify } from "./internal-waiters.ts"
+import { humanProtectedTargets, humanProtectedBlockMessage } from "./canvas-human-guard.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
 // 或接收 path_b64 位元组（含文档 md/txt/json/csv/pdf）→
@@ -181,6 +182,15 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   })
   if (tplBlock) {
     return Response.json({ ok: false, code: "TEMPLATE_SLOT_OPEN", error: tplBlock }, { status: 409 })
+  }
+  // 整卡守门（2026-11-03）：人改/锁定卡的删除与回退在下发前拦（补 delete→add 绕过）。
+  {
+    const snapNodes = (getCanvasState(state.sessionId)?.state as { nodes?: unknown } | null | undefined)?.nodes
+    const hit = humanProtectedTargets(Array.isArray(snapNodes) ? (snapNodes as Record<string, unknown>[]) : [], v.ops)
+    if (hit.deletes.length || hit.reverts.length) {
+      console.log(`[gateway] canvas_ops: HUMAN_EDITED_PROTECTED session=${state.sessionId} deletes=${hit.deletes.join(",")} reverts=${hit.reverts.join(",")}`)
+      return Response.json({ ok: false, code: "HUMAN_EDITED_PROTECTED", error: humanProtectedBlockMessage(hit), blocked: hit }, { status: 409 })
+    }
   }
   const label = typeof body.label === "string" && body.label ? body.label.slice(0, 200) : undefined
   const rawTimeout = typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : CANVAS_OPS_TIMEOUT_MS

@@ -125,3 +125,27 @@ export function humanEditBlockedMessage(label: string, fields: readonly HumanEdi
   const names = fields.map((f) => (f === "title" ? "标题" : f === "prompt" ? "提示词" : "正文")).join("、");
   return `${label} 的${names}是用户手改过的，已保留用户版本、未覆盖；只有用户本轮明确要求改它时，才在该步 meta.${HUMAN_OVERRIDE_KEY} 里点名栏位（如 ["prompt"]）再写`;
 }
+
+/**
+ * 整卡守门（2026-11-03，补 3dc273e25 的漏洞）：update_node 只拦栏位覆盖，agent 却可以
+ * delete_nodes 删掉人改过的卡、再 add_node 一张「自己版本」的新卡（或 revert_node 退回
+ * agent 旧版），人的改动照样消失。人改过（human_edited 非空）或锁定（locked===true）的卡，
+ * 删除/回退一律拦下，除非该 op 带 `_override_human`（true 或点名节点 id 清单）——同
+ * update_node 的覆盖契约：只在用户本轮明确要求时才可带，且回覆里要说明。
+ */
+export function isHumanProtectedNode(metadata: unknown): boolean {
+  const md = (metadata ?? {}) as Record<string, unknown>;
+  return md.locked === true || cleanHumanEdited(md.human_edited) !== undefined;
+}
+
+/** op 级覆盖授权：`_override_human: true` 放行全部；字串/阵列＝只放行点名的节点 id。 */
+export function opOverridesNode(op: unknown, nodeId: string): boolean {
+  const raw = (op as Record<string, unknown> | null | undefined)?.[HUMAN_OVERRIDE_KEY];
+  if (raw === true) return true;
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+  return list.includes(nodeId);
+}
+
+export function humanProtectedDeleteMessage(ids: readonly string[], verb: "删除" | "回退" = "删除"): string {
+  return `节点 ${ids.join("、")} 是用户手改过或锁定的卡，已拒绝${verb}（删掉再新建也算覆盖人的版本）；只有用户本轮明确要求${verb}它时，才在该 op 上带 ${HUMAN_OVERRIDE_KEY}: true（或点名 id 清单）再发`;
+}

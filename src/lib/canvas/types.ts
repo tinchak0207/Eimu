@@ -617,7 +617,8 @@ export interface CanvasProjectMetaPatch {
 export type CanvasAgentOp =
   | { type: "add_node"; node: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string } }
   | { type: "update_node"; id: string; patch: { title?: string; position?: CanvasPosition; width?: number; height?: number; metadata?: Partial<CanvasNodeMetadata> } }
-  | { type: "delete_nodes"; ids: string[] }
+  /** `_override_human`：用户本轮明确要求删人改/锁定卡时才带（见 human-edits.ts 整卡守门）。 */
+  | { type: "delete_nodes"; ids: string[]; _override_human?: true | string[] }
   | { type: "connect_nodes"; connections: { fromNodeId: string; toNodeId: string }[] }
   | { type: "delete_connections"; ids: string[] }
   | { type: "select_nodes"; ids: string[] }
@@ -637,7 +638,7 @@ export type CanvasAgentOp =
    * 与 `update_node` 的分工：update_node 写新值；本 op 回到旧值——版本史住在画布端，
    * agent 不必先把旧 metadata 抄进上下文。执行端＝adapter 的 agent_ops 分派（同一次 dispatch）。
    */
-  | { type: "revert_node"; nodeId: string; version?: number };
+  | { type: "revert_node"; nodeId: string; version?: number; _override_human?: true | string[] };
 
 export interface CanvasAgentOpsEvent {
   request_id: string;

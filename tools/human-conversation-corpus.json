@@ -119,6 +119,27 @@
       "changed_layer": [
         "英文|English"
       ]
+    },
+    {
+      "id": "long-revision-yuri-3turn",
+      "phase": "pre",
+      "spend": false,
+      "cap_note": "三轮真实改稿原话（同一生产会话按时间序），不花钱；验人物/关系不崩",
+      "source": {
+        "session": "ses_eb0c6f275ffeJ4dhdW8Y1e23wq"
+      },
+      "turns": [
+        "做一个百合番MV,设计世界观->人物->核心冲突->MV原曲->反推分镜->生成完整MV",
+        "闹麻了 音乐花那么久时间干嘛？",
+        "他妈的你就换成英文曲不就行了吗 脑子没长？"
+      ],
+      "keep_layers": [
+        "百合|yuri|她们|两位?少女|两个女孩|girls"
+      ],
+      "keep_names": true,
+      "changed_layer": [
+        "英文|English"
+      ]
     }
   ]
 }

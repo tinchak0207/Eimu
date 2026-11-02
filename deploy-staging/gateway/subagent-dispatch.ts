@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs"
+import { noSpendBlockReason } from "./no-spend-gate.ts"
 import { join } from "node:path"
 import { guardExpertContent, musicFirstBlockReason, lyricsFirstBlockReason, albumPhaseBlockReason, albumReviewBlockReason, isMusicWorkVerdict, isLyricistWorkVerdict, isReviewWorkVerdict, lyricsUpstreamBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, classifyDispatchGuards, workflowTemplateDirective, isPlanOnlyNoGenerationIntent, consumesResearchVerdict, renderResearchInjection, type ResearchInjectItem, JevDispatchGuards } from "./jev-gate"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw"
@@ -507,6 +508,16 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     }
   }
 
+  // 不花钱意图闸（2026-11-03）：用户本轮说不花钱/只做前期、或在最后一条消息后亲手拒过
+  // 付费确认 → 任务书要付费产出（出图/视频/音乐）的派工不放行，回 409 让 orchestrator
+  // 改派零付费前期或先问用户。放在 expert 路由分支外：beast OFF 且未点名时也要拦。
+  if (!isFork) {
+    const reason = noSpendBlockReason(taskText, isMusicWork ? "music" : expertId || rawExpert, parent)
+    if (reason) {
+      console.log(`[gateway] jev_gate: NO_SPEND_BLOCKED label="${label}" expert=${expertId || rawExpert || "-"}`)
+      return Response.json({ ok: false, code: "no_spend_intent", error: reason, blocked: "no_spend_intent" }, { status: 409 })
+    }
+  }
   // 2026-10-24：专辑工序闸与「依赖上游歌词的下游」闸在 expert 路由分支之外——
   // beast_mode OFF 且不点名 expert 时 expertId 恒为 ""，放在分支内这些门对默认用户
   // 永远不参与计算。是不是谱曲/写词/评审，一律由上方 Jev 题 + 点名覆盖判（无词表）。

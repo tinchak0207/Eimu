@@ -2,7 +2,7 @@
 //
 // reduceCanvasEvent 的签名是 (state, CanvasSseEvent)，不是标准 reducer。
 // 这里包一层 adapter，同时容纳「本端动作」（载入专案、拖动节点、undo 还原）。
-import { guardAgentPatchAgainstHumanEdits, HUMAN_OVERRIDE_KEY, stampHumanEdit } from "@/lib/canvas/human-edits";
+import { guardAgentPatchAgainstHumanEdits, HUMAN_OVERRIDE_KEY, humanProtectedDeleteMessage, isHumanProtectedNode, opOverridesNode, stampHumanEdit } from "@/lib/canvas/human-edits";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
@@ -376,9 +376,20 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             if (reason) next = recordCanvasNodeVersion(next, op.id, reason);
             break;
           }
-          case "delete_nodes":
-            next = canvasReducer(next, { type: "delete_many", nodeIds: op.ids });
+          case "delete_nodes": {
+            // 整卡守门（2026-11-03）：人改/锁定卡未带 _override_human 不删（网关已先拦一次并
+            // 回 409 给 agent；这里是前端兜底——旧网关、直连回放都过这一把）。
+            const guardedIds: string[] = [];
+            const allowedIds = op.ids.filter((id) => {
+              const target = next.nodes.find((n) => n.id === id);
+              if (!target || !isHumanProtectedNode(target.metadata) || opOverridesNode(op, id)) return true;
+              guardedIds.push(id);
+              return false;
+            });
+            if (guardedIds.length > 0) console.warn(`[canvas] ${humanProtectedDeleteMessage(guardedIds)}`);
+            if (allowedIds.length > 0) next = canvasReducer(next, { type: "delete_many", nodeIds: allowedIds });
             break;
+          }
           case "connect_nodes":
             for (const c of op.connections) {
               next = canvasReducer(next, { type: "connect", fromNodeId: c.fromNodeId, toNodeId: c.toNodeId });
@@ -397,6 +408,13 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             // 版本回退（2026-10-03）：直接复用 reducer 既有回退语义（只还原 title+metadata，
             // 座标/尺寸不动；回退本身 append 一版 reason="revert"）。agent 读 node_versions
             // 索引后指名版本即可，不必把旧 metadata 抄进上下文。
+            {
+              const target = next.nodes.find((n) => n.id === op.nodeId);
+              if (target && isHumanProtectedNode(target.metadata) && !opOverridesNode(op, op.nodeId)) {
+                console.warn(`[canvas] ${humanProtectedDeleteMessage([op.nodeId], "回退")}`);
+                break;
+              }
+            }
             next = revertCanvasNodeToVersion(next, op.nodeId, op.version);
             break;
           default:

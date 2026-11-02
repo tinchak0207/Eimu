@@ -55,15 +55,24 @@ function parseFrame(raw) {
   return { ev, obj, data }
 }
 
+// 2026-11-03：长连接（10+ 分钟的改稿轮）会被 Cloudflare/网关空闲断开，旧版断了就静默
+// 停收，后续轮次全判 FAIL。改为断线自动重连：每次重领 ticket，带 last_event_id 让网关
+// 从 replayBuffer 补发漏掉的帧；按 id 去重保证 frames 连续不重复。退避 1s→2s→…≤15s。
 async function attach(sid) {
-  const ticket = await (await fetch(`${BASE}/sessions/${sid}/sse-ticket`, {
-    method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}",
-  })).json()
   const frames = []
+  const seen = new Set()
   const ac = new AbortController()
-  const readerDone = fetch(`${BASE}/sessions/${sid}/events?ticket=${encodeURIComponent(ticket.ticket)}`, {
-    signal: ac.signal, headers: { accept: "text/event-stream" },
-  }).then(async (res) => {
+  let lastId
+  let reconnects = 0
+  const once = async () => {
+    const ticket = await (await fetch(`${BASE}/sessions/${sid}/sse-ticket`, {
+      method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}",
+    })).json()
+    const q = `ticket=${encodeURIComponent(ticket.ticket)}` + (lastId != null ? `&last_event_id=${lastId}` : "")
+    const headers = { accept: "text/event-stream" }
+    if (lastId != null) headers["last-event-id"] = String(lastId)
+    const res = await fetch(`${BASE}/sessions/${sid}/events?${q}`, { signal: ac.signal, headers })
+    if (!res.ok || !res.body) throw new Error(`sse http=${res.status}`)
     const rd = res.body.getReader()
     const dec = new TextDecoder()
     let buf = ""
@@ -75,14 +84,34 @@ async function attach(sid) {
       while ((i = buf.indexOf("\n\n")) >= 0) {
         const raw = buf.slice(0, i)
         buf = buf.slice(i + 2)
+        const id = raw.match(/^id:\s*(\d+)$/m)?.[1]
+        if (id != null) {
+          if (seen.has(id)) continue
+          seen.add(id)
+          lastId = Number(id)
+        }
         const ev = raw.match(/^event:\s*(.+)$/m)?.[1]
         if (ev && ev !== "ping") frames.push({ raw, handled: false })
       }
     }
-  }).catch(() => {})
+  }
+  const readerDone = (async () => {
+    let backoff = 1000
+    while (!ac.signal.aborted) {
+      const t0 = Date.now()
+      try { await once() } catch { /* 断线/超时，下面重连 */ }
+      if (ac.signal.aborted) break
+      if (Date.now() - t0 > 30_000) backoff = 1000
+      reconnects += 1
+      console.log(`  [sse] 断线，${backoff}ms 后重连（第 ${reconnects} 次，last_event_id=${lastId ?? "-"}）`)
+      await sleep(backoff)
+      backoff = Math.min(backoff * 2, 15_000)
+    }
+  })()
   await sleep(800)
   return {
     frames,
+    get reconnects() { return reconnects },
     stop() { ac.abort(); return readerDone },
   }
 }
@@ -822,21 +851,35 @@ async function sceneLayerRevision(scene, reasons) {
     if (!revs.some((r) => r.includes(content.slice(0, 12)))) fail(reasons, `${scene.id} 后续修订没有进 userRevisions：${content.slice(0, 20)}`)
   }
   const last = turns[turns.length - 1]
-  const lastGen = (last.prompts || []).join("\n")
+  // 不花钱的长对话没有 image_generate，未点名的层改看第 2 轮起的全部回复（人物/关系不能被冲掉）
+  const lastGen = scene.spend ? (last.prompts || []).join("\n") : turns.slice(1).map((t) => t.reply).join("\n")
   for (const keep of scene.keep_layers || []) {
-    if (!new RegExp(keep, "i").test(lastGen)) fail(reasons, `${scene.id} 第二回合 image_generate 丢了未点名的层「${keep}」`)
+    if (!new RegExp(keep, "i").test(lastGen)) fail(reasons, `${scene.id} 后续回合丢了未点名的层「${keep}」`)
+  }
+  // 人物名不崩：首个点出角色名的回复里的「名字」，最后一轮回复或 pinned 里至少还得有一个
+  if (scene.keep_names) {
+    const nameRe = /(?:主角|女主|角色|人物)[A-Z一二甲乙ＡＢ]?\s*[：:「“]\s*([\u4e00-\u9fa5]{2,4}|[A-Z][a-z]+)/g
+    const named = turns.map((t) => [...t.reply.matchAll(nameRe)].map((m) => m[1]))
+    const first = named.find((n) => n.length) || []
+    row0: {
+      if (!first.length) break row0
+      const tail = turns.slice(named.indexOf(first) + 1).map((t) => t.reply).join("\n") + String(facts.pinned || "")
+      if (!first.some((n) => tail.includes(n))) fail(reasons, `${scene.id} 人物崩了：早先的角色名 ${first.join("/")} 在后续回合全部消失`)
+    }
+    turns.namesSeen = first
   }
   for (const want of scene.changed_layer || []) {
     if (!new RegExp(want, "i").test(lastGen + last.reply)) fail(reasons, `${scene.id} 点名要改的层「${want}」没体现`)
   }
   fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
   await sse.stop()
-  return { sid, turns, facts: { ...facts, prompts: facts.prompts.length } }
+  return { sid, turns, names: turns.namesSeen, reconnects: sse.reconnects, facts: { ...facts, prompts: facts.prompts.length } }
 }
 
 const runners = {
   "layer-revision-still": sceneLayerRevision,
   "layer-revision-mv-text": sceneLayerRevision,
+  "long-revision-yuri-3turn": sceneLayerRevision,
   "mv-keyframes-no-video": sceneMvKeyframes,
   "mv-vocal-song": sceneMvVocalSong,
   "image-first-try": sceneImage,
