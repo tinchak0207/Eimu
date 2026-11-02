@@ -156,7 +156,11 @@ export async function commitGenerationBilling(
   amount = job.billingAmount,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<void> {
-  if (!amount) return;
+  // amount=0 must still write an applied commit row. Otherwise terminalReservedJobs
+  // (which only excludes commit.amount > 0) forever re-selects old failed/cancelled
+  // zero-settle jobs, starving succeeded jobs that truly need a commit backfill
+  // (cost_coins null while reserve already deducted — 2026-11-02, 110+ succeeded).
+  if (!Number.isFinite(amount)) return;
   if (amount < 0 || amount > job.billingAmount) {
     throw new Error(`Invalid committed amount for generation job ${job.id}.`);
   }
@@ -491,9 +495,12 @@ async function reclaimOneZombie(input: {
     }
 
     if (reserveStatus === "unknown") {
+      // DB check constraint only allows pending|executing|applied|unknown|failed —
+      // writing needs_review aborts the tx (2026-11-02 prod spam) and never settles.
+      // Keep status=unknown, stamp last_error for human review.
       await tx`
         UPDATE billing_operation
-        SET status = 'needs_review', last_error = ${detail}, updated_at = now()
+        SET last_error = ${detail}, updated_at = now()
         WHERE job_id = ${input.jobId} AND operation = 'reserve' AND sequence = 1 AND status = 'unknown'
       `;
       await tx`

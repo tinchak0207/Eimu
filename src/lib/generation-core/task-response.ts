@@ -85,8 +85,25 @@ export async function resolveTaskCostCoins(jobId: string): Promise<number | null
       ORDER BY operation.updated_at DESC
       LIMIT 1
     `;
-    if (rows.length === 0) return null;
-    return Math.round((Number(rows[0].amount) / 500000) * 1e6) / 1e6;
+    if (rows.length > 0) {
+      return Math.round((Number(rows[0].amount) / 500000) * 1e6) / 1e6;
+    }
+    // Fallback: succeeded job with applied reserve but missing commit (reconcile
+    // queue historically starved by amount=0 no-op commits). Show reserve amount
+    // so clients are not told cost_coins is unknown while money already moved.
+    const fallback = await sql<{ amount: string | number }[]>`
+      SELECT reserve.amount
+      FROM billing_operation reserve
+      JOIN generation_job job ON job.id = reserve.job_id
+      WHERE reserve.job_id = ${jobId}
+        AND reserve.operation = 'reserve'
+        AND reserve.sequence = 1
+        AND reserve.status = 'applied'
+        AND job.status = 'succeeded'
+      LIMIT 1
+    `;
+    if (fallback.length === 0) return null;
+    return Math.round((Number(fallback[0].amount) / 500000) * 1e6) / 1e6;
   } catch (error) {
     console.error("[task-response] cost_coins lookup failed", { jobId, error: String(error) });
     return null;

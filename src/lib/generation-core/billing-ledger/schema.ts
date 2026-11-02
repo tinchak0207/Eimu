@@ -246,7 +246,6 @@ export async function terminalReservedJobs(limit: number, sql: GenerationSql): P
         SELECT 1 FROM billing_operation settled
         WHERE settled.job_id = job.id
           AND settled.operation = 'commit'
-          AND settled.amount > 0
       )
     ORDER BY job.finished_at NULLS LAST, job.created_at
     LIMIT ${limit}
