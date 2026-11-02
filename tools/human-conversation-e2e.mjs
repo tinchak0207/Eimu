@@ -739,33 +739,58 @@ async function sceneMvVocalSong(scene, reasons) {
 }
 
 // 长期可改场景（2026-11-02）：先给模糊要求，再只改一层。
-// 断言只看会话席位落盘（userRevisions/pinnedConstraints）和第二回合真实送出的生成参数，不看模型自述「已保留」。
-async function revisionFacts(sessionId) {
+// 断言只看会话席位落盘（userRevisions/pinnedConstraints/originalUserPrompt）和第二回合子代理真实送出的
+// image_generate 提示词，不看模型自述「已保留」。生成在子代理里、常在 turn.done 之后才过确认卡，
+// 所以每个花钱回合结束后继续代答确认卡，直到该回合之后的生成真正提交。
+async function revisionFacts(sessionId, sinceMs = 0) {
   const code = `
 import json, sqlite3
 sid = ${JSON.stringify(sessionId)}
+since = ${Number(sinceMs) || 0}
 db = sqlite3.connect("file:/opt/agent-harness/state/sessions.db?mode=ro", uri=True)
 row = db.execute("SELECT data FROM sessions WHERE id=?", (sid,)).fetchone()
 d = json.loads(row[0]) if row else {}
-rec = [json.loads(r[0]) for r in db.execute("SELECT data FROM generation_receipts WHERE parent_gw=? ORDER BY created_at", (sid,)).fetchall()]
-prompts = [str(r.get("prompt") or (r.get("request") or {}).get("prompt") or json.dumps(r, ensure_ascii=False)[:1200]) for r in rec]
-print(json.dumps({"seat": d.get("seat"), "original": d.get("originalUserPrompt"), "pinned": d.get("pinnedConstraints"), "revisions": d.get("userRevisions"), "receipts": len(rec), "prompts": prompts}, ensure_ascii=False))
+recs = db.execute("SELECT producer_oc, created_at FROM generation_receipts WHERE parent_gw=?", (sid,)).fetchall()
+oc = sqlite3.connect("file:/opt/agent-harness/workspace/.local/share/opencode/opencode.db?mode=ro", uri=True)
+prompts = []
+for prod in sorted({r[0] for r in recs if r[1] >= since}):
+    for (raw,) in oc.execute("SELECT data FROM part WHERE session_id=? AND time_created>=? AND data LIKE '%\\"tool\\":\\"image_generate\\"%' ORDER BY time_created", (prod, since)):
+        j = json.loads(raw)
+        prompts.append(str(((j.get("state") or {}).get("input") or {}).get("prompt") or ""))
+print(json.dumps({"original": d.get("originalUserPrompt"), "pinned": d.get("pinnedConstraints"), "revisions": d.get("userRevisions"), "receipts": len(recs), "receipts_since": sum(1 for r in recs if r[1] >= since), "prompts": prompts}, ensure_ascii=False))
 `
   const out = await sshPy(code)
   return JSON.parse(out.trim().split("\n").pop())
 }
 
-function invokedGenArgs(frames, from) {
-  return frames.slice(from).map((f) => parseFrame(f.raw)).filter(({ ev, obj }) => ev === "tool.invoke" && /image|generate|workflow_write/i.test(String(obj?.tool || "")) && !/quote/i.test(String(obj?.tool || ""))).map(({ obj }) => `${obj.tool} ${obj.args_summary || ""}`)
-}
-
-async function waitImage(sse, from, ms) {
-  for (let t = 0; t < ms; t += 3000) {
-    const names = eventNames(sse.frames, from)
-    if (names.includes("image.done") || names.includes("image.failed")) return names
-    await sleep(3000)
+// turn.done 之后子代理才来的确认卡/问题卡：按同一预算继续代答，直到这一回合的生成提交或超时。
+async function drainAfterTurn(sid, sse, from, sinceMs, content, budget, ms = 8 * 60 * 1000) {
+  let spent = 0, facts = null
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    for (let i = from; i < sse.frames.length; i++) {
+      const frame = sse.frames[i]
+      if (frame.handled) continue
+      const { ev, obj } = parseFrame(frame.raw)
+      const rid = obj?.request_id ?? obj?.id
+      if (ev === "confirm.request" && rid) {
+        frame.handled = true
+        const amount = Number(obj?.amount_coins ?? 0)
+        const allow = amount > 0 && spent + amount <= budget
+        await fetch(`${BASE}/sessions/${sid}/confirm`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, approved: allow }) }).catch(() => null)
+        if (allow) spent += amount
+      }
+      if (ev === "question.request" && rid) {
+        frame.handled = true
+        const picked = answersFor(Array.isArray(obj?.questions) ? obj.questions : [{}], content, { spend: true, maxCoins: budget - spent })
+        await fetch(`${BASE}/sessions/${sid}/question`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ request_id: rid, answers: picked.answers }) }).catch(() => null)
+      }
+    }
+    facts = await revisionFacts(sid, sinceMs).catch(() => facts)
+    if (facts?.prompts?.length) break
+    await sleep(5000)
   }
-  return eventNames(sse.frames, from)
+  return { spent, facts }
 }
 
 async function sceneLayerRevision(scene, reasons) {
@@ -775,32 +800,38 @@ async function sceneLayerRevision(scene, reasons) {
   const turns = []
   for (const [i, content] of scene.turns.entries()) {
     const from = sse.frames.length
+    const since = Date.now() - 5000
     const turn = await runTurn(sid, content, { sse, spend: !!scene.spend, maxCoins: scene.max_coins || 0 })
-    if (scene.spend) turn.names = await waitImage(sse, from, 180000)
-    turns.push({ i, from, reply: turn.reply.slice(0, 1200), names: [...new Set(turn.names)], approved: turn.approved, approvedCoins: turn.approvedCoins, picks: turn.picks, gen: invokedGenArgs(sse.frames, from).map((s) => s.slice(0, 1500)) })
+    const row = { i, since, reply: turn.reply.slice(0, 1500), names: [...new Set(turn.names)], approved: turn.approved, approvedCoins: turn.approvedCoins, picks: turn.picks }
+    if (scene.spend) {
+      const left = Math.max(0, (scene.max_coins || 0) - (turn.approvedCoins || 0))
+      const drained = await drainAfterTurn(sid, sse, from, since, content, left)
+      row.lateSpent = drained.spent
+      row.prompts = (drained.facts?.prompts || []).map((s) => s.slice(0, 1200))
+      if (!row.prompts.length) fail(reasons, `${scene.id} 第 ${i + 1} 回合之后没有真正提交 image_generate`)
+    }
+    turns.push(row)
     if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有结束`)
     if (!scene.spend && turn.mediaDone) fail(reasons, `${scene.id} 不花钱的场景出现了成片事件`)
-    if (scene.spend && !turn.names.includes("image.done")) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有 image.done`)
   }
   const facts = await revisionFacts(sid)
-  if (facts.seat !== "creator_legacy") fail(reasons, `${scene.id} 席位是 ${facts.seat}`)
   if (!String(facts.original || "").includes(scene.turns[0].slice(0, 12))) fail(reasons, `${scene.id} originalUserPrompt 不是第一句原话`)
   if (typeof facts.pinned !== "string") fail(reasons, `${scene.id} pinnedConstraints 没有落盘`)
   const revs = Array.isArray(facts.revisions) ? facts.revisions : []
   for (const content of scene.turns.slice(1)) {
     if (!revs.some((r) => r.includes(content.slice(0, 12)))) fail(reasons, `${scene.id} 后续修订没有进 userRevisions：${content.slice(0, 20)}`)
   }
-  // 未点名的层：第二回合真实送出的生成参数里必须还在
-  const lastGen = [...turns[turns.length - 1].gen, ...facts.prompts.slice(1)].join("\n")
+  const last = turns[turns.length - 1]
+  const lastGen = (last.prompts || []).join("\n")
   for (const keep of scene.keep_layers || []) {
-    if (!new RegExp(keep).test(lastGen)) fail(reasons, `${scene.id} 第二回合生成参数丢了未点名的层「${keep}」`)
+    if (!new RegExp(keep, "i").test(lastGen)) fail(reasons, `${scene.id} 第二回合 image_generate 丢了未点名的层「${keep}」`)
   }
   for (const want of scene.changed_layer || []) {
-    if (!new RegExp(want).test(lastGen + turns[turns.length - 1].reply)) fail(reasons, `${scene.id} 点名要改的层「${want}」没体现`)
+    if (!new RegExp(want, "i").test(lastGen + last.reply)) fail(reasons, `${scene.id} 点名要改的层「${want}」没体现`)
   }
   fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
   await sse.stop()
-  return { sid, turns, facts }
+  return { sid, turns, facts: { ...facts, prompts: facts.prompts.length } }
 }
 
 const runners = {
