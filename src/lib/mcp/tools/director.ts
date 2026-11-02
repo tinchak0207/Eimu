@@ -509,7 +509,7 @@ async function ensureSession(args: Record<string, unknown>, ctx: McpToolContext,
 
 /** 回覆声称「还在跑」的措辞（产物为空时出现即不判 completed）。 */
 const IN_PROGRESS_CLAIM_RE =
-  /正在(?:并行|批量)?(?:生成|出图|渲染|制作|处理|跑)|生成中|渲染中|排队中|并行(?:生成|出图|跑)|子代理[^。\n]{0,12}(?:在跑|执行中|进行中|生成)|稍等|稍候|请等待|跑完(?:后|再)|in progress|still generating/i;
+  /正在(?:并行|批量)?(?:生成|出图|渲染|制作|处理|跑)|生成中|渲染中|排队中|并行(?:生成|出图|跑)|(?:现在)?派出(?:了)?(?:生成|子代理)|已派(?:出|遣)|两路已经派|子代理[^。\n]{0,12}(?:在跑|执行中|进行中|生成)|稍等|稍候|请等待|跑完(?:后|再)|in progress|still generating/i;
 
 function artifactCount(artifacts: ReturnType<typeof slimArtifacts>): number {
   return Object.values(artifacts).reduce((sum, list) => sum + list.length, 0);
@@ -523,15 +523,24 @@ type IdleGate =
 /**
  * 会话 idle 时是否真的完成：
  * - 网关投影 active_children／inflight_generations 任一 >0 ⇒ busy（后台子代理／生成仍在跑）；
+ * - 产物为空且无助手摘要 ⇒ busy（启动／回合间隙竞态；久无活动 ⇒ stalled）；
  * - 产物为空且最新回覆声称还在生成 ⇒ busy；距 last_activity_at 超过 EIMU_IDLE_CLAIM_STALL_MS ⇒ stalled；
- * - 否则 done。旧网关（无投影）只剩第二条兜底。
+ * - 否则 done。旧网关（无投影）靠后两条兜底。
  */
 function idleGate(runtime: JobRuntime, summary: string, artifacts: ReturnType<typeof slimArtifacts>, nowMs: number): IdleGate {
   if ((runtime.active_children ?? 0) > 0) return { kind: "busy", reason: `active_children=${runtime.active_children}` };
   if ((runtime.inflight_generations ?? 0) > 0) {
     return { kind: "busy", reason: `inflight_generations=${runtime.inflight_generations}` };
   }
-  if (artifactCount(artifacts) === 0 && IN_PROGRESS_CLAIM_RE.test(summary)) {
+  const emptyArtifacts = artifactCount(artifacts) === 0;
+  // 启动／回合间隙竞态：idle + 无产物 + 无助手摘要 ≠ 完成（2026-11-02 真路径：wait 45s 空 completed，随后才 fork 子代理）。
+  if (emptyArtifacts && !summary.trim()) {
+    if (runtime.last_activity_at !== null && nowMs - runtime.last_activity_at > EIMU_IDLE_CLAIM_STALL_MS) {
+      return { kind: "stalled", reason: "idle_empty_no_assistant_summary" };
+    }
+    return { kind: "busy", reason: "idle_empty_no_assistant_summary" };
+  }
+  if (emptyArtifacts && IN_PROGRESS_CLAIM_RE.test(summary)) {
     if (runtime.last_activity_at !== null && nowMs - runtime.last_activity_at > EIMU_IDLE_CLAIM_STALL_MS) {
       return { kind: "stalled", reason: "idle_claims_in_progress_without_artifacts" };
     }
