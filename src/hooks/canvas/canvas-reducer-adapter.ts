@@ -2,6 +2,7 @@
 //
 // reduceCanvasEvent 的签名是 (state, CanvasSseEvent)，不是标准 reducer。
 // 这里包一层 adapter，同时容纳「本端动作」（载入专案、拖动节点、undo 还原）。
+import { guardAgentPatchAgainstHumanEdits, HUMAN_OVERRIDE_KEY, stampHumanEdit } from "@/lib/canvas/human-edits";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
@@ -253,7 +254,11 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       if (!title) return state;
       const prev = state.nodes.find((n) => n.id === action.nodeId);
       if (!prev) return state;
-      const renamed: CanvasNode = { ...prev, title };
+      // rename 只来自人手（CanvasEmbedView onRename）；agent 改标题走 agent_ops.update_node。
+      // 记人手标题，agent 下一轮不得盖回（human-edits.ts）。
+      const renamed: CanvasNode = title === prev.title
+        ? { ...prev, title }
+        : { ...prev, title, metadata: { ...prev.metadata, human_edited: stampHumanEdit(prev.metadata, ["title"]) } };
       const next: CanvasReducerState = {
         ...state,
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? renamed : n)),
@@ -346,15 +351,21 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
           case "update_node": {
             const prevNode = next.nodes.find((n) => n.id === op.id);
             if (!prevNode) break;
+            // 人手改过的栏位不许 agent 盖掉（2026-11-02）：未点名 _override_human 的
+            // title/prompt/content 改动剔除，保留人的版本；compile 侧另回 warning 给 agent。
+            const guarded = guardAgentPatchAgainstHumanEdits(prevNode, op.patch as { title?: string; metadata?: Record<string, unknown> });
+            const guardedMd = guarded.patch.metadata as Record<string, unknown> | undefined;
+            if (guardedMd) delete guardedMd[HUMAN_OVERRIDE_KEY];
+            const patch = guarded.patch as typeof op.patch;
             const updated: CanvasNode = {
               ...prevNode,
-              ...(op.patch.title ? { title: op.patch.title.slice(0, 120) } : {}),
-              ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
-              ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
-              ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
-              // 契约：op.patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
+              ...(patch.title ? { title: patch.title.slice(0, 120) } : {}),
+              ...(patch.position ? { position: patch.position, moved: true } : {}),
+              ...(typeof patch.width === "number" ? { width: Math.max(120, patch.width) } : {}),
+              ...(typeof patch.height === "number" ? { height: Math.max(90, patch.height) } : {}),
+              // 契约：patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
               // 确认收紧会剥掉被读键，维持直通，理由见 agent_ops 开头注释。
-              ...(op.patch.metadata ? { metadata: { ...prevNode.metadata, ...op.patch.metadata } } : {}),
+              ...(patch.metadata ? { metadata: { ...prevNode.metadata, ...patch.metadata } } : {}),
             };
             next = {
               ...next,

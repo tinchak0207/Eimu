@@ -1,3 +1,4 @@
+import { cleanHumanEdited } from "@/lib/canvas/human-edits";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { isReferenceImageRole } from "@/lib/image-types";
 import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/storyboard-contract";
@@ -291,6 +292,7 @@ const DURABLE_FIELD_CLEANERS: Record<MetadataCleanerName, (raw: unknown) => unkn
   // 工程旗标三键：false 是语义（工程卡但未钉住/未过期/未复用），不能像 unsupportedFlag
   // 那样只留 truthy（那会把 false 剥成缺键）。
   projectFlag: (v) => (typeof v === "boolean" ? v : undefined),
+  humanEdited: cleanHumanEdited,
 };
 
 /**

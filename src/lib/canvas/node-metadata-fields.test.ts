@@ -171,6 +171,9 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   project_pinned: { project_pinned: false },
   project_stale: { project_stale: true },
   project_reused: { project_reused: false },
+  // 2026-11-02：locked 原本两端都不在白名单（compile 锁死键）；human_edited＝人手改字记号。
+  locked: { locked: true },
+  human_edited: { human_edited: { prompt: 1793600000000, title: 1793600000001 } },
 };
 
 const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);

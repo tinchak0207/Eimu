@@ -154,6 +154,10 @@ export interface SessionState {
   tplDeviateToken?: { token: string; at: number } | null
   /** 2026-10-28：首回合用户原文（≤12k，持久化），每回合注入【用户原始目标·压缩不可丢】。 */
   originalUserPrompt?: string
+  /** 2026-10-28 首回合硬约束句（2026-11-02 起持久化，原本重启即失）。 */
+  pinnedConstraints?: string
+  /** 2026-11-02：首回合后的用户修订台账（≤16 条×400 字，持久化），每回合注入【用户后续修订·压缩不可丢】。 */
+  userRevisions?: string[]
   /** 已上报过 turn.status 的 compaction part id（2026-10-02 压缩可见化去重，volatile）。 */
   compactionNotified?: Set<string>
   /** 已发过 context.compacted 边界事件的摘要讯息去重键（2026-10-02 压缩语义化，volatile）。

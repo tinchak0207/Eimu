@@ -50,7 +50,9 @@ export type MetadataCleanerName =
   // S10b：工程桥（S10a）五键。project_sig 允许空字串（signature=null 时 S10a 写 ""，
   // 「在工程图里、签名未知」与「不是工程卡」是两回事）；三个旗标 false 也是语义。
   | "projectSig"
-  | "projectFlag";
+  | "projectFlag"
+  // 2026-11-02 人手栏位记号（human-edits.ts）。
+  | "humanEdited";
 
 /** 一个耐久化键：键名 ＋ 清洗器名称（型别对应）＋ 为何它必须活著。 */
 export interface DurableFieldSpec {
@@ -137,6 +139,9 @@ export const DURABLE_METADATA_FIELDS: readonly DurableFieldSpec[] = [
   { key: "project_pinned", cleaner: "projectFlag", note: "已钉住（false＝工程卡但未钉住，不能当缺键）" },
   { key: "project_stale", cleaner: "projectFlag", note: "过期/漂移（false＝新鲜，不能当缺键）" },
   { key: "project_reused", cleaner: "projectFlag", note: "本轮复用旧产物（false＝新跑，不能当缺键）" },
+  // ── 2026-11-02 人手改过的不许盖掉：两键此前都不在白名单，重载即丢、compile 看不到 ──
+  { key: "locked", cleaner: "booleanFlag", note: "整卡锁定（compile.patchForExisting 只留身份键；漏放行＝锁重载即失效）" },
+  { key: "human_edited", cleaner: "humanEdited", note: "人手改过的栏位→时间戳（agent 写入守门据此保留人的版本；漏放行＝人手改字下一轮被盖）" },
 ];
 
 /** A 必须放行的键名清单（供测试与消费端列举）。 */
@@ -180,7 +185,9 @@ export type AgentFieldTransform =
   /** 工程签名（与 A 同一把尺：空字串保留＝「签名未知」，不是缺键）。 */
   | "projectSig"
   /** 工程旗标（与 A 同一把尺：true/false 两态都传，false 也是语义）。 */
-  | "projectFlag";
+  | "projectFlag"
+  /** 人手栏位记号（与 A 同一份 `cleanHumanEdited`）。 */
+  | "humanEdited";
 
 /** 分族透传条件：同伴键为指定字串值时，本键才透传。 */
 export interface AgentFieldCondition {
@@ -295,6 +302,9 @@ export const AGENT_METADATA_FIELDS: readonly AgentFieldSpec[] = [
   { key: "project_pinned", transform: "projectFlag", note: "已钉住（false 同样是语义）" },
   { key: "project_stale", transform: "projectFlag", note: "过期/漂移（false 同样是语义）" },
   { key: "project_reused", transform: "projectFlag", note: "本轮复用旧产物（false 同样是语义）" },
+  // agent 必须看得见「哪张卡被锁、哪个栏位人手改过」，否则 workflow_write 会照旧盖掉。
+  { key: "locked", transform: "boolean", note: "整卡锁定" },
+  { key: "human_edited", transform: "humanEdited", note: "人手改过的栏位（agent 不得覆盖，除非用户本轮点名）" },
 ];
 
 /** B 应透传的键名清单。 */

@@ -38,6 +38,9 @@ export interface PersistableState {
   tplDeviateToken?: { token: string; at: number } | null
   /** 2026-10-28：首回合用户原文（≤12k），压缩/重启后每回合重注 system。 */
   originalUserPrompt?: string
+  /** 2026-11-02：首回合硬约束句与用户后续修订台账（长期可改：多轮后各层不回退）。 */
+  pinnedConstraints?: string
+  userRevisions?: string[]
 }
 /** DB row 的 data 栏位 JSON 形状（Map/Set 均序列化为阵列）。 */
 export interface PersistedData {
@@ -66,6 +69,9 @@ export interface PersistedData {
   tplDeviateToken?: { token: string; at: number } | null
   /** 2026-10-28：首回合用户原文镜像。 */
   originalUserPrompt?: string
+  /** 2026-11-02：硬约束句与用户修订台账镜像。 */
+  pinnedConstraints?: string
+  userRevisions?: string[]
 }
 
 export interface PersistedRow {

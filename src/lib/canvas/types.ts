@@ -148,6 +148,8 @@ export interface CanvasNodeMetadata {
   key_features?: string[];
   role?: string;
   locked?: boolean;
+  /** 人手改过的栏位 → 时间戳（human-edits.ts；agent 写入路径据此不覆盖人的版本）。 */
+  human_edited?: import("./human-edits").HumanEditedFields;
   // P3: 批次 & 查阅 metadata
   referenceNodeIds?: string[];
   batchIndex?: number;

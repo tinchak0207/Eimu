@@ -1,6 +1,7 @@
 // 画布 chat 的展示型类型与介面（自 use-canvas-chat.ts 外围搬迁，符号名不变）。
 // use-canvas-chat.ts 仍是唯一汇出点（barrel），消费端 import 路径零改动。
 import { cleanEmitsEntity, toCardMetadataName, toGateConfirm, toNodeFontSize } from "@/lib/canvas/layout";
+import { cleanHumanEdited } from "@/lib/canvas/human-edits";
 // 上行白名单的**键集合单一真源**（与还原端 layout.toNodeMetadata 共用同一份清单；
 // 漏一端＝回旧会话还原后该键静默消失）。
 import {
@@ -198,6 +199,8 @@ function applyAgentFieldTransform(transform: AgentFieldTransform, raw: unknown):
     case "projectFlag":
       // 工程旗标：true/false 两态都是语义，不能走 truthy（false 会被剥成缺键）。
       return typeof raw === "boolean" ? raw : undefined;
+    case "humanEdited":
+      return cleanHumanEdited(raw);
   }
 }
 

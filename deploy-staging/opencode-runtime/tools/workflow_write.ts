@@ -20,7 +20,7 @@ export default tool({
     "· needs：依赖的上游 step id（画布连线由它推出）。\n" +
     "· tool：必须是 harness 工具 id（image_generate / image_edit / …），不确定就省略。\n" +
     "· gate: true = 人工批准门禁步。meta 是自由透传键值（≤4KB）。steps 1..256 个。**合法性透传：节点上不合 DSL 格式的值（例：`size` 不是 `宽x高`）读面会原样放进该步的 `meta`（同键，如 `meta.size`），不会丢；要改它就改 `meta` 里的同名键。**\n\n" +
-    "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③从 source 里移除步骤不会删画布节点（v0 只回 `warnings`）；**族4 节点在首次收编前**被移除时不会回 warning，下一步读面仍会看到它——要真移除节点用 `canvas_apply_ops`。\n\n" +
+    "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；用户手改过的标题/提示词/正文（节点 metadata.human_edited）与 locked 节点也不会被覆盖，被挡的栏位会回 warning——只有用户本轮明确要求改该栏位时，才在该步 meta._override_human 里点名（如 [\"prompt\"]）；③从 source 里移除步骤不会删画布节点（v0 只回 `warnings`）；**族4 节点在首次收编前**被移除时不会回 warning，下一步读面仍会看到它——要真移除节点用 `canvas_apply_ops`。\n\n" +
     "**改画布产线（节点在 `dsl` 里）→ 一律 `workflow_write`**（幂等；读 `dsl`→改 `steps`→整份交回）。单步或多步、改 prompt 或改结构，都是它。**`dsl` 已自动覆盖存量画布上的产线节点（含未带产线身份键的提示词节点与生成配置节点），每步的 `meta._origin_node_id` 由读面自动填好——原样带回即可，不要自己发明。**改提示词要改「生成步」（kind=image/video 的那一步）的 `prompt`**——生成面板与重跑读的是生成节点自身的 `metadata.prompt`；若上游另有「提示词节点步」持有同一段提示词（画布把提示词存了两份），把两处改成同一段：只改提示词步不会改变生成输入。节点不在 `dsl` 里，或要动 DSL 表达不到的栏位（位置／尺寸／手调连线）→ 才用 `canvas_apply_ops`（`update_node`／`connect_nodes`／`delete_connections`）。**铺新产线＝有意动作**：交回会新建节点的 source 时，若 `source.workflow` 不在当前画布 `dsl` 的 ns 里（画布快照没有产线信息、或它来自别的画布／会话记忆，都算不在），工具先回 `confirm_new_line` 要你确认——确认前画布不动。确为有意（用户要铺这条线／你在规划另一张画布）就带 `confirm_new_line: true` 重交同一份 source；若它只是记忆或别的画布的 source 就不要交回。**回执里的新建/更新颗数（`created_node_ids`）必须如实转述，不得声称「无新建」。** **禁手拼 `add_node`＋`connect_nodes` 搭整条产线结构**（绕过编译器、破坏可逆性）。**",
   args: {
     source: tool.schema

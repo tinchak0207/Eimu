@@ -19,6 +19,7 @@
 //   6. 对 DSL 编译产物 decompile（decompile.ts）后再 compile → 全部 update_node、
 //      零新增连线（round-trip 幂等）。
 
+import { guardAgentPatchAgainstHumanEdits, humanEditBlockedMessage, humanEditOverriddenMessage, HUMAN_OVERRIDE_KEY, type HumanEditableField } from "../canvas/human-edits";
 import {
   CanvasNodeType,
   type CanvasAgentOp,
@@ -155,7 +156,7 @@ function patchForExisting(
   existing: CanvasNode,
   title: string,
   metadata: WorkflowNodeMetadata,
-): { patch: { title?: string; metadata: WorkflowNodeMetadata }; lockedDropped: boolean } {
+): { patch: { title?: string; metadata: WorkflowNodeMetadata }; lockedDropped: boolean; humanBlocked: HumanEditableField[]; humanOverridden: HumanEditableField[] } {
   const prevMd = (existing.metadata ?? {}) as WorkflowNodeMetadata;
   if (prevMd.locked === true) {
     const kept: WorkflowNodeMetadata = {};
@@ -165,11 +166,20 @@ function patchForExisting(
       if (key === "status" || (LOCKED_IDENTITY_KEYS as readonly string[]).includes(key)) continue;
       if (JSON.stringify(prevMd[key]) !== JSON.stringify(value)) lockedDropped = true;
     }
-    return { patch: { metadata: kept }, lockedDropped };
+    return { patch: { metadata: kept }, lockedDropped, humanBlocked: [], humanOverridden: [] };
   }
   const next: WorkflowNodeMetadata = { ...metadata };
   if (prevMd.status !== undefined && prevMd.status !== null) delete next.status;
-  return { patch: { title, metadata: next }, lockedDropped: false };
+  // 人手改过的栏位（metadata.human_edited）不覆盖（2026-11-02）：与 reducer agent_ops 同一把尺，
+  // 未在 step.meta._override_human 点名的 title/prompt/content 改动剔除并回 warning。
+  // current 来自上行快照（prompt/content 已截断），以 agent 视图判等；reducer 拿全文再判一次。
+  const guarded = guardAgentPatchAgainstHumanEdits(existing, { title, metadata: next as Record<string, unknown> }, { currentIsAgentView: true });
+  return {
+    patch: guarded.patch as { title?: string; metadata: WorkflowNodeMetadata },
+    lockedDropped: false,
+    humanBlocked: guarded.blocked,
+    humanOverridden: guarded.overridden,
+  };
 }
 
 // ─────────────────────────── 编译期校验（schema 之后的跨步骤语义）
@@ -441,8 +451,10 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     if (existing) {
       // patch 禁含 position/width/height/moved——人拖位置自动保留（canvas-reducer-adapter update_node 语义）。
       // 已存在节点：status 不重置、locked 节点内容不覆盖（见 patchForExisting）。
-      const { patch, lockedDropped } = patchForExisting(existing, step.title, metadata);
+      const { patch, lockedDropped, humanBlocked, humanOverridden } = patchForExisting(existing, step.title, metadata);
       if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      if (humanBlocked.length > 0) warnings.push(humanEditBlockedMessage(`步骤 ${step.id}`, humanBlocked));
+      if (humanOverridden.length > 0) warnings.push(humanEditOverriddenMessage(`步骤 ${step.id}`, humanOverridden));
       ops.push({ type: "update_node", id: nodeId, patch });
       updated++;
       continue;
@@ -497,14 +509,18 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
           ],
         };
       }
-      const { patch, lockedDropped } = patchForExisting(target, step.title, metadata);
+      const { patch, lockedDropped, humanBlocked, humanOverridden } = patchForExisting(target, step.title, metadata);
       if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      if (humanBlocked.length > 0) warnings.push(humanEditBlockedMessage(`步骤 ${step.id}`, humanBlocked));
+      if (humanOverridden.length > 0) warnings.push(humanEditOverriddenMessage(`步骤 ${step.id}`, humanOverridden));
       ops.push({ type: "update_node", id: originNodeId, patch });
       updated++;
       nodeIds.set(step.id, originNodeId);
       continue;
     }
     // 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition。
+    // _override_human 只是给已存在人手节点的运输键，新节点不落。
+    delete (metadata as Record<string, unknown>)[HUMAN_OVERRIDE_KEY];
     ops.push({ type: "add_node", node: { id: nodeId, type: kindToNodeType(step.kind), title: step.title, metadata } });
     added++;
   }
