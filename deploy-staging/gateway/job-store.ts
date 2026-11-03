@@ -126,6 +126,12 @@ export function registerGenerationReceipt(input: Record<string, any>): Generatio
 export function completeGenerationReceipt(id: string, status: string, artifacts: Array<{ url: string }>, extra: Record<string, any>): GenerationReceipt {
   const row = generationReceipt(id)
   if (!row) throw new Error("unregistered job")
+  // 退款是已核实的财务终态；后续poll timeout/失败观察不能撤销退款或重新打开消费。
+  // failed仍可由后来真实success/refund推进，queued进度ACK也不代替最终产物消费。
+  // （b3c825d92 于 10-30 整树还原 4af310238 时被一并撤下，H17 原样拣回。）
+  if (row.status === "refunded" && status !== "refunded") return row
+  // 已取消同理：poller超时只是观察失败，不能把cancelled改写成failed并清掉已消费标记；真实退款/晚到成功仍可推进。
+  if (row.status === "cancelled" && status === "failed") return row
   if (status === "succeeded" && row.kind !== "message" && artifacts.length < (row.requested_count || 1)) throw new Error("authoritative batch is incomplete; retain task for recovery")
   // A previous failed observation must never hide a later real success.
   if (row.status === "succeeded" && status !== "succeeded") return row
@@ -154,7 +160,7 @@ export function generationReceipts(parentGw?: string, pendingOnly = false): Gene
   const rows = parentGw
     ? db().query("SELECT * FROM generation_receipts WHERE parent_gw=? ORDER BY created_at").all(parentGw)
     : db().query("SELECT * FROM generation_receipts ORDER BY created_at").all()
-  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.status !== "succeeded"))
+  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.result_source !== "runtime_music" && r.status !== "succeeded" && r.status !== "refunded"))
 }
 export function acknowledgeGeneration(id: string, stage: string, extra: Record<string, any>): void {
   const row = generationReceipt(id)
