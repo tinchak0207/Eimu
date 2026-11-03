@@ -596,6 +596,9 @@ export function settleConfirm(
         cost_coins: pending.ledger.amount_coins,
         task_id: pending.ledger.task_id,
         model: pending.ledger.model,
+        // H20：确认⇄平台 job 逐笔对账键（＝工具提交时的 Idempotency-Key）。只加栏位，金额/次数不变。
+        request_id: requestId,
+        ...(pending.ledger.workflow_id ? { workflow_id: pending.ledger.workflow_id } : {}),
       })
     }
     void emitQuotaChanged(state)

@@ -93,6 +93,10 @@ export interface LedgerEntry {
   result_url?: string
   kind?: string
   event?: string
+  // H20（2026-11-04）：confirm/approved 的关联键。request_id＝工具层提交平台时的 Idempotency-Key
+  //（generation_job.idempotency_key），对账据此逐笔连到 job；旧行无此键＝未关联，不崩。
+  request_id?: string
+  workflow_id?: string
 }
 
 export async function appendLedger(entry: LedgerEntry): Promise<void> {

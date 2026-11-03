@@ -12,7 +12,8 @@ export type GatewayPromptPart =
 
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
-  ledger?: { amount_coins: number; task_id?: string; model?: string }
+  // H20：workflow_id 让批量确认能落到批次；request_id 由 settleConfirm 以 map 键写入，不在此重复。
+  ledger?: { amount_coins: number; task_id?: string; model?: string; workflow_id?: string }
   // 2026-11-01 MCP 可执行确认卡：与 SSE confirm.request 同一段说明文字，供 GET /status 只读投影
   //（外部 MCP 客户端收不到 SSE，否则看不到卡在批什么）。仅内存，不入持久化。
   description?: string

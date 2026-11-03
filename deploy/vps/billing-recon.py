@@ -16,6 +16,9 @@
 #   用户实扣 charged = reserve - refund + projection_commit（quota 单位，1 币 = 500000）。
 #   confirmed = 网关回执 generation_receipts.data.cost_coins（image_generate.ts 确认时的预估额，
 #   同一值作为 cap_coins 送平台）；回执 task_id = generation_job.id。
+#   H20 关联键：ledger confirm/approved 自 H20 起带 request_id（＝工具提交平台的 Idempotency-Key＝
+#   generation_job.idempotency_key；upscale_audit 逐张为 <request_id>-<i>）与 workflow_id（wfgen_ 批次）。
+#   旧行两键皆无＝「无法逐笔关联」；新行按 request_id 连 job，再比 确认额 vs 实扣。
 #
 # 用法（VPS）：
 #   python3 deploy/vps/billing-recon.py                       # 默认路径 + 只读 psql
@@ -28,7 +31,7 @@ TOL = 0.005  # 币
 DEFAULT_PSQL = ("sudo -n docker exec -i -e PGOPTIONS=-c\\ default_transaction_read_only=on "
                 "image-control-postgres psql -X -q -v ON_ERROR_STOP=1 -U image_control -d image_control")
 PG_QUERIES = {
-    "jobs": "SELECT id, billing_user_id, source, kind, model_id, status, billing_amount, requested_count, completed_count, created_at FROM generation_job",
+    "jobs": "SELECT id, billing_user_id, source, kind, model_id, status, billing_amount, requested_count, completed_count, created_at, idempotency_key FROM generation_job",
     "ops": "SELECT job_id, operation, amount, status, idempotency_ref, created_at FROM billing_operation",
     "acct": "SELECT id, billing_user_id, entry_type, amount, source, job_id, created_at FROM account_ledger",
 }
@@ -54,7 +57,9 @@ CATS = [
     ("ledger_missing", "帐本缺行（操作已扣，帐本接管后无对应行）"),
     ("gw_ledger_ne_charged", "网关 ledger.jsonl done 记帐≠平台实扣"),
     ("receipt_no_job", "回执无对应平台 job"),
-    ("confirm_unlinked_event", "确认事件无法逐笔关联（ledger confirm/approved 无 task_id）"),
+    ("confirm_unlinked_event", "确认事件无法逐笔关联（ledger confirm/approved 无 task_id 也无 request_id，H20 前旧行）"),
+    ("confirm_rid_no_job", "确认已放行但平台无该 request_id 的 job（提交前中止/未提交，待甄别）"),
+    ("confirm_event_lt_charged", "确认额<平台实扣（按 request_id 关联，实扣超出用户放行额）"),
     ("confirm_unlinked_table", "确认表无对应回执（generation_confirmations approved）"),
     ("frozen_unknown", "真相未明冻结（INC-0831，不退不重投，仅列示）"),
 ]
@@ -118,8 +123,12 @@ def read_gateway(args):
                     o = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(o, dict):
+                    continue
                 events.append({"kind": o.get("kind"), "event": o.get("event"), "task_id": o.get("task_id"),
-                               "cost": num(o.get("cost_coins")), "ts": o.get("ts")})
+                               "cost": num(o.get("cost_coins")), "ts": o.get("ts"),
+                               "request_id": o.get("request_id") if isinstance(o.get("request_id"), str) else None,
+                               "workflow_id": o.get("workflow_id") if isinstance(o.get("workflow_id"), str) else None})
     return receipts, confirmations, events, has_conf is not None, os.path.exists(args.ledger)
 
 
@@ -248,6 +257,8 @@ def reconcile(pg, receipts, confirmations, events):
     done = collections.defaultdict(float)
     done_n = collections.Counter()
     gw_ref = set()
+    confirm_rids = []
+    linked = [0, 0]
     for e in events:
         if e["kind"] in ("image", "video", "audio", "generation") and e["task_id"]:
             if e["event"] in ("done", "completed") and e["cost"] is not None:
@@ -255,8 +266,12 @@ def reconcile(pg, receipts, confirmations, events):
                 done_n[e["task_id"]] += 1
             if e["event"] == "refunded":
                 gw_ref.add(e["task_id"])
-        if e["kind"] == "confirm" and e["event"] == "approved" and not e["task_id"]:
-            add("confirm_unlinked_event", e["cost"], ts=pfx(e["ts"], 10))
+        if e["kind"] == "confirm" and e["event"] == "approved":
+            rid = e.get("request_id")
+            if not e["task_id"] and not rid:
+                add("confirm_unlinked_event", e["cost"], ts=pfx(e["ts"], 10))
+            elif rid:
+                confirm_rids.append(e)
     for tid, c in done.items():
         if tid in jobs and abs(coins(charged[tid]) - c) > TOL:
             add("gw_ledger_ne_charged", coins(charged[tid]) - c, job=pfx(tid), status=jobs[tid]["status"],
@@ -271,7 +286,35 @@ def reconcile(pg, receipts, confirmations, events):
     for c in confirmations:
         if c["outcome"] == "approved" and c["request_id"] not in rec_rids:
             add("confirm_unlinked_table", c["amount"], req=pfx(c["request_id"], 12))
+    # H20：confirm/approved 按 request_id 逐笔连 generation_job.idempotency_key
+    by_key = collections.defaultdict(list)
+    for j in jobs.values():
+        k = j.get("idempotency_key")
+        if k:
+            by_key[k].append(j["id"])
+    rec_by_rid = collections.defaultdict(set)
+    for r in receipts:
+        if r.get("request_id"):
+            rec_by_rid[r["request_id"]].add(r["task_id"])
+    for e in confirm_rids:
+        rid = e["request_id"]
+        if rid.startswith("wfgen_") or e.get("workflow_id"):
+            linked[1] += 1  # 工作流批次：批次级关联（节点 job 用 pg: 键），不逐笔比额
+            continue
+        tids = set(by_key.get(rid, [])) | {t for t in rec_by_rid.get(rid, ()) if t in jobs}
+        if not tids:  # upscale_audit 逐张 <rid>-<i>
+            pre = rid + "-"
+            tids = {t for k, ts in by_key.items() if k.startswith(pre) and k[len(pre):].isdigit() for t in ts}
+        if not tids:
+            add("confirm_rid_no_job", e["cost"], req=pfx(rid, 12), ts=pfx(e["ts"], 10))
+            continue
+        linked[0] += 1
+        ch = sum(coins(charged[t]) for t in tids)
+        if e["cost"] is not None and ch - e["cost"] > TOL:
+            add("confirm_event_lt_charged", ch - e["cost"], req=pfx(rid, 12), jobs=len(tids),
+                reason="confirmed=%s charged=%s" % (e["cost"], round(ch, 4)))
     findings["_confirmed_compared"] = compared[0]
+    findings["_confirm_linked"] = tuple(linked)
     return findings
 
 
@@ -299,11 +342,13 @@ def main():
     receipts, confirmations, events, has_conf, has_ledger = read_gateway(args)
     findings = reconcile(pg, receipts, confirmations, events)
     compared = findings.pop("_confirmed_compared")
+    linked_job, linked_wf = findings.pop("_confirm_linked")
     summary = summarize(findings)
     job_ids = {j["id"] for j in pg["jobs"]}
     meta = {"jobs": len(pg["jobs"]), "ops": len(pg["ops"]), "acct": len(pg["acct"]), "receipts": len(receipts),
             "confirmations": len(confirmations) if has_conf else "未取得", "ledger_events": len(events) if has_ledger else "未取得",
-            "confirmed_compared": compared, "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids)}
+            "confirmed_compared": compared, "confirm_events_linked": linked_job, "confirm_events_workflow_batch": linked_wf,
+            "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids)}
     if args.json:
         print(json.dumps({"meta": meta, "summary": summary}, ensure_ascii=False, indent=1))
         return
