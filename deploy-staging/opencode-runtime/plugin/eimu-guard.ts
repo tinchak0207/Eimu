@@ -553,8 +553,19 @@ const RECEIPT_MAX_BYTES = intEnv("TOOL_RECEIPT_MAX_BYTES", 10 * 1024)
 const PREV_SUMMARY_HEAD_CHARS = 14_000
 const PREV_SUMMARY_TAIL_CHARS = 6_000
 const GOAL_CARD_TAG = "<eimu-goal-card>"
-/** 网关/插件自己投递的 user-role 通知不是用户原话。 */
-const SYSTEM_INJECTED_USER_TEXT_RE = /^\s*(?:【目标验收|\[Monitor Result\]|<system-reminder|后台命令已结束|<eimu-goal-card>)/
+/**
+ * 网关/插件自己投递的 user-role 通知不是用户原话。
+ * 2026-11-03 补：网关唤醒/续写/尾端注入（【子代理完成·系统自动唤醒】【系统续写指示】
+ * 「---\n【系统注入·尾端】」【生成结果耐久收件箱】【本会话兄弟名册·系统事实】…）此前漏网，
+ * 被当成「用户原话·最高优先级目标」收进目标卡，且唤醒文案里的「禁止…」命中 DIRECTIVE_RE
+ * 被当纠正优先保留，把真实原话/纠正挤出（7109fa18：34 条 user 角色里 30+ 条是系统唤醒）。
+ * 判据收窄到网关命名约定（「…·系统事实/系统注入/系统自动唤醒/系统补注】」与三个固定前缀），
+ * 用户自己写的【系统设定】【模式=full】等不在此列。
+ */
+const SYSTEM_INJECTED_USER_TEXT_RE =
+  /^\s*(?:-{3,}\s*)?(?:【目标验收|【[^】\n]{0,24}·系[统統][^】\n]{0,8}】|【系统注入·|【系统续写指示】|【生成结果耐久收件箱】|\[Monitor Result\]|<system-reminder|后台命令已结束|<eimu-goal-card>)/
+/** 同一 part 内尾随的网关注入段（「---」+【系统注入·…】起）截掉，只留前面的用户原话。 */
+const TRAILING_SYSTEM_INJECTION_RE = /\n\s*-{3,}\s*\n\s*【系统注入·[\s\S]*$/
 /** 纠正/否决/授权类措辞：折叠中段时优先保留。 */
 const DIRECTIVE_RE =
   /不要|别[再用做]|不许|禁止|不是|不对|错了|改成|改为|换成|必须|只准|只要|不用|授权|同意|批准|确认|可以|否决|作废|重做|撤销|取消|停|full|auto|don't|do not|never|wrong|instead|must|stop|approve|authori[sz]/i
@@ -591,7 +602,9 @@ function userTextOf(msg: PluginMsg): string {
     if (part?.type !== "text" || typeof part.text !== "string") continue
     if (part.synthetic === true || part.ignored === true || part.metadata?.compaction_continue) continue
     if (!part.text.trim() || SYSTEM_INJECTED_USER_TEXT_RE.test(part.text)) continue
-    texts.push(part.text)
+    const own = part.text.replace(TRAILING_SYSTEM_INJECTION_RE, "")
+    if (!own.trim()) continue
+    texts.push(own)
   }
   return texts.join("\n")
 }
