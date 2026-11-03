@@ -128,7 +128,8 @@ def read_gateway(args):
                 events.append({"kind": o.get("kind"), "event": o.get("event"), "task_id": o.get("task_id"),
                                "cost": num(o.get("cost_coins")), "ts": o.get("ts"),
                                "request_id": o.get("request_id") if isinstance(o.get("request_id"), str) else None,
-                               "workflow_id": o.get("workflow_id") if isinstance(o.get("workflow_id"), str) else None})
+                               "workflow_id": o.get("workflow_id") if isinstance(o.get("workflow_id"), str) else None,
+                               "refund_claim": o.get("refund_claim") if isinstance(o.get("refund_claim"), str) else None})
     return receipts, confirmations, events, has_conf is not None, os.path.exists(args.ledger)
 
 
@@ -257,6 +258,7 @@ def reconcile(pg, receipts, confirmations, events):
     done = collections.defaultdict(float)
     done_n = collections.Counter()
     gw_ref = set()
+    gw_claim = set()
     confirm_rids = []
     linked = [0, 0]
     for e in events:
@@ -266,6 +268,9 @@ def reconcile(pg, receipts, confirmations, events):
                 done_n[e["task_id"]] += 1
             if e["event"] == "refunded":
                 gw_ref.add(e["task_id"])
+            # H22：网关只在平台证实时记 refunded；调用方声称已退记 failed+refund_claim，仍查「声称已退但平台仍扣」
+            elif e["event"] == "failed" and e.get("refund_claim"):
+                gw_claim.add(e["task_id"])
         if e["kind"] == "confirm" and e["event"] == "approved":
             rid = e.get("request_id")
             if not e["task_id"] and not rid:
@@ -283,6 +288,11 @@ def reconcile(pg, receipts, confirmations, events):
             continue
         if tid in jobs and charged[tid] > 0.5 and jobs[tid]["status"] not in {"refunded"} | UNKNOWN_STATES:
             add("gw_refunded_but_charged", coins(charged[tid]), job=pfx(tid), status=jobs[tid]["status"], reason="ledger.jsonl refunded")
+    for tid in gw_claim - gw_ref:
+        if pfx(tid) in seen_ref:
+            continue
+        if tid in jobs and charged[tid] > 0.5 and jobs[tid]["status"] not in {"refunded"} | UNKNOWN_STATES:
+            add("gw_refunded_but_charged", coins(charged[tid]), job=pfx(tid), status=jobs[tid]["status"], reason="ledger.jsonl 调用方声称已退（平台未证实）")
     for c in confirmations:
         if c["outcome"] == "approved" and c["request_id"] not in rec_rids:
             add("confirm_unlinked_table", c["amount"], req=pfx(c["request_id"], 12))

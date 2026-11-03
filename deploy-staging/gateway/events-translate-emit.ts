@@ -1,7 +1,7 @@
 import type { SessionState } from "./types-gateway.ts"
 import { PLATFORM_BASE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
-import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
+import { emitQuotaChanged, appendLedgerFor, claimLedgerDone } from "./quota-ledger.ts"
 import { flushPendingCompact } from "./messages-gw.ts"
 import { boundMap, boundSet } from "./events-translate-core.ts"
 import { emitCanvasResult } from "./events-translate-canvas.ts"
@@ -63,7 +63,8 @@ export async function emitImageDone(
   if (task_id) {
     emitCanvasResult(state, task_id, publicUrl, cost_coins)
   }
-  void appendLedgerFor(state, {
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, publicUrl, cost_coins)) void appendLedgerFor(state, {
     kind: "image",
     event: "done",
     task_id,
@@ -123,7 +124,8 @@ export async function emitVideoDone(
   if (task_id) {
     emitCanvasResult(state, task_id, url, cost_coins)
   }
-  void appendLedgerFor(state, {
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, url, cost_coins)) void appendLedgerFor(state, {
     kind: "video",
     event: "done",
     task_id,
@@ -157,7 +159,8 @@ export async function emitAudioDone(
     ...(meta?.cover ? { cover: meta.cover } : {}),
     ...(meta?.lyric_status ? { lyric_status: meta.lyric_status } : {}),
   })
-  void appendLedgerFor(state, {
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, url, cost_coins)) void appendLedgerFor(state, {
     kind: "audio",
     event: "done",
     task_id,

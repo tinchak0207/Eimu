@@ -24,6 +24,7 @@ import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, rec
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 import { notify } from "./internal-waiters.ts"
+import { generationReceipt } from "./job-store.ts"
 import { humanProtectedTargets, humanProtectedBlockMessage } from "./canvas-human-guard.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
@@ -626,6 +627,20 @@ export function settleConfirm(
   return true
 }
 
+// H22（2026-11-04）：ledger 的 refunded 只在平台账证实时写。证据＝该 task 的持久回执终态为 refunded——
+// 回执状态只经 /internal/job-completion 写入且须为权威终态，来源是 poller/image_get_result 读到的平台
+// generation_job.status；平台仅在全额 refund operation applied 后才把 job 置 refunded（billing-ledger/write.ts）。
+// 调用方 /internal/emit 自带的 refunded:true 无此证据时记 failed＋refund_claim="caller"/refund_status="unconfirmed"。
+// 只改日志语义：SSE 帧的 refunded 字段、退款/扣费路径一律不动。
+function failureLedgerFields(task_id: string, refunded: boolean): { event: string; refund_source?: string; refund_claim?: string; refund_status?: string } {
+  if (!refunded) return { event: "failed" }
+  let platformRefunded = false
+  try { platformRefunded = !!task_id && generationReceipt(task_id)?.status === "refunded" } catch {}
+  return platformRefunded
+    ? { event: "refunded", refund_source: "platform_job" }
+    : { event: "failed", refund_claim: "caller", refund_status: "unconfirmed" }
+}
+
 // 用 task_id（或按序）把 loading 节点置 error，resume 的 agent 文案讲人话。
 export function emitImageFailed(
   state: SessionState,
@@ -656,7 +671,7 @@ export function emitImageFailed(
   }
   void appendLedgerFor(state, {
     kind: "image",
-    event: refunded ? "refunded" : "failed",
+    ...failureLedgerFields(task_id, refunded),
     task_id,
   })
 }
@@ -690,7 +705,7 @@ export function emitVideoFailed(
   }
   void appendLedgerFor(state, {
     kind: "video",
-    event: refunded ? "refunded" : "failed",
+    ...failureLedgerFields(task_id, refunded),
     task_id,
   })
 }
@@ -724,7 +739,7 @@ export function emitAudioFailed(
   }
   void appendLedgerFor(state, {
     kind: "audio",
-    event: refunded ? "refunded" : "failed",
+    ...failureLedgerFields(task_id, refunded),
     task_id,
   })
 }
