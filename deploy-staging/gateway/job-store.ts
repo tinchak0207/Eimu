@@ -130,7 +130,11 @@ export function completeGenerationReceipt(id: string, status: string, artifacts:
   // A previous failed observation must never hide a later real success.
   if (row.status === "succeeded" && status !== "succeeded") return row
   const changed = row.status !== status || JSON.stringify(row.artifacts) !== JSON.stringify(artifacts)
-  const data = { ...row, ...extra, artifacts: undefined }
+  // 2026-11-03 加固：平台轮询回包不带 cost_coins（image_get_result 传 body.cost_coins=undefined、poller 硬停不传），
+  // 直接展开会把登记时工具算好的 cost_coins 覆盖成 undefined → JSON 丢键 → image.done cost=null。
+  // 只有完成方给出有限数值才覆盖；缺省/非数值一律保留登记值。
+  const { cost_coins, ...rest } = extra
+  const data = { ...row, ...rest, ...(typeof cost_coins === "number" && Number.isFinite(cost_coins) ? { cost_coins } : {}), artifacts: undefined }
   db().query(`UPDATE generation_receipts SET status=?,artifacts=?,data=?,updated_at=?,
     observed_at=CASE WHEN ? THEN NULL ELSE observed_at END,
     downloaded_at=CASE WHEN ? THEN NULL ELSE downloaded_at END,
