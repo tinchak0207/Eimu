@@ -60,6 +60,16 @@ interface AutoApprovedItem {
   description: string | null;
 }
 
+/** 照抄网关 pending_question_items 契约（H11）。answers 依 questions 顺序作答。 */
+interface PendingQuestionItem {
+  request_id: string;
+  questions: Array<{
+    header: string | null;
+    question: string;
+    options: Array<{ label: string; description: string | null }>;
+  }>;
+}
+
 interface JobRuntime {
   status: SessionRuntimeStatus;
   phase: string;
@@ -70,6 +80,8 @@ interface JobRuntime {
   inflight_generations: number | null;
   /** null＝旧网关没投影确认卡明细（无法按 id 批准）。 */
   pending_confirm_items: PendingConfirmItem[] | null;
+  /** null＝旧网关没投影 question 明细。 */
+  pending_question_items: PendingQuestionItem[] | null;
   recent_approved_coins: number | null;
   last_activity_at: number | null;
   source: "status_endpoint" | "session_list" | "assumed_running";
@@ -335,6 +347,40 @@ function readPendingConfirmItems(raw: unknown): PendingConfirmItem[] | null {
   return out;
 }
 
+function readPendingQuestionItems(raw: unknown): PendingQuestionItem[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: PendingQuestionItem[] = [];
+  for (const entry of raw) {
+    if (!isPlainObject(entry) || typeof entry.request_id !== "string" || !entry.request_id) continue;
+    const questions = Array.isArray(entry.questions) ? entry.questions : [];
+    out.push({
+      request_id: entry.request_id,
+      questions: questions.filter(isPlainObject).map((q) => ({
+        header: typeof q.header === "string" ? q.header : null,
+        question: typeof q.question === "string" ? q.question : "",
+        options: (Array.isArray(q.options) ? q.options : []).filter(isPlainObject).map((o) => ({
+          label: typeof o.label === "string" ? o.label : "",
+          description: typeof o.description === "string" ? o.description : null,
+        })),
+      })),
+    });
+  }
+  return out;
+}
+
+/** 网关 QUESTION_ASSUME_MS 默认 180s：question 卡超时即 expired_without_consent，不代答。 */
+const QUESTION_EXPIRY_NOTE =
+  "导演用 question 卡请示：请把 questions 原样转给用户，约 3 分钟内用 eimu_job reply（answers 依题序给选项 label，或 message 作为自由回答）作答；超时网关按「超时未回复」拒绝，导演会停下。";
+
+/** awaiting_input 附带的提问明细（无 question 时不加栏位）。 */
+function questionFields(runtime: JobRuntime): Record<string, unknown> {
+  if (runtime.pending_questions <= 0) return {};
+  if (runtime.pending_question_items === null) {
+    return { questions: null, questions_note: "网关未投影 question 明细（旧版）；题面见网页，或用 eimu_job reply 的 message 自由作答。" };
+  }
+  return { questions: runtime.pending_question_items, questions_note: QUESTION_EXPIRY_NOTE };
+}
+
 async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: string): Promise<JobRuntime> {
   const statusPath = agentSessionPath(jobId, "/status");
   const statusRes = await ctx.dispatcher({
@@ -356,6 +402,7 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
         active_children: finiteOrNull(payload.active_children),
         inflight_generations: finiteOrNull(payload.inflight_generations),
         pending_confirm_items: readPendingConfirmItems(payload.pending_confirm_items),
+        pending_question_items: readPendingQuestionItems(payload.pending_question_items),
         recent_approved_coins: finiteOrNull(payload.recent_approved_coins),
         last_activity_at: finiteOrNull(payload.last_activity_at),
         source: "status_endpoint",
@@ -386,6 +433,7 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
         active_children: null,
         inflight_generations: null,
         pending_confirm_items: null,
+        pending_question_items: null,
         recent_approved_coins: null,
         last_activity_at: null,
         source: "session_list",
@@ -403,6 +451,7 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
     active_children: null,
     inflight_generations: null,
     pending_confirm_items: null,
+    pending_question_items: null,
     recent_approved_coins: null,
     last_activity_at: null,
     source: "assumed_running",
@@ -801,6 +850,7 @@ async function judgeSnapshotCore(opts: {
             ...base,
             ...(opts.auto.approved.length > 0 ? { auto_approved: opts.auto.approved } : {}),
             status: "awaiting_input",
+            ...questionFields(runtime),
             code: "budget_exceeded",
             phase: runtime.phase,
             pending_questions: runtime.pending_questions,
@@ -826,6 +876,7 @@ async function judgeSnapshotCore(opts: {
         ...base,
         ...(opts.auto.approved.length > 0 ? { auto_approved: opts.auto.approved } : {}),
         status: "awaiting_input",
+        ...questionFields(runtime),
         phase: runtime.phase,
         pending_questions: runtime.pending_questions,
         pending_confirms: runtime.pending_confirms,
@@ -1133,6 +1184,53 @@ function readConfirmIds(args: Record<string, unknown>): string[] | null {
   return ids.length > 0 ? [...new Set(ids)] : null;
 }
 
+interface QuestionAnswerResult {
+  id: string;
+  outcome: "answered" | "expired" | "error";
+  http_status: number;
+}
+
+/**
+ * 依 questions 顺序组 answers（string[][]，网关 isQuestionAnswers 要求每格非空）：
+ * args.answers 可为 string[]（每题一个）或 string[][]；缺省／空格用 message 作自由回答。
+ */
+function buildQuestionAnswers(item: PendingQuestionItem, raw: unknown, message: string): string[][] {
+  const given = Array.isArray(raw) ? raw : [];
+  const count = Math.max(1, item.questions.length);
+  const out: string[][] = [];
+  for (let i = 0; i < count; i += 1) {
+    const cell = given[i];
+    const row = (Array.isArray(cell) ? cell : [cell]).filter(
+      (v): v is string => typeof v === "string" && v.trim() !== "",
+    );
+    out.push(row.length > 0 ? row : [message]);
+  }
+  return out;
+}
+
+/** POST /sessions/:id/question {request_id, answers}（照抄 src/lib/agent-chat-client/session.ts replyAgentQuestion）。 */
+async function postQuestionAnswer(
+  jobId: string,
+  item: PendingQuestionItem,
+  answers: string[][],
+  ctx: McpToolContext,
+): Promise<QuestionAnswerResult> {
+  const response = await ctx.dispatcher({
+    method: "POST",
+    path: agentSessionPath(jobId, "/question"),
+    authorization: ctx.authorization,
+    traceId: ctx.traceId,
+    toolName: "eimu_job",
+    body: { request_id: item.request_id, answers },
+  });
+  if (response.status >= 200 && response.status < 300) {
+    return { id: item.request_id, outcome: "answered", http_status: response.status };
+  }
+  // 网关 handleQuestion：未知／已结算 request_id 回 404 question_expired。
+  if (response.status === 404) return { id: item.request_id, outcome: "expired", http_status: 404 };
+  return { id: item.request_id, outcome: "error", http_status: response.status };
+}
+
 async function sendJobMessage(jobId: string, message: string, ctx: McpToolContext): Promise<McpToolCallResult | null> {
   const sent = await ctx.dispatcher({
     method: "POST",
@@ -1259,6 +1357,41 @@ export async function eimuJob(args: Record<string, unknown>, ctx: McpToolContext
     }
     const before = await fetchSessionDetail(jobId, ctx, "eimu_job");
     if (before.error) return before.error;
+    // H11：导演挂着 question 卡时，reply 必须走 POST /question 作答（与前端 replyAgentQuestion 同端点同 body）；
+    // 只发新讯息不会解开 question，卡会在 QUESTION_ASSUME_MS 后被按超时拒绝。
+    const pendingRuntime = await resolveJobRuntime(jobId, ctx, "eimu_job");
+    const questionItems = pendingRuntime.pending_question_items ?? [];
+    if (questionItems.length > 0) {
+      const results = [];
+      for (const item of questionItems) {
+        results.push(await postQuestionAnswer(jobId, item, buildQuestionAnswers(item, args.answers, message), ctx));
+      }
+      if (results.some((r) => r.outcome === "answered")) {
+        return waitForTerminal({
+          jobId,
+          ctx,
+          toolName: "eimu_job",
+          waitSeconds,
+          baselineCount: 0,
+          now,
+          sleep,
+          startedAt,
+          assumeStarted: true,
+          extra: { question_results: results },
+        });
+      }
+      if (results.every((r) => r.outcome === "error")) {
+        return machineError({
+          code: "question_answer_failed",
+          message: "question 卡作答全部失败（上游非 2xx）。",
+          retryable: true,
+          next_action: "retry_later",
+          job_id: jobId,
+          question_results: results,
+        });
+      }
+      // 全部 expired：卡已超时被拒，退回发文字讯息让导演据此继续。
+    }
     const failed = await sendJobMessage(jobId, message, ctx);
     if (failed) return failed;
     return waitForTerminal({
@@ -1448,8 +1581,8 @@ export function defineDirectorTools(): ToolDefinition[] {
       name: "eimu_job",
       title: "导演任务",
       description: bilingual(
-        "对导演 job_id 执行 get|wait|reply|approve|reject|revise|cancel。wait≤45s，超时仍 processing，勿重提交。completed 须会话 idle、无待确认、无后台子代理／生成；awaiting_input 时 confirm_cards 列出确认卡（id／金额／模型／说明），approve／reject 按 confirm_ids（默认全部）走确认端点。终态另附 generated_media（本会话全部成功生成的公开 URL，含返工稿），artifacts 缺项时从中取。",
-        "Act on a director job_id: get|wait|reply|approve|reject|revise|cancel. Bounded wait <=45s; still processing on timeout - do NOT resubmit. completed requires an idle session with no pending questions/confirms and no running sub-agents or generations. awaiting_input lists confirm_cards (id/amount/model/description); approve/reject resolve them by confirm_ids (default: all) via the confirm endpoint. Terminal results also carry generated_media (every successful generation in the session with public URLs, including reworks); use it when artifacts misses an item.",
+        "对导演 job_id 执行 get|wait|reply|approve|reject|revise|cancel。wait≤45s，超时仍 processing，勿重提交。completed 须会话 idle、无待确认、无后台子代理／生成；awaiting_input 时 confirm_cards 列出确认卡（id／金额／模型／说明），approve／reject 按 confirm_ids（默认全部）走确认端点；questions 列出导演 question 卡（题面／选项），reply 用 answers 或 message 作答（约 3 分钟内，否则超时拒绝）。终态另附 generated_media（本会话全部成功生成的公开 URL，含返工稿），artifacts 缺项时从中取。",
+        "Act on a director job_id: get|wait|reply|approve|reject|revise|cancel. Bounded wait <=45s; still processing on timeout - do NOT resubmit. completed requires an idle session with no pending questions/confirms and no running sub-agents or generations. awaiting_input lists confirm_cards (id/amount/model/description); approve/reject resolve them by confirm_ids (default: all) via the confirm endpoint; questions lists the director's question cards (text/options) - answer with reply using answers (option labels in question order) or message, within ~3 minutes or the gateway rejects them as timed out. Terminal results also carry generated_media (every successful generation in the session with public URLs, including reworks); use it when artifacts misses an item.",
       ),
       annotations: {
         readOnlyHint: false,
@@ -1472,6 +1605,12 @@ export function defineDirectorTools(): ToolDefinition[] {
             items: { type: "string" },
             maxItems: 50,
             description: "approve／reject 要处理的确认卡 id（来自 confirm_cards[].id）；省略＝当前全部待确认卡。",
+          },
+          answers: {
+            type: "array",
+            maxItems: 10,
+            items: { type: "string" },
+            description: "reply 回答 question 卡：依 questions[] 顺序，每题一个选项 label；缺项用 message 作自由回答。",
           },
           message: {
             type: "string",

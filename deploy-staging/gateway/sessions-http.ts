@@ -148,6 +148,21 @@ export async function handleGetSessionStatus(key: string, id: string): Promise<R
     task_id: c.ledger?.task_id ?? null,
     description: c.description ?? null,
   }))
+  // 2026-11-04 H11：question 卡明细（与 SSE question.request 同口径，白名单＋截断）。
+  // 外部 agent（MCP）只拿到 pending_questions 计数时看不到题面／选项，无法在 QUESTION_ASSUME_MS
+  // 超时前作答（job 8606e683：超预算四选一请示 3 分钟后 expired_without_consent）。
+  const clip = (v: unknown, n: number): string | null => (typeof v === "string" ? v.slice(0, n) : null)
+  const pending_question_items = [...(state.pendingQuestions?.values() ?? [])].slice(0, 10).map((q) => ({
+    request_id: q.requestId,
+    questions: (Array.isArray(q.questions) ? q.questions : []).slice(0, 10).map((x) => ({
+      header: clip(x?.header, 200),
+      question: clip(x?.question, 2000) ?? "",
+      options: (Array.isArray(x?.options) ? x.options : []).slice(0, 12).map((o) => ({
+        label: clip(o?.label, 300) ?? "",
+        description: clip(o?.description, 800),
+      })),
+    })),
+  }))
   let recent_approved_coins = 0
   for (const rec of state.resolvedConfirms?.values() ?? []) {
     if (rec.outcome === "approved" && typeof rec.amount_coins === "number") recent_approved_coins += rec.amount_coins
@@ -172,6 +187,7 @@ export async function handleGetSessionStatus(key: string, id: string): Promise<R
     active_children,
     inflight_generations,
     pending_confirm_items,
+    pending_question_items,
     recent_approved_coins,
     last_turn_active_at: state.lastTurnActiveAt ?? 0,
     last_activity_at: state.lastActivityAt ?? null,
