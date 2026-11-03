@@ -12,6 +12,7 @@ import { emitToSession } from "./sse-core.ts"
 import { corsOriginFor, corsHeaders, encoder, sseTickets, uploadTickets } from "./auth-gw.ts"
 import { handleRequest } from "./router.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { opencodeHeaders, connectOpencode } from "./opencode-client.ts"
 import { opencodeErrorMessage } from "./emit-helpers.ts"
@@ -248,7 +249,8 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
     renderSubagentNoteQueueBlock(parentState.subagentNotes),
     renderSubagentNoteWakeContent(note),
   )
-  const body = { ...beastAgentField(parentState), parts: [{ type: "text", text: content }] }
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(parentState, { ...beastAgentField(parentState), parts: [{ type: "text", text: content }] })
   try {
     const res = await fetch(`${OPENCODE_URL}/session/${parentState.opencodeSessionId}/prompt_async`, {
       method: "POST",
@@ -308,7 +310,8 @@ async function deliverSubagentWakes(state: any, runs: SubagentWakeRun[]): Promis
     runs.map(subagentWakeBlock).join("\n\n"),
   )
   state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
-  const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(state, { ...beastAgentField(state), parts: [{ type: "text", text: content }] })
   const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     headers: opencodeHeaders(),

@@ -4,6 +4,7 @@ import { bindGenerationConsumer, generationParent, generationReceipt, generation
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { armWatchdogTimer } from "./timers-gw"
 import { emitImageDone, emitVideoDone } from "./events-translate"
 import { emitImageFailed, emitVideoFailed, emitAudioFailed } from "./media-internal-routes"
@@ -267,7 +268,9 @@ export async function drainGenerationInbox(): Promise<void> {
         .join("\n")
       const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${jobLines}`
       const agent = generationParent(consumer)?.consumer_agent
-      const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
+      const inboxBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
+      // H19：仅主会话 consumer 挂原始需求钉（子代理 consumer 不挂，与 beastAgentField 同口径）。
+      const promptBody = parent?.opencodeSessionId === consumer ? withPinnedWakeSystem(parent, inboxBody) : inboxBody
       let ownTurnGen: number | undefined
       if (parent?.opencodeSessionId === consumer) {
         parent.lastPromptBody = promptBody

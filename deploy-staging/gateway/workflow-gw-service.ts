@@ -19,6 +19,7 @@ import type { SessionState, TaskStatus } from "./types-gateway.ts"
 import { appendLedgerFor, emitQuotaChanged } from "./quota-ledger.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { emitAgentNotice, reportNodeTerminalState } from "./emit-helpers.ts"
 import { emitVideoDone } from "./events-translate.ts"
 import { parseShotCandidate } from "./video-prompt-schema"
@@ -593,7 +594,8 @@ async function postWorkflowWake(state: SessionState, wfid: string, content: stri
   if (workflowWakeSessionBusy(state)) {
     throw new WorkflowWakeDispatchError("not_submitted", "session is processing an active turn", true)
   }
-  const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(state, { ...beastAgentField(state), parts: [{ type: "text", text: content }] })
   let res: Response
   try {
     res = await fetch(`${OPENCODE_URL}/session/${ocId}/prompt_async`, {

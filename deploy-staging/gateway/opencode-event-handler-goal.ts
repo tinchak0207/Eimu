@@ -3,6 +3,7 @@ import { registerSessionTeardownHook, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { getActiveGoal, buildGoalEvaluatorSpec, parseGoalEvaluatorOutput, recordVerdict, GOAL_MAX_NOT_MET_STREAK } from "./session-goals.ts"
 import { runGoalEvaluator, findRunningRun } from "./subagent"
 import type { SessionState } from "./types-gateway.ts"
@@ -59,7 +60,8 @@ export async function deliverGoalNudge(state: SessionState, reason: string): Pro
   if (state.turnAborted || state.turnAbortSource === "user") return
   const turnGen = state.turnGen ?? 0
   emitToSession(state, "message.delta", { text: `目标验收尚未通过，已提醒继续补齐：${reason}\n` })
-  const body = {
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(state, {
     ...beastAgentField(state),
     parts: [
       {
@@ -67,7 +69,7 @@ export async function deliverGoalNudge(state: SessionState, reason: string): Pro
         text: `【目标验收·未达成】独立验收者判定当前会话目标尚未达成。依据：${reason}\n请继续推进目标，补齐验收缺失的证据与交付，不要只重复声明已完成。`,
       },
     ],
-  }
+  })
   const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     body: JSON.stringify(body),
