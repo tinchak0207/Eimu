@@ -46,10 +46,15 @@ fi
 log "free=${FREE_BEFORE}% warn=${WARN_PCT}% crit=${CRIT_PCT}%"
 
 # --- Tier 1: always safe, do it whenever we are below the warn line -----------
-journalctl --vacuum-size=50M >/dev/null 2>&1 || true
+# 2026-11-03: this used to vacuum to 50M every 10 minutes whenever free <20%, which on
+# this box is always. The journal then only reached back a few hours and the 03:5x
+# memory collapse left no journal evidence. journald.conf.d/60-eimu.conf now caps the
+# journal (150M, keep 1G free); here we only trim to 120M, and to 50M when critical.
+journalctl --vacuum-size=120M >/dev/null 2>&1 || true
 apt-get clean >/dev/null 2>&1 || true
 
 if [ "$FREE_BEFORE" -lt "$CRIT_PCT" ]; then
+  journalctl --vacuum-size=50M >/dev/null 2>&1 || true
   # --- Tier 2 (critical only): reclaim docker build cache, keep running images ---
   # `docker builder prune` never touches images a container is running from.
   docker builder prune -af >/dev/null 2>&1 || true
@@ -65,6 +70,9 @@ if [ "$FREE_BEFORE" -lt "$WARN_PCT" ]; then
   find /opt/agent-harness/workspace/out -type d -name tmp 2>/dev/null | while read -r d; do
     find "$d" -type f -mtime +3 -delete 2>/dev/null || true
   done
+  # Per-session sandbox /tmp (.run/<slug>/tmp): scratch probes, not deliverables.
+  find /opt/agent-harness/workspace/.run -mindepth 3 -path '/opt/agent-harness/workspace/.run/*/tmp/*' \
+    -type f -mtime +3 -delete 2>/dev/null || true
   # Drop truncated rotated logs that gzip already covered; keep journal vacuum above.
   find /var/log -type f -name "*.gz" -mtime +14 -delete 2>/dev/null || true
 fi
