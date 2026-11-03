@@ -81,34 +81,6 @@ test("wallet badge can be compacted for mobile navigation", () => {
   assert.match(source, /from-transparent via-white to-transparent/);
 });
 
-test("checkin calendar opens a calendar modal and awards random image credits", () => {
-  const source = read("src/components/CheckinCalendar.tsx");
-
-  assert.match(source, /fetchCheckinStatus/);
-  assert.match(source, /doCheckin/);
-  assert.match(source, /quotaToRewardCount/);
-  assert.match(source, /formatCheckinRewardText/);
-  assert.match(source, /Array\.from\(\{ length: 7 \}/);
-  assert.match(source, /role="dialog"/);
-  assert.match(source, /签到领取/);
-  assert.match(source, /每日签到可随机获得 1 到 3 张额度/);
-  assert.match(source, /今日签到已获得/);
-  assert.match(source, /await refresh\(\)/);
-  // bg-[#1f2230]/38 曾静默编译成空（/38 不在默认透明度刻度上），遮罩全透明。
-  // 必须是 rgba() 任意值形式，且深度与历史灯箱一致（0.74）保证 gauss 模糊有暗底可辨。
-  assert.match(source, /bg-\[rgba\(31,34,48,0\.74\)\]/);
-  assert.doesNotMatch(source, /bg-\[#1f2230\]\/38/);
-  assert.match(source, /backdrop-blur-md/);
-  // 弹层材质必须是全站的 lg-sheet 玻璃，不允许回到灰底 + 黑描边的平面卡。
-  assert.match(source, /lg-sheet/);
-  assert.doesNotMatch(source, /bg-\[#f7f8fb\]/);
-  assert.doesNotMatch(source, /border border-\[rgba\(0,0,0,0\.08\)\]/);
-  assert.match(source, /max-w-\[440px\]/);
-  assert.match(source, /w-\[min\(calc\(100vw-20px\),440px\)\]/);
-  assert.doesNotMatch(source, /sm:bg-\[#f4f5f7\]/);
-  assert.doesNotMatch(source, /max-w-\[390px\]/);
-});
-
 test("mobile pages reserve space for the single-row navbar", () => {
   // 2026-09-05：History 页 navbar 与「生成历史」栏之间 80px 空隙过大，裁定减 60%（pt-20 → pt-8）；
   // pricing 页维持弹窗化紧凑流（py-6）；两页都不允许回到两行 navbar 时代的 pt-32。

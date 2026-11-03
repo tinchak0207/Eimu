@@ -106,6 +106,9 @@ eval-*/
 surgery/
 /*.mp4
 /*.mjs
+!/next.config.mjs
+!/postcss.config.mjs
+!/eslint.config.mjs
 chapters.tsv
 
 # Blender headless sandbox workdir (bridge/blender-bridge)

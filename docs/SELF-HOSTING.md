@@ -9,7 +9,7 @@
 | 组件 | 版本 / 说明 |
 | --- | --- |
 | Node.js | 22.x（见 `.node-version`） |
-| 包管理器 | npm（仓库含 `package-lock.json`；同时保留 pnpm workspace 配置） |
+| 包管理器 | npm（仓库含 `package-lock.json`） |
 | Postgres | 16，用于生成控制面 |
 | 对象存储 | 任何兼容 Vercel Blob 语义的存储；也可替换 `artifact-service` 的落地实现 |
 | 反向代理 | Nginx / Caddy，需支持 SSE 长连接 |

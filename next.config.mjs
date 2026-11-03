@@ -7,9 +7,8 @@ const controlPlaneOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  // Vercel 远程构建跳过 lint＋型别检查（每次省约 60s）；本机 `npm run build` 照常把关。
+  // Vercel 远程构建跳过 lint（存量 error 待清）；型别检查不再跳过（tsc 0 error）。
   eslint: { ignoreDuringBuilds: process.env.VERCEL === "1" },
-  typescript: { ignoreBuildErrors: process.env.VERCEL === "1" },
   // 建置期「新鲜度指纹」，供 /api/version 取证用（唯一消费者，不影响其他 bundle）。
   // 必要性：route 内 new Date() 是「请求时间」不是「建置时间」，会误导「生产跑的是哪一版」
   // 的取证，故在此（=config 求值时 = build 时）冻结成常数，由 Next 内联进 server bundle。
