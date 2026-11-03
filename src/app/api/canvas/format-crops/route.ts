@@ -27,6 +27,7 @@ import { requireVerifiedUser } from "@/lib/server-user";
 import { AD_SIZE_OPTIONS, normalizeSizeSelection, type AdSizeOption } from "@/lib/ad-formats";
 import { summarizeFormatCrops, type FormatCropPlan } from "@/lib/canvas/format-crops";
 import { cropImage, readSourceImageInfo } from "@/lib/canvas/format-crops-exec";
+import { isForbiddenHost, safeFetchPublicImage } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,15 +61,6 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ ok: false, error: message, code }, { status });
 }
 
-/** 主机黑名单：IP 字面量（v4/v6）、localhost、内网尾缀。同 /api/canvas/image-proxy 的守卫。 */
-function isForbiddenHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
-  if (host.includes(":")) return true;
-  return false;
-}
-
 /** sourceImageUrl → Buffer。data:image 直解；https 限公网主机、限时限量、只认 image/*。 */
 async function fetchSourceBuffer(url: string): Promise<Buffer> {
   if (url.startsWith("data:image/")) {
@@ -88,8 +80,13 @@ async function fetchSourceBuffer(url: string): Promise<Buffer> {
   if (target.protocol !== "https:" || isForbiddenHost(target.hostname)) {
     throw new Error("仅支持 https 公网图片地址");
   }
-  const res = await fetch(target, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" });
-  if (!res.ok) throw new Error(`上游图片获取失败（${res.status}）`);
+  // 重定向手动逐跳校验（≤3 跳）+ DNS 解析后 IP 校验，不再 redirect:"follow"。
+  const res = await safeFetchPublicImage(target, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    maxBytes: MAX_SOURCE_BYTES,
+  });
+  // 细节（状态码/content-type）只进服务端日志，外部统一固定文案（见 POST 的 catch）。
+  if (!res.ok) throw new Error(`上游返回 ${res.status}`);
   const mime = res.headers.get("content-type") ?? "";
   if (!mime.startsWith("image/")) throw new Error(`不是图片（${mime || "无 content-type"}）`);
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -142,8 +139,11 @@ export async function POST(req: NextRequest) {
       height = info.height;
       dimsFrom = "image";
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return fail(400, `源图读取失败：${reason}`, "source_fetch_failed");
+      console.warn("[canvas/format-crops] source fetch failed", {
+        url: sourceImageUrl.slice(0, 120),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return fail(400, "源图读取失败", "source_fetch_failed");
     }
   }
 

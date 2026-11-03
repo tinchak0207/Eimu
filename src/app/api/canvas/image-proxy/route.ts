@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
+import { ImageTooLargeError, SsrfBlockedError, isForbiddenHost, safeFetchPublicImage } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,17 +20,6 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ ok: false, error: message, code }, { status });
-}
-
-/** 主机黑名单：IP 字面量（v4/v6）、localhost、内网尾缀。 */
-function isForbiddenHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  // IPv4 字面量
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
-  // IPv6 字面量（URL hostname 形如 [::1] 去掉中括号后含冒号）
-  if (host.includes(":")) return true;
-  return false;
 }
 
 export async function GET(req: NextRequest) {
@@ -49,40 +39,19 @@ export async function GET(req: NextRequest) {
     return fail(400, "仅支持 https 公网图片地址", "invalid_url");
   }
 
+  // 逐跳校验（≤3 跳）+ DNS 解析后 IP 校验 + 连接钉 IP，全在共享守卫里（@/lib/ssrf-guard）。
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: "manual",
-    });
-    if (upstream.status >= 300 && upstream.status < 400) {
-      const location = upstream.headers.get("location");
-      if (!location) return fail(400, "重定向地址缺失", "invalid_url");
-      let next: URL;
-      try {
-        next = new URL(location, target);
-      } catch {
-        return fail(400, "重定向地址不合法", "invalid_url");
-      }
-      if (next.protocol !== "https:" || isForbiddenHost(next.hostname)) {
-        return fail(400, "重定向目标不是 https 公网图片地址", "invalid_url");
-      }
-      upstream = await fetch(next, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        redirect: "manual",
-      });
-      if (upstream.status >= 300 && upstream.status < 400) {
-        return fail(400, "重定向目标不合法", "invalid_url");
-      }
-    }
-  } catch {
+    upstream = await safeFetchPublicImage(target, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), maxBytes: MAX_BYTES });
+  } catch (error) {
+    if (error instanceof SsrfBlockedError) return fail(400, "目标不是 https 公网图片地址", "invalid_url");
     return fail(502, "上游图片获取失败", "upstream_failed");
   }
-  if (!upstream.ok) return fail(502, `上游返回 ${upstream.status}`, "upstream_failed");
-
+  // 网络错误、非 2xx、非图片对外同一文案同一状态码（不泄露状态码/content-type 侧信道）。
   const contentType = upstream.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("image/")) {
-    return fail(415, `不是图片（${contentType || "无 content-type"}）`, "not_an_image");
+  if (!upstream.ok || !contentType.startsWith("image/")) {
+    await upstream.body?.cancel().catch(() => {});
+    return fail(502, "上游图片获取失败", "upstream_failed");
   }
   const declared = Number(upstream.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_BYTES) {
@@ -105,8 +74,9 @@ export async function GET(req: NextRequest) {
       }
       chunks.push(value);
     }
-  } catch {
-    return fail(502, "上游读取中断", "upstream_failed");
+  } catch (error) {
+    if (error instanceof ImageTooLargeError) return fail(413, "图片超过 25MB", "too_large");
+    return fail(502, "上游图片获取失败", "upstream_failed");
   }
 
   return new NextResponse(new Blob(chunks as BlobPart[], { type: contentType }), {
