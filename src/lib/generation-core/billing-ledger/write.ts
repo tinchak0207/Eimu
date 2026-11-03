@@ -6,10 +6,11 @@ import { getGenerationSql, type GenerationSql } from "../database";
 import { getGenerationJob, mapGenerationJob } from "../job-repository";
 import { JOB_EVENT, emitJobEvent } from "../job-events";
 import { claimBillingOperation, committedAmount, dueReservationJobs, ensureRefundOperation, freshJob, markExpiredBillingOperationsUnknown, markFullyRefunded, markOperationRetry, markOperationUnknown, markReservationRejected, moveJobToQueued, terminalReservedJobs } from "./schema";
-import { billingRetryAt, classifyBillingFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
+import { billingRetryAt, classifyBillingFailure, classifyRefundFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
 import { DEFAULT_RECONCILE_BATCH, ZOMBIE_RECLAIM_BATCH, ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT } from "./types";
 import type { FailureClass, GenerationJob } from "../types";
 import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { ImageBillingGatewayError } from "@/lib/image-billing";
 
 /**
  * 降档交付（2026-10-25）：该 job 的成片实际档位低于请求档位时，返回实际档位。
@@ -268,15 +269,18 @@ export async function refundGenerationBilling(input: {
     return "applied";
   } catch (error) {
     const detail = detailOf(error);
-    const disposition = classifyBillingFailure(error);
+    // H21：refund 用 classifyRefundFailure（中继未接到请求的 4xx → 有上限退避重试）。
+    const disposition = classifyRefundFailure(error);
+    const httpStatus = error instanceof ImageBillingGatewayError ? error.status ?? null : null;
     if (disposition === "retry") {
+      const nextAttemptAt = billingRetryAt(error, operationAttempts(claimed));
       await markOperationRetry({
         id: String(claimed.id),
         detail,
-        nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)),
+        nextAttemptAt,
         sql,
       });
-      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund", nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)).toISOString() } }, sql);
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund", nextAttemptAt: nextAttemptAt.toISOString(), attempt: operationAttempts(claimed), http_status: httpStatus } }, sql);
       return "pending";
     }
     if (disposition === "rejected") {
@@ -285,7 +289,10 @@ export async function refundGenerationBilling(input: {
         SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
         WHERE id = ${String(claimed.id)} AND status = 'executing'
       `;
-      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefundFailed, actor: input.executorId, upstreamRaw: detail, detail: { amount, operation: "refund" } }, sql);
+      // failed＝人工队列：admin GET /api/admin/billing-operations?status=failed 可查，
+      // POST action=retry（预算归零重排）/mark_applied/mark_failed 处置；probe 的 refund_failed 名单同源。
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefundFailed, actor: input.executorId, upstreamRaw: detail, detail: { amount, operation: "refund", manual_review: true, http_status: httpStatus } }, sql);
+      console.error(`[billing-ledger] refund_manual_review job ${input.job.id} amount ${amount} http ${String(httpStatus)}：确定性拒绝，已入人工队列（status=failed）`);
       return "failed";
     }
     await markOperationUnknown({
@@ -572,6 +579,11 @@ async function reclaimOneZombie(input: {
  * probe terminal_unsettled(refund_failed) 如实可见、需人工对帐，不再自动重试。
  * 过期的 executing op 已由 markExpiredBillingOperationsUnknown 在同轮冻结为 unknown，
  * 走人工对帐通道，这里不再重扫。
+ *
+ * 2026-11-04 H21：保留上面 08-30 的「只捞 pending、不捞 failed」（不复活刷日志）。变化只在上游：
+ * refund 遇「中继没接到请求」的 4xx 不再直接 failed，而是 markOperationRetry 回 pending＋退避，
+ * 由本函数按 next_attempt_at 重跑；attempt_count>0 的这类 op 免 6h 门槛。存量 failed 不自动复活，
+ * 仍走人工队列（admin action=retry 会把它重排回 pending、再由这里执行一次）。
  */
 export async function retryStrandedRefundOperations(input: {
   executorId: string;
@@ -590,7 +602,12 @@ export async function retryStrandedRefundOperations(input: {
       AND refund_op.next_attempt_at <= now()
       AND refund_op.amount > 0
       AND job.status IN ('succeeded', 'failed', 'cancelled')
-      AND job.finished_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+      AND (
+        job.finished_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+        -- H21：已尝试过、被排了退避的 refund（attempt_count>0）不必再等 6h 僵尸门槛——
+        -- commit 已落、terminalReservedJobs 不会再碰它；claim 仍是并发边界，next_attempt_at 仍是退避。
+        OR refund_op.attempt_count > 0
+      )
     ORDER BY job.finished_at NULLS LAST
     LIMIT ${ZOMBIE_RECLAIM_BATCH}
   `;

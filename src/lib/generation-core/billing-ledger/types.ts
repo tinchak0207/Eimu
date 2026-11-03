@@ -29,6 +29,28 @@ export function classifyBillingFailure(error: unknown): BillingFailureDispositio
   return "unknown";
 }
 
+/**
+ * H21（2026-11-04）：refund 专用分类。只在 classifyBillingFailure 之上加一条「确定未落地且可恢复」的口子：
+ * 计费中继回 4xx 且**非中继 JSON**（BillingRelayUnavailableError：路由不存在／部署停用／边缘拦截）
+ * ＝relay 函数根本没跑、new-api add_quota 一定没被调用 → 重放不可能双退，按 retry 走有上限退避
+ * （billingRetryAt 5s·2^n 封顶 300s；预算＝operation-registry billing.refund，超预算 → failed 人工队列）。
+ * 实证：job 2bc5aefd（2026-08-07）refund 遇中继 404 非 JSON 被判 rejected 永久 failed，1 币至今未退。
+ * 刻意不放宽的：
+ *  - 408 与 5xx/超时/网络（含非 JSON 502/504）：中继可能已执行 → 仍 unknown 冻结，绝不盲目重放；
+ *  - 中继 JSON 业务拒绝（new-api 4xx，如用户不存在）：确定性 → 仍 rejected → failed 人工队列。
+ * reserve 不用本函数：reserve 的 relay 故障维持「立即失败不扣费」（11-01 I-2 语义）。
+ */
+export function classifyRefundFailure(error: unknown): BillingFailureDisposition {
+  if (
+    error instanceof BillingRelayUnavailableError
+    && error.status !== undefined
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+  ) return "retry";
+  return classifyBillingFailure(error);
+}
+
 export function billingRetryAt(error: unknown, attempt: number, now = new Date()): Date {
   if (error instanceof ImageBillingGatewayError && error.retryAfter) {
     const seconds = Number(error.retryAfter);
