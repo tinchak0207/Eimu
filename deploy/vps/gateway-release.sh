@@ -15,6 +15,18 @@
 #   opencode-release.sh 完全同套（gateway sessions.db lastTurnActiveAt / subagent_reworks
 #   ＋ opencode.db 未 completed 的流式 assistant 讯息）。
 #
+# H07（2026-11-03「更新中」反复 503 事故后）防重入 / 两段 drain / 退避：
+#   · 两段 drain：先「软 drain」（不开维护，上界 180s）→ 清零才开 maintenance → 再「终检 drain」
+#     （上界 GW_DRAIN_FINAL_SECS，默认 30s）→ 重启。软 drain 超时直接退出，用户全程看不到
+#     「服务更新中」503；维护窗口从「drain 全程 ≤180s」缩到「终检＋重启」秒级。
+#   · 防重入：本机 flock（git common dir/gateway-release.lock）＋ 远端激活锁预检，持锁即
+#     ACTIVATION_LOCKED 立刻 exit 75，不等待、不循环。
+#   · 退避：drain 超时写远端戳 $HARNESS_ROOT/.drain-timeout.stamp（时间 连续次数）；冷却期内
+#     （600s×2^(n-1)，上限 3600s）再发直接 DRAIN_COOLDOWN exit 4，不开维护、不探测。
+#     --force 或 GW_DRAIN_COOLDOWN_SECS=0 跳过。drain 清零即清戳。
+#   · 退出码：0 成功｜1 一般失败｜2 用法｜3 drain 超时/探测失败｜4 drain 冷却中｜
+#     75 另一发版持锁｜76 激活身份冲突（有人并行发版）｜129/130/143 信号中断（trap 恢复维护位）
+#
 # --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即 build+重启。
 #   用于提示词/文案这类短改：目标 <60s，不再为在途回合等 180s。中断的回合由耐久续接处理。
 #
@@ -71,6 +83,11 @@ OWNER="${GW_OWNER:-ubuntu:ubuntu}"
 # release 目录只放 symlink 指向此处，否则每次发布都会把 41MB 的 sessions.db 换掉。
 STATE_DIR="${GW_STATE_DIR:-$HARNESS_ROOT/state}"
 ACTIVATION_LOCK="${HARNESS_ACTIVATION_LOCK:-$HARNESS_ROOT/.harness-activation.lock}"
+# H07：两段 drain 的终检上界、drain 超时退避（远端戳）。opencode-release.sh 经 __emit-drain 共用。
+DRAIN_FINAL_SECS_DEFAULT="${GW_DRAIN_FINAL_SECS:-30}"
+DRAIN_COOLDOWN_SECS_DEFAULT="${GW_DRAIN_COOLDOWN_SECS:-600}"
+DRAIN_COOLDOWN_MAX_DEFAULT="${GW_DRAIN_COOLDOWN_MAX_SECS:-3600}"
+DRAIN_STAMP_DEFAULT="${GW_DRAIN_STAMP:-$HARNESS_ROOT/.drain-timeout.stamp}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -95,7 +112,7 @@ remote_args() { printf '%s\n' "$HARNESS_ROOT" "$GATEWAY_PATH" "$RELEASES_DIR" "$
 
 run_remote() {
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN ssh: $*"; return 0; fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$@"
 }
 
 # 带 stdin 的远端执行。--dry-run 时把远端脚本原样印出（可另存后 bash -n 检查），不连线。
@@ -114,7 +131,7 @@ run_remote_stdin() {
   fi
   local command
   if [ "$#" -gt 1 ]; then printf -v command '%q ' "$@"; else command="$1"; fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$command"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$command"
 }
 
 # 二进位 tar 上传。--dry-run 只吞掉 stdin 并报位元组数（不把 tar 二进位印到终端）。
@@ -125,7 +142,7 @@ run_remote_binary() {
     log "DRY-RUN ssh(binary): $* (stdin $n bytes)"
     return 0
   fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$@"
 }
 
 # ── F8（2026-10-04）断面 A：agent-gateway 重启前的 drain（只读）─────────────
@@ -152,8 +169,9 @@ drain_inflight_count() {
   for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
   echo $(( a + b + c ))
 }
+local phase="${DRAIN_PHASE:-drain}"
 if [ "$DRAIN_FORCE" = "1" ]; then
-  echo "DRAIN_SKIPPED (--force)"
+  echo "DRAIN_SKIPPED (--force) phase=$phase"
 else
   drain_waited=0
   while :; do
@@ -161,15 +179,64 @@ else
     if [ "$drain_n" = "ERR" ]; then
       echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 中止部署；明确跳过请加 --force"; exit 3
     fi
-    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
+    if [ "$drain_n" = "0" ]; then
+      echo "DRAIN_CLEAR phase=$phase waited=${drain_waited}s"
+      rm -f "${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" 2>/dev/null || true
+      break
+    fi
     if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
-      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；确需立即重启请加 --force"
+      drain_stamp_timeout
+      echo "DRAIN_TIMEOUT phase=$phase inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；不要写 sleep 重试循环（冷却期内重发会 DRAIN_COOLDOWN exit 4）；确需立即重启请加 --force"
       exit 3
     fi
-    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
+    echo "DRAIN_WAIT phase=$phase inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
     sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
   done
 fi
+}
+
+# H07 退避：drain 超时记戳「epoch 连续次数」；冷却 = base×2^(n-1)，封顶 max。
+drain_stamp_timeout() {
+  local f="${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" n=0 _t
+  if [ -f "$f" ]; then read -r _t n < "$f" 2>/dev/null || n=0; fi
+  case "$n" in ''|*[!0-9]*) n=0;; esac
+  printf '%s %s\n' "$(date +%s)" "$((n + 1))" > "$f" 2>/dev/null || true
+}
+# 冷却期内拒绝再次激活（不开维护、不探测）；--force 或 DRAIN_COOLDOWN_SECS=0 跳过。
+drain_cooldown_check() {
+  local force="${1:-0}" f="${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}"
+  local base="${DRAIN_COOLDOWN_SECS:-600}" cap="${DRAIN_COOLDOWN_MAX_SECS:-3600}" t n cd age
+  [ "$force" = "1" ] && return 0
+  [ "$base" -gt 0 ] 2>/dev/null || return 0
+  [ -f "$f" ] || return 0
+  read -r t n < "$f" 2>/dev/null || return 0
+  case "$t$n" in ''|*[!0-9]*) return 0;; esac
+  cd="$base"; while [ "$n" -gt 1 ] && [ "$cd" -lt "$cap" ]; do cd=$((cd * 2)); n=$((n - 1)); done
+  [ "$cd" -le "$cap" ] || cd="$cap"
+  age=$(( $(date +%s) - t ))
+  if [ "$age" -lt "$cd" ]; then
+    echo "DRAIN_COOLDOWN 上次 drain 超时在 ${age}s 前，冷却 ${cd}s 未满（剩 $((cd - age))s）→ 拒发，未开维护。等低峰再发，或经暴君同意加 --force"
+    exit 4
+  fi
+}
+# 两段 drain：软 drain（不开维护）→ 开维护 → 终检 drain（短上界）。$1 维护库，其余同 drain_gate。
+drain_then_maintenance() {
+  local mdb="$1"; shift
+  drain_cooldown_check "$1"
+  if [ "$1" = "1" ]; then
+    maintenance_begin "$mdb"
+    DRAIN_PHASE=force drain_gate "$@"
+    return 0
+  fi
+  DRAIN_PHASE=soft drain_gate "$@"
+  maintenance_begin "$mdb"
+  DRAIN_PHASE=final drain_gate "$1" "${DRAIN_FINAL_SECS:-30}" "${@:3}"
+}
+# 远端共用库：参数默认值 + 函数体。gateway 激活与 opencode-release（__emit-drain）同一份。
+emit_drain_lib() {
+  printf 'DRAIN_FINAL_SECS=%q\nDRAIN_COOLDOWN_SECS=%q\nDRAIN_COOLDOWN_MAX_SECS=%q\nDRAIN_STAMP=%q\n' \
+    "$DRAIN_FINAL_SECS_DEFAULT" "$DRAIN_COOLDOWN_SECS_DEFAULT" "$DRAIN_COOLDOWN_MAX_DEFAULT" "$DRAIN_STAMP_DEFAULT"
+  declare -f drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end
 }
 
 # 复用既有 maintenance 布尔；同表所有权记录只用于 finally 与下次激活恢复原值。
@@ -226,8 +293,9 @@ gateway_prepare() {
   [ "$actual" = "$expected" ] || { echo "ACTIVATION_CONFLICT expected=$expected actual=$actual" >&2; exit 76; }
   trap 'gateway_recover $?' EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-  maintenance_begin "${12}"
-  drain_gate "${@:8:6}"
+  # H07：旧序「先 maintenance_begin 再 drain ≤180s」= 每次 drain 都让用户吃 ≤3 分钟 503，
+  # 外层再 sleep 重试就是 11-03「更新中」反复弹。现序：软 drain 不开维护 → 清零才开维护 → 短终检。
+  drain_then_maintenance "${12}" "${@:8:6}"
   # 维护/共享锁已持有；recent 时间窗不能替代执行端真实空闲。
   # --force（暴君 2026-10-31「给我强行发布」）：跳过执行端空闲检查，在途回合由耐久续接处理。
   if [ "$8" = "1" ]; then echo "OPENCODE_IDLE_SKIPPED (--force)"; else
@@ -307,13 +375,55 @@ gateway_activate() {
 run_gateway_activation() {
   local -a RA
   mapfile -t RA < <(remote_args)
-  { printf 'ACTIVATION_LOCK=%q\n' "$ACTIVATION_LOCK";
-    declare -f gateway_identity drain_gate maintenance_control maintenance_begin maintenance_end gateway_prepare gateway_verify gateway_recover gateway_activate; cat; } \
+  local rc=0
+  { printf 'ACTIVATION_LOCK=%q\n' "$ACTIVATION_LOCK"; emit_drain_lib;
+    declare -f gateway_identity gateway_prepare gateway_verify gateway_recover gateway_activate; cat; } \
     | run_remote_stdin sudo flock -n -E 75 "$ACTIVATION_LOCK" bash -s -- \
       "${RA[@]}" "$GW_EXPECTED" "$DEPLOY_GATE" "$FORCE" \
       "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
       "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
-      "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "$@"
+      "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "$@" || rc=$?
+  explain_exit "$rc"
+  return "$rc"
+}
+
+# 退出码 → 一句人话（不重试，由人决定下一步）。
+explain_exit() {
+  case "$1" in
+    0) ;;
+    3) log "EXIT 3 drain 超时/探测失败：未重启。别写 sleep 重试循环；低峰再发一次，或经暴君同意 --force。" ;;
+    4) log "EXIT 4 drain 冷却中：上次 drain 刚超时，本次未开维护、未探测。" ;;
+    75) log "EXIT 75 ACTIVATION_LOCKED：另一发版正持有激活锁（$ACTIVATION_LOCK 或本机锁）→ 立即退出，不等待不重试。" ;;
+    76) log "EXIT 76 ACTIVATION_CONFLICT：线上身份已被别的发版改动 → 重新 status / guard 后再决定。" ;;
+    129|130|143) log "EXIT $1 信号中断：远端 trap 已尝试恢复维护位与旧 release（见 RECOVERY_*/MAINTENANCE_* 行），用 status 核对 maintenance=0。" ;;
+  esac
+}
+
+# H07 防重入（本机）：同一仓库（含所有 worktree）同时只许一个 gateway release/rollback/adopt。
+# 持锁即退 75，不排队。fd 9 随进程退出释放（含被 kill），无残留锁要清。
+acquire_local_lock() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  command -v flock >/dev/null 2>&1 || { log "WARN 本机无 flock，跳过本机防重入锁（远端激活锁仍生效）"; return 0; }
+  local d
+  d="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "${TMPDIR:-/tmp}")"
+  LOCAL_LOCK="${GW_LOCAL_LOCK:-$d/gateway-release.lock}"
+  exec 9>>"$LOCAL_LOCK" || die "无法打开本机锁 $LOCAL_LOCK"
+  if ! flock -n 9; then
+    log "ACTIVATION_LOCKED 本机已有 gateway-release 在跑（$LOCAL_LOCK）→ exit 75，不等待不重试"
+    exit 75
+  fi
+}
+
+# H07 远端激活锁预检：在打包/上传/祖先闸之前就发现「别人正在发」，立即 75 退出。
+assert_remote_lock_free() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  local rc=0
+  run_remote "sudo flock -n -E 75 '$ACTIVATION_LOCK' true" || rc=$?
+  case "$rc" in
+    0) ;;
+    75) log "ACTIVATION_LOCKED 远端激活锁被占（$ACTIVATION_LOCK：另一 gateway/opencode 发版进行中）→ exit 75，不等待不重试"; exit 75 ;;
+    *) die "远端激活锁预检失败 rc=$rc（SSH/sudo）→ 不发" ;;
+  esac
 }
 
 usage() {
@@ -338,6 +448,11 @@ usage() {
 环境可覆写：GW_SSH_KEY GW_SSH_TARGET GW_SSH_PORT GW_HARNESS_ROOT GW_GATEWAY_PATH
             GW_RELEASES_DIR GW_DEPLOY_GATE GW_HEALTH_URL GW_OWNER
             GW_DRY_REMOTE_LOG（--dry-run 时把远端脚本另存到该档，供 bash -n 检查）
+            GW_DRAIN_FINAL_SECS（开维护后终检 drain 上界，默认 30）
+            GW_DRAIN_COOLDOWN_SECS / GW_DRAIN_COOLDOWN_MAX_SECS（drain 超时退避，默认 600 / 3600；0 关闭）
+            GW_DRAIN_STAMP（远端退避戳，默认 $HARNESS_ROOT/.drain-timeout.stamp）
+            GW_LOCAL_LOCK（本机防重入锁，默认 <git common dir>/gateway-release.lock）
+退出码：0 成功 1 失败 2 用法 3 drain 超时 4 drain 冷却 75 持锁 76 身份冲突 129/130/143 信号
 EOF
 }
 
@@ -385,7 +500,7 @@ assert_gateway_tree_clean() {
 # 落到呼叫端本来就写好的 `case "$base" in ""|unknown-baseline) base="HEAD"` 分支。
 current_release_sha() {
   [ "$DRY_RUN" -eq 1 ] && return 0
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" \
     "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null || true" 2>/dev/null | head -1 || true
 }
 
@@ -393,7 +508,7 @@ current_release_sha() {
 # 发版祖先闸的线上读取（只读 SSH；--dry-run 照样读真线上）。输出：
 #   LINK link:<当前 release files 绝对路径>   SHA <meta.env GIT_SHA>   HOT <HOTPATCH.log 热装 commit>…
 gateway_online_state() {
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" bash -s -- "$GATEWAY_PATH" <<'REMOTE'
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" bash -s -- "$GATEWAY_PATH" <<'REMOTE'
 set -u
 cur="$(readlink -f "$1" 2>/dev/null || true)"
 [ -n "$cur" ] || exit 0
@@ -406,7 +521,7 @@ REMOTE
 }
 
 guard_remote_append() {
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "sudo tee -a '$1' >/dev/null"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "sudo tee -a '$1' >/dev/null"
 }
 
 # $1=候选完整 sha。须在 GW_EXPECTED 抓取之后调用（见 release-ancestry-guard.sh 竞态说明）。
@@ -504,12 +619,27 @@ fi
 if command -v curl >/dev/null 2>&1; then
   echo "healthz=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
 fi
+# H07：「更新中」排障三件——维护位/租约、激活锁、drain 冷却戳（全唯读）
+SDB="$HARNESS_ROOT/state/sessions.db"
+if [ -f "$SDB" ]; then
+  m="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$SDB" "SELECT value FROM generation_runtime_control WHERE name='maintenance';" 2>/dev/null || echo ERR)"
+  l="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$SDB" "SELECT COUNT(*) FROM generation_runtime_control WHERE name='deployment-maintenance';" 2>/dev/null || echo ERR)"
+  echo "maintenance=${m:-unset} deployment_lease=${l}"
+fi
+LK="$HARNESS_ROOT/.harness-activation.lock"
+if [ -e "$LK" ]; then
+  if sudo flock -n "$LK" true 2>/dev/null; then echo "activation_lock=free"; else echo "activation_lock=HELD"; fi
+fi
+ST="$HARNESS_ROOT/.drain-timeout.stamp"
+if [ -f "$ST" ]; then echo "drain_timeout_stamp=$(cat "$ST") now=$(date +%s)"; else echo "drain_timeout_stamp=none"; fi
 REMOTE
 }
 
 # ── adopt（一次性）──────────────────────────────────────────────────────
 cmd_adopt() {
   preflight_local
+  acquire_local_lock
+  assert_remote_lock_free
   local GW_EXPECTED rel
   GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
   rel="baseline-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -539,6 +669,8 @@ cmd_release() {
   preflight_local
   guard_require_explicit_sha "$SHA" "gateway-release.sh release"
   assert_gateway_tree_clean
+  acquire_local_lock
+  assert_remote_lock_free
   local sha_full sha_short ts rel
   sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
   # 先抓激活身份再跑祖先闸：此后若有人并行发版，激活阶段 ACTIVATION_CONFLICT 会拦下。
@@ -626,6 +758,8 @@ REMOTE
 
 cmd_rollback() {
   preflight_local
+  acquire_local_lock
+  assert_remote_lock_free
   local GW_EXPECTED
   GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
   run_gateway_activation <<'REMOTE'
@@ -669,7 +803,7 @@ main() {
   [ -n "$cmd" ] || { usage; exit 2; }
   shift || true
   case "$cmd" in
-    __emit-drain) declare -f drain_gate maintenance_control maintenance_begin maintenance_end ;;
+    __emit-drain) emit_drain_lib ;;
     status) parse_flags "$@"; cmd_status ;;
     guard) parse_flags "$@"; cmd_guard ;;
     release) parse_flags "$@"; cmd_release ;;

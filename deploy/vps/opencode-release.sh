@@ -205,7 +205,9 @@ oc_prepare() {
   [ "$(runtime_identity)" = "$1" ] || { echo ACTIVATION_CONFLICT >&2; exit 76; }
   trap 'oc_recover $?' EXIT
   trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-  maintenance_begin "$2"
+  # H07（2026-11-03「更新中」事故）：带 drain 参数时走两段 drain——软 drain 不开维护，
+  # 清零才 maintenance_begin，再短终检（drain_then_maintenance 来自 gateway-release.sh __emit-drain）。
+  if [ "$#" -gt 2 ]; then drain_then_maintenance "$2" "${@:3}"; else maintenance_begin "$2"; fi
 }
 
 run_oc_activation() {
@@ -455,8 +457,7 @@ VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; 
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 
-oc_prepare "${19}" "${17}"
-drain_gate "${13}" "${14}" "${15}" "${16}" "${17}" "${18}"
+oc_prepare "${19}" "${17}" "${13}" "${14}" "${15}" "${16}" "${17}" "${18}"
 
 # drain 成功后才开始可见变更；超时只留下临时上传文件，不覆盖运行中的工具/提示词。
 sudo mkdir -p "$BACKUP_DIR" "$(dirname "$HISTORY_LOG")"
@@ -520,11 +521,10 @@ cmd_rollback() {
 set -euo pipefail
 VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"
 WORKSPACE_DIR="$(dirname "$VPS_DIR")"
-oc_prepare "${13}" "${11}"
 latest="$(sudo ls -1t "$BACKUP_DIR"/opencode-*-pre.tgz 2>/dev/null | head -1 || true)"
 [ -n "$latest" ] || { echo NO_BACKUP; exit 1; }
 oc_validate_backup "$latest"
-drain_gate "${7}" "${8}" "${9}" "${10}" "${11}" "${12}"
+oc_prepare "${13}" "${11}" "${7}" "${8}" "${9}" "${10}" "${11}" "${12}"
 OC_UNDO="$BACKUP_DIR/recovery-opencode-$(date -u +%Y%m%dT%H%M%SZ)-$$.tgz"
 oc_create_backup "$OC_UNDO"
 OC_CHANGED=1
