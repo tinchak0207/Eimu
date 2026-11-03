@@ -17,13 +17,26 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 
 | 工具 | 作用 |
 |---|---|
-| `eimu_direct` | 一句话派工给导演，返回 `job_id`（可 `mode=quote\|plan\|full`，`full` 建议带 `budget_cap`；**极限模式＝`thinking_level=extreme`**，开拍前写入账号设置＝野兽模式开） |
-| `eimu_job` | 对 job 做 get／wait／reply／approve／revise／cancel；终态含成片与中间产物（`artifacts` 分 film／storyboard／brief／bible／keyframes 首尾帧／stills 成品静帧如电商主图·卖点·细节／audio，各项带原标签 `label`） |
+| `eimu_direct` | 一句话派工给导演，返回 `job_id`（＝session_id）。`mode=quote`（或 `preflight=true`）只报价、不建任务、不扣费；`plan`／`full` 正式跑**必须**带 `budget_cap`（币）或 `confirm=true`，否则回 `needs_confirmation`＋`code=budget_required`（未提交、未扣费）。有界等待 ≤45s，超时回 `processing`＋`job_id`，勿重提交。**极限模式＝`thinking_level=extreme`**（开拍前写入账号设置＝野兽模式开） |
+| `eimu_job` | 对 job 做 get／wait／reply／approve／reject／revise／cancel。`awaiting_input` 时附 `confirm_cards`（扣费确认卡，approve／reject 按 `confirm_ids`，省略＝全部）与 `questions`（导演 question 卡题面与选项，用 `reply` 的 `answers` 或 `message` 作答，约 3 分钟内）。终态含 `artifacts`（film／storyboard／brief／bible／keyframes 首尾帧／stills 成品静帧如电商主图·卖点·细节／audio，各项带原标签 `label`）与 `generated_media`（本会话全部成功生成的公开 URL，含返工稿） |
 | `list_agent_sessions` | 列本账号 agent／导演会话 |
 | `get_agent_session` | 读会话对话与产物 |
 | `abort_agent_session` | 中止正在跑的会话 |
 
-主技能 `film-production` 的路径就是：**eimu_direct → 轮询 eimu_job → 交成片**。
+主技能 `film-production` 的路径就是：**eimu_direct → 轮询 eimu_job → 交成片**。`camera-motion`／`character-consistency` 两个技能也走同一条导演路径：教你把运镜语言、角色外形锚与参考图写进交给导演的需求，而不是自己逐镜调原子工具。
+
+### 导演返回的 `status`
+
+| status | 含义 | 下一步 |
+|---|---|---|
+| `quoted` | 只报价（`quote.estimated_coins`／`quote.balance_coins`），无 job_id | 再调一次 `eimu_direct`（`full`／`plan`＋`budget_cap` 或 `confirm=true`），不算重提交 |
+| `needs_confirmation` | 正式跑缺 `budget_cap`／`confirm`（`code=budget_required`），未提交 | 补参数再调 `eimu_direct` |
+| `insufficient_quota` | 余额低于粗估花费，未提交 | 充值、降 mode，或显式 `confirm=true` |
+| `processing` | 导演在跑 | 按 `poll_after_seconds` 调 `eimu_job wait/get`，勿重提交 |
+| `awaiting_input` | 导演停下等人：`confirm_cards` 扣费确认卡，或 `questions` 请示卡；`code=budget_exceeded`＝卡金额超出 `budget_cap` | 问用户后 `approve`／`reject`，或 `reply`（`answers`／`message`） |
+| `completed` | 会话 idle、无待确认、无后台子代理／生成 | 交付 `artifacts`＋`generated_media` |
+| `stalled` | 会话 idle、回覆称仍在生成但无产物且久无活动 | `eimu_job reply` 追问，或 `get_agent_session` 看记录；勿重提交 |
+| `cancelled` | 已取消 | — |
 
 ### 展开原子工具（专家面）
 
@@ -33,7 +46,7 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 - 或请求头：`X-Eimu-Toolset: expert`
 - 或 `initialize`／`tools/list` 的 `params.toolset = "expert"`
 
-专家面含生图／改图／生视频／TTS／画布产线／harness 闸门等原子工具，以及 `get_agent_settings`／`save_agent_settings`（读写账号级思考档位与野兽模式，免费）；**成片主路径仍应走导演工具**，不要把逐镜手拼写成默认教法。
+专家面在导演五件套之外另列：`get_quota`／`list_models`／`get_result`、生图／改图／生视频／TTS／放大（`generate_image`／`edit_image`／`generate_video`／`tts`／`upscale`）、画布产线（`list_canvas_projects`／`canvas_get_state`／`workflow_*`）、`run_agent`／`get_agent_generation_task`、技能库（`list_skills`／`get_skill`）、harness 闸门（`check_delivery_contract`／`evaluate_media_quality`），以及 `get_agent_settings`／`save_agent_settings`（读写账号级思考档位与野兽模式，免费）。harness 指南资源与提示模板（`resources/list`／`prompts/list`）也只在 `toolset=expert` 时列出。**成片主路径仍应走导演工具**，不要把逐镜手拼写成默认教法。
 
 ## 包内文件
 
@@ -49,7 +62,7 @@ plugin/eimu/
     └── camera-motion/SKILL.md              # 运镜与镜头运动
 ```
 
-目前**没有** zip／tar.gz 整包；请按 https://eimu.dev/plugin/ 逐档取回。本说明**不**推销市集一键装。
+整包 tar.gz 见上方链接（解压得到 `plugin/marketplace.json` 与 `plugin/eimu/`），也可按 https://eimu.dev/plugin/ 逐档取回。本说明**不**推销市集一键装。
 
 ## 今天就能用的装法
 
@@ -65,7 +78,8 @@ export EIMU_BIZ_KEY=sk-biz-你的密钥
 上面这行只对**当前终端**生效。要持久，写入 shell 启动文件（bash `~/.bashrc`，zsh `~/.zshrc`）。完整写入与自查见 https://eimu.dev/mcp 的「一键：把这段发给你的 agent」。
 
 ```bash
-# Claude Code（--header 必须单引号，写出字面 ${EIMU_BIZ_KEY}）
+# Claude Code（--header 的值用单引号：单引号让字面的 ${EIMU_BIZ_KEY} 写进配置文件、
+# 由客户端加载时插值；用双引号会在 shell 里当场把你的真密钥展开、烘进配置文件）
 claude mcp add --transport http --scope user eimu https://eimu.dev/api/mcp \
   --header 'Authorization: Bearer ${EIMU_BIZ_KEY}'
 ```
@@ -77,14 +91,7 @@ url = "https://eimu.dev/api/mcp"
 bearer_token_env_var = "EIMU_BIZ_KEY"
 ```
 
-```bash
-# Claude Code（--header 的值用单引号：单引号让字面的 ${EIMU_BIZ_KEY} 写进配置文件、
-# 由客户端加载时插值；用双引号会在 shell 里当场把你的真密钥展开、烘进配置文件）
-claude mcp add --transport http eimu https://eimu.dev/api/mcp \
-  --header 'Authorization: Bearer ${EIMU_BIZ_KEY}'
-```
-
-装完让 agent 调 `tools/list`：默认应看到导演工具（约 5 个），而不是整包原子工具。真 oracle＝`tools/call get_quota`（需 `toolset=expert`）或导演派工回执；`✔ Connected` 只证明握手。
+装完让 agent 调 `tools/list`：默认应看到导演工具（5 个），而不是整包原子工具。真 oracle 用默认面就能做、且不扣费：`list_agent_sessions`（只读），或 `eimu_direct` 带 `mode=quote`（只报价，回执 `quote.balance_coins` 即账户余额）；`✔ Connected` 只证明握手。`get_quota` 不在默认 `tools/list` 里（只在 `toolset=expert` 列出），但服务端 `tools/call` 不按 toolset 拦截，客户端按名字直接调也能用。
 
 
 ### 装法二：复制插件目录到本机
@@ -111,9 +118,10 @@ claude mcp add --transport http eimu https://eimu.dev/api/mcp \
 
 **诚实边界（仍成立）：**
 
-- 默认面不展开全部原子工具（要显式 `toolset=expert`）
+- 默认 `tools/list` 不展开原子工具（要显式 `toolset=expert`）；这是列表过滤，`tools/call` 本身不按 toolset 拦截
 - 不提供「预置运镜库 API」或跨工程角色库的独立产品面；运镜与角色一致性走导演链路与对应 skill
-- `eimu_direct`／`eimu_job` 若回 `not_ready`，按回执用 `toolset=expert` + `run_agent`／`get_agent_session` 过渡，叙事仍是「交出去拿成片」
+- 导演 question 卡约 3 分钟内未作答，网关按超时拒绝，导演会停下；外部 agent 要及时轮询并把 `questions` 转给用户
+- `artifacts` 由导演回覆文本分类得出，可能缺项；缺项时以 `generated_media`（网关生成回执）为准
 
 ## 本机 stdio（非主路径）
 
