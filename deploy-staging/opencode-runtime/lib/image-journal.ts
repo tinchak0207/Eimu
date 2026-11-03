@@ -123,6 +123,12 @@ export function acquireSharedRateSlot(account: string, now: number, limit: numbe
 }
 
 /** 接受UUID与完整产物收据在同一SQLite事务内提交，退出窗口不会遗失同步成品。 */
+// H15（2026-11-04）同镜头去重的本地候选：近 windowMs 内已拿到 task_id、未被本地判退款/拒绝、
+// shot_key 相同的提交。只给候选 task_id；在途/成败以网关 session-tasks 权威收据为准（本地无 succeeded 态）。
+export function sameShotSubmissions(shotKey: string, sinceMs: number): Array<{ task_id: string; identity: any }> {
+  return db().query("SELECT task_id,metadata_json FROM tool_submission WHERE task_id IS NOT NULL AND state NOT IN ('refunded','rejected') AND created_at>=? AND json_extract(metadata_json,'$.shot_key')=?").all(sinceMs, shotKey)
+    .map((row: any) => ({ task_id: row.task_id, identity: JSON.parse(row.metadata_json) }))
+}
 export function acceptTaskSubmission(scope:string,requestID:string,taskID:string,payload:Record<string,unknown>):void {
   db().transaction(()=>{finishSubmission(scope,requestID,"accepted",taskID);journalRegistration(taskID,String(payload.session_id),payload)}).immediate()
 }

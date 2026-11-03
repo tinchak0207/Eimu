@@ -15,12 +15,13 @@ import {
   publicImageUrl,
   authorizedProjectBudget,
   uploadImageBytes,
+  gatewayRequest,
   ok,
   fail,
 } from "../lib/client"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
 import { VIDEO_MOTION_FALLBACK, hasMotionContract } from "../lib/video-prompt-schema"
-import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash } from "../lib/image-journal"
+import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash, sameShotSubmissions } from "../lib/image-journal"
 
 /**
  * 生图尺寸白名单（R9-C, 2026-09-30）：真源＝站点 GET /v1/openapi.json 的
@@ -316,6 +317,7 @@ export default tool({
         "仅 video 用：成片分辨率档。用户要高清/2K/4K/电影级时填对应档，一次填对直接出成片——minimax-h3 的高清档由平台自动完成（768P 出片后 auto-hd 超分），不要自己分两步超分，视频也没有独立超分工具。可选档以 video_quote 的 resolutions 为准；模型到不了该档会在提交前被拒，不静默降档。省略则用模型默认档。",
       ),
     generate_audio: tool.schema.boolean().optional().describe("是否生成音讯，仅 video 用"),
+    rework_reason: tool.schema.string().max(300).optional().describe("同一镜头（同prompt同帧）已有在途或已成功任务时，确需再付费重出（换模、返工、多候选）才填，写明原因；不填会被同镜头去重闸拦下且不扣费。多候选优先用n。"),
     reference_images: tool.schema
       .array(tool.schema.string())
       .max(9)
@@ -427,6 +429,35 @@ export default tool({
       catch(e:any){return fail(e.code??"project_budget_unknown",e.message,{request_id,new_generation:false,recoverable:true})}
     }
 
+    // H15 同镜头去重闸（2026-11-04，02-847 回放：换模重出把在途/已成的同镜头再付费一遍，实扣浪费 14 币）。
+    // 只拦「新付费提交 + 同会话(含子代理)已有同 prompt 同帧、未失败/未退款的任务 + 未写 rework_reason」；
+    // 原任务失败/退款/取消即放行；首次生成、同 request_id 续接、retry_task_id 恢复都不经过这里。
+    // 不新增确认卡（full/auto 不重复确认）；查询失败一律放行（fail-open），不误拦正常生成。
+    const shot_key = contentHash({ kind, prompt: args.prompt.split(/\s+/).filter(Boolean).join(" "), frame: args.frame ?? null })
+    const rework_reason = args.rework_reason?.trim() || undefined
+    if (cost_coins > 0.1 && (!prior || prior.state==="rejected") && !rework_reason) {
+      let live: any[] = []
+      try {
+        const candidates = sameShotSubmissions(shot_key, Date.now() - 24 * 3600_000)
+        if (candidates.length) {
+          const listing = await gatewayRequest("/internal/session-tasks", { session_id: context.sessionID }, context.abort)
+          const byId = new Map((Array.isArray(listing?.tasks) ? listing.tasks : []).map((task: any) => [task.task_id, task]))
+          live = candidates.flatMap(({ task_id, identity }) => {
+            const task: any = byId.get(task_id)
+            if (!task || ["failed", "refunded", "cancelled"].includes(String(task.status))) return []
+            return [{ task_id, status: task.status ?? "unknown", model: task.model ?? identity.model, project: task.project ?? identity.project, frame: task.frame ?? identity.frame, request_id: identity.request_id }]
+          })
+        }
+      } catch { live = [] }
+      if (live.length) {
+        const succeeded = live.some((task) => task.status === "succeeded")
+        return fail("duplicate_shot",
+          `同一镜头（同prompt${args.frame != null ? "同帧" : ""}）本会话已有${succeeded ? "已成功" : "在途"}任务 ${live.slice(0, 5).map((task) => `${task.task_id}(${task.model}/${task.status})`).join("、")}；本次未提交、未扣费。` +
+          `${succeeded ? "直接用已成功结果" : "用 image_get_result 等它终态；失败/退款后同参数重提会自动放行"}。确需再付费重出（换模/返工/多候选）请带 rework_reason 写明原因${succeeded ? "" : "——原任务若之后成功，两份都会扣费"}，本次预估 ${cost_coins} 币。`,
+          { existing: live, shot_key, new_generation: false, charged: false, request_id })
+      }
+    }
+
     // 扣费闸门：≤0.1 币的草稿直接放行，其余需用户确认
     if (cost_coins > 0.1 && (!prior || prior.state==="rejected")) {
       const description =
@@ -435,8 +466,9 @@ export default tool({
             ? `生成 ${duration_seconds ?? 10} 秒视频（${model}，${video_price.resolution}、${video_price.billing_unit}），预估花费 ${cost_coins} 币`
             : `生成 ${duration_seconds ?? 10} 秒视频（${model}），预估花费 ${cost_coins} 币（目录查无秒价，粗估待确认，实扣可能更高）`
           : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
+      const spend_description = rework_reason ? `${description}（同镜头重出：${rework_reason}）` : description
       const approved = await confirmSpend(
-        { sessionID: context.sessionID, amount_coins: cost_coins, description, model, request_id },
+        { sessionID: context.sessionID, amount_coins: cost_coins, description: spend_description, model, request_id },
         context.abort,
       )
       if (!approved) {
@@ -506,7 +538,7 @@ export default tool({
               ...(reference_images.length > 0 ? { reference_images } : {}),
             }
 
-      const identity = { scope, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
+      const identity = { scope, shot_key, rework_reason, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
       payload.workflow = { metadata: { budget_version:budget?.version, session_id:context.sessionID,project:args.project,frame:args.frame,request_id,size,reference_version:identity.reference_version,style_version:identity.style_version,style_lock:args.style_lock ?? "" } }
       payload.cap_coins = Math.min(args.cap_coins ?? cost_coins, cost_coins)
       // 单次权威实扣不得高于本地原子保留；目录变价应拒绝而非穿透项目上限。
