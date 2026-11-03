@@ -319,6 +319,9 @@ export async function POST(req: NextRequest) {
 
     case "resources/list":
       // 只露「有什么」：投影掉 text 全文，全文交给 resources/read 按 uri 取。
+      // harness 指南教的是原子工具手拼（generate_image／run_agent…），默认导演面的 tools/list 里没有这些工具；
+      // 与 /mcp 页「专家面另含 harness」一致，导演面不列（read 仍可按 uri 取，不报错）。
+      if (resolveRequestToolset(req, parsed.params) !== "expert") return rpcOk(traceId, id, { resources: [] });
       return rpcOk(traceId, id, {
         resources: HARNESS_RESOURCES.map(({ uri, name, description, mimeType }) => ({
           uri,
@@ -350,6 +353,8 @@ export async function POST(req: NextRequest) {
 
     case "prompts/list":
       // 投影掉 build 函式：清单是纯资料，必须可 JSON 序列化。
+      // 同 resources/list：eimu-harness 提示模板只在专家面列出（导演面会被它引去调不存在的原子工具）。
+      if (resolveRequestToolset(req, parsed.params) !== "expert") return rpcOk(traceId, id, { prompts: [] });
       return rpcOk(traceId, id, {
         prompts: HARNESS_PROMPTS.map(({ name, title, description, arguments: args }) => ({
           name,

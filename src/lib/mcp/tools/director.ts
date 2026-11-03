@@ -698,7 +698,69 @@ type Judgement =
   | { kind: "final"; summary: string; body: Record<string, unknown> }
   | { kind: "continue"; phase: string; reason?: string; budget?: Record<string, unknown> };
 
-async function judgeSnapshot(opts: {
+type GeneratedMedia = {
+  task_id: string;
+  kind: string;
+  created_at: number | null;
+  artifacts: Array<{ url: string; mime: string | null; width: number | null; height: number | null }>;
+};
+
+/**
+ * 终态补抓：网关回执表里本会话成功落地的生成产物（公开 URL）。
+ * 导演终稿常只引用 workspace 路径（出站净化成「（内部存档）」），只靠回覆文本抽 URL 会丢产物
+ * （2026-11-02 复测 job 8606e683：回执 8 张成功图，artifacts.stills 只拿到 2 张）。
+ * 旧网关无此端点／失败时只回说明，不影响原判定。
+ */
+async function fetchGeneratedMediaFields(jobId: string, ctx: McpToolContext, toolName: string): Promise<Record<string, unknown>> {
+  const path = agentSessionPath(jobId, "/generations");
+  try {
+    const res = await ctx.dispatcher({ method: "GET", path, authorization: ctx.authorization, traceId: ctx.traceId, toolName });
+    if (res.status < 200 || res.status >= 300) {
+      return { generated_media: null, generated_media_note: `生成回执清单暂不可用（HTTP ${res.status}）；产物以 artifacts 为准。` };
+    }
+    const payload = parseJsonLoose(res.text);
+    if (!isPlainObject(payload) || !Array.isArray(payload.generations)) {
+      return { generated_media: null, generated_media_note: "生成回执清单格式不符；产物以 artifacts 为准。" };
+    }
+    const items: GeneratedMedia[] = [];
+    for (const entry of payload.generations) {
+      if (!isPlainObject(entry) || typeof entry.task_id !== "string" || !Array.isArray(entry.artifacts)) continue;
+      const artifacts: GeneratedMedia["artifacts"] = [];
+      for (const a of entry.artifacts) {
+        if (!isPlainObject(a) || typeof a.url !== "string" || !/^https?:\/\//.test(a.url)) continue;
+        artifacts.push({
+          url: a.url,
+          mime: typeof a.mime === "string" ? a.mime : null,
+          width: finiteOrNull(a.width),
+          height: finiteOrNull(a.height),
+        });
+      }
+      if (artifacts.length === 0) continue;
+      items.push({
+        task_id: entry.task_id,
+        kind: typeof entry.kind === "string" ? entry.kind : "unknown",
+        created_at: finiteOrNull(entry.created_at),
+        artifacts,
+      });
+    }
+    return {
+      generated_media: items,
+      generated_media_note:
+        "本会话全部成功生成的媒体（网关回执真源，含返工稿与历史轮次，按 created_at 升序）；导演挑定的交付以 artifacts 为准，artifacts 缺项时从这里取公开 URL。" +
+        (payload.truncated === true ? "（清单已截断，只含最近 200 条）" : ""),
+    };
+  } catch {
+    return { generated_media: null, generated_media_note: "生成回执清单读取失败；产物以 artifacts 为准。" };
+  }
+}
+
+async function judgeSnapshot(opts: Parameters<typeof judgeSnapshotCore>[0]): Promise<Judgement> {
+  const judged = await judgeSnapshotCore(opts);
+  if (judged.kind !== "final") return judged;
+  return { ...judged, body: { ...judged.body, ...(await fetchGeneratedMediaFields(opts.jobId, opts.ctx, opts.toolName)) } };
+}
+
+async function judgeSnapshotCore(opts: {
   jobId: string;
   runtime: JobRuntime;
   messages: AgentMessage[];
@@ -1301,6 +1363,12 @@ const DIRECTOR_OUTPUT_SCHEMA: Record<string, unknown> = {
     budget: { type: "object", description: "预算记账（cap／基线／当前余额／累计估算与来源）。" },
     confirm_results: { type: "array", items: { type: "object" } },
     artifacts: { type: "object" },
+    generated_media: {
+      type: ["array", "null"],
+      description: "终态时附：本会话全部成功生成的媒体（网关回执真源，含返工稿；每项 task_id/kind/created_at/artifacts[url,mime,width,height]）。null＝清单不可用。",
+      items: { type: "object" },
+    },
+    generated_media_note: { type: "string" },
     poll_after_seconds: { type: "number" },
     do_not_resubmit: { type: "boolean" },
     next_action: { type: "string" },
@@ -1380,8 +1448,8 @@ export function defineDirectorTools(): ToolDefinition[] {
       name: "eimu_job",
       title: "导演任务",
       description: bilingual(
-        "对导演 job_id 执行 get|wait|reply|approve|reject|revise|cancel。wait≤45s，超时仍 processing，勿重提交。completed 须会话 idle、无待确认、无后台子代理／生成；awaiting_input 时 confirm_cards 列出确认卡（id／金额／模型／说明），approve／reject 按 confirm_ids（默认全部）走确认端点。",
-        "Act on a director job_id: get|wait|reply|approve|reject|revise|cancel. Bounded wait <=45s; still processing on timeout - do NOT resubmit. completed requires an idle session with no pending questions/confirms and no running sub-agents or generations. awaiting_input lists confirm_cards (id/amount/model/description); approve/reject resolve them by confirm_ids (default: all) via the confirm endpoint.",
+        "对导演 job_id 执行 get|wait|reply|approve|reject|revise|cancel。wait≤45s，超时仍 processing，勿重提交。completed 须会话 idle、无待确认、无后台子代理／生成；awaiting_input 时 confirm_cards 列出确认卡（id／金额／模型／说明），approve／reject 按 confirm_ids（默认全部）走确认端点。终态另附 generated_media（本会话全部成功生成的公开 URL，含返工稿），artifacts 缺项时从中取。",
+        "Act on a director job_id: get|wait|reply|approve|reject|revise|cancel. Bounded wait <=45s; still processing on timeout - do NOT resubmit. completed requires an idle session with no pending questions/confirms and no running sub-agents or generations. awaiting_input lists confirm_cards (id/amount/model/description); approve/reject resolve them by confirm_ids (default: all) via the confirm endpoint. Terminal results also carry generated_media (every successful generation in the session with public URLs, including reworks); use it when artifacts misses an item.",
       ),
       annotations: {
         readOnlyHint: false,

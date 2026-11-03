@@ -89,7 +89,7 @@ test("initialize：capabilities 同时含 tools / resources / prompts", async ()
 // ─────────────────────────────────────────── resources
 
 test("resources/list：两个 harness uri、只露清单不回全文（不得带 text 栏位）", async () => {
-  const { status, raw, body } = await callMcp({ jsonrpc: "2.0", id: 2, method: "resources/list" });
+  const { status, raw, body } = await callMcp({ jsonrpc: "2.0", id: 2, method: "resources/list", params: { toolset: "expert" } });
   assert.equal(status, 200);
   const resources = body.result.resources as Array<Record<string, unknown>>;
   assert.equal(resources.length, 2);
@@ -140,7 +140,7 @@ test("resources/read：正确 uri 回对应全文；未知 uri 回 invalidParams
 // ─────────────────────────────────────────── prompts
 
 test("prompts/list：回 eimu-harness、纯资料（不得带 build 函式）", async () => {
-  const { status, body } = await callMcp({ jsonrpc: "2.0", id: 5, method: "prompts/list" });
+  const { status, body } = await callMcp({ jsonrpc: "2.0", id: 5, method: "prompts/list", params: { toolset: "expert" } });
   assert.equal(status, 200);
   const prompts = body.result.prompts as Array<Record<string, unknown>>;
   assert.equal(prompts.length, 1);

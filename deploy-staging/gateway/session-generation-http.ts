@@ -1,6 +1,6 @@
 import { PLATFORM_BASE } from "./constants-gateway.ts"
 import { getOwnedSession } from "./sessions-core.ts"
-import { generationReceipt } from "./job-store.ts"
+import { generationReceipt, generationReceipts } from "./job-store.ts"
 
 const headers = { "Cache-Control": "private, no-store" }
 function unavailable(status: number, code: string): Response {
@@ -52,4 +52,40 @@ export async function handleSessionGeneration(key: string, sessionId: string, ta
   } catch {
     return unavailable(503, "task_lookup_unavailable")
   }
+}
+
+const LISTED_GENERATION_KINDS = new Set(["image", "video", "audio"])
+const MAX_LISTED_GENERATIONS = 200
+
+/**
+ * 只读：列出本会话（owned）成功落地的生成回执及其公开产物 URL。
+ * 导演终稿回覆里可能只引用 workspace 路径（出站被净化成「（内部存档）」），
+ * MCP 只靠回覆文本抽 URL 会丢产物；回执表才是产物真源。
+ * 只投影 url/mime/宽高，不外露供应商、端点等内部字段。
+ */
+export function handleSessionGenerations(key: string, sessionId: string): Response {
+  const session = getOwnedSession(key, sessionId)
+  if (!session) return Response.json({ ok: false, code: "not_found" }, { status: 404, headers })
+  const all = generationReceipts(session.sessionId)
+    .filter((r) => LISTED_GENERATION_KINDS.has(r.kind) && r.status === "succeeded")
+  const items = all.slice(-MAX_LISTED_GENERATIONS).map((r) => ({
+    task_id: r.task_id,
+    kind: r.kind,
+    created_at: r.created_at,
+    artifacts: (Array.isArray(r.artifacts) ? r.artifacts : [])
+      .filter((a) => typeof a?.url === "string" && /^https?:\/\//.test(a.url))
+      .map((a) => ({
+        url: a.url,
+        mime: typeof a.mimeType === "string" ? a.mimeType : null,
+        width: typeof a.width === "number" && a.width > 0 ? a.width : null,
+        height: typeof a.height === "number" && a.height > 0 ? a.height : null,
+      })),
+  })).filter((r) => r.artifacts.length > 0)
+  return Response.json({
+    ok: true,
+    session_id: session.sessionId,
+    total_succeeded: all.length,
+    truncated: all.length > MAX_LISTED_GENERATIONS,
+    generations: items,
+  }, { headers })
 }
