@@ -57,63 +57,141 @@ function parseFrame(raw) {
 
 // 2026-11-03：长连接（10+ 分钟的改稿轮）会被 Cloudflare/网关空闲断开，旧版断了就静默
 // 停收，后续轮次全判 FAIL。改为断线自动重连：每次重领 ticket，带 last_event_id 让网关
-// 从 replayBuffer 补发漏掉的帧；按 id 去重保证 frames 连续不重复。退避 1s→2s→…≤15s。
+// 从 replayBuffer 补发漏掉的帧。退避 1s→2s→…≤15s。
+// 2026-11-04 H08 加固（只动夹具，网关零改动）：
+// ① 网关不发 SSE 心跳（Bun idleTimeout 255s、undici bodyTimeout 300s），半开连接会静默挂
+//    5 分钟——每条连接加空闲看门狗 SSE_IDLE_MS，无字节即主动断开重连（Last-Event-ID 续读，零丢帧）；
+//    领 ticket 加超时，不再无界挂起。
+// ② 404/401/403/410 与 session.closed 是终局，不再每 15s 空转重连到场景超时；记 fatal 让回合立即收手。
+// ③ 去重改按「单连接内 id 单调」：网关续读只补 id>last_event_id 的帧，所以重连后首帧 id≤last
+//    只可能是网关重启 eventCounter 回退（落盘防抖 3s），旧版 seen 集合会把这些新帧当重复吞掉。
+// ④ 记下每段断线区间，回合循环的「安静」扣掉断线时长：断线不是安静，避免把断线误判成回合结束；
+//    看门狗的秒级重连也不会把安静计时清零（否则 QUIET_MS 永远到不了）。
+// ⑤ 连续失败 SSE_MAX_FAILS 次判 fatal（有界）；stop() 能打断退避等待。
+// ⑦ 首连带 last_event_id=0 并等到连上再返回：旧版固定睡 800ms，ticket 慢时首批帧（确认卡/ack）直接丢。
+// ⑥ 每次接入网关先发的 `event: connected`（无 id，传输层帧）不再进 frames：旧版每重连一次就多一帧，
+//    回合循环把它当「有新动静」，重连风暴会把安静计时与 5 分钟无动静兜底一起顶掉。
+const SSE_IDLE_MS = Number(process.env.HUMAN_E2E_SSE_IDLE_MS || 90 * 1000)
+const SSE_TICKET_MS = Number(process.env.HUMAN_E2E_SSE_TICKET_MS || 15 * 1000)
+const SSE_MAX_FAILS = Number(process.env.HUMAN_E2E_SSE_MAX_FAILS || 40)
+const SSE_FATAL_STATUS = new Set([401, 403, 404, 410])
+
 async function attach(sid) {
   const frames = []
-  const seen = new Set()
   const ac = new AbortController()
-  let lastId
+  let lastId = 0 // 新建会话首连也带 last_event_id=0：ticket 慢于 800ms 时，发消息后到连上前的帧由网关补发
   let reconnects = 0
+  let regressions = 0
+  let fatal = null
+  let connected = false
+  const outages = [{ s: Date.now(), e: null }] // 断线区间；首连之前也算断线
+  let wake = null
   const once = async () => {
-    const ticket = await (await fetch(`${BASE}/sessions/${sid}/sse-ticket`, {
+    const tr = await fetch(`${BASE}/sessions/${sid}/sse-ticket`, {
       method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}",
-    })).json()
-    const q = `ticket=${encodeURIComponent(ticket.ticket)}` + (lastId != null ? `&last_event_id=${lastId}` : "")
-    const headers = { accept: "text/event-stream" }
-    if (lastId != null) headers["last-event-id"] = String(lastId)
-    const res = await fetch(`${BASE}/sessions/${sid}/events?${q}`, { signal: ac.signal, headers })
-    if (!res.ok || !res.body) throw new Error(`sse http=${res.status}`)
-    const rd = res.body.getReader()
-    const dec = new TextDecoder()
-    let buf = ""
-    while (true) {
-      const { done, value } = await rd.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      let i
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const raw = buf.slice(0, i)
-        buf = buf.slice(i + 2)
-        const id = raw.match(/^id:\s*(\d+)$/m)?.[1]
-        if (id != null) {
-          if (seen.has(id)) continue
-          seen.add(id)
-          lastId = Number(id)
+      signal: AbortSignal.any([ac.signal, AbortSignal.timeout(SSE_TICKET_MS)]),
+    })
+    if (SSE_FATAL_STATUS.has(tr.status)) { fatal = `sse-ticket http=${tr.status}`; return false }
+    const ticket = await tr.json().catch(() => ({}))
+    if (!tr.ok || !ticket.ticket) throw new Error(`sse-ticket http=${tr.status}`)
+    const q = `ticket=${encodeURIComponent(ticket.ticket)}&last_event_id=${lastId}`
+    const headers = { accept: "text/event-stream", "last-event-id": String(lastId) }
+    const conn = new AbortController()
+    const onAbort = () => conn.abort()
+    ac.signal.addEventListener("abort", onAbort, { once: true })
+    let idle = setTimeout(() => conn.abort(), SSE_TICKET_MS)
+    const kick = () => { clearTimeout(idle); idle = setTimeout(() => conn.abort(), SSE_IDLE_MS) }
+    try {
+      const res = await fetch(`${BASE}/sessions/${sid}/events?${q}`, { signal: conn.signal, headers })
+      if (SSE_FATAL_STATUS.has(res.status)) { fatal = `sse http=${res.status}`; return false }
+      if (!res.ok || !res.body) throw new Error(`sse http=${res.status}`)
+      connected = true
+      outages[outages.length - 1].e = Date.now()
+      kick()
+      const rd = res.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ""
+      let connLast = null
+      while (true) {
+        const { done, value } = await rd.read()
+        if (done) break
+        kick()
+        buf += dec.decode(value, { stream: true })
+        let i
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, i)
+          buf = buf.slice(i + 2)
+          const idm = raw.match(/^id:\s*(\d+)$/m)?.[1]
+          if (idm != null) {
+            const id = Number(idm)
+            if (connLast != null && id <= connLast) continue
+            if (connLast == null && id <= lastId) {
+              regressions += 1
+              console.log(`  [sse] 网关 event id 回退（${lastId}→${id}，多半是重启丢了防抖落盘），按新帧收`)
+            }
+            connLast = id
+            lastId = id
+          }
+          const ev = raw.match(/^event:\s*(.+)$/m)?.[1]
+          if (ev && ev !== "ping" && ev !== "connected") frames.push({ raw, handled: false })
+          if (ev === "session.closed") fatal = "session.closed"
         }
-        const ev = raw.match(/^event:\s*(.+)$/m)?.[1]
-        if (ev && ev !== "ping") frames.push({ raw, handled: false })
       }
+      return true
+    } finally {
+      if (connected) outages.push({ s: Date.now(), e: null })
+      connected = false
+      clearTimeout(idle)
+      ac.signal.removeEventListener("abort", onAbort)
     }
   }
+  const pause = (ms) => new Promise((r) => { const t = setTimeout(r, ms); wake = () => { clearTimeout(t); r() } })
   const readerDone = (async () => {
     let backoff = 1000
-    while (!ac.signal.aborted) {
+    let fails = 0
+    while (!ac.signal.aborted && !fatal) {
       const t0 = Date.now()
-      try { await once() } catch { /* 断线/超时，下面重连 */ }
-      if (ac.signal.aborted) break
-      if (Date.now() - t0 > 30_000) backoff = 1000
+      let err = null
+      let up = false
+      try { up = await once() } catch (e) { err = e }
+      if (ac.signal.aborted || fatal) break
+      if (up) backoff = 1000 // 连上过（含看门狗主动断开）就从 1s 重来，不让退避越滚越长
+      if (Date.now() - t0 > 30_000) { backoff = 1000; fails = 0 }
+      fails += 1
+      if (fails >= SSE_MAX_FAILS) { fatal = `连续 ${fails} 次重连失败：${err?.message || "连接被关"}`; break }
       reconnects += 1
-      console.log(`  [sse] 断线，${backoff}ms 后重连（第 ${reconnects} 次，last_event_id=${lastId ?? "-"}）`)
-      await sleep(backoff)
+      console.log(`  [sse] 断线（${err?.message || "连接被关"}），${backoff}ms 后重连（第 ${reconnects} 次，last_event_id=${lastId}）`)
+      await pause(backoff)
       backoff = Math.min(backoff * 2, 15_000)
     }
+    if (fatal) console.log(`  [sse] 不再重连：${fatal}`)
   })()
-  await sleep(800)
+  // 等首连真正建立（上限 SSE_TICKET_MS），不再固定睡 800ms 就开始发消息。
+  for (const t0 = Date.now(); !connected && !fatal && Date.now() - t0 < SSE_TICKET_MS;) await sleep(100)
   return {
     frames,
     get reconnects() { return reconnects },
-    stop() { ac.abort(); return readerDone },
+    get regressions() { return regressions },
+    get fatal() { return fatal },
+    get connected() { return connected },
+    // t 以来累计断线毫秒数
+    downSince(t) {
+      const now = Date.now()
+      return outages.reduce((sum, o) => sum + Math.max(0, (o.e ?? now) - Math.max(o.s, t)), 0)
+    },
+    status() { return { reconnects, regressions, fatal, lastId } },
+    stop() { ac.abort(); wake?.(); return readerDone },
   }
+}
+
+// 自上次新帧起「连着线却没动静」的毫秒数：扣掉其间断线时长；断线中恒为 0（断线不是「安静」）。
+function quietMs(sse, lastNew) {
+  return sse.connected ? Date.now() - lastNew - sse.downSince(lastNew) : 0
+}
+
+// 夹具侧 SSE 故障注记：让「没结束」类失败能和产品失败区分开。
+function sseNote(sse) {
+  return sse.fatal ? `（夹具 SSE 已终止：${sse.fatal}；重连 ${sse.reconnects} 次——先查连接，别当产品结论）` : ""
 }
 
 async function createSession(title) {
@@ -281,8 +359,9 @@ async function runTurn(sid, content, opts) {
       }
     }
     const names = eventNames(sse.frames, from)
-    const quiet = Date.now() - lastNew >= QUIET_MS
+    const quiet = quietMs(sse, lastNew) >= QUIET_MS
     const ended = names.includes("turn.done") || names.includes("session.error")
+    if (sse.fatal) break
     const mediaDone = names.some((n) => n === "image.done" || n === "video.done" || n === "audio.done")
     if (names.includes("session.error") && quiet) break
     if (opts.spend && approved > 0) {
@@ -309,6 +388,7 @@ async function runTurn(sid, content, opts) {
     picks,
     done: names.includes("turn.done"),
     error: names.includes("session.error"),
+    sse: sse.status(),
     mediaDone: names.some((n) => n === "image.done" || n === "video.done" || n === "audio.done"),
   }
 }
@@ -322,7 +402,7 @@ async function sceneQuote(scene, reasons) {
   for (const content of scene.turns) {
     const turn = await runTurn(sid, content, { sse, spend: false, maxCoins: 0 })
     turns.push({ reply_chars: turn.reply.length, done: turn.done, mediaDone: turn.mediaDone, names: [...new Set(turn.names)] })
-    if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done`)
+    if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
     if (turn.mediaDone) fail(reasons, `${scene.id} 用户说别生成，却出现了成片事件`)
     if (turn.approved) fail(reasons, `${scene.id} 不该批准扣费`)
     const priced = /币|报价|quote/.test(turn.reply) || turn.names.includes("tool.call") || turn.names.some((n) => /quote|tool/.test(n))
@@ -342,7 +422,7 @@ async function sceneText(scene, reasons) {
   const sid = await createSession(`human-e2e-${scene.id}`)
   const sse = await attach(sid)
   const turn = await runTurn(sid, scene.turns[0], { sse, spend: false, maxCoins: 0 })
-  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done`)
+  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
   if (turn.mediaDone) fail(reasons, `${scene.id} 用户说不要音频，却出现了成片事件`)
   const onlyDispatch = /已经派出去了/.test(turn.reply) && turn.reply.length < 80
   if (onlyDispatch || turn.reply.length < 200) fail(reasons, `${scene.id} 本回合没有交歌单正文（${turn.reply.length} 字）`)
@@ -359,7 +439,7 @@ async function sceneGenerate(scene, reasons) {
   const sid = await createSession(`human-e2e-${scene.id}`)
   const sse = await attach(sid)
   const turn = await runTurn(sid, scene.turns[0], { sse, spend: true, maxCoins: scene.max_coins })
-  if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 回合没有结束`)
+  if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 回合没有结束${sseNote(sse)}`)
   const names = turn.names
   const confirmAt = names.indexOf("confirm.request")
   const mediaAt = names.findIndex((n) => n === "video.done" || n === "image.done" || n === "audio.done")
@@ -395,7 +475,7 @@ async function sceneImage(scene, reasons) {
   const sse = await attach(sid)
   const turn = await runTurn(sid, scene.turns[0], { sse, spend: true, maxCoins: scene.max_coins })
   const facts = await sessionFacts(sid)
-  if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 回合没有结束`)
+  if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 回合没有结束${sseNote(sse)}`)
   for (let i = 0; i < 60 && !eventNames(sse.frames, 0).includes("image.done") && !eventNames(sse.frames, 0).includes("image.failed"); i++) await sleep(3000)
   turn.names = eventNames(sse.frames, 0)
   if (turn.names.includes("image.failed")) fail(reasons, `${scene.id} image.failed`)
@@ -509,9 +589,9 @@ async function sceneMvKeyframes(scene, reasons) {
     const raw = sse.frames.map((f) => f.raw).join("\n")
     const musicDone = /"tool":"music_gen"[^\n]*"ok"|event: audio\.(?:done|failed)/.test(raw) || /music_gen[^\n]*(?:ok|error)/.test(sse.frames.filter((f) => parseFrame(f.raw).ev === "tool.result").map((f) => f.raw).join("\n"))
     const imgDone = names.includes("image.done")
-    const quiet = Date.now() - lastNew >= QUIET_MS
+    const quiet = quietMs(sse, lastNew) >= QUIET_MS
     if (quiet && names.includes("turn.done") && imgDone && musicDone) break
-    if (Date.now() - lastNew >= 5 * 60 * 1000) break
+    if (sse.fatal || quietMs(sse, lastNew) >= 5 * 60 * 1000) break
   }
   if (scene.stop_after_first_image_ms && !log.aborted) {
     const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
@@ -706,7 +786,7 @@ async function sceneMvVocalSong(scene, reasons) {
         log.musicResultAt = Math.round((Date.now() - t0) / 1000)
       }
     }
-    if (Date.now() - lastNew >= 5 * 60 * 1000) break
+    if (sse.fatal || quietMs(sse, lastNew) >= 5 * 60 * 1000) break
   }
   if (!log.aborted) {
     const ab = await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" }).catch(() => null)
@@ -840,7 +920,7 @@ async function sceneLayerRevision(scene, reasons) {
       if (!row.prompts.length) fail(reasons, `${scene.id} 第 ${i + 1} 回合之后没有真正提交 image_generate`)
     }
     turns.push(row)
-    if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有结束`)
+    if (!turn.done && !turn.mediaDone) fail(reasons, `${scene.id} 第 ${i + 1} 回合没有结束${sseNote(sse)}`)
     if (!scene.spend && turn.mediaDone) fail(reasons, `${scene.id} 不花钱的场景出现了成片事件`)
   }
   const facts = await revisionFacts(sid)
