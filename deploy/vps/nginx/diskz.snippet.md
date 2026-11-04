@@ -38,7 +38,8 @@ location = /risk/diskz.json {
     allow 127.0.0.1;
     deny all;
     error_page 403 405 = @h68_drop;
-    limit_except GET { deny all; }
+    # H77：limit_except GET 会连 HEAD 一起放行，契约是只 GET
+    if ($request_method != GET) { return 444; }
     alias /var/www/certbot/diskz.json;
     default_type application/json;
     add_header Cache-Control "no-store" always;
