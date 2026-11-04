@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { claimHandoff, createHandoffTicket, pollHandoff } from "@/lib/pwa-handoff";
+import {
+  claimHandoff,
+  createHandoffTicket,
+  isValidHandoffChallenge,
+  isValidHandoffVerifier,
+  pollHandoff,
+} from "@/lib/pwa-handoff";
 import { packHandoffTicket } from "@/lib/github-auth";
 import { INVITE_COOKIE, looksLikeInviteCode } from "@/lib/first-touch-attribution";
 
@@ -18,8 +24,19 @@ export async function POST(req: NextRequest) {
   if (action === "create") {
     // provider 白名单：只有显式 google 才走 Google，其余（缺省/垃圾值）回落 github。
     const provider = req.nextUrl.searchParams.get("provider") === "google" ? "google" : "github";
+    // PKCE 式绑定：发起设备本地生成 verifier，只上报 challenge=sha256hex(verifier)；缺失即拒绝，
+    // 否则攻击者可建一张无绑定的票绕过 claim 校验。
+    let challenge: unknown = null;
     try {
-      const ticket = await createHandoffTicket();
+      challenge = ((await req.json().catch(() => null)) as { challenge?: unknown } | null)?.challenge;
+    } catch {
+      challenge = null;
+    }
+    if (!isValidHandoffChallenge(challenge)) {
+      return NextResponse.json({ success: false, message: "缺少或非法的 challenge" }, { status: 400 });
+    }
+    try {
+      const ticket = await createHandoffTicket(challenge);
       const invite = looksLikeInviteCode(req.cookies.get(INVITE_COOKIE)?.value)
         ? req.cookies.get(INVITE_COOKIE)?.value
         : null;
@@ -42,8 +59,11 @@ export async function POST(req: NextRequest) {
     if (!ticket) {
       return NextResponse.json({ success: false }, { status: 404 });
     }
+    // verifier 走请求体（不进 URL/日志）；旧式在途 ticket 无 verifier，由 claimHandoff 的过渡分支放行。
+    const claimBody = (await req.json().catch(() => null)) as { verifier?: unknown } | null;
+    const verifier = isValidHandoffVerifier(claimBody?.verifier) ? claimBody.verifier : null;
     try {
-      const claimed = await claimHandoff(ticket);
+      const claimed = await claimHandoff(ticket, verifier);
       if (!claimed) {
         return NextResponse.json({ success: false }, { status: 404 });
       }
