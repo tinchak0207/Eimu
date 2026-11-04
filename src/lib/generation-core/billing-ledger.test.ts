@@ -101,7 +101,9 @@ test("terminal settlement asks only for reserved jobs that still have no commit"
   assert.equal(calls.length, 1);
   assert.match(calls[0], /NOT EXISTS/);
   assert.match(calls[0], /settled\.operation = 'commit'/);
-  assert.match(calls[0], /settled\.amount > 0/);
+  // aeb72119f：零金额 commit 也落库，任意 commit（含 amount=0）都算已结，不能再按 amount>0 过滤，
+  // 否则零结算的失败/取消单会永久占满对帐批次。
+  assert.doesNotMatch(calls[0], /settled\.amount/);
   assert.equal(calls[0].includes("LIMIT"), true);
 });
 

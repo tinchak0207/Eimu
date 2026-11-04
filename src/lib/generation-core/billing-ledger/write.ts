@@ -157,8 +157,8 @@ export async function commitGenerationBilling(
   amount = job.billingAmount,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<void> {
-  // amount=0 must still write an applied commit row. Otherwise terminalReservedJobs
-  // (which only excludes commit.amount > 0) forever re-selects old failed/cancelled
+  // amount=0 must still write an applied commit row. terminalReservedJobs excludes a
+  // job once ANY commit row exists (aeb72119f); without the zero row it would forever re-select old failed/cancelled
   // zero-settle jobs, starving succeeded jobs that truly need a commit backfill
   // (cost_coins null while reserve already deducted — 2026-11-02, 110+ succeeded).
   if (!Number.isFinite(amount)) return;
