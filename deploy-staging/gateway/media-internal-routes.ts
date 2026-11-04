@@ -6,6 +6,7 @@ import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
+import { userDemandsSingleQuantity } from "./question-quantity-guard.ts"
 import { estimateTtsCoins } from "./pricing-and-validation"
 import { byChildOc } from "./subagent-runs.ts"
 import { pushParentNote } from "./subagent-live.ts"
@@ -59,6 +60,38 @@ function outExtForContentType(contentType: string, fallbackExt: string): string 
   if (ct === "application/pdf") return "pdf"
   if (ct.startsWith("text/")) return "txt"
   return fallbackExt.replace(/^\./, "") || "bin"
+}
+
+// 2026-11-04 音乐单成品闸：一次用户请求（同一条用户消息所起的回合，含子代理重派/返工）只交付 1 条 music_gen。
+// 真会话证据（/tmp/human-e2e-2026-11-04T13-33-53-301Z）：「配一段 10 秒的轻音乐」被 orchestrator 三次重派子代理、
+// 各自 music_gen（1 币×3、3 条 audio.done）。提示词压不住，由工具生成前来此问一句：
+//   reuse   ＝本回合已交付过 → 复用那条，不再生成不再扣费，也不会再发 audio.done（同 URL 被 announcedUrls 去重）；
+//   busy    ＝另一席位正在生成 → 别重复发起；
+//   reuse:null ＝放行并占位（TTL 6 分钟，成功交付/release/超时清除）。
+// 只在用户原话明确单量（一首／一段…，见 question-quantity-guard）时生效——专辑等多曲委托不受影响。
+const MUSIC_CLAIM_TTL_MS = 6 * 60 * 1000
+export async function handleMusicReuseCheck(req: Request): Promise<Response> {
+  const url = new URL(req.url)
+  const sessionId = url.searchParams.get("session_id")
+  if (!sessionId) return Response.json({ ok: false, error: "session_id is required" }, { status: 400 })
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (!state) return Response.json({ ok: true, reuse: null, guard: "no_session" })
+  if (url.searchParams.get("release") === "1") {
+    if (state.musicClaim?.sessionId === sessionId) state.musicClaim = undefined
+    return Response.json({ ok: true, released: true })
+  }
+  if (!userDemandsSingleQuantity(state.lastUserMessage)) return Response.json({ ok: true, reuse: null, guard: "not_single" })
+  const turnAt = state.lastUserAt ?? 0
+  const d = state.lastMusicDelivery
+  if (d && d.turnAt === turnAt) {
+    return Response.json({ ok: true, reuse: { url: d.url, ...(d.duration_s ? { duration_s: d.duration_s } : {}), cost_coins: 0 } })
+  }
+  const claim = state.musicClaim
+  if (claim && claim.sessionId !== sessionId && Date.now() - claim.at < MUSIC_CLAIM_TTL_MS) {
+    return Response.json({ ok: true, reuse: null, busy: true })
+  }
+  state.musicClaim = { sessionId, at: Date.now() }
+  return Response.json({ ok: true, reuse: null })
 }
 
 export async function handleMediaUpload(req: Request): Promise<Response> {

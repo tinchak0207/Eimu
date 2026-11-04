@@ -10,6 +10,7 @@ import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, a
 // 只在 handleQuestion（用户真答覆）路径记；settleQuestion 的自动跳过代答与 3 分钟超时
 // 自动代答**都不是用户同意**，一律不记（见下方 handleQuestion 成功分支）。
 import { markUserAnsweredQuestion } from "./canvas-cascade-state.ts"
+import { planQuantityGuard, mergeGuardedAnswers } from "./question-quantity-guard.ts"
 // TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地后换成真 import（bun build 硬查 named import）。
 export function normalizeQuestionOptions(raw: unknown): Array<{ label: string; description?: string }> {
   if (!Array.isArray(raw)) return []
@@ -86,6 +87,62 @@ export async function lookupOpencodeQuestion(state: SessionState, callId: string
   return null
 }
 
+// 2026-11-04 数量闸：用户原话已明确数量=1 而模型弹「N 候选／N 张」扩量问卡 → 不展示，直接以单量代答。
+// 按 callId 记「已处置」，防 pending/running 多次触发 emitQuestionRequest 重复代答（第二次 reply 会 404）。
+const quantityGuardHandled = new WeakMap<SessionState, Set<string>>()
+
+async function replyOpencodeQuestion(state: SessionState, requestId: string, answers: string[][]): Promise<boolean> {
+  const urls = [
+    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
+    `/question/${encodeURIComponent(requestId)}/reply`,
+  ]
+  for (const url of urls) {
+    try {
+      const res = await opencodeFetch(url, { method: "POST", body: JSON.stringify({ answers }), timeoutMs: 8000 })
+      if (res.ok) return true
+      if (res.status !== 404) return false
+    } catch {
+      // try next
+    }
+  }
+  return false
+}
+
+/**
+ * 返回 true＝已被数量闸整张代答（调用方不得再展示）；false＝照常展示（visibleQuestions/guardMerge 经 out 带回）。
+ * 代答失败（上游不通）时退回「照常展示」，绝不静默吞卡。
+ */
+async function applyQuantityGuard(
+  state: SessionState,
+  requestId: string,
+  callId: string,
+  questions: PendingQuestion["questions"],
+): Promise<{ handled: boolean; questions: PendingQuestion["questions"]; guardMerge?: PendingQuestion["guardMerge"] }> {
+  const plan = planQuantityGuard(state.lastUserMessage, questions)
+  if (plan.kind === "none") return { handled: false, questions }
+  if (plan.kind === "partial") {
+    console.warn(`[gateway] question-quantity-guard partial session=${state.sessionId} req=${requestId} hidden=${plan.merge.auto.length}/${plan.merge.total}`)
+    return { handled: false, questions: plan.visible, guardMerge: plan.merge }
+  }
+  const seen = quantityGuardHandled.get(state) ?? new Set<string>()
+  quantityGuardHandled.set(state, seen)
+  const key = callId || requestId
+  if (seen.has(key)) return { handled: true, questions }
+  seen.add(key)
+  const ok = await replyOpencodeQuestion(state, requestId, plan.answers)
+  if (!ok) {
+    seen.delete(key)
+    console.warn(`[gateway] question-quantity-guard reply failed session=${state.sessionId} req=${requestId}; fall back to showing the card`)
+    return { handled: false, questions }
+  }
+  console.warn(`[gateway] question-quantity-guard auto-answered session=${state.sessionId} req=${requestId} answers=${JSON.stringify(plan.answers).slice(0, 120)}`)
+  // 不是用户同意：不 markUserAnsweredQuestion、不置 questionAnsweredThisTurn。刷新进度哨，等模型续跑。
+  state.turnLastFrameAt = Date.now()
+  state.turnProgressAt = Date.now()
+  armMidturnStallTimer(state)
+  return { handled: true, questions }
+}
+
 export async function emitQuestionRequest(state: SessionState, callId: string, input: unknown): Promise<void> {
   if (!callId) return
   for (const pending of state.pendingQuestions.values()) {
@@ -106,8 +163,11 @@ export async function emitQuestionRequest(state: SessionState, callId: string, i
     return
   }
   if (state.pendingQuestions.has(requestId)) return
-  state.pendingQuestions.set(requestId, { requestId, callId, questions })
-  emitToSession(state, "question.request", { request_id: requestId, questions })
+  const guarded = await applyQuantityGuard(state, requestId, callId, questions)
+  if (guarded.handled) return
+  if (state.pendingQuestions.has(requestId)) return
+  state.pendingQuestions.set(requestId, { requestId, callId, questions: guarded.questions, ...(guarded.guardMerge ? { guardMerge: guarded.guardMerge } : {}) })
+  emitToSession(state, "question.request", { request_id: requestId, questions: guarded.questions })
   // R8-B 工单 #3：pending 期间 30s 心跳接管用户可见性（R8 实锤 129s 零帧死寂）。
   armQuestionHeartbeat(state)
   // 片AJ：3 分钟无人回覆按推荐方案代答继续（assumed）。
@@ -139,8 +199,10 @@ export async function hydratePendingQuestions(state: SessionState): Promise<void
         if (state.pendingQuestions.has(id)) continue
         const tool = rec.tool && typeof rec.tool === "object" ? (rec.tool as Record<string, unknown>) : null
         const callId = typeof tool?.callID === "string" ? tool.callID : ""
-        state.pendingQuestions.set(id, { requestId: id, callId, questions })
-        emitToSession(state, "question.request", { request_id: id, questions })
+        const guarded = await applyQuantityGuard(state, id, callId, questions)
+        if (guarded.handled) continue
+        state.pendingQuestions.set(id, { requestId: id, callId, questions: guarded.questions, ...(guarded.guardMerge ? { guardMerge: guarded.guardMerge } : {}) })
+        emitToSession(state, "question.request", { request_id: id, questions: guarded.questions })
         // R8-B 工单 #3：hydrate 出的 pending question 同样布心跳。
         armQuestionHeartbeat(state)
         // 片AJ：hydrate 的 pending 同样布 3 分钟代答哨。
@@ -192,6 +254,9 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
   if (!state.pendingQuestions.has(requestId)) {
     return jsonError(404, "question request unknown or already resolved", "not_found", "question_expired")
   }
+  // 数量闸 partial：卡里只展示了部分子问题，其余已代答——把用户答案按原序合并回完整 answers 再回给 opencode。
+  const guardMerge = state.pendingQuestions.get(requestId)?.guardMerge
+  const replyAnswers: string[][] = guardMerge ? mergeGuardedAnswers(guardMerge, body.answers) : body.answers
   const urls = [
     `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
     `/question/${encodeURIComponent(requestId)}/reply`,
@@ -202,7 +267,7 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
     try {
       const res = await opencodeFetch(url, {
         method: "POST",
-        body: JSON.stringify({ answers: body.answers }),
+        body: JSON.stringify({ answers: replyAnswers }),
         timeoutMs: 8000,
       })
       if (res.ok) {

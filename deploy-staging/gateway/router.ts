@@ -20,7 +20,7 @@ import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle, persi
 import { fetchOpencodeTitle } from "./opencode-client.ts"
 import { openEventStream } from "./sse-core.ts"
 import { handleAttachmentUpload, sanitizeUploadName, reserveUniqueUploadName, contentTypeForExt } from "./uploads-media.ts"
-import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
+import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleMusicReuseCheck, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
 import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker, handleSubagentMessage, handleSubagentNotify, handleSubagentAskParent, handleSubagentCheckpoint, handleSubagentScratchpad, handleSubagentArtifact, handleSubagentSuspend, handleSubagentResume } from "./subagent.ts"
 // 用户面 peek 子代理（列表／转录增量／停止）；鉴权沿用下方 Bearer 闸门。
@@ -222,6 +222,10 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       // 素材入库：opencode video_upload 工具经此把外部影片/音频下载进平台存储。
       if (req.method === "POST" && pathname === "/internal/media/upload") {
         return handleMediaUpload(req)
+      }
+      // 音乐单成品闸：music_gen 生成前问「本回合是否已交付 / 是否有人在生成」。
+      if (req.method === "GET" && pathname === "/internal/media/music-reuse") {
+        return handleMusicReuseCheck(req)
       }
       // W6a（2026-10-04）：装置桥**内部**入口。agent 工具跑在 opencode-server（同机
       // loopback），只知道 session_id、不持有装置凭证；由 session 解析租户 → 挑该租户
