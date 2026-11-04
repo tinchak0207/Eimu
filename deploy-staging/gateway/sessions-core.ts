@@ -19,6 +19,7 @@ import { memoryRecallPrefetch, memoryRecallInflight } from "./memory-wiring.ts"
 import { rejectOpencodeQuestion } from "./questions-gw.ts"
 import { notify } from "./internal-waiters.ts"
 import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 // TODO(整合 Wave1): 以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
 // 整合阶段把下行注释还原成真 import、删除全部 declare，即完成桥接：
 // import { workflowOwnerBySession, workflowSnapshotFor, workflowService, sseTickets, SSE_TICKET_TTL_MS, stripStaleTurnTextFromReplay, armWatchdogTimer, armHeartbeatTimer, personaModel, restoreWorkflowsFromSnapshot, memoryRecallPrefetch, memoryRecallInflight, rejectOpencodeQuestion, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, closeSessionStreams } from "./index.ts"
@@ -225,7 +226,9 @@ export async function redriveInterruptedTurn(state: SessionState, gen: number): 
     return
   }
   console.log(`[gateway] N1 redrive: re-derived interrupted prompt from opencode history (${text.length} chars), re-dispatching — session=${cur.sessionId}`)
-  const body = { parts: [{ type: "text", text }] } as NonNullable<SessionState["lastPromptBody"]>
+  // H24：重推导体只有 parts＋model ⇒ 重投回合丢 system；同 H19 挂原始需求钉（只给模型）。
+  // 注：自 1c4ac1543（10-14）起本函数已无调用方（重启接管只观察、不重发），此处为防重新接线时回归。
+  const body = withPinnedWakeSystem(cur, { parts: [{ type: "text", text }] }) as NonNullable<SessionState["lastPromptBody"]>
   body.model = personaModel(cur)
   cur.lastPromptBody = body // 补回投递体：后续看门狗/抖动重试才有弹药
   dispatchInterruptedTurn(cur, body, gen)

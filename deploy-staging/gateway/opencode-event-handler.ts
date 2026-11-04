@@ -53,6 +53,7 @@ import { detectMemorySignals } from "./memory-trigger.ts"
 import { enqueueMemorySignal, appendMemoryAudit } from "./memory-queue.ts"
 import { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools } from "./opencode-event-handler-hooks.ts"
 import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 
 // H14（2026-10-02）：系统唤醒不冒充用户发言。prompt_async 注入的唤醒文本在 opencode 里只能是
 // user-role message（身份由 opencode 存储决定）；网关侧能做的是把它从「用户发言」语义摘出——
@@ -519,7 +520,9 @@ export function handleOpencodeEvent(event: any): void {
           const retryInjection = buildFailoverInjection({ hadOutput, orphanTools })
           const retryBody: NonNullable<SessionState["lastPromptBody"]> = hadOutput
             ? // 有中断处：注入续写指示（＋孤儿工具补注），让模型从断点续跑。
-              { parts: [{ type: "text", text: retryInjection }] }
+              // H24：续写体只有 parts ⇒ 本跳 system 为空、模型看不到原始需求钉；同 H19 套
+              // withPinnedWakeSystem（只写 body.system，不进 parts、不上屏；旧会话无钉则逐字同修前）。
+              withPinnedWakeSystem(state, { parts: [{ type: "text", text: retryInjection }] })
             : baseBody
               ? // 零产出：重放原任务书（没有中断处可续，不注入）。
                 { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }
