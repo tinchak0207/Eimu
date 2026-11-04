@@ -51,7 +51,7 @@ import { flushPendingSteers, takePendingSteersForRetry, settleSteerRetryInjectio
 // 只入队；不在这里呼叫 LLM，也不自动跑批次（批次仍由 MEMORY_BATCH_ENABLED/人工决定）。
 import { detectMemorySignals } from "./memory-trigger.ts"
 import { enqueueMemorySignal, appendMemoryAudit } from "./memory-queue.ts"
-import { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools } from "./opencode-event-handler-hooks.ts"
+import { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools, parkInFlightToolsAsOrphans } from "./opencode-event-handler-hooks.ts"
 import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"
 import { withPinnedWakeSystem } from "./pinned-goal.ts"
 
@@ -149,7 +149,8 @@ export function handleOpencodeEvent(event: any): void {
       // 上游报错或引擎重启（含 OOM 被杀）后，在跑的工具不会再回 tool.result，
       // in-flight 表必须清掉，否则中段停滞哨会把「工具还在跑」当成常态一直等下去
       // （2026-10-31 实测：opencode 被 OOM 杀后幽灵 in-flight 让 turn 多等了 6 分钟以上）。
-      clearInFlightTools(state)
+      // H37：清在途但停泊为孤儿候选——idle 段 failover 还要据此注入 is_error 补注。
+      parkInFlightToolsAsOrphans(state)
       emitSessionError(state, opencodeErrorCode(err), errMessage)
       return
     }

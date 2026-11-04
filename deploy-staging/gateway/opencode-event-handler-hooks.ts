@@ -83,7 +83,25 @@ export function noteToolInFlight(state: SessionState, part: any): void {
     boundMap(m, IN_FLIGHT_TOOLS_CAP)
   } else if (status === "completed" || status === "error") {
     m.delete(callId)
+    orphanCandidatesBySession.get(state.sessionId)?.delete(callId)
   }
+}
+// H37（2026-11-04）：session.error 时 70c30e37f 直接清 in-flight 表（防中段停滞哨被幽灵工具拖住），
+// 但 idle 段 failover 随后 takeInFlightTools 拿到空表 ⇒ 孤儿 tool_use is_error 补注永远不注入。
+// 改为「停泊」：把在途工具移进孤儿候选（hasInFlightTool 不看它 ⇒ 停滞哨照旧不等幽灵），
+// failover 的 takeInFlightTools 仍能取到；正常收尾／零产出重投的 clearInFlightTools 一并清。
+const orphanCandidatesBySession = new Map<string, Map<string, OrphanToolUse>>()
+export function parkInFlightToolsAsOrphans(state: SessionState): void {
+  const m = inFlightToolsBySession.get(state.sessionId)
+  inFlightToolsBySession.delete(state.sessionId)
+  if (!m || m.size === 0) return
+  let parked = orphanCandidatesBySession.get(state.sessionId)
+  if (!parked) {
+    parked = new Map()
+    orphanCandidatesBySession.set(state.sessionId, parked)
+  }
+  for (const [k, v] of m) parked.set(k, v)
+  boundMap(parked, IN_FLIGHT_TOOLS_CAP)
 }
 /** 该 session 当前是否有工具在跑（in-flight）。中段停滞哨据此区分「工具在跑」与「turn 冻结」。 */
 export function hasInFlightTool(state: SessionState): boolean {
@@ -92,12 +110,13 @@ export function hasInFlightTool(state: SessionState): boolean {
 }
 /** 取出并清空该 session 的孤儿候选（failover 消费一次；正常 turn 结束亦清，防泄漏）。 */
 export function takeInFlightTools(state: SessionState): OrphanToolUse[] {
-  const m = inFlightToolsBySession.get(state.sessionId)
-  if (!m || m.size === 0) return []
-  const out = [...m.values()]
-  m.clear()
-  return out
+  const merged = new Map<string, OrphanToolUse>(orphanCandidatesBySession.get(state.sessionId) ?? [])
+  for (const [k, v] of inFlightToolsBySession.get(state.sessionId) ?? []) merged.set(k, v)
+  orphanCandidatesBySession.delete(state.sessionId)
+  inFlightToolsBySession.get(state.sessionId)?.clear()
+  return [...merged.values()]
 }
 export function clearInFlightTools(state: SessionState): void {
   inFlightToolsBySession.delete(state.sessionId)
+  orphanCandidatesBySession.delete(state.sessionId)
 }
