@@ -58,6 +58,18 @@ const nextConfig = {
       { source: "/docs/report", destination: "/docs", permanent: true },
     ];
   },
+  // S-14：仅加两条不会破坏嵌入/分享页的基础安全头；CSP/HSTS/X-Frame-Options 待作者裁定。
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     const controlPlaneRewrites = buildControlPlaneRewrites(controlPlaneOrigin);
     // 影片生成必须先进 Vercel 的处理器套动作合同，再代理到控制面。

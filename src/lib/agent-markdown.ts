@@ -90,6 +90,37 @@ export function isAudioUrl(url: string): boolean {
   );
 }
 
+/**
+ * S-18：Markdown 链接/图片 URL 的 scheme 与来源过滤（模型输出不可信，可被提示注入）。
+ *
+ * 浏览器解析 URL 时会吞掉 scheme 里的 tab/换行并裁掉首部控制字符与空白（`java\tscript:`），
+ * 故先剔除全部空白/控制/零宽字符再判 scheme，不能靠首部 trim。
+ * - link：http / https / mailto 与站内相对路径（`/x`、`#x`、`?x`、`./x`、`../x`、无冒号相对）
+ * - image：http / https 与站内单斜杠相对路径（无 data:/blob: 的现有使用）
+ * - 其余（javascript:/vbscript:/data:/file:/blob:/协议相对 `//host`…）返回 null，调用方降级为纯文本
+ * 注意：图片仍可指向任意 https 外域（零点击外泄面未封，需作者裁定域名白名单/站内代理）。
+ */
+// eslint-disable-next-line no-control-regex
+const URL_NOISE_RE = /[\u0000-\u0020\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\uffa0]/g;
+export function sanitizeMarkdownUrl(href: string, kind: "link" | "image"): string | null {
+  if (typeof href !== "string") return null;
+  const raw = href.trim();
+  const compact = raw.replace(URL_NOISE_RE, "");
+  if (compact === "") return null;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(compact);
+  if (scheme) {
+    const name = scheme[1].toLowerCase();
+    if (name === "http" || name === "https") return raw;
+    if (name === "mailto" && kind === "link") return raw;
+    return null;
+  }
+  // 无 scheme：协议相对（`//host`、`/\host`、`\\host`）会跳到外域，一律拒。
+  if (/^[/\\]{2}/.test(compact) || /^\\/.test(compact) || /^\/\\/.test(compact)) return null;
+  if (compact.startsWith("/")) return raw;
+  if (kind === "image") return null;
+  return raw;
+}
+
 function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
   const out: MdInline[] = [];
   for (const t of tokens ?? []) {
@@ -118,21 +149,32 @@ function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
         break;
       case "link": {
         const tok = t as Tokens.Link;
+        const href = sanitizeMarkdownUrl(tok.href, "link");
+        // scheme/来源不合规：降级为纯文本（只留链接文字，不留可点击目标）。
+        if (href === null) {
+          out.push(...inlineFromTokens(tok.tokens));
+          break;
+        }
         // 图片直链的 <a>：整条转缩略图，不留裸 URL 文本。
-        if (isImageUrl(tok.href)) {
-          out.push({ k: "img", src: tok.href, alt: tok.text });
-        } else if (isVideoUrl(tok.href)) {
-          out.push({ k: "video", src: tok.href });
-        } else if (isAudioUrl(tok.href)) {
-          out.push({ k: "audio", src: tok.href });
+        if (isImageUrl(href)) {
+          out.push({ k: "img", src: href, alt: tok.text });
+        } else if (isVideoUrl(href)) {
+          out.push({ k: "video", src: href });
+        } else if (isAudioUrl(href)) {
+          out.push({ k: "audio", src: href });
         } else {
-          out.push({ k: "link", href: tok.href, children: inlineFromTokens(tok.tokens) });
+          out.push({ k: "link", href, children: inlineFromTokens(tok.tokens) });
         }
         break;
       }
       case "image": {
         const tok = t as Tokens.Image;
-        out.push({ k: "img", src: tok.href, alt: tok.text });
+        const src = sanitizeMarkdownUrl(tok.href, "image");
+        if (src === null) {
+          if (tok.text) out.push({ k: "text", text: tok.text });
+        } else {
+          out.push({ k: "img", src, alt: tok.text });
+        }
         break;
       }
       case "br":
