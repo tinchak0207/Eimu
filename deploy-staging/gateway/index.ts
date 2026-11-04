@@ -199,7 +199,7 @@ setInterval(() => {
 // ── R6（2026-09-10）subagent async 完成唤醒 ─────────────────────────────
 // async dispatch 的子代理终态（成功/失败皆唤）时，把结果摘要以系统消息投进
 // 父会话并续 turn。轮子 = workflow 唤醒扫描器的 prompt_async 段（2026-09-01 修 3）：
-// beastAgentField 带 agent 栏＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
+// beastAgentField 带 agent 栏（野兽 orchestrator／否则 creator，H43）＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
 // 幂等：finishRun 的 status 守卫保每 run 只唤一次；父回合 ackTimer 仍在时
 // 推进 session.pendingSubagentWakes（上限 32，丢最旧），回合结束再注入，不丢弃。
 //

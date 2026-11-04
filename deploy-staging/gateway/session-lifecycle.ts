@@ -17,12 +17,18 @@ import { MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // ── 能力断路（MOE 评测死线1，2026-09-08）：野兽模式 ON 时主会话跑 orchestrator
 // agent（opencode.json agent.orchestrator.tools 把 blender_exec/blender_render/
 // blender_export_gltf/music_gen 从工具表物理移除）→ 主会话无法直调域工具，只能
-// subagent_dispatch 派发 Expert。OFF 不带 agent 栏＝default build agent＝零变化。
+// subagent_dispatch 派发 Expert。
+// H43（2026-11-04）：OFF 改带 creator。旧注释「OFF 不带 agent 栏＝default build＝零变化」
+// 已过时——admission 非野兽自 09-29 起挂 creator（messages-gw-admission.ts），会话创建
+// 自 10-19 起绑 creator（handleCreateSession）；唤醒体缺 agent 时 opencode 1.18.14 不沿用
+// 上一条，而是落 defaultInfo＝内建 build（无 Eimu 人设、工具表换成 build 的，见 H42）。
+// 判定与 handleCreateSession 同口径：beast_mode===true ⇒ orchestrator，其余（含读设置抛错）⇒ creator。
+// 只给 agent，不带 model（opencode 取会话当前 model）。
 export function beastAgentField(state: SessionState): Record<string, string> {
   try {
     if (loadUserSettings(state.apiKey)?.beast_mode === true) return { agent: "orchestrator" }
   } catch {}
-  return {}
+  return { agent: "creator" }
 }
 
 // ---- public handlers ----
