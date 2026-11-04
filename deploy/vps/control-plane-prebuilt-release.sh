@@ -191,14 +191,15 @@ gates_check() {
   return "$fail"
 }
 
-# 估算 VPS 新增落盘（字节）：containerd 存储＝压缩 blob＋解包快照，按 2× 计；overlay worker 只算超出底座的部分。
+# 估算 VPS 新增落盘（字节）：containerd 存储下 .Size 已含压缩 blob＋解包快照（＝docker images 的 DISK USAGE）；
+#   overlay worker 只算超出底座的部分；api 按整镜像算（与线上共享的 node 底层不扣，偏保守）。
 estimate_bytes() {
   local a w b=0
   a="$(docker image inspect "$(cand_tag "$API_REPO")" --format '{{.Size}}' 2>/dev/null || echo 0)"
   w="$(docker image inspect "$(cand_tag "$WORKER_REPO")" --format '{{.Size}}' 2>/dev/null || echo 0)"
   [ "$(docker image inspect "$(cand_tag "$WORKER_REPO")" --format '{{index .Config.Labels "eimu.cp.worker.mode"}}' 2>/dev/null)" = overlay ] \
     && b="$(docker image inspect "$(kv live_worker_image)" --format '{{.Size}}' 2>/dev/null || echo 0)"
-  echo $(( (a + w - b) * 2 ))
+  echo $(( a + w - b ))
 }
 
 # ── 构建 ────────────────────────────────────────────────────────────────
@@ -218,7 +219,7 @@ cmd_build() {
   resolve_engine || engine_unavailable; export DOCKER_HOST="$ENGINE_HOST"
   local at wt dir p base live_rev mode t0; local -a present=()
   at="$(cand_tag "$API_REPO")"; wt="$(cand_tag "$WORKER_REPO")"
-  if docker image inspect "$at" >/dev/null 2>&1 && docker image inspect "$wt" >/dev/null 2>&1; then echo "BUILD_REUSE api=$at worker=$wt"; return 0; fi
+  if docker image inspect "$at" >/dev/null 2>&1 && docker image inspect "$wt" >/dev/null 2>&1; then echo "BUILD_REUSE api=$at worker=$wt"; smoke_local "$at" "$wt"; return 0; fi
   [ -n "$PROBE" ] || PROBE="$(remote_probe)"
   base="$(kv live_worker_image)"; live_rev="$(kv live_worker_rev)"
   mkdir -p "$STATE_DIR" "$BUILD_ROOT"
@@ -252,12 +253,16 @@ cmd_build() {
 
 # 本机冒烟：不带任何 env/秘密；api 进程能起来并应答 HTTP；worker 源码与 tsx 在位、CMD 未变。
 smoke_local() {
-  local at="$1" wt="$2" name="cp-api-smoke-$$" code=000 port=13199
-  docker run -d --rm --name "$name" -p "127.0.0.1:$port:3000" "$at" >/dev/null
-  for _ in $(seq 1 20); do code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$port/api/healthz" || echo 000)"; [ "$code" != 000 ] && break; sleep 2; done
+  local at="$1" wt="$2" name="cp-api-smoke-$$" code=""
+  # 容器内 wget（与 VPS postcheck 同法），不经 rootless 端口转发；只认 healthz 200。
+  docker run -d --rm --name "$name" "$at" >/dev/null
+  for _ in $(seq 1 20); do
+    code="$(docker exec "$name" wget -S -O /dev/null -T 5 http://127.0.0.1:3000/api/healthz 2>&1 | grep -m1 'HTTP/' | awk '{print $2}' || true)"
+    [ "$code" = 200 ] && break; sleep 2
+  done
   docker rm -f "$name" >/dev/null 2>&1 || true
-  echo "SMOKE api http=$code"
-  [ "$code" != 000 ] || die "api 冒烟失败：进程未应答（镜像已建未上线）"
+  echo "SMOKE api healthz=${code:-无回应}"
+  [ "$code" = 200 ] || die "api 冒烟失败：healthz≠200（镜像已建未上线）"
   docker run --rm --entrypoint sh "$wt" -c 'test -f /app/worker/generation-worker.ts && test -f /app/tools/control-plane-bootstrap.ts && test -d /app/node_modules/tsx' \
     || die "worker 冒烟失败：源码/tsx 不在位"
   [ "$(docker image inspect "$wt" --format '{{json .Config.Cmd}}')" = '["npm","run","generation:bootstrap"]' ] || die "worker CMD 与线上配方不同"
