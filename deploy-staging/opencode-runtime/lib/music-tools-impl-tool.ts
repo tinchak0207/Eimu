@@ -64,7 +64,7 @@ export const musicGenTool: MusicToolDef = {
       type: "boolean",
       required: false,
       description:
-        "默认 false：一次调用只交付并登记一个成品（FlowMusic 上游常回 2 个 take，多余的不上传不登记不出卡）。仅当用户明确要「多个版本供挑选」时传 true；传了 target_seconds 时本参数无效（只交付裁好的一个）。",
+        "默认 true（保持 2026-10-03 多 take 偏好闸行为：FlowMusic 回多个 take 时全部交付并带 preference_question）。传 false 才只交付主候选；传了 target_seconds 时本参数无效（只交付裁好的一个）。",
     },
     // </harness-only>
     reference_images: {
@@ -150,7 +150,7 @@ export const musicGenTool: MusicToolDef = {
         }
         targetSeconds = Math.round(t * 1000) / 1000
       }
-      const allTakes = (rawArgs.all_takes === true || rawArgs.all_takes === "true") && targetSeconds === null
+      const allTakes = !(rawArgs.all_takes === false || rawArgs.all_takes === "false") && targetSeconds === null
       // </harness-only>
 
       // ── 乐谱编辑参数（片 K，2026-09-19）────────────────────────────────────
@@ -529,7 +529,7 @@ export const musicGenTool: MusicToolDef = {
         // <harness-only>
         // 一次调用只交付一个成品（2026-11-04）：旧版把 FlowMusic 的每个 take 都上传并进 audios[]，
         // gateway 对每个 audios[].url 发一张 audio.done 卡、账本多行，用户一句话得到 2 个成品。
-        // 默认只交付主候选；all_takes=true（用户明确要多版本）才恢复多 take；裁时长时恒为单成品。
+        // 默认保持多 take 交付（偏好闸需要 ≥2 个 take，见 2026-10-03-music-preference-gate-entropy）；all_takes=false 或裁时长时才单成品。
         extraTakesSkipped = allTakes ? 0 : Math.max(0, flowResult.candidates.length - 1)
         // </harness-only>
         for (const candidate of allTakes ? flowResult.candidates.slice(1) : []) {
