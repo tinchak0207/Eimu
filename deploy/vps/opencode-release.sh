@@ -257,15 +257,27 @@ last_release_sha() {
     "sudo tail -1 '$HISTORY_LOG' 2>/dev/null | awk '{print \$2}'" 2>/dev/null | head -1
 }
 
+# 最近一次「全量」发布的 sha（history 里非 prompts-only 的最后一行）；prompts-only 不代表整树被发过。
+last_full_release_sha() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
+    "sudo awk '\$1 != \"prompts-only\" {s=\$2} END{print s}' '$HISTORY_LOG' 2>/dev/null" 2>/dev/null | head -1
+}
+
 run_recon() {
   [ "$SKIP_RECON" -eq 1 ] && { log "SKIP recon（--skip-recon）"; return 0; }
   [ -f "$RECON_SCRIPT" ] || die "找不到 recon 脚本：$RECON_SCRIPT"
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN local: bash $RECON_SCRIPT"; return 0; fi
-  local base
-  base="$(last_release_sha)"
+  local base pbase
+  base="$(last_full_release_sha)"
+  pbase="$(last_release_sha)"
   [ -n "$base" ] || base="HEAD"
-  log "== recon 对账（挡漂移；基准 $base）=="
-  RECON_BASE="$base" bash "$RECON_SCRIPT" || die "recon 未通过（生产被手改或故障）→ 先收编再发布"
+  [ -n "$pbase" ] || pbase="$base"
+  log "== recon 对账（挡漂移；基准 $base；提示词基准 $pbase）=="
+  # 根因修复（2026-11-05）：prompts-only 只装 AGENTS.md＋skills/_prompt-routing，却写 history 末行，
+  # 旧版 recon 把末行当整树基准 → 全量发布前凡有「上次全量之后改过的代码文件」就被误判漂移，
+  # 逼人 --skip-recon。现拆两个基准：整树＝最近一次全量 release；提示词范围＝history 末行（含 prompts-only）。
+  RECON_BASE="$base" RECON_PROMPTS_BASE="$pbase" bash "$RECON_SCRIPT" || die "recon 未通过（生产被手改或故障）→ 先收编再发布"
 }
 
 # 发版祖先闸：只读读 history（--dry-run 照样读真线上），推出线上生效 commit 集合。
