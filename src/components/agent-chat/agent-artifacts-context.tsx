@@ -21,6 +21,8 @@ export type AgentArtifactsValue = {
   imageActions?: Pick<AgentImageCardProps, "onSaveToLibrary" | "onEdit" | "onDownload" | "onRerun" | "onRerunVariant">;
   videoActions?: Pick<AgentVideoCardProps, "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant">;
   audioActions?: Pick<AgentAudioCardProps, "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant">;
+  /** 赏阅「发给助理」：预填输入框（不自动送出）。缺席时赏阅退化为「复制给助理」。 */
+  onSendFeedback?: (text: string) => void;
 };
 
 const AgentArtifactsContext = createContext<AgentArtifactsValue | undefined>(undefined);
@@ -30,12 +32,14 @@ export function AgentArtifactsProvider({
   imageActions,
   videoActions,
   audioActions,
+  onSendFeedback,
   children,
 }: {
   items: AgentChatState["items"];
   imageActions?: AgentArtifactsValue["imageActions"];
   videoActions?: AgentArtifactsValue["videoActions"];
   audioActions?: AgentArtifactsValue["audioActions"];
+  onSendFeedback?: AgentArtifactsValue["onSendFeedback"];
   children: ReactNode;
 }) {
   const media = useMemo(
@@ -46,8 +50,8 @@ export function AgentArtifactsProvider({
     [items],
   );
   const value = useMemo(
-    () => ({ items: media, imageActions, videoActions, audioActions }),
-    [media, imageActions, videoActions, audioActions],
+    () => ({ items: media, imageActions, videoActions, audioActions, onSendFeedback }),
+    [media, imageActions, videoActions, audioActions, onSendFeedback],
   );
   return <AgentArtifactsContext.Provider value={value}>{children}</AgentArtifactsContext.Provider>;
 }

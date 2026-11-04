@@ -17,9 +17,24 @@ import { EntityText } from "@/components/entities/entity-chip";
 import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
 import type { StoryboardShotAudioMetadata } from "@/lib/canvas/storyboard-shots";
 import { STATUS_LABEL } from "./constants";
+import { OpenInViewerButton } from "@/components/viewer/OpenInViewerButton";
+import { stableAssetId } from "@/lib/viewer/from-items";
+import type { ViewAsset } from "@/lib/viewer/types";
 
 function isUrl(value: string): boolean {
   return value.startsWith("http") || value.startsWith("data:");
+}
+
+/** 画布媒体节点 → 赏阅成品（来历只带节点上真有的 prompt）。 */
+function viewAssetOfNode(node: CanvasNode, kind: "image" | "video" | "audio", url: string): ViewAsset {
+  const prompt = node.metadata?.prompt?.trim();
+  return {
+    id: stableAssetId(url),
+    kind,
+    url,
+    ...(node.title ? { title: node.title } : {}),
+    ...(prompt ? { provenance: { prompt } } : {}),
+  };
 }
 
 /** B3：缩略图降采样——小尺寸显示时走 next/image 优化器（仅 Blob 存储域，
@@ -408,6 +423,7 @@ export function NodeBody({
               // 回呼未提供 = 不渲染（诚实原则：不长出必定失败的按钮）。
               return (
                 <div className="relative h-full w-full">
+                  <OpenInViewerButton asset={viewAssetOfNode(node, "video", content)} className="absolute right-1.5 top-1.5 z-10" />
                   <video
                     ref={videoRef}
                     src={content}
@@ -457,16 +473,19 @@ export function NodeBody({
             }
             const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
             return (
-              // eslint-disable-next-line @next/next/no-img-element -- 节点内容图（data:/缩图/本站 proxy 来源），next/image 无法优化且会绑死节点拖曳缩放版面
-              <img
-                src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
-                alt={node.title}
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-                className="h-full w-full object-cover"
-                onError={handleImgError}
-              />
+              <div className="relative h-full w-full">
+                <OpenInViewerButton asset={viewAssetOfNode(node, "image", content)} className="absolute right-1.5 top-1.5 z-10" />
+                {/* eslint-disable-next-line @next/next/no-img-element -- 节点内容图（data:/缩图/本站 proxy 来源），next/image 无法优化且会绑死节点拖曳缩放版面 */}
+                <img
+                  src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
+                  alt={node.title}
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                  onError={handleImgError}
+                />
+              </div>
             );
           }
           return renderPlaceholder(status, metadata);
@@ -500,7 +519,8 @@ export function NodeBody({
         const content = metadata?.content;
         if (content && isUrl(content)) {
           return (
-            <div className="flex flex-1 items-center justify-center p-3">
+            <div className="relative flex flex-1 items-center justify-center p-3 pr-11">
+              <OpenInViewerButton asset={viewAssetOfNode(node, "audio", content)} className="absolute right-2 top-1/2 -translate-y-1/2" />
               <audio src={content} controls className="w-full" data-canvas-interactive />
             </div>
           );

@@ -49,6 +49,8 @@ export interface AgentChatPanelProps {
   videoActions?: AgentTranscriptProps["videoActions"];
   /** 出音频卡动作回调：接线前省略，按钮保持 disabled。 */
   audioActions?: AgentTranscriptProps["audioActions"];
+  /** 赏阅「发给助理」：把整理好的反馈预填进输入框（同「微调」，不自动送出）。 */
+  onSendFeedback?: (text: string) => void;
   /** 批量生成的中止信号。存在时批量进度卡带上「停止」按钮。 */
   onStopGeneration?: () => void;
   /**
@@ -201,6 +203,7 @@ function AgentChatPanelComponent({
   imageActions,
   videoActions,
   audioActions,
+  onSendFeedback,
   onStopGeneration,
   anchor,
   onAnchor,
@@ -641,7 +644,7 @@ function AgentChatPanelComponent({
           // 不新造发送路径）；Provider 只罩消息列表，空态没有气泡可发。
           // OpenUI 成品组件按 taskId 查会话产物（AgentArtifactsProvider），动作与媒体卡同一组。
           <AgentChatSendProvider value={onSend}>
-            <AgentArtifactsProvider items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions}>
+            <AgentArtifactsProvider items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} onSendFeedback={onSendFeedback}>
               <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} onAuthorizeLocalFiles={authorizeLocalFiles} />
             </AgentArtifactsProvider>
           </AgentChatSendProvider>

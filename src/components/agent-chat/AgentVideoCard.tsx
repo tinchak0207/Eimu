@@ -1,11 +1,14 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { AlertTriangle, Check, Coins, Download, Library, Loader2, Play, RotateCw, SlidersHorizontal, X } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, Coins, Download, Library, Loader2, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentVideoItem } from "@/lib/agent-chat-types";
+import { viewAssetFromVideoItem } from "@/lib/viewer/from-items";
+import { Viewer } from "@/components/viewer/Viewer";
 import { AgentRerunMenu } from "./AgentRerunMenu";
+import type { AgentMediaItem } from "./agent-artifacts-context";
+import { useAgentMediaActions, useAgentMediaViewerOpen } from "./agent-viewer";
 
 export interface AgentVideoCardProps {
   item: AgentVideoItem;
@@ -21,6 +24,8 @@ export interface AgentVideoCardProps {
   onRerun?: (item: AgentVideoItem, count: number) => void;
   /** 「微调」：只把半句话预填进输入框（不自动送出＝不替使用者开一轮扣费）。 */
   onVariant?: (item: AgentVideoItem) => void;
+  /** 所在合集（OpenUI 图集/专辑/对比）：「放大」打开整个合集并停在本条。缺省＝只看本条。 */
+  viewerSet?: readonly AgentMediaItem[];
 }
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -65,127 +70,17 @@ function VideoAction({
   );
 }
 
-/** 全屏影片播放器：黑底置中、原生 controls 播放、右上关闭、底部下载。
- *  关闭走三条路：点背景 / Esc / Android 返回键（history pushState + popstate，
- *  与图片 Lightbox 同惯例）。影片不做捏合缩放/拖动平移——对播放中的影片无意义。 */
-function VideoLightbox({
-  src,
-  onClose,
-  onDownload,
-}: {
-  src: string;
-  onClose: () => void;
-  onDownload?: () => void;
-}) {
-  const closeBtnRef = useRef<HTMLButtonElement>(null);
-
-  // 打开期间锁背景滚动（存原值，关闭时还原）；焦点进关闭按钮。
-  useEffect(() => {
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeBtnRef.current?.focus();
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, []);
-
-  // Esc 关闭 + Android 返回键关闭（history 弹层惯例，与图片查看器一致）。
-  useEffect(() => {
-    window.history.pushState({ agentVideoLightbox: true }, "");
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    const onPop = () => onClose();
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("popstate", onPop);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("popstate", onPop);
-    };
-  }, [onClose]);
-
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="影片查看器"
-      className="agent-chat-surface fixed inset-0 z-[95] flex min-h-[100dvh] select-none items-center justify-center bg-[rgba(18,20,28,0.92)] backdrop-blur-xl [-webkit-tap-highlight-color:transparent] motion-safe:animate-lg-appear motion-reduce:animate-none"
-      onClick={onClose}
-    >
-      <button
-        ref={closeBtnRef}
-        type="button"
-        aria-label="关闭"
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose();
-        }}
-        className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.14] text-white backdrop-blur-md transition-colors duration-200 hover:bg-white/[0.24] focus:outline-none focus:ring-2 focus:ring-white/50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
-      >
-        <X className="h-5 w-5" aria-hidden="true" />
-      </button>
-      {/* 点击影片/控制列不冒泡到背景，不误关查看器。 */}
-      <div
-        className="flex max-h-full max-w-full items-center justify-center"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <video
-          src={src}
-          controls
-          autoPlay
-          playsInline
-          className="max-h-[82dvh] max-w-[92vw] rounded-[1.5rem] bg-black object-contain"
-        />
-      </div>
-      <div className="absolute inset-x-0 bottom-[max(1.25rem,env(safe-area-inset-bottom))] flex justify-center">
-        <button
-          type="button"
-          aria-label="下载"
-          title="下载"
-          disabled={!onDownload}
-          onClick={(event) => {
-            event.stopPropagation();
-            onDownload?.();
-          }}
-          className={cn(
-            "flex h-11 items-center gap-1.5 rounded-full bg-white/[0.14] px-4 text-ios-subhead font-medium text-white backdrop-blur-md transition-colors duration-200",
-            "enabled:hover:bg-white/[0.24] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-white/50",
-            "disabled:cursor-not-allowed disabled:text-white/40",
-            "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
-          )}
-        >
-          <Download className="h-4 w-4" aria-hidden="true" />
-          下载
-        </button>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant }: AgentVideoCardProps) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
+function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant, viewerSet }: AgentVideoCardProps) {
   const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
   const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // 上一次按压的时长（毫秒）。click 由它判定是否「长按唤菜单后松手」。
-  const pressRef = useRef<{ dt: number; t: number } | null>(null);
-
-  const closeViewer = useCallback(() => {
-    setViewerOpen(false);
-    triggerRef.current?.focus();
-  }, []);
-
-  const openViewer = useCallback(() => {
-    // 内嵌的可能正在播：进全屏前先停掉，避免两处声音叠着放。
-    videoRef.current?.pause();
-    setViewerOpen(true);
-  }, []);
+  // 内联播放与全屏同源（赏阅 Viewer）：标记/倍速/逐帧、加载失败与重试都由 Surface 自带；
+  // 动作沿用本卡 props 的回调（含「发给助理」预填），点「放大」进站内全屏赏阅。
+  const asset = useMemo(() => viewAssetFromVideoItem(item), [item]);
+  const videoSources = { video: { onSaveToLibrary, onDownload, onRerun, onVariant } };
+  const actionsFor = useAgentMediaActions(videoSources);
+  const viewerActions = actionsFor([item]);
+  const openMedia = useAgentMediaViewerOpen(videoSources);
 
   const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
     apply();
@@ -230,100 +125,19 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
     flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
   }, [item, onDownload, downState, flash]);
 
-  // item.url 变化（同实例换片）时重置加载态，避免旧片的 loaded/failed 串台。
-  useEffect(() => {
-    setLoaded(false);
-    setFailed(false);
-  }, [item.url]);
-
-  const handleRetry = () => {
-    setFailed(false);
-    setLoaded(false);
-    setRetryKey((k) => k + 1);
-  };
-
   return (
     <figure className="agent-rise">
-      {/* 灰底只刷在媒体面这一层（与图片卡同惯例：媒体 `overflow-hidden
-          rounded-[18px] bg-black/[0.03]`，动作条落在页面白底上），不再叠两层灰。 */}
-      <div
-        ref={triggerRef}
-        role="button"
-        tabIndex={0}
-        aria-label="查看影片"
-        className="group relative aspect-video max-h-[min(420px,52dvh)] w-full cursor-zoom-in select-none overflow-hidden rounded-[18px] bg-black/[0.03] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
-        onPointerDown={() => {
-          pressRef.current = { dt: 0, t: Date.now() };
-        }}
-        onPointerUp={() => {
-          const p = pressRef.current;
-          if (p) p.dt = Date.now() - p.t;
-        }}
-        onPointerCancel={() => {
-          pressRef.current = null;
-        }}
-        onClick={() => {
-          const p = pressRef.current;
-          pressRef.current = null;
-          if (!p || failed) return;
-          // 长按会唤起系统菜单（存视频等），松手后的 click 不该把查看器也打开。
-          if (p.dt > 400) return;
-          openViewer();
-        }}
-        onKeyDown={(event) => {
-          if ((event.key === "Enter" || event.key === " ") && !failed) {
-            event.preventDefault();
-            openViewer();
-          }
-        }}
-      >
-        {!failed && !loaded && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" aria-hidden="true">
-            <Play className="h-10 w-10 text-white/70" fill="currentColor" />
-          </div>
-        )}
-        {failed ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-              <AlertTriangle className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <p className="text-ios-subhead font-medium text-muted-foreground">视频加载失败</p>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleRetry();
-              }}
-              className="flex h-11 items-center gap-1.5 rounded-full bg-ios-blue/10 px-4 text-ios-subhead font-medium text-ios-blue backdrop-blur-[22px] transition-colors duration-200 hover:bg-ios-blue/[0.16] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ios-blue/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
-            >
-              <RotateCw className="h-4 w-4" aria-hidden="true" />
-              重试
-            </button>
-          </div>
-        ) : (
-          <video
-            key={retryKey}
-            ref={videoRef}
-            src={item.url}
-            aria-label="智能体生成的影片"
-            controls
-            playsInline
-            preload="none"
-            onLoadedMetadata={() => setLoaded(true)}
-            onError={() => setFailed(true)}
-            className={cn(
-              "absolute inset-0 h-full w-full bg-black object-contain transition-opacity duration-300 motion-reduce:transition-none",
-              "opacity-100",
-            )}
-          />
-        )}
-        {/* media_kind 徽章：film=成片、其余（含缺省）=影片。 */}
-        <span
-          className={cn(
-            "pointer-events-none absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-ios-caption1 font-medium backdrop-blur-md",
-            failed ? "hidden" : "bg-black/55 text-white/90",
-          )}
-        >
+      {/* 媒体面＝赏阅 inline；media_kind 徽章（film=成片、其余含缺省=影片）叠在左上。 */}
+      <div className="relative">
+        <Viewer
+          asset={asset}
+          density="inline"
+          actions={viewerActions}
+          // 在合集里时「放大」进整个合集（可切成员）；单条走 Viewer 默认路径。
+          onOpenFull={viewerSet ? () => openMedia(item, viewerSet) : undefined}
+          className="max-h-[min(420px,52dvh)]"
+        />
+        <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-full bg-black/55 px-2 py-0.5 text-ios-caption1 font-medium text-white/90 backdrop-blur-md">
           {item.mediaKind === "film" ? "成片" : "影片"}
         </span>
       </div>
@@ -371,11 +185,6 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
         </VideoAction>
       </div>
-      {viewerOpen &&
-        createPortal(
-          <VideoLightbox src={item.url} onClose={closeViewer} onDownload={onDownload ? () => onDownload(item) : undefined} />,
-          document.body,
-        )}
     </figure>
   );
 }

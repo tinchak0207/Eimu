@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play } from "lucide-react";
 import { ARTIFACT_MISSING_TEXT, type ArtifactSlotProps, type GalleryLayout } from "@/lib/openui/artifact-slot";
 import { loadLyricPreview, loadWaveform } from "@/lib/openui/artifact-preview";
+import { CompareViewer } from "@/components/viewer/CompareViewer";
+import { Viewer } from "@/components/viewer/Viewer";
+import { stableAssetId } from "@/lib/viewer/from-items";
+import { viewAssetFromMediaItem } from "./agent-viewer";
+import type { ViewAsset } from "@/lib/viewer/types";
 import { AgentImageCard } from "./AgentImageCard";
 import { AgentVideoCard } from "./AgentVideoCard";
 import { AgentAudioCard } from "./AgentAudioCard";
@@ -13,7 +18,8 @@ import { resolveArtifact, useAgentArtifacts, type AgentArtifactsValue, type Agen
 /**
  * OpenUI 成品组件的真实渲染（2026-10-18）：经 ArtifactSlotRendererProvider 注入 eimu-library。
  * 复用聊天里既有的 AgentImageCard / AgentVideoCard / AgentAudioCard（下载、再来一版、变体、
- * 存图库、音频卡的滚动歌词播放器深链都原样保留），不另写播放器。
+ * 存图库都原样保留），不另写播放器；点成员 → 站内赏阅打开整个合集并停在该成员，
+ * 前后滑块用赏阅的 CompareViewer。
  */
 
 function Missing({ count }: { count?: number }) {
@@ -24,51 +30,23 @@ function Missing({ count }: { count?: number }) {
   );
 }
 
-function MediaCard({ item, ctx }: { item: AgentMediaItem; ctx: AgentArtifactsValue }) {
-  if (item.kind === "image") return <AgentImageCard item={item} {...ctx.imageActions} />;
-  if (item.kind === "video") return <AgentVideoCard item={item} {...ctx.videoActions} />;
-  return <AgentAudioCard item={item} {...ctx.audioActions} />;
+/** set＝所在合集：点该成员时赏阅打开整个合集并停在它（缺省＝只看本件）。 */
+function MediaCard({ item, ctx, set }: { item: AgentMediaItem; ctx: AgentArtifactsValue; set?: readonly AgentMediaItem[] }) {
+  if (item.kind === "image") return <AgentImageCard item={item} {...ctx.imageActions} viewerSet={set} />;
+  if (item.kind === "video") return <AgentVideoCard item={item} {...ctx.videoActions} viewerSet={set} />;
+  return <AgentAudioCard item={item} {...ctx.audioActions} viewerSet={set} />;
 }
 
-/** 盲选用的「裸」媒体：不带配方/花费/模型信息，避免先入为主。 */
+/**
+ * 盲选用的「裸」媒体：只给种类与 URL（不带 taskId/配方/模型/花费），赏阅 inline 与其放大都不会
+ * 泄露来历，避免先入为主；id 用 URL 摘要。
+ */
 function BareMedia({ item }: { item: AgentMediaItem }) {
-  if (item.kind === "image") {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={item.url} alt="候选" className="w-full rounded-ios-md object-cover" loading="lazy" />;
-  }
-  if (item.kind === "video") {
-    return <video src={item.url} controls playsInline preload="none" className="w-full rounded-ios-md bg-black" />;
-  }
-  return <audio src={item.url} controls preload="none" className="w-full" />;
-}
-
-/** 前后滑块：两张图叠放，拖动分界线对比（只读查看控件，不收集任何参数）。 */
-function BeforeAfter({ before, after }: { before: AgentMediaItem; after: AgentMediaItem }) {
-  const [pos, setPos] = useState(50);
-  return (
-    <div className="flex flex-col gap-2" data-openui-compare-slider="">
-      <div className="relative w-full select-none overflow-hidden rounded-ios-md bg-black/5">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={after.url} alt="后" className="block w-full" draggable={false} />
-        <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={before.url} alt="前" className="block w-full" draggable={false} />
-        </div>
-        <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.15)]" style={{ left: `${pos}%` }} />
-        <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-xs text-white">A</span>
-        <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-xs text-white">B</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={pos}
-        aria-label="拖动对比 A / B"
-        onChange={(e) => setPos(Number(e.target.value))}
-        className="w-full accent-[#007aff]"
-      />
-    </div>
+  const asset = useMemo<ViewAsset>(
+    () => ({ id: stableAssetId(item.url), kind: item.kind, url: item.url }),
+    [item],
   );
+  return <Viewer asset={asset} density="inline" />;
 }
 
 function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: GalleryLayout; ctx: AgentArtifactsValue }) {
@@ -77,7 +55,7 @@ function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: Gall
     const main = found[Math.min(hero, found.length - 1)];
     return (
       <div className="flex flex-col gap-2" data-openui-gallery="hero">
-        <MediaCard item={main} ctx={ctx} />
+        <MediaCard item={main} ctx={ctx} set={found} />
         <div className="grid grid-cols-4 gap-2">
           {found.map((item, index) => (
             <button
@@ -105,7 +83,7 @@ function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: Gall
       <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 [overscroll-behavior-x:contain]" data-openui-gallery="strip">
         {found.map((item) => (
           <div key={item.id} className="w-[72%] max-w-[300px] shrink-0 snap-start">
-            <MediaCard item={item} ctx={ctx} />
+            <MediaCard item={item} ctx={ctx} set={found} />
           </div>
         ))}
       </div>
@@ -116,7 +94,7 @@ function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: Gall
       <div className="columns-2 gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid" data-openui-gallery="masonry">
         {found.map((item) => (
           <div key={item.id}>
-            <MediaCard item={item} ctx={ctx} />
+            <MediaCard item={item} ctx={ctx} set={found} />
           </div>
         ))}
       </div>
@@ -125,7 +103,7 @@ function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: Gall
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-openui-gallery="grid">
       {found.map((item) => (
-        <MediaCard key={item.id} item={item} ctx={ctx} />
+        <MediaCard key={item.id} item={item} ctx={ctx} set={found} />
       ))}
     </div>
   );
@@ -188,6 +166,13 @@ function AudioPreview({ item, preview }: { item: AgentMediaItem; preview: "lyric
   );
 }
 
+/** 前后滑块：赏阅的 CompareViewer（只读查看控件，不收集任何参数）；前=A、后=B。 */
+function SliderCompare({ before, after }: { before: AgentMediaItem; after: AgentMediaItem }) {
+  const a = useMemo(() => viewAssetFromMediaItem(before), [before]);
+  const b = useMemo(() => viewAssetFromMediaItem(after), [after]);
+  return <CompareViewer a={a} b={b} mode="slider" />;
+}
+
 const LETTERS = ["A", "B", "C", "D"];
 
 function CompareView({ found, mode, question, ctx }: { found: AgentMediaItem[]; mode: "side" | "blind" | "slider"; question?: string; ctx: AgentArtifactsValue }) {
@@ -209,7 +194,7 @@ function CompareView({ found, mode, question, ctx }: { found: AgentMediaItem[]; 
     return (
       <div className="flex flex-col gap-3" data-openui-compare="slider">
         {question ? <p className="text-sm font-medium">{question}</p> : null}
-        <BeforeAfter before={images[0]} after={images[1]} />
+        <SliderCompare before={images[0]} after={images[1]} />
       </div>
     );
   }
@@ -220,7 +205,7 @@ function CompareView({ found, mode, question, ctx }: { found: AgentMediaItem[]; 
         {found.map((item, index) => (
           <div key={item.id} className="flex flex-col gap-2 rounded-ios-lg border border-border/60 p-2" data-openui-candidate={LETTERS[index]}>
             <span className="text-sm font-semibold">方案 {LETTERS[index]}</span>
-            {blind ? <BareMedia item={item} /> : <MediaCard item={item} ctx={ctx} />}
+            {blind ? <BareMedia item={item} /> : <MediaCard item={item} ctx={ctx} set={found} />}
             <button
               type="button"
               className="min-h-11 rounded-ios-md border border-border bg-background px-3 text-sm font-medium disabled:opacity-50"
@@ -275,7 +260,7 @@ export function OpenUIArtifactSlot({ kind, refs, title, caption, mode, layout, p
           {list.map((item, index) => (
             <div key={item.id} className="flex flex-col gap-1">
               {kind === "album" ? <span className="text-sm text-muted-foreground">{`${index + 1}.`}</span> : null}
-              <MediaCard item={item} ctx={ctx} />
+              <MediaCard item={item} ctx={ctx} set={list.length > 1 ? list : undefined} />
               {kind === "audio" && preview ? <AudioPreview item={item} preview={preview} /> : null}
             </div>
           ))}

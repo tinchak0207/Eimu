@@ -22,20 +22,53 @@ import { authHeaders } from "@/lib/canvas/client";
 import { cn } from "@/lib/utils";
 
 /**
- * 拉 glb bytes → blob URL。两条来源：
+ * 拉 glb bytes → blob URL。三条来源：
  *   - 站内桥产物（导演卡）：走 `/api/blender-artifact?name=` 代读，**必带 authHeaders**
  *     （历史坑：裸 fetch 401 静默 → 视口永远空）。
- *   - 公网物件存储（本机导入卡，2026-09-27）：glb_path 本身是 http(s) URL，直连拉取。
- *     **不带 Authorization**——token 只送本站 origin，禁止外泄到第三方主机。
+ *   - 本站受保护端点（绝对 URL 但同源且路径在 /api/ 下，如赏阅把相对路径解析后传入）：
+ *     与上一条同理，**必带 authHeaders**（头只送本站 origin）。
+ *   - 公开资源（站外 http(s) URL，或同源非 /api/ 的静态文件，如 store 域 glb、/public 文件）：
+ *     **既不要求登录也不发送登录头**——赏阅 `/view` 页对匿名访客开放；token 也绝不外泄到第三方主机。
  */
+type GltfSource = { url: string; needsAuth: boolean };
+
+function classifyGltfSource(glbPath: string): GltfSource {
+  if (!/^https?:\/\//i.test(glbPath)) {
+    return {
+      url: `/api/blender-artifact?name=${encodeURIComponent(glbPath.split("/").filter(Boolean).pop() ?? "")}`,
+      needsAuth: true,
+    };
+  }
+  let sameOriginApi = false;
+  try {
+    const parsed = new URL(glbPath);
+    sameOriginApi =
+      typeof window !== "undefined" && parsed.origin === window.location.origin && /^\/api(\/|$)/.test(parsed.pathname);
+  } catch {
+    // URL 解析失败按公开资源处理（不带头），fetch 自会报错
+  }
+  return { url: glbPath, needsAuth: sameOriginApi };
+}
+
 async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
-  const headers = authHeaders();
-  if (!headers) throw new Error("尚未登录，无法加载 3D 预览");
-  const remote = /^https?:\/\//i.test(glbPath);
-  const url = remote
-    ? glbPath
-    : `/api/blender-artifact?name=${encodeURIComponent(glbPath.split("/").filter(Boolean).pop() ?? "")}`;
-  const resp = await fetch(url, remote ? { cache: "no-store" } : { cache: "no-store", headers });
+  const source = classifyGltfSource(glbPath);
+  let init: RequestInit = { cache: "no-store" };
+  if (source.needsAuth) {
+    const headers = authHeaders();
+    if (!headers) throw new Error("尚未登录，无法加载 3D 预览");
+    init = { cache: "no-store", headers };
+  }
+  let resp: Response;
+  try {
+    resp = await fetch(source.url, init);
+  } catch {
+    // 公开站外资源最常见的失败是对方未开放跨域（CORS）或网络不通；浏览器不给细分原因，如实说明可能性
+    throw new Error(
+      source.needsAuth
+        ? "模型文件获取失败：网络不通，请重试"
+        : "模型文件获取失败：网络不通，或该来源未开放跨域访问（CORS），请重试或下载后查看",
+    );
+  }
   if (!resp.ok) {
     let detail = "";
     try {
@@ -51,22 +84,34 @@ async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-type GltfViewportPhase = "loading" | "ready" | "fallback";
+export type GltfViewportPhase = "loading" | "ready" | "fallback";
 
 export interface Scene3dGltfViewportProps {
   /** sceneCard.glb_path：站内桥产物路径（取纯档名走 /api/blender-artifact 代理）或 http(s) 公网 URL（直连）。 */
   glbPath: string;
   className?: string;
+  /** 可选（赏阅 3D 适配器用）：资产加载完成后交出引擎（读/设相机）；卸载或重载时回 null。向后兼容，不传＝无变化。 */
+  onEngine?: (engine: import("@/lib/director-engine/engine").DirectorEngine | null) => void;
+  /** 可选：加载阶段变化通知（赏阅据此显示可重试错误态）。 */
+  onPhase?: (phase: GltfViewportPhase, errorText: string | null) => void;
 }
 
-export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportProps) {
+export function Scene3dGltfViewport({ glbPath, className, onEngine, onPhase }: Scene3dGltfViewportProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<import("@/lib/director-engine/engine").DirectorEngine | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const [phase, setPhase] = useState<GltfViewportPhase>("loading");
   const [errorText, setErrorText] = useState<string | null>(null);
+  const onEngineRef = useRef(onEngine);
+  onEngineRef.current = onEngine;
+  const onPhaseRef = useRef(onPhase);
+  onPhaseRef.current = onPhase;
+  useEffect(() => {
+    onPhaseRef.current?.(phase, errorText);
+  }, [phase, errorText]);
 
   const disposeEngine = useCallback(() => {
+    onEngineRef.current?.(null);
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
@@ -110,6 +155,7 @@ export function Scene3dGltfViewport({ glbPath, className }: Scene3dGltfViewportP
         if (outcome?.ok) {
           loaded = true;
           setPhase("ready");
+          onEngineRef.current?.(engine);
         } else if (!outcome) {
           // url=null（理论上不会发生：blobUrl 非空）防御分支
           setErrorText(`3D 资产加载失败：模型地址无效（模型：${glbPath}）`);

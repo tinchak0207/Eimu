@@ -4,10 +4,10 @@
 // 微信式卡片组，渲染在用户气泡内、正文下方。
 //
 // 三种卡：
-//   - image：圆角缩略图直显（<img> 直连网关 ?t=<ticket>），点击新窗口看原图；
-//     加载失败 / 铸票失败 → 降级成文档式横条卡（不许破图）。
-//   - video（原片直传成功）：微信式单个可播气泡（<video controls> 直连网关
-//     读回 URL ?t=<ticket>）；无票 / 坏票 / 加载失败 → 降级成文档式横条卡。
+//   - image：圆角缩略图直显（<img> 直连网关 ?t=<ticket>），点击进站内赏阅（Provider 缺席时退回新标签看原图）；
+//     加载失败 / 铸票失败 → 降级成文档式横条卡（不许破图）。点击进站内赏阅全屏。
+//   - video（原片直传成功）：微信式单个可播气泡（赏阅 inline，直连网关
+//     读回 URL ?t=<ticket>，可放大进全屏）；无票 / 坏票 / 加载失败 → 降级成文档式横条卡。
 //   - video-group（旧抽帧降级态，保留兼容）：一条影片在区块里展开成 4 张抽帧
 //     JPEG（<原文件名去扩展名>-frame-N.jpg，同目录同前缀）→ 合并成一张「视频」
 //     徽标卡 + 4 张帧缩略横排（帧复用 image 逻辑）。
@@ -19,10 +19,12 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Film } from "lucide-react";
+import { Viewer } from "@/components/viewer/Viewer";
 import { cn } from "@/lib/utils";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import { buildAssetUrl, freshTicketValue, mintUploadsTicket, type AgentUploadsTicket } from "@/lib/agent-uploads";
 import { formatBytes } from "@/lib/video-frames";
+import { useAgentViewerOpen, viewAssetFromUrl } from "./agent-viewer";
 
 // ─────────────────────────── 解析（纯函数，node --test 可测）
 
@@ -130,13 +132,18 @@ export function groupAttachmentRefs(refs: AgentAttachmentRef[]): AttachmentCardM
   return out;
 }
 
+/** 音频附件：类型表里没有 audio 种类，按 mime 认（落在 document 种类下）。 */
+function isAudioRef(ref: AgentAttachmentRef): boolean {
+  return ref.kind === "document" && (ref.mime ?? "").startsWith("audio/");
+}
+
 /**
  * 这组卡要不要读票：image 缩略、video-group 帧、video 原片气泡都要
  * （没票拼不出网关 URL，一律降级成文档卡）；document 不需要。
  */
 export function groupsNeedTicket(groups: AttachmentCardModel[]): boolean {
   return groups.some(
-    (g) => g.kind === "video-group" || g.ref.kind === "image" || g.ref.kind === "video",
+    (g) => g.kind === "video-group" || g.ref.kind === "image" || g.ref.kind === "video" || isAudioRef(g.ref),
   );
 }
 
@@ -238,6 +245,7 @@ export function AttachmentThumb({
   skeletonClassName?: string;
 }) {
   const [broken, setBroken] = useState(false);
+  const openViewer = useAgentViewerOpen();
   const url = ticket !== null && attRef.path ? buildAssetUrl(sessionId ?? "", attRef.path, ticket) : null;
 
   if (broken || url === null) {
@@ -268,6 +276,13 @@ export function AttachmentThumb({
       rel="noopener noreferrer"
       title={`打开原图：${attRef.name ?? "附件"}`}
       className={cn("block overflow-hidden", wrapperClassName, chromeClassName)}
+      onClick={(event) => {
+        // 站内赏阅优先；Provider 缺席时 useAgentViewerOpen 自己在新标签打开，故这里一律拦默认跳转。
+        const asset = viewAssetFromUrl(url, "image", { title: attRef.name, mime: attRef.mime });
+        if (!asset) return;
+        event.preventDefault();
+        openViewer([asset]);
+      }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- 网关签票 URL（带 ticket，必要时经本站 proxy），next/image 无法优化且 fill／宽高推导会绑死附件自适应版面 */}
       <img
@@ -299,10 +314,14 @@ export function VideoBubble({
   ticket: string | null;
   minting: boolean;
 }) {
-  const [broken, setBroken] = useState(false);
   const url = ticket !== null && attRef.path ? buildAssetUrl(sessionId ?? "", attRef.path, ticket) : null;
+  const asset = useMemo(
+    () => (url ? viewAssetFromUrl(url, "video", { title: attRef.name, mime: attRef.mime }) : null),
+    [url, attRef.name, attRef.mime],
+  );
 
-  if (broken || url === null) {
+  // 无票 / 坏票 → 文档式横条卡；加载失败由赏阅 Surface 自带可重试的错误态。
+  if (asset === null) {
     return <DocumentCard attRef={attRef} />;
   }
 
@@ -312,16 +331,37 @@ export function VideoBubble({
   }
 
   return (
-    <video
-      src={url}
-      controls
-      playsInline
-      preload="metadata"
-      onError={() => setBroken(true)}
-      aria-label={attRef.name ?? "视频附件"}
-      title={attRef.name ?? "视频"}
-      className="max-h-56 w-full max-w-xs rounded-ios-lg bg-black object-contain"
-    />
+    <div className="w-full max-w-xs" title={attRef.name ?? "视频"}>
+      <Viewer asset={asset} density="inline" className="max-h-56" />
+    </div>
+  );
+}
+
+/** 音频附件：赏阅 inline（可放大进全屏）；无票时降级成文档式横条卡。 */
+export function AudioAttachment({
+  sessionId,
+  attRef,
+  ticket,
+  minting,
+}: {
+  sessionId: string | null;
+  attRef: AgentAttachmentRef;
+  ticket: string | null;
+  minting: boolean;
+}) {
+  const url = ticket !== null && attRef.path ? buildAssetUrl(sessionId ?? "", attRef.path, ticket) : null;
+  const asset = useMemo(
+    () => (url ? viewAssetFromUrl(url, "audio", { title: attRef.name, mime: attRef.mime }) : null),
+    [url, attRef.name, attRef.mime],
+  );
+  if (minting) {
+    return <div className="h-16 w-full max-w-xs animate-pulse rounded-ios-lg bg-foreground/10" aria-hidden="true" />;
+  }
+  if (asset === null) return <DocumentCard attRef={attRef} />;
+  return (
+    <div className="w-full max-w-xs" title={attRef.name ?? "音频"}>
+      <Viewer asset={asset} density="inline" />
+    </div>
   );
 }
 
@@ -400,6 +440,17 @@ function AgentAttachmentCardsComponent({ refs, sessionId }: AgentAttachmentCards
               chromeClassName="rounded-[18px] border border-black/[0.06] bg-black/[0.04] transition-transform active:scale-[0.98]"
               skeletonClassName="h-60 w-48 animate-pulse self-end rounded-[18px] border border-black/[0.06] bg-black/[0.04]"
               imgClassName="block max-h-60 w-auto max-w-[min(100%,260px)] object-cover"
+            />
+          );
+        }
+        if (isAudioRef(ref)) {
+          return (
+            <AudioAttachment
+              key={ref.path ?? `audio-${i}`}
+              sessionId={sessionId ?? null}
+              attRef={ref}
+              ticket={ticket !== null ? ticket.ticket : null}
+              minting={minting}
             />
           );
         }

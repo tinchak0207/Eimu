@@ -79,6 +79,18 @@ export function isVideoUrl(url: string): boolean {
   return /\.(mp4|mov|webm|m4v)(\?\S*)?$/i.test(url.trim());
 }
 
+/**
+ * `![alt](x)` 图片语法的 src 实际指向什么：模型常把影片/音频也写成图片语法，
+ * 按扩展名分流到影片/音频播放器，而不是 <img> 破图。允许 http(s) 与相对路径，拒绝 javascript:/data: 等其它协议。
+ */
+export function mediaKindOfImageSrc(src: string): "image" | "video" | "audio" {
+  const s = src.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^https?:/i.test(s)) return "image";
+  if (/\.(mp4|mov|webm|m4v)([?#]\S*)?$/i.test(s) || isVideoUrl(s)) return "video";
+  if (/\.(m4a|mp3|wav|aac|ogg|flac|opus)([?#]\S*)?$/i.test(s) || isAudioUrl(s)) return "audio";
+  return "image";
+}
+
 /** 音频直链（m4a/mp3/wav/aac/ogg/flac/opus）：同上，画成音频播放器，另加平台「只存音频」前缀补判。 */
 export function isAudioUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
@@ -132,7 +144,10 @@ function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
       }
       case "image": {
         const tok = t as Tokens.Image;
-        out.push({ k: "img", src: tok.href, alt: tok.text });
+        const mk = mediaKindOfImageSrc(tok.href);
+        if (mk === "video") out.push({ k: "video", src: tok.href });
+        else if (mk === "audio") out.push({ k: "audio", src: tok.href });
+        else out.push({ k: "img", src: tok.href, alt: tok.text });
         break;
       }
       case "br":

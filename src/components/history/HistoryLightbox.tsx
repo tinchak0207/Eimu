@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { AudioLines, Play, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
-import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/history-media";
-import { cn } from "@/lib/utils";
-import {
-  formatAbsoluteTime,
-  formatCoins,
-  formatModelLabel,
-  inferEntryKind,
-  primaryModelId,
-} from "@/lib/history-types";
+// 历史灯箱 = 赏阅（Viewer）的历史专属胶水。
+//
+// 渲染（图/视频/音频、缩放、键盘切换、焦点陷阱、滚动锁、返回键）全部由赏阅壳承担；
+// 本档只做三件历史专属的事：
+//   1. entries → ViewAsset 集合（与 entries 1:1 同下标：不可看的记录用文本占位，下标基准不漂移）；
+//   2. 历史专属动作（收藏/下载/做同款/再来 N 组/微调变体/溯源/删除）以 extraActions 挂进壳的动作栏；
+//   3. 壳内切换成员 → onNavigate 回报，删除后 entries 变短 → 按父级给的新 index 重开。
+// 「灯箱/删除索引基准统一」语义（HistoryClient 以 displayEntries 为唯一基准计算 lightboxIndex）原样保持：
+// 本组件不自己维护下标，只镜像父级 index 与壳内导航。
+
+import { useEffect, useRef } from "react";
+import { Coins, Download, GitBranch, Layers, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
+import { useViewer, type ViewerExtraAction } from "@/components/viewer/ViewerHost";
+import { viewAssetFromHistoryEntry } from "@/lib/viewer/from-items";
+import type { ViewAsset } from "@/lib/viewer/types";
+import { formatCoins, inferEntryKind } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { historyDagNodes, historyDagNodesTotalCoins, workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
 import type { HistoryEntry } from "@/lib/history-types";
@@ -34,510 +38,250 @@ export interface HistoryLightboxProps {
 }
 
 /**
- * 灯箱主图/缩略图的取图顺序：工作流先看后端渲染好的 DAG 图，否则 image →
- * imageUrl → videoUrl。视频记录的结果里只有 videoUrl，旧实现直接返回 null，
- * 于是整条视频记录在灯箱里显示成「没有留存图片」，胶片条上也全是「无图」。
+ * 一条记录 → 一件 ViewAsset（保持与 entries 同下标）。
+ * 工作流先看后端渲染好的 DAG 图；其余走赏阅投影（多成果＝合集）；老记录只有裸 base64 图；
+ * 都没有时给诚实的文本占位（「没有留存图片，参数仍可复用」），而不是把记录从集合里剔掉。
  */
-function entrySrc(entry: HistoryEntry): string | null {
-  const dagThumbnailUrl = workflowDagThumbnailUrl(entry);
-  if (dagThumbnailUrl) return dagThumbnailUrl;
-  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
-  if (!result) return null;
-  return result.image ? `data:image/png;base64,${result.image}` : result.imageUrl ?? result.videoUrl ?? null;
+function assetForEntry(entry: HistoryEntry): ViewAsset {
+  const dag = workflowDagThumbnailUrl(entry);
+  if (dag) return { id: entry.id, kind: "image", url: dag, title: "工作流结构图" };
+  const projected = viewAssetFromHistoryEntry(entry);
+  if (projected) return projected;
+  const raw = entry.results.find((result) => result.image)?.image;
+  if (raw) return { id: entry.id, kind: "image", url: `data:image/png;base64,${raw}` };
+  return { id: entry.id, kind: "text", title: "生成记录", text: "这条记录没有留存图片。参数仍可复用。" };
 }
 
-/**
- * 音频产物 URL。音频不能当 <img> 的 src（喂进去只会是破图），所以与 entrySrc
- * 分开取：只收「没有图/视频、只有 audioUrl」的结果，避免把图片记录判成音频。
- */
-function entryAudioSrc(entry: HistoryEntry): string | null {
-  for (const result of entry.results) {
-    if (!result.image && !result.imageUrl && !result.videoUrl && result.audioUrl) return result.audioUrl;
-  }
-  return null;
-}
+const CHIP = "rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-[13px] text-[rgba(255,255,255,0.82)]";
 
-/** 工具栏按钮：44px 命中区，符合触摸目标下限。 */
-function ToolbarButton({
-  label,
-  onClick,
-  active,
-  tone = "neutral",
-  disabled = false,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  active?: boolean;
-  tone?: "neutral" | "danger" | "gold";
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex h-11 w-11 cursor-pointer items-center justify-center rounded-full",
-        "bg-white/15 text-white/90 backdrop-blur-xl transition-all duration-200",
-        // Tailwind's opacity modifier only resolves values on the default
-        // scale (multiples of 5) — /28 silently compiled to nothing. Bracket
-        // rgba() is a real arbitrary value, not a scale lookup, so it always
-        // compiles regardless of the fraction.
-        "hover:bg-[rgba(255,255,255,0.28)] active:scale-[0.94]",
-        "focus:outline-none focus:ring-2 focus:ring-white/50",
-        tone === "danger" && "hover:bg-[rgba(255,59,48,0.32)]",
-        tone === "gold" && active && "text-[#FFD34D]",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function HistoryLightbox({
-  entries,
-  index,
-  onClose,
-  onNavigate,
-  onToggleStar,
-  onDownload,
-  onDelete,
-  onReuse,
-  onRerun,
-  onRerunVariant,
-  onShowLineage,
-}: HistoryLightboxProps) {
-  const [mounted, setMounted] = useState(false);
-  /** 下载要等整图 fetch 成 blob，期间工具栏下载钮转圈防重复点击。 */
-  const [downloadBusy, setDownloadBusy] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  /** 打开前的焦点，关闭时要还回去，否则键盘用户会被扔回页面顶部。 */
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const titleId = useId();
-
-  const isOpen = index !== null && index >= 0 && index < entries.length;
-  const entry = isOpen ? entries[index] : null;
-
-  // createPortal 需要 document，SSR 阶段不能调用。
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // 打开时记住焦点并移入对话框；关闭时还原。
-  useEffect(() => {
-    if (!isOpen) return;
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
-    closeButtonRef.current?.focus();
-
-    return () => {
-      previousFocusRef.current?.focus?.();
-    };
-  }, [isOpen]);
-
-  // 锁住背景滚动。直接改 overflow 会让滚动条消失导致页面横跳，所以补上等宽的 padding。
-  useEffect(() => {
-    if (!isOpen) return;
-    const { body } = document;
-    const previousOverflow = body.style.overflow;
-    const previousPadding = body.style.paddingRight;
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-
-    body.style.overflow = "hidden";
-    if (scrollbarWidth > 0) body.style.paddingRight = `${scrollbarWidth}px`;
-
-    return () => {
-      body.style.overflow = previousOverflow;
-      body.style.paddingRight = previousPadding;
-    };
-  }, [isOpen]);
-
-  // 安卓返回键关闭灯箱，而不是退出整个页面。
-  useEffect(() => {
-    if (!isOpen) return;
-    window.history.pushState({ historyLightbox: true }, "");
-    const handlePopState = () => onClose();
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [isOpen, onClose]);
-
-  const goPrev = useCallback(() => {
-    if (index === null || index <= 0) return;
-    onNavigate(index - 1);
-  }, [index, onNavigate]);
-
-  const goNext = useCallback(() => {
-    if (index === null || index >= entries.length - 1) return;
-    onNavigate(index + 1);
-  }, [index, entries.length, onNavigate]);
-
-  // 键盘：Esc 关闭、左右切换、Tab 在对话框内循环。
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        goPrev();
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        goNext();
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      // 焦点陷阱：不这么做的话 Tab 会跑到灯箱背后的页面上去。
-      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (!focusables?.length) return;
-
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, goPrev, goNext]);
-
-  if (!mounted || !isOpen || !entry) return null;
-
-  const src = entrySrc(entry);
-  const videoSrc = !workflowDagThumbnailUrl(entry)
-    ? entry.results.find((result) => result.videoUrl)?.videoUrl
-    : null;
-  /** 纯音频记录：src 为 null 时才取 audioUrl，有图/视频记录不受影响。 */
-  const audioSrc = src ? null : entryAudioSrc(entry);
-  const isAudioEntry = Boolean(audioSrc);
-  const model = primaryModelId(entry);
-  const promptText = entry.prompt.trim();
+function EntryFooter({ entry }: { entry: HistoryEntry }) {
   const workflow = entry.workflow;
-  const rerunnable = canHistoryEntryRerun(entry);
-  // 只在真的带 DAG 节点时才算一遍，普通图像记录零开销。
   const dagNodes = inferEntryKind(entry) === "workflow" ? historyDagNodes(entry) : null;
-  const dagNodesTotalCoins = historyDagNodesTotalCoins(dagNodes);
-  /** DAG 缩略图：主图用的就是它，这里额外用 type badge 说出来「这是工作流图」。 */
-  const isDagThumbnail = Boolean(workflowDagThumbnailUrl(entry));
-
-  return createPortal(
-    <div
-      // bg-[#1f2230]/74 silently compiled to nothing: Tailwind's opacity
-      // modifier only resolves scale values (multiples of 5), so /74 never
-      // generated a rule at all — the whole dark backdrop was actually fully
-      // transparent, leaving every white-on-dark control in this lightbox
-      // rendering as white-on-whatever-was-behind-it (i.e. invisible on the
-      // light page). rgba() as a bracket value bypasses the scale lookup.
-      className="hist-lightbox-enter fixed inset-0 z-[95] flex min-h-[100dvh] w-screen flex-col bg-[rgba(31,34,48,0.74)] backdrop-blur-md"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex min-h-0 flex-1 flex-col"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {/* 顶部工具栏 */}
-        <header className="flex shrink-0 items-center justify-between gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
-          <div className="min-w-0 flex-1">
-            <p id={titleId} className="truncate text-ios-subhead font-semibold text-[rgba(255,255,255,0.92)]">
-              {promptText || "生成记录"}
+  const dagTotal = historyDagNodesTotalCoins(dagNodes);
+  const quota = entry.quota !== undefined && entry.quota > 0 ? entry.quota : null;
+  if (!workflow && !entry.retryOfTaskId && !dagNodes && quota === null) return null;
+  return (
+    <div className="w-full max-w-2xl px-2 text-white">
+      <div className="flex flex-wrap justify-center gap-1.5">
+        {quota !== null && <span className={CHIP}>消耗 {formatCoins(quota)} 张</span>}
+        {workflow?.workflowPresetLabel && <span className={CHIP}>{workflow.workflowPresetLabel}</span>}
+        {workflow?.imageSize && <span className={CHIP}>{workflow.imageSize}</span>}
+        {workflow?.qualityProfile && <span className={CHIP}>{workflow.qualityProfile}</span>}
+        {workflow?.estimatedCredits !== undefined && (
+          <span className={`inline-flex items-center gap-1 ${CHIP}`}>
+            <Coins className="h-3 w-3" aria-hidden="true" />
+            预估 {workflow.estimatedCredits}
+          </span>
+        )}
+        {entry.retryOfTaskId && (
+          <span className={CHIP} title={`衍生自任务 ${entry.retryOfTaskId}`}>
+            衍生自任务 {entry.retryOfTaskId.slice(0, 8)}
+          </span>
+        )}
+      </div>
+      {/* 节点产物清单：后端没有写入 dagNodes 时整块不渲染。 */}
+      {dagNodes && (
+        <div className="mt-3">
+          <p className="text-[13px] font-medium text-[rgba(255,255,255,0.82)]">节点产物</p>
+          <ul className="mt-1.5 space-y-1">
+            {dagNodes.map((node, nodeIndex) => (
+              <li key={`${node.role ?? node.kind ?? "node"}-${nodeIndex}`} className="flex items-center gap-2 text-[13px] text-white/70">
+                <span className="min-w-0 flex-1 truncate">
+                  {node.title ?? node.role ?? "未命名节点"}
+                  {node.kind && <span className="ml-1.5 text-white/50">{node.kind}</span>}
+                </span>
+                {node.status && <span className="shrink-0 text-white/50">{node.status}</span>}
+                {node.costCoins !== null && (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 text-[#FFCE73]">
+                    <Coins className="h-3 w-3" aria-hidden="true" />
+                    {node.costCoins}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {dagTotal !== null && (
+            <p className="mt-1.5 inline-flex items-center gap-1 text-[13px] text-[rgba(255,255,255,0.82)]">
+              <Coins className="h-3 w-3 text-[#FFCE73]" aria-hidden="true" />
+              节点合计 {dagTotal} 币
             </p>
-            <p className="mt-0.5 truncate text-ios-caption1 text-white/70">
-              {model ? formatModelLabel(model) : "未知模型"} · {formatAbsoluteTime(entry.generatedAt)}
-              {entry.quota !== undefined && entry.quota > 0 && ` · 消耗 ${formatCoins(entry.quota)} 张`}
-              {/* 工作流记录的主图是后端渲染的 DAG 缩略图，不是生成结果本身。
-                  不说明的话用户会以为那就是跑出来的图。 */}
-              {isDagThumbnail && " · 工作流结构图"}
-              {isAudioEntry && " · 音乐"}
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <ToolbarButton
-              label={entry.starred ? "取消收藏" : "收藏"}
-              active={Boolean(entry.starred)}
-              tone="gold"
-              onClick={() => onToggleStar(entry.id)}
-            >
-              <Star className="h-4 w-4" fill={entry.starred ? "currentColor" : "none"} />
-            </ToolbarButton>
-            {(src || audioSrc) && (
-              <ToolbarButton
-                label="下载"
-                disabled={downloadBusy}
-                onClick={() => {
-                  if (downloadBusy) return;
-                  setDownloadBusy(true);
-                  Promise.resolve(onDownload(entry)).finally(() => setDownloadBusy(false));
-                }}
-              >
-                {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              </ToolbarButton>
-            )}
-            {onReuse && workflow && (
-              <ToolbarButton label="用这套参数继续做图" onClick={() => onReuse(entry)}>
-                <RotateCcw className="h-4 w-4" />
-              </ToolbarButton>
-            )}
-            {/* payload 级重跑：配方完整才挂，按下去只会失败的按钮比不挂更糟。 */}
-            {onRerun && rerunnable && (
-              <ToolbarButton label="再来 N 组" onClick={() => onRerun(entry)}>
-                <Layers className="h-4 w-4" />
-              </ToolbarButton>
-            )}
-            {onRerunVariant && rerunnable && (
-              <ToolbarButton label="微调变体" onClick={() => onRerunVariant(entry)}>
-                <SlidersHorizontal className="h-4 w-4" />
-              </ToolbarButton>
-            )}
-            {/* REQ-D1：溯源抽屉入口。与历史卡同一抽屉实例（页面级单例）。 */}
-            {onShowLineage && (
-              <ToolbarButton label="溯源" onClick={() => onShowLineage(entry)}>
-                <GitBranch className="h-4 w-4" />
-              </ToolbarButton>
-            )}
-            <ToolbarButton label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
-              <Trash2 className="h-4 w-4" />
-            </ToolbarButton>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={onClose}
-              aria-label="关闭大图"
-              className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-white/15 text-white/90 backdrop-blur-xl transition-all duration-200 hover:bg-[rgba(255,255,255,0.28)] active:scale-[0.94] focus:outline-none focus:ring-2 focus:ring-white/50"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
-
-        {/* 主图区 */}
-        <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 py-4 sm:px-16">
-          {index > 0 && (
-            <button
-              type="button"
-              onClick={goPrev}
-              aria-label="上一张"
-              className="absolute left-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/15 text-white/90 backdrop-blur-xl transition-all duration-200 hover:bg-[rgba(255,255,255,0.28)] active:scale-[0.94] focus:outline-none focus:ring-2 focus:ring-white/50 sm:left-4"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-          )}
-
-          {videoSrc ? (
-            <video
-              key={entry.id}
-              src={videoSrc}
-              controls
-              autoPlay
-              playsInline
-              preload="none"
-              className="hist-lightbox-figure max-h-full max-w-full rounded-ios-2xl object-contain shadow-[0_30px_80px_rgba(0,0,0,0.32)]"
-            />
-          ) : src ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              key={entry.id}
-              src={src}
-              alt={promptText ? `生成结果：${promptText.slice(0, 60)}` : "生成结果"}
-              decoding="async"
-              className="hist-lightbox-figure max-h-full max-w-full rounded-ios-2xl object-contain shadow-[0_30px_80px_rgba(0,0,0,0.32)]"
-            />
-          ) : audioSrc ? (
-            /* 音频条目：主区换成可播放面（autoPlay 由开启灯箱的那次点击提供使用者手势，
-               浏览器不会挡）。关闭三件套（Esc／背景点击／popstate）沿用既有监听，未改。 */
-            <div className="hist-lightbox-figure w-full max-w-lg rounded-ios-2xl bg-white/10 px-8 py-10 text-center shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
-              <span
-                className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/15 text-white/90"
-                aria-hidden="true"
-              >
-                <AudioLines className="h-6 w-6" />
-              </span>
-              <p className="mt-3 line-clamp-2 text-ios-footnote text-white/85">{promptText || "未命名音频"}</p>
-              <audio
-                src={audioSrc}
-                controls
-                autoPlay
-                preload="metadata"
-                aria-label="播放音频"
-                className="mt-4 w-full"
-              />
-            </div>
-          ) : (
-            <div className="rounded-ios-2xl bg-white/10 px-8 py-12 text-center">
-              <p className="text-ios-footnote text-white/85">这条记录没有留存图片</p>
-              <p className="mt-1 text-ios-caption1 text-white/60">参数仍可复用</p>
-            </div>
-          )}
-
-          {index < entries.length - 1 && (
-            <button
-              type="button"
-              onClick={goNext}
-              aria-label="下一张"
-              className="absolute right-2 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/15 text-white/90 backdrop-blur-xl transition-all duration-200 hover:bg-[rgba(255,255,255,0.28)] active:scale-[0.94] focus:outline-none focus:ring-2 focus:ring-white/50 sm:right-4"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
           )}
         </div>
-
-        {/* 参数摘要 + 衍生关联（重跑任务经 retryOfTaskId 指回父任务） */}
-        {(workflow || entry.retryOfTaskId) && (
-          <div className="shrink-0 px-4 pb-2 sm:px-6">
-            <div className="flex flex-wrap gap-1.5">
-              {workflow?.workflowPresetLabel && (
-                <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
-                  {workflow.workflowPresetLabel}
-                </span>
-              )}
-              {workflow?.imageSize && (
-                <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
-                  {workflow.imageSize}
-                </span>
-              )}
-              {workflow?.qualityProfile && (
-                <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
-                  {workflow.qualityProfile}
-                </span>
-              )}
-              {workflow?.estimatedCredits !== undefined && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
-                  <Coins className="h-2.5 w-2.5" />
-                  预估 {workflow.estimatedCredits}
-                </span>
-              )}
-              {entry.retryOfTaskId && (
-                <span
-                  className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]"
-                  title={`衍生自任务 ${entry.retryOfTaskId}`}
-                >
-                  衍生自任务 {entry.retryOfTaskId.slice(0, 8)}
-                </span>
-              )}
-            </div>
-
-            {/* 节点产物清单：DAG 每个节点跑完各自的产物与实付。后端没有写入
-                dagNodes 时整块不渲染（而不是显示一个空清单）。 */}
-            {dagNodes && (
-              <div className="mt-3">
-                <p className="text-ios-caption1 font-medium text-[rgba(255,255,255,0.82)]">节点产物</p>
-                <ul className="mt-1.5 space-y-1">
-                  {dagNodes.map((node, nodeIndex) => (
-                    <li
-                      key={`${node.role ?? node.kind ?? "node"}-${nodeIndex}`}
-                      className="flex items-center gap-2 text-ios-caption1 text-white/70"
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {node.title ?? node.role ?? "未命名节点"}
-                        {node.kind && <span className="ml-1.5 text-white/50">{node.kind}</span>}
-                      </span>
-                      {node.status && <span className="shrink-0 text-white/50">{node.status}</span>}
-                      {node.costCoins !== null && (
-                        <span className="inline-flex shrink-0 items-center gap-0.5 text-[#FFCE73]">
-                          <Coins className="h-2.5 w-2.5" />
-                          {node.costCoins}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                {dagNodesTotalCoins !== null && (
-                  <p className="mt-1.5 inline-flex items-center gap-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
-                    <Coins className="h-2.5 w-2.5 text-[#FFCE73]" />
-                    节点合计 {dagNodesTotalCoins} 币
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 胶片条 */}
-        <nav
-          aria-label="历史图片列表"
-          className="hist-filmstrip flex shrink-0 gap-2 overflow-x-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
-        >
-          {entries.map((item, itemIndex) => {
-            const itemIsVideo = !workflowDagThumbnailUrl(item) && item.results.some((result) => result.videoUrl);
-            const thumb = itemIsVideo ? null : entrySrc(item);
-            const itemIsAudio = !thumb && Boolean(entryAudioSrc(item));
-            const isCurrent = itemIndex === index;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onNavigate(itemIndex)}
-                aria-label={`第 ${itemIndex + 1} 张`}
-                aria-current={isCurrent ? "true" : undefined}
-                className={cn(
-                  "h-14 w-14 shrink-0 cursor-pointer overflow-hidden rounded-ios-md transition-all duration-200",
-                  "focus:outline-none focus:ring-2 focus:ring-white/50",
-                  isCurrent
-                    ? "opacity-100 ring-2 ring-white/85"
-                    : "opacity-45 hover:opacity-80",
-                )}
-              >
-                {thumb ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    {...historyThumbnailProps(thumb, true)}
-                    width={56}
-                    height={56}
-                    fetchPriority="low"
-                    onError={(event) => { retryOriginalHistoryImage(event.currentTarget, thumb); }}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    className="h-full w-full object-cover"
-                  />
-                ) : itemIsVideo ? (
-                  <span className="flex h-full w-full items-center justify-center bg-white/10 text-white/70">
-                    <Play className="h-4 w-4" fill="currentColor" />
-                  </span>
-                ) : itemIsAudio ? (
-                  /* 音频条目的胶片位没有可当缩略图的图，用音频图标代替「无图」，
-                     否则一条真有产物的记录在胶片条上会被读成空记录。 */
-                  <span className="flex h-full w-full items-center justify-center bg-white/10 text-white/70">
-                    <AudioLines className="h-4 w-4" />
-                  </span>
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center bg-white/10 text-ios-caption1 text-white/60">
-                    无图
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        <p className="shrink-0 pb-3 text-center text-ios-caption1 text-white/60">
-          左右方向键切换，按 Esc 关闭
-        </p>
-      </div>
-    </div>,
-    document.body,
+      )}
+    </div>
   );
+}
+
+export function HistoryLightbox(props: HistoryLightboxProps) {
+  const { entries, index } = props;
+  const { open, close, update } = useViewer();
+
+  const latest = useRef(props);
+  useEffect(() => {
+    latest.current = props;
+  });
+  /** 壳内成员（含合集子项）id → 记录。每次 open/update 刷新。 */
+  const entryByAssetId = useRef(new Map<string, HistoryEntry>());
+  /** 本组件持有的会话：sig=记录 id 序列，index=壳内当前下标。null＝没有会话。 */
+  const sessionRef = useRef<{ sig: string; index: number } | null>(null);
+  const downloadingRef = useRef(false);
+
+  const isOpen = index !== null && index >= 0 && index < entries.length;
+
+  useEffect(() => {
+    if (!isOpen || index === null) {
+      if (sessionRef.current) {
+        sessionRef.current = null;
+        close();
+      }
+      return;
+    }
+
+    const p = latest.current;
+    const lookup = (asset: ViewAsset) => entryByAssetId.current.get(asset.id);
+
+    /** 先收壳（RerunDialog/溯源抽屉在壳之下），再把控制权交给对应的页面级弹层。 */
+    const dismissThen = (run: (entry: HistoryEntry) => void) => (asset: ViewAsset) => {
+      const entry = lookup(asset);
+      if (!entry) return;
+      sessionRef.current = null;
+      close();
+      latest.current.onClose();
+      run(entry);
+    };
+
+    const extraActions: ViewerExtraAction[] = [
+      {
+        id: "star",
+        label: (asset) => (lookup(asset)?.starred ? "取消收藏" : "收藏"),
+        icon: <Star className="h-4 w-4" aria-hidden="true" />,
+        onClick: (asset) => {
+          const entry = lookup(asset);
+          if (entry) latest.current.onToggleStar(entry.id);
+        },
+      },
+      {
+        id: "download",
+        label: "下载",
+        icon: <Download className="h-4 w-4" aria-hidden="true" />,
+        visible: (asset) => asset.kind !== "text",
+        onClick: (asset) => {
+          const entry = lookup(asset);
+          if (!entry || downloadingRef.current) return;
+          downloadingRef.current = true;
+          void Promise.resolve(latest.current.onDownload(entry)).finally(() => {
+            downloadingRef.current = false;
+          });
+        },
+      },
+    ];
+    if (p.onReuse) {
+      extraActions.push({
+        id: "reuse",
+        label: "用这套参数继续做图",
+        icon: <RotateCcw className="h-4 w-4" aria-hidden="true" />,
+        visible: (asset) => Boolean(lookup(asset)?.workflow),
+        onClick: dismissThen((entry) => latest.current.onReuse?.(entry)),
+      });
+    }
+    // payload 级重跑：配方完整才挂，按下去只会失败的按钮比不挂更糟。
+    if (p.onRerun) {
+      extraActions.push({
+        id: "rerun",
+        label: "再来 N 组",
+        icon: <Layers className="h-4 w-4" aria-hidden="true" />,
+        visible: (asset) => {
+          const entry = lookup(asset);
+          return entry ? canHistoryEntryRerun(entry) : false;
+        },
+        onClick: dismissThen((entry) => latest.current.onRerun?.(entry)),
+      });
+    }
+    if (p.onRerunVariant) {
+      extraActions.push({
+        id: "variant",
+        label: "微调变体",
+        icon: <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />,
+        visible: (asset) => {
+          const entry = lookup(asset);
+          return entry ? canHistoryEntryRerun(entry) : false;
+        },
+        onClick: dismissThen((entry) => latest.current.onRerunVariant?.(entry)),
+      });
+    }
+    if (p.onShowLineage) {
+      extraActions.push({
+        id: "lineage",
+        label: "溯源",
+        icon: <GitBranch className="h-4 w-4" aria-hidden="true" />,
+        onClick: dismissThen((entry) => latest.current.onShowLineage?.(entry)),
+      });
+    }
+    extraActions.push({
+      id: "delete",
+      label: "删除",
+      danger: true,
+      icon: <Trash2 className="h-4 w-4" aria-hidden="true" />,
+      onClick: (asset) => {
+        const entry = lookup(asset);
+        if (!entry) return;
+        // 不可逆删除：沿用仓库既有的 window.confirm 确认模式（吊销密钥/删除渠道等同款），取消即什么都不发生。
+        if (!window.confirm("确定删除这条作品？删除后无法恢复。")) return;
+        latest.current.onDelete(entry.id);
+      },
+    });
+
+    const extraFooter = (asset: ViewAsset) => {
+      const entry = lookup(asset);
+      return entry ? <EntryFooter entry={entry} /> : null;
+    };
+
+    const sig = entries.map((entry) => entry.id).join("\u0001");
+    const current = sessionRef.current;
+    const map = new Map<string, HistoryEntry>();
+    const assets = entries.map((entry) => {
+      const asset = assetForEntry(entry);
+      map.set(asset.id, entry);
+      for (const child of asset.children ?? []) map.set(child.id, entry);
+      return asset;
+    });
+    entryByAssetId.current = map;
+
+    if (current && current.sig === sig && current.index === index) {
+      // 集合与位置都没变（收藏/内容刷新）：只原位更新动作与脚注，不重挂载舞台。
+      update({ extraActions, extraFooter });
+      return;
+    }
+    // 首次打开、父级改了位置（溯源跳转）、或集合变了（删除后）：以父级 index 为准重开。
+    sessionRef.current = { sig, index };
+    open(assets, {
+      index,
+      extraActions,
+      extraFooter,
+      onIndexChange: (next) => {
+        const live = sessionRef.current;
+        if (!live) return;
+        live.index = next;
+        latest.current.onNavigate(next);
+      },
+      onClose: () => {
+        if (!sessionRef.current) return;
+        sessionRef.current = null;
+        latest.current.onClose();
+      },
+    });
+  }, [isOpen, entries, index, open, close, update]);
+
+  // 卸载（换路由）时收掉自己的会话，且不回调父级。
+  useEffect(
+    () => () => {
+      if (sessionRef.current) {
+        sessionRef.current = null;
+        close();
+      }
+    },
+    [close],
+  );
+
+  return null;
 }

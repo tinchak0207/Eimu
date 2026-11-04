@@ -279,6 +279,7 @@ export function AgentChatSurface({
     imageActions,
     videoActions,
     audioActions,
+    onSendFeedback,
   } = useAgentSurfaceSessionActions({
     chatHistoryUser,
     historyOwnerRef,
@@ -682,6 +683,7 @@ export function AgentChatSurface({
           imageActions={imageActions}
           videoActions={videoActions}
           audioActions={audioActions}
+          onSendFeedback={onSendFeedback}
           anchor={anchor}
           onAnchor={() => void onAnchor()}
           onReanchor={() => void onReanchor()}

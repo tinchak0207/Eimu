@@ -1,21 +1,22 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  AlertTriangle,
   Check,
   Coins,
   Download,
   Library,
   Loader2,
   Mic2,
-  RotateCw,
   SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAudioItem } from "@/lib/agent-chat-types";
-import { guessAudioTitleFromUrl, openLyricPlayer } from "@/lib/lyric-player-url";
+import { viewAssetFromAudioItem } from "@/lib/viewer/from-items";
+import { Viewer } from "@/components/viewer/Viewer";
 import { AgentRerunMenu } from "./AgentRerunMenu";
+import type { AgentMediaItem } from "./agent-artifacts-context";
+import { useAgentMediaActions, useAgentMediaViewerOpen } from "./agent-viewer";
 
 export interface AgentAudioCardProps {
   item: AgentAudioItem;
@@ -31,6 +32,8 @@ export interface AgentAudioCardProps {
   onRerun?: (item: AgentAudioItem, count: number) => void;
   /** 「微调」：只把半句话预填进输入框（不自动送出＝不替使用者开一轮扣费）。 */
   onVariant?: (item: AgentAudioItem) => void;
+  /** 所在合集（OpenUI 专辑/图集）：「在播放器中打开」进整个合集并停在本首。缺省＝只看本首。 */
+  viewerSet?: readonly AgentMediaItem[];
 }
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -75,17 +78,10 @@ function AudioAction({
   );
 }
 
-function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant }: AgentAudioCardProps) {
-  const [failed, setFailed] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
+function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant, viewerSet }: AgentAudioCardProps) {
   const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
   const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  // item.url 变化（同实例换曲）时重置加载态，避免旧曲的 failed 串台。
-  useEffect(() => {
-    setFailed(false);
-  }, [item.url]);
 
   const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
     apply();
@@ -97,11 +93,6 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
       timers.forEach(clearTimeout);
     };
   }, []);
-
-  const handleRetry = () => {
-    setFailed(false);
-    setRetryKey((k) => k + 1);
-  };
 
   const handleSave = useCallback(async () => {
     if (!onSaveToLibrary || saveState === "loading" || saveState === "saved") return;
@@ -135,12 +126,13 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
     flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
   }, [item, onDownload, downState, flash]);
 
-  const handleOpenLyricPlayer = useCallback(() => {
-    // 真歌名优先；没有就从 URL 猜一个可读档名；都没有则不传 title——
-    // 播放器自会显示「未命名曲目」，绝不传「音频 #N」这类编号占位。
-    const title = item.title?.trim() || guessAudioTitleFromUrl(item.url);
-    openLyricPlayer({ url: item.url, title, trackId: item.id });
-  }, [item.id, item.title, item.url]);
+  // 主按钮与内联播放同源（赏阅）：动作沿用本卡 props 的回调（含「发给助理」预填），
+  // 全屏在站内打开，不再跳外部 store 播放器。加载失败/重试由赏阅 Surface 自带。
+  const asset = useMemo(() => viewAssetFromAudioItem(item), [item]);
+  const audioSources = { audio: { onSaveToLibrary, onDownload, onRerun, onVariant } };
+  const actionsFor = useAgentMediaActions(audioSources);
+  const viewerActions = actionsFor([item]);
+  const openMedia = useAgentMediaViewerOpen(audioSources);
 
   const title = item.title?.trim() ?? "";
   const cover = item.cover?.trim() ?? "";
@@ -177,54 +169,31 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
         </div>
       </div>
       <div className="px-3.5 pt-2.5">
-        {failed ? (
-          <div className="flex flex-col items-center justify-center gap-3 bg-black/[0.03] p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-              <AlertTriangle className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <p className="text-ios-subhead font-medium text-muted-foreground">音频加载失败</p>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleRetry();
-              }}
-              className="flex h-11 items-center gap-1.5 rounded-full bg-ios-blue/10 px-4 text-ios-subhead font-medium text-ios-blue backdrop-blur-[22px] transition-colors duration-200 hover:bg-ios-blue/[0.16] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ios-blue/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
-            >
-              <RotateCw className="h-4 w-4" aria-hidden="true" />
-              重试
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {/* 主操作：打开已分好滚动歌词的 store 播放器（不再以浏览器默认 <audio> 为主体验）。 */}
-            <button
-              type="button"
-              onClick={handleOpenLyricPlayer}
-              className={cn(
-                "flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px]",
-                "bg-ios-blue text-white text-ios-subhead font-semibold",
-                "shadow-[0_1px_0_rgba(255,255,255,0.18)_inset] transition-colors duration-200",
-                "hover:bg-ios-blue/90 active:scale-[0.98]",
-                "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
-                "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
-              )}
-            >
-              <Mic2 className="h-4.5 w-4.5" aria-hidden="true" />
-              打开滚动歌词播放器
-            </button>
-            {/* 次要：保留原生试听，方便不离开对话时快速确认音源。 */}
-            <audio
-              key={retryKey}
-              src={item.url}
-              aria-label="智能体生成的音频（次要试听）"
-              controls
-              preload="none"
-              onError={() => setFailed(true)}
-              className="w-full opacity-90"
-            />
-          </div>
-        )}
+        <div className="flex flex-col gap-2.5">
+          {/* 主操作：站内全屏赏阅（滚动歌词、A-B 循环、标记→助理）。 */}
+          <button
+            type="button"
+            onClick={() => openMedia(item, viewerSet)}
+            className={cn(
+              "flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px]",
+              "bg-ios-blue text-white text-ios-subhead font-semibold",
+              "shadow-[0_1px_0_rgba(255,255,255,0.18)_inset] transition-colors duration-200",
+              "hover:bg-ios-blue/90 active:scale-[0.98]",
+              "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
+              "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            )}
+          >
+            <Mic2 className="h-4.5 w-4.5" aria-hidden="true" />
+            在播放器中打开
+          </button>
+          {/* 次要：内联赏阅，不离开对话即可试听/标记。 */}
+          <Viewer
+            asset={asset}
+            density="inline"
+            actions={viewerActions}
+            onOpenFull={viewerSet ? () => openMedia(item, viewerSet) : undefined}
+          />
+        </div>
       </div>
       {item.lyricStatus === "aligning" && (
         <p className="flex items-center gap-1.5 px-3.5 pt-2 text-ios-caption1 text-muted-foreground">

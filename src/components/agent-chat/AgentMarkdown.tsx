@@ -1,11 +1,11 @@
 "use client";
 
-import { Component, memo, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { Component, memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EntityText } from "@/components/entities/entity-chip";
+import { Viewer } from "@/components/viewer/Viewer";
+import { useAgentViewerOpen, viewAssetFromUrl } from "./agent-viewer";
 import {
   isBareOpenUIInfo,
   isImageUrl,
@@ -21,7 +21,7 @@ import {
  * - 表格 / 粗体 / 列表 / 代码块 / 引用照版式渲染，不再糊成纯文本。
  * - 行内代码（task_id、端点路径等）走「低调等宽小字」样式：不删原文，
  *   但不再和正文抢视觉权重。
- * - 消息里的平台图片直链自动渲染成缩略图卡，点击放大（灯罩内点任意处关闭）。
+ * - 消息里的平台图片直链自动渲染成缩略图卡，点击进站内赏阅全屏（缩放/返回键关闭/标记→助理）。
  *   原始 URL 保留在 img alt / aria-label 里，屏读器与复制路径不丢。
  */
 
@@ -81,7 +81,7 @@ class AgentOpenUIErrorBoundary extends Component<
   }
 }
 
-/** 图片缩略图卡：消息内嵌一颗可点的缩图，点击开灯罩放大。 */
+/** 图片缩略图卡：消息内嵌一颗可点的缩图，点击开赏阅全屏。 */
 function AgentImageThumb({ src, alt, onOpen }: { src: string; alt: string; onOpen: () => void }) {
   return (
     <button
@@ -103,6 +103,28 @@ function AgentImageThumb({ src, alt, onOpen }: { src: string; alt: string; onOpe
         className="max-h-56 max-w-full object-contain"
       />
     </button>
+  );
+}
+
+/** 消息内影片：赏阅 inline（倍速/逐帧/标记，点「放大」进全屏）。 */
+function MdVideo({ src }: { src: string }) {
+  const asset = useMemo(() => viewAssetFromUrl(src, "video"), [src]);
+  if (!asset) return null;
+  return (
+    <div className="my-1 w-full max-w-md" aria-label={`影片：${src}`}>
+      <Viewer asset={asset} density="inline" />
+    </div>
+  );
+}
+
+/** 消息内音频：赏阅 inline（波形/歌词/标记，点「放大」进全屏）。 */
+function MdAudio({ src }: { src: string }) {
+  const asset = useMemo(() => viewAssetFromUrl(src, "audio"), [src]);
+  if (!asset) return null;
+  return (
+    <div className="my-1 w-full max-w-md" aria-label={`音频：${src}`}>
+      <Viewer asset={asset} density="inline" />
+    </div>
   );
 }
 
@@ -138,19 +160,10 @@ function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: 
       // 消息里的平台图片直链：缩略图卡，点击放大（罪状 9）。
       return <AgentImageThumb src={span.src} alt={span.alt} onOpen={() => onOpenImage(span.src, span.alt)} />;
     case "video":
-      // 消息里的平台影片直链：内嵌播放器，不再是一串裸 URL。
-      return (
-        <video
-          src={span.src}
-          controls
-          playsInline
-          preload="none"
-          aria-label={`影片：${span.src}`}
-          className="my-1 block max-h-72 w-full max-w-md rounded-ios-lg bg-black"
-        />
-      );
+      // 消息里的平台影片直链：内嵌赏阅播放器（可放大进全屏），不再是一串裸 URL。
+      return <MdVideo src={span.src} />;
     case "audio":
-      return <audio src={span.src} controls preload="none" aria-label={`音频：${span.src}`} className="my-1 block w-full max-w-md" />;
+      return <MdAudio src={span.src} />;
     case "br":
       return <br />;
   }
@@ -176,12 +189,16 @@ function BlockNode({
   onSend?: (text: string) => void;
 }) {
   switch (block.type) {
-    case "p":
+    case "p": {
+      // 内嵌赏阅（影片/音频）含块级 div/p，不能放进 <p>（hydration 报错）。
+      const hasBlockMedia = block.children.some((c) => c.k === "video" || c.k === "audio");
+      const Tag = hasBlockMedia ? "div" : "p";
       return (
-        <p className="my-1 break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0">
+        <Tag className="my-1 break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0">
           {block.children.map((c, i) => <InlineSpan key={i} span={c} onOpenImage={onOpenImage} />)}
-        </p>
+        </Tag>
       );
+    }
     case "h": {
       // 手机端阶梯锚点（agent-chat.css ≤639.98px）：h1 → 18px/26px（.agent-turn-title），
       // h2/h3 → 17px/25px（.agent-turn-text）。桌面原 class 序列不动（text-base / text-[0.9375rem]）。
@@ -262,8 +279,12 @@ function BlockNode({
 }
 
 function AgentMarkdownComponent({ text, isStreaming, onSend }: AgentMarkdownProps) {
-  // 灯罩：同一气泡里多张缩图共用一个放大层。
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  // 缩图点击 → 站内赏阅全屏（与 portal 全屏同一个壳，不再自带灯罩）。
+  const openViewer = useAgentViewerOpen();
+  const onOpenImage = (src: string, alt: string) => {
+    const asset = viewAssetFromUrl(src, "image", { title: alt.trim() || undefined });
+    if (asset) openViewer([asset]);
+  };
   const blocks = parseAgentMarkdown(text);
 
   return (
@@ -272,41 +293,11 @@ function AgentMarkdownComponent({ text, isStreaming, onSend }: AgentMarkdownProp
         <BlockNode
           key={i}
           block={b}
-          onOpenImage={(src, alt) => setLightbox({ src, alt })}
+          onOpenImage={onOpenImage}
           isStreaming={isStreaming}
           onSend={onSend}
         />
       ))}
-      {/* 灯罩走 portal：气泡带 .agent-rise 入场动画（transform 未清零），
-          fixed 元素会被它的 containing block 困在气泡里。lightbox 只在点击后
-          （纯客户端）非空，SSR 阶段永不渲染 portal。 */}
-      {lightbox &&
-        createPortal(
-          <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="图片放大查看"
-          onClick={() => setLightbox(null)}
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4 [touch-action:manipulation]"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element -- 平台直链，同上 */}
-          <img
-            src={lightbox.src}
-            alt={lightbox.alt || "放大图片"}
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-[85vh] max-w-[92vw] rounded-ios-xl object-contain shadow-2xl"
-          />
-          <button
-            type="button"
-            onClick={() => setLightbox(null)}
-            aria-label="关闭放大"
-            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-          </div>,
-          document.body,
-        )}
     </>
   );
 }
