@@ -25,6 +25,14 @@
 #   music-operation 回执（task_id＝music-operation:sha256(producer\0operation)，data.operation_id）
 #   的 ref＝music:<producer_oc 或 parent_gw>:<operation_id>（call_… 直调 / pg:… 工程图节点），
 #   故按 (会话, operation_id) 逐笔连 music_charge，比 回执确认额 vs 实扣；music_charge 表缺失＝「未取得」。
+#   H33 历史已知旧帐分栏（只分栏、不改汇总口径、不改账、不改写旧日志）：
+#     A. 双费 done：同 task 有 ≥2 行带费 done/completed（H22 口径，虚高＝带费合计−平台实扣）。
+#        该 task 全部带费行 ts 早于截断 A ⇒ legacy；任一行 ≥ 截断 / ts 解析不了 ⇒ 截断后新增（告警）。
+#     B. 旧车道 refunded 矛盾：gw_refunded_but_charged 中「ledger.jsonl refunded」且该 task 的 refunded 行
+#        全是 kind=generation、ts 早于截断 B ⇒ legacy；其余（回执 refunded、现行车道、调用方声称、≥截断）⇒ 新增。
+#     截断取真实生效时刻（VPS /opt/agent-harness/releases/gateway/history.log 第 3 列 epoch，非 commit 时间）。
+#     告警与退出码只看截断后新增：加 --alert-exit 时有新增 rc=2、否则 rc=0（其他类别仍只列示，不影响退出码）；
+#     不加时 rc 恒 0（兼容既有调用方/探针，rc≠0 只表示脚本出错）。
 #
 # 用法（VPS）：
 #   python3 deploy/vps/billing-recon.py                       # 默认路径 + 只读 psql
@@ -48,6 +56,14 @@ OPTIONAL_PG_QUERIES = {
 FAIL_STATES = {"failed", "cancelled", "canceled"}
 UNKNOWN_STATES = {"submit_unknown", "billing_unknown"}
 GEN_KINDS = ("image", "video", "audio")
+# H33 截断（UTC）。A＝8cfae3979（H22 done 幂等＋refunded 以平台为准）网关 release
+# 8cfae3979cdb-20261103T235628Z-304292 生效，history.log epoch 1793750220＝2026-11-04 07:57:00 SGT。
+# B＝4af310238（10-30 整树还原，撤下 2a571c55b 工程图引入的 kind=generation 车道写入方，其后各 release 均无该写入方）
+# 网关 release 4af310238e8f-20261030T081715Z-176185 生效，history.log epoch 1793348262＝2026-10-30 16:17:42 SGT。
+LEGACY_CUTOFF_DONE_DUP = "2026-11-03T23:57:00Z"
+LEGACY_CUTOFF_GEN_REFUND = "2026-10-30T08:17:42Z"
+LEGACY_SRC_DONE_DUP = "8cfae3979 网关 release 8cfae3979cdb-20261103T235628Z-304292 生效（history.log epoch 1793750220）"
+LEGACY_SRC_GEN_REFUND = "4af310238 撤下 generation 车道写入方，网关 release 4af310238e8f-20261030T081715Z-176185 生效（history.log epoch 1793348262）"
 
 CATS = [
     ("confirmed_ne_charged_over", "confirmed≠扣费（实扣>确认）"),
@@ -245,7 +261,7 @@ def read_gateway(args):
     return receipts, confirmations, events, has_conf is not None, os.path.exists(args.ledger)
 
 
-def reconcile(pg, receipts, confirmations, events):
+def reconcile(pg, receipts, confirmations, events, cutoffs=None):
     findings = {k: [] for k, _ in CATS}
 
     def add(cat, amount_coins, **detail):
@@ -527,9 +543,81 @@ def reconcile(pg, receipts, confirmations, events):
     findings["_refund_logging"] = {"failed_tasks_platform_refunded": len(pr), "with_refunded_row": len(pr & gw_ref),
                                    "logged_refund_missing": len(pr - gw_ref),
                                    "backfill_rows": sum(1 for e in events if e["event"] == "refunded" and e.get("refund_backfill_of"))}
+    findings["_legacy_split"] = legacy_split(findings, jobs, charged, events, cutoffs or {})
     findings["_confirmed_compared"] = compared[0]
     findings["_confirm_linked"] = tuple(linked)
     return findings
+
+
+def legacy_split(findings, jobs, charged, events, cutoffs):
+    """H33：两类历史已知旧帐按真实生效时刻分栏。只读、只计数；在明细上加 legacy= 标记，不增删任何类别条目。"""
+    ca_iso = cutoffs.get("done_dup") or LEGACY_CUTOFF_DONE_DUP
+    cb_iso = cutoffs.get("gen_refund") or LEGACY_CUTOFF_GEN_REFUND
+    ca, cb = ts_epoch(ca_iso), ts_epoch(cb_iso)
+    if ca is None or cb is None:
+        raise SystemExit("截断时刻解析失败：%s / %s" % (ca_iso, cb_iso))
+    # A. 双费 done（H22 口径：带费＝cost_coins>0）
+    costed = collections.defaultdict(list)
+    for e in events:
+        if e["kind"] in ("image", "video", "audio", "generation") and e["task_id"] and e["event"] in ("done", "completed") \
+                and (e["cost"] or 0) > 0:
+            costed[e["task_id"]].append(e)
+    a = {"legacy": [0, 0.0, 0], "new": [0, 0.0, 0]}  # 笔数、虚高币、虚高未取得（无平台 job）
+    a_new, a_legacy = [], set()
+    for tid, rs in costed.items():
+        if len(rs) < 2:
+            continue
+        tss = [ts_epoch(r["ts"]) for r in rs]
+        col = "legacy" if all(t is not None and t < ca for t in tss) else "new"
+        a[col][0] += 1
+        if tid in jobs:
+            a[col][1] += sum(r["cost"] for r in rs) - coins(charged[tid])
+        else:
+            a[col][2] += 1
+        if col == "legacy":
+            a_legacy.add(pfx(tid))
+        else:
+            a_new.append(dict(job=pfx(tid), rows=len(rs), last_ts=max((r["ts"] or "") for r in rs)[:19],
+                              overcount=round(sum(r["cost"] for r in rs) - coins(charged[tid]), 4) if tid in jobs else None))
+    # B. 旧车道 refunded 矛盾：按 gw_refunded_but_charged 条目逐笔判（legacy+new＝汇总该类别）
+    ref_rows = collections.defaultdict(list)
+    for e in events:
+        if e["task_id"] and e["event"] == "refunded" and e["kind"] in ("image", "video", "audio", "generation"):
+            ref_rows[pfx(e["task_id"])].append(e)
+    b = {"legacy": [0, 0.0], "new": [0, 0.0]}
+    b_new = []
+    for f in findings["gw_refunded_but_charged"]:
+        rs = ref_rows.get(f["job"], [])
+        old = f.get("reason") == "ledger.jsonl refunded" and rs and all(
+            r["kind"] == "generation" and ts_epoch(r["ts"]) is not None and ts_epoch(r["ts"]) < cb for r in rs)
+        col = "legacy" if old else "new"
+        b[col][0] += 1
+        b[col][1] += f["coins"] or 0
+        if old:
+            f["legacy"] = "H33旧车道refunded"
+        else:
+            b_new.append(dict(job=f["job"], reason=f.get("reason"), lanes=",".join(sorted({r["kind"] or "?" for r in rs})) or "-",
+                              ts=min((r["ts"] or "") for r in rs)[:19] if rs else "-", coins=f["coins"]))
+    # 信息：gw_ledger_ne_charged 中属 A 类 legacy 的条目（不改该类别汇总）
+    gl = [0, 0.0]
+    for f in findings["gw_ledger_ne_charged"]:
+        if f["job"] in a_legacy:
+            f["legacy"] = "H33双费done"
+            gl[0] += 1
+            gl[1] += f["coins"] or 0
+    r4 = lambda x: round(x, 4)
+    return {
+        "done_dup_costed": {"cutoff": ca_iso, "cutoff_source": LEGACY_SRC_DONE_DUP if not cutoffs.get("done_dup") else "命令行覆盖",
+                            "legacy_tasks": a["legacy"][0], "legacy_overcount_coins": r4(a["legacy"][1]),
+                            "legacy_overcount_missing": a["legacy"][2],
+                            "new_tasks": a["new"][0], "new_overcount_coins": r4(a["new"][1]), "new_overcount_missing": a["new"][2],
+                            "new_detail": sorted(a_new, key=lambda x: x["last_ts"])},
+        "gen_refunded_contra": {"cutoff": cb_iso, "cutoff_source": LEGACY_SRC_GEN_REFUND if not cutoffs.get("gen_refund") else "命令行覆盖",
+                                "legacy_count": b["legacy"][0], "legacy_coins": r4(b["legacy"][1]),
+                                "new_count": b["new"][0], "new_coins": r4(b["new"][1]), "new_detail": b_new},
+        "gw_ledger_ne_charged_in_legacy_done_dup": {"count": gl[0], "coins": r4(gl[1])},
+        "alerts": a["new"][0] + b["new"][0],
+    }
 
 
 def summarize(findings):
@@ -551,10 +639,15 @@ def main():
     ap.add_argument("--pg-dir", help="离线：读 DIR/jobs.csv ops.csv acct.csv（可选 music.csv）取代 psql")
     ap.add_argument("--json", action="store_true", help="只输出汇总 JSON")
     ap.add_argument("--limit", type=int, default=15, help="每类明细最多列几笔")
+    ap.add_argument("--cutoff-done-dup", help="H33 覆盖截断 A（ISO，默认 %s）" % LEGACY_CUTOFF_DONE_DUP)
+    ap.add_argument("--cutoff-gen-refund", help="H33 覆盖截断 B（ISO，默认 %s）" % LEGACY_CUTOFF_GEN_REFUND)
+    ap.add_argument("--alert-exit", action="store_true", help="H33：截断后新增（双费 done／refunded 矛盾）>0 时退出码 2")
     args = ap.parse_args()
     pg = read_pg(args)
     receipts, confirmations, events, has_conf, has_ledger = read_gateway(args)
-    findings = reconcile(pg, receipts, confirmations, events)
+    findings = reconcile(pg, receipts, confirmations, events,
+                         cutoffs={"done_dup": args.cutoff_done_dup, "gen_refund": args.cutoff_gen_refund})
+    legacy = findings.pop("_legacy_split")
     compared = findings.pop("_confirmed_compared")
     linked_job, linked_wf = findings.pop("_confirm_linked")
     music_meta = findings.pop("_music")
@@ -566,9 +659,10 @@ def main():
             "confirmed_compared": compared, "confirm_events_linked": linked_job, "confirm_events_workflow_batch": linked_wf,
             "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids), "music": music_meta,
             "refund_logging": refund_logging}
+    rc = 2 if (args.alert_exit and legacy["alerts"]) else 0  # H33：退出码只看截断后新增（opt-in）
     if args.json:
-        print(json.dumps({"meta": meta, "summary": summary}, ensure_ascii=False, indent=1))
-        return
+        print(json.dumps({"meta": meta, "summary": summary, "legacy_split": legacy}, ensure_ascii=False, indent=1))
+        sys.exit(rc)
     print("# H18 计费三方对帐（只读）")
     print("输入：" + "，".join("%s=%s" % kv for kv in meta.items() if kv[0] not in ("music", "refund_logging")))
     print("退款记录（ledger×平台，只计数）：" + "，".join("%s=%s" % kv for kv in refund_logging.items()))
@@ -584,6 +678,22 @@ def main():
         print("\n## %s（%d 笔，列前 %d）" % (label, len(fs), min(args.limit, len(fs))))
         for f in sorted(fs, key=lambda x: -abs(x["coins"] or 0))[:args.limit]:
             print("- " + " ".join("%s=%s" % (kk, "未取得" if vv is None else vv) for kk, vv in f.items()))
+    A, B = legacy["done_dup_costed"], legacy["gen_refunded_contra"]
+    print("\n## 历史已知旧帐（H33 截断前，仅列示，不告警；汇总表口径不变）")
+    print("- 双费 done（截断 %s；%s）：legacy %d 个 task，虚高 %s 币（虚高未取得 %d）" % (
+        A["cutoff"], A["cutoff_source"], A["legacy_tasks"], A["legacy_overcount_coins"], A["legacy_overcount_missing"]))
+    print("- 旧车道 refunded 矛盾（截断 %s；%s）：legacy %d 笔，%s 币" % (
+        B["cutoff"], B["cutoff_source"], B["legacy_count"], B["legacy_coins"]))
+    g = legacy["gw_ledger_ne_charged_in_legacy_done_dup"]
+    print("- 其中「%s」类别里属双费 done legacy：%d 笔，%s 币" % (dict(CATS)["gw_ledger_ne_charged"], g["count"], g["coins"]))
+    print("\n## 告警（截断后新增）：%d" % legacy["alerts"])
+    print("- 双费 done 新增：%d 个 task，虚高 %s 币（未取得 %d）" % (A["new_tasks"], A["new_overcount_coins"], A["new_overcount_missing"]))
+    for d in A["new_detail"][:args.limit]:
+        print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
+    print("- refunded 矛盾新增（非旧车道或截断后）：%d 笔，%s 币" % (B["new_count"], B["new_coins"]))
+    for d in B["new_detail"][:args.limit]:
+        print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
+    sys.exit(rc)
 
 
 if __name__ == "__main__":
