@@ -106,6 +106,10 @@ export interface LedgerEntry {
   refund_status?: string
   // H31（2026-11-04）：平台事后退款补记行的标注＝补记前回执的终态（failed/cancelled）；首个终态即 refunded 的行无此键。
   refund_backfill_of?: string
+  // H34（2026-11-04）：audio done 行关联键（见 events-translate-types.ts AudioLedgerLink）；旧行无键＝未关联。
+  tool_session?: string
+  tool_call_id?: string
+  music_ref?: string
 }
 
 export async function appendLedger(entry: LedgerEntry): Promise<void> {

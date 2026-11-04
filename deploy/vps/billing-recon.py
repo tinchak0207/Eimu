@@ -30,7 +30,7 @@
 #   python3 deploy/vps/billing-recon.py                       # 默认路径 + 只读 psql
 #   python3 deploy/vps/billing-recon.py --json                # 只出汇总 JSON
 #   python3 deploy/vps/billing-recon.py --pg-dir DIR ...      # 离线：DIR 下 jobs.csv / ops.csv / acct.csv
-import argparse, collections, csv, io, json, os, shlex, sqlite3, subprocess, sys
+import argparse, collections, csv, datetime, io, json, os, re, shlex, sqlite3, subprocess, sys
 
 Q = 500000.0
 TOL = 0.005  # 币
@@ -80,6 +80,78 @@ CATS = [
     ("confirm_unlinked_table", "确认表无对应回执（generation_confirmations approved）"),
     ("frozen_unknown", "真相未明冻结（INC-0831，不退不重投，仅列示）"),
 ]
+
+
+def ts_epoch(v):
+    """ISO（ledger ts）或 PG timestamptz 文本 → epoch 秒；解析不了回 None（不猜）。"""
+    if not isinstance(v, str) or not v:
+        return None
+    t = v.strip().replace(" ", "T", 1)
+    if t.endswith("Z"):
+        t = t[:-1] + "+00:00"
+    m = re.match(r"^(.*[T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(?::?(\d{2}))?$", t)
+    if m:
+        t = "%s%s:%s" % (m.group(1), m.group(2), m.group(3) or "00")
+    t = re.sub(r"\.(\d{6})\d+", r".\1", t)
+    try:
+        d = datetime.datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=datetime.timezone.utc)
+    return d.timestamp()
+
+
+def music_ledger_link(music, events):
+    """H34：ledger audio done 行 × music_charge 逐笔关联（只计数，不入金额类别、不改账）。
+    按 (tool_session, tool_call_id) 归一次工具调用（多 take 不重复计）：
+      exact＝行带 music_ref 且平台有 charge_ref＝music:<keyId>:<music_ref>；
+      session_time＝无 music_ref，按 tool_session 在 [ts-900s, ts+60s] 唯一命中一笔；
+      ambiguous＝该窗多笔；unlinked＝零笔；legacy_no_keys＝H34 前旧行（无 tool_session，无法逐笔）。"""
+    by_inner, by_sess = {}, collections.defaultdict(list)
+    for c in music:
+        parts = (c.get("charge_ref") or "").split(":", 2)
+        if len(parts) != 3:
+            continue
+        by_inner.setdefault(parts[2], c)
+        inner = parts[2].split(":", 2)
+        if len(inner) == 3 and inner[0] == "music":
+            by_sess[inner[1]].append((ts_epoch(c.get("created_at")), parts[2]))
+    out = collections.Counter()
+    calls = {}
+    for e in events:
+        if e["kind"] != "audio" or e["event"] != "done":
+            continue
+        out["rows"] += 1
+        if not e.get("tool_session"):
+            out["legacy_no_keys"] += 1
+            continue
+        k = (e["tool_session"], e.get("tool_call_id") or ("row", out["rows"]))
+        prev = calls.get(k)
+        if prev is None or (not prev.get("music_ref") and e.get("music_ref")):
+            calls[k] = e
+    used = set()
+    for e in calls.values():
+        out["calls_keyed"] += 1
+        if e.get("music_ref"):
+            if e["music_ref"] in by_inner:
+                out["exact"] += 1
+                used.add(e["music_ref"])
+            else:
+                out["ref_no_charge"] += 1
+            continue
+        t = ts_epoch(e.get("ts"))
+        hits = [r for (ct, r) in by_sess.get(e["tool_session"], []) if t is not None and ct is not None and t - 900 <= ct <= t + 60]
+        if len(hits) == 1:
+            out["session_time"] += 1
+            used.add(hits[0])
+        elif hits:
+            out["ambiguous"] += 1
+        else:
+            out["unlinked"] += 1
+    out["charges_linked"] = len(used)
+    return {"ledger_link_" + k: out[k] for k in ("rows", "legacy_no_keys", "calls_keyed", "exact", "session_time",
+                                                 "ambiguous", "unlinked", "ref_no_charge", "charges_linked")}
 
 
 def num(v):
@@ -165,7 +237,11 @@ def read_gateway(args):
                                "request_id": o.get("request_id") if isinstance(o.get("request_id"), str) else None,
                                "workflow_id": o.get("workflow_id") if isinstance(o.get("workflow_id"), str) else None,
                                "refund_claim": o.get("refund_claim") if isinstance(o.get("refund_claim"), str) else None,
-                               "refund_backfill_of": o.get("refund_backfill_of") if isinstance(o.get("refund_backfill_of"), str) else None})
+                               "refund_backfill_of": o.get("refund_backfill_of") if isinstance(o.get("refund_backfill_of"), str) else None,
+                               # H34：audio done 关联键（只读；旧行无＝legacy）
+                               "tool_session": o.get("tool_session") if isinstance(o.get("tool_session"), str) else None,
+                               "tool_call_id": o.get("tool_call_id") if isinstance(o.get("tool_call_id"), str) else None,
+                               "music_ref": o.get("music_ref") if isinstance(o.get("music_ref"), str) else None})
     return receipts, confirmations, events, has_conf is not None, os.path.exists(args.ledger)
 
 
@@ -442,6 +518,7 @@ def reconcile(pg, receipts, confirmations, events):
         mmeta["receipt_matched_coins"] = round(mm["_matched_coins"], 4)
         mmeta["charges_without_receipt"] = sum(1 for c in music if c.get("charge_ref") not in m_used)  # music_gen 直调不写回执，正常
         mmeta["refunds"] = "无退款路径（failed＝确定性未扣）"
+        mmeta.update(music_ledger_link(music, events))  # H34
     findings["_music"] = mmeta
     # H31：ledger 退款记录完整度（只计数、不入金额类别）。failed_tasks_platform_refunded＝ledger 有 failed 行、平台 job 已 refunded
     # 的 task；其中无任一车道 refunded 行＝少报（logged_refund_missing）。backfill_rows＝网关见平台事后退款补记的行（H31 上线后才有）。

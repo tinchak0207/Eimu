@@ -1,6 +1,7 @@
 import { appendTranscript } from "./subagent-transcript.ts"
 import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
+import { toolOutputMusicRef } from "./events-translate-emit.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
@@ -239,7 +240,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               run.artifacts.push({ kind: "audio", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
               appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "audio", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
-            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
+            // H34：子代理产出——tool_session＝子会话（music_charge ref 里的会话就是它），账本行带关联键。
+            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover }, {
+              tool_session: typeof part.sessionID === "string" ? part.sessionID : undefined,
+              tool_call_id: childCallId || undefined,
+              music_ref: toolOutputMusicRef(parsedOut),
+            })
           }
         }
         if (part.type !== "text" && part.type !== "reasoning") {

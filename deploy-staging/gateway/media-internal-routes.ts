@@ -781,8 +781,9 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
     await emitVideoDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "audio.done") {
     // 同 video.done：放行却静默丢帧。共用 emitAudioDone，语义与前端 audio.done 卡对齐。
-    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio"; title?: string; cover?: string; lyric_status?: string }
-    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind, { title: d.title, cover: d.cover, lyric_status: d.lyric_status })
+    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio"; title?: string; cover?: string; lyric_status?: string; music_ref?: string }
+    // H34：调用方带 music_ref 才写进账本行（audioLedgerLinkFields 校验形状）；SSE 帧不变。
+    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind, { title: d.title, cover: d.cover, lyric_status: d.lyric_status }, { music_ref: d.music_ref })
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
     if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)

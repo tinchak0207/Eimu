@@ -165,6 +165,7 @@ export async function musicChargeReceiptFields(
               ? body.message
               : `HTTP ${resp.status}`
       return {
+        music_ref: ref,
         cost_coins: null,
         charge_error: resp.status === 402 ? "余额不足（这笔未扣费）" : `扣费失败（HTTP ${resp.status}）`,
         charge_note: `本次音乐已生成，但平台扣费未完成：${detail}。费用状态以平台账本为准，不得对用户宣称已扣费，也不得当作免费。`,
@@ -172,6 +173,7 @@ export async function musicChargeReceiptFields(
     }
     if (typeof body?.cost_coins !== "number") {
       return {
+        music_ref: ref,
         cost_coins: null,
         charge_error: "平台扣费回应缺 cost_coins 字段",
         charge_note: "本次音乐已生成，但平台扣费回应未带 cost_coins，实际费用状态以平台账本为准。",
@@ -180,11 +182,14 @@ export async function musicChargeReceiptFields(
     // 非主 take 归 0：本次调用只扣 1 次，避免 gateway 把顶层价贴到每张卡使账本虚增（见上方说明）。
     if (takes && takes.length > 1) for (const t of takes.slice(1)) t.cost_coins = 0
     return {
+      // H34：扣费 ref 回执化——网关 audio done 账本行据此与 music_charge 逐笔连（charge_ref＝music:<keyId>:<ref>）。
+      music_ref: ref,
       cost_coins: body.cost_coins,
       ...(body?.deduped === true ? { cost_deduped: true } : {}),
     }
   } catch (e: any) {
     return {
+      music_ref: ref,
       cost_coins: null,
       charge_error: "扣费呼叫异常",
       charge_note: `本次音乐已生成，但扣费呼叫异常：${e?.message ?? String(e)}。费用状态以平台账本为准。`,

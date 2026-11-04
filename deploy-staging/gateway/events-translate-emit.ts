@@ -5,7 +5,7 @@ import { emitQuotaChanged, appendLedgerFor, claimLedgerDone } from "./quota-ledg
 import { flushPendingCompact } from "./messages-gw.ts"
 import { boundMap, boundSet } from "./events-translate-core.ts"
 import { emitCanvasResult } from "./events-translate-canvas.ts"
-import type { AudioDoneMeta } from "./events-translate-types.ts"
+import type { AudioDoneMeta, AudioLedgerLink } from "./events-translate-types.ts"
 // Shared image.done emission path, deduped per session by url (bounded Set, cap
 // 100, evict oldest). Both the opencode tool-result translation and the
 // /internal/emit entry point go through here, so the same image can never be
@@ -135,6 +135,24 @@ export async function emitVideoDone(
   void emitQuotaChanged(state)
 }
 
+// H34：只收非空字符串；music_ref 必须是 music: 前缀（music_gen 的 ref 形状），否则不写。
+export function audioLedgerLinkFields(link?: AudioLedgerLink): Partial<AudioLedgerLink> {
+  if (!link) return {}
+  const ok = (v: unknown, max = 256): v is string => typeof v === "string" && v.length > 0 && v.length <= max
+  return {
+    ...(ok(link.tool_session) ? { tool_session: link.tool_session } : {}),
+    ...(ok(link.tool_call_id) ? { tool_call_id: link.tool_call_id } : {}),
+    ...(ok(link.music_ref) && link.music_ref.startsWith("music:") ? { music_ref: link.music_ref } : {}),
+  }
+}
+
+// H34：从工具回执顶层取 music_ref（music_gen 回执带；其它工具无此键＝undefined）。
+export function toolOutputMusicRef(parsed: unknown): string | undefined {
+  if (parsed === null || typeof parsed !== "object") return undefined
+  const v = (parsed as Record<string, unknown>).music_ref
+  return typeof v === "string" && v.startsWith("music:") ? v : undefined
+}
+
 export async function emitAudioDone(
   state: SessionState,
   url: string,
@@ -142,6 +160,7 @@ export async function emitAudioDone(
   task_id?: string,
   media_kind?: "audio",
   meta?: AudioDoneMeta,
+  link?: AudioLedgerLink,
 ): Promise<void> {
   if (!url) return
   if (state.announcedUrls.has(url)) return
@@ -166,6 +185,7 @@ export async function emitAudioDone(
     task_id,
     cost_coins,
     result_url: url,
+    ...audioLedgerLinkFields(link),
   })
   void emitQuotaChanged(state)
 }

@@ -24,7 +24,7 @@ import { markDirty } from "./sessions-core.ts"
 import { canvasResultNodeId } from "./canvas-cascade-state.ts"
 import { MODEL_SELF_FIX_CODE, isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
-import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
+import { emitImageDone, emitVideoDone, emitAudioDone, toolOutputMusicRef } from "./events-translate-emit.ts"
 import { readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, wantsAutoCanvas, settleMusicCanvasUnit, settleCanvasUnitWithoutTask } from "./events-translate-canvas.ts"
 import { bashDenyAttribution, bashDenyProvenance, appendDenyAudit } from "./events-translate-deny.ts"
 import type { DenyProvenance } from "./events-translate-types.ts"
@@ -481,7 +481,13 @@ if (status === "pending" || status === "running") {
       if (parsed !== null && typeof parsed === "object") {
         const media = collectToolOutputMediaUrls(parsed)
         for (const c of media.video) void emitVideoDone(state, c.url, c.cost_coins, undefined, "video")
-        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
+        // H34：账本行带关联键（实际跑工具的会话、callID、music_gen 回执的 music_ref），SSE 帧不变。
+        const audioLink = {
+          tool_session: typeof part?.sessionID === "string" ? part.sessionID : undefined,
+          tool_call_id: callId || undefined,
+          music_ref: toolOutputMusicRef(parsed),
+        }
+        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover }, audioLink)
         // 出曲后自动 lyric-align（异步）：歌词来自工具入参，URL 来自出参；失败不挡播放。
         if (media.audio.length > 0) {
           maybeEnqueueLyricAlignFromTool({
