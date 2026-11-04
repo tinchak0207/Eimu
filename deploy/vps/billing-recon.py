@@ -164,7 +164,8 @@ def read_gateway(args):
                                "cost": num(o.get("cost_coins")), "ts": o.get("ts"),
                                "request_id": o.get("request_id") if isinstance(o.get("request_id"), str) else None,
                                "workflow_id": o.get("workflow_id") if isinstance(o.get("workflow_id"), str) else None,
-                               "refund_claim": o.get("refund_claim") if isinstance(o.get("refund_claim"), str) else None})
+                               "refund_claim": o.get("refund_claim") if isinstance(o.get("refund_claim"), str) else None,
+                               "refund_backfill_of": o.get("refund_backfill_of") if isinstance(o.get("refund_backfill_of"), str) else None})
     return receipts, confirmations, events, has_conf is not None, os.path.exists(args.ledger)
 
 
@@ -442,6 +443,13 @@ def reconcile(pg, receipts, confirmations, events):
         mmeta["charges_without_receipt"] = sum(1 for c in music if c.get("charge_ref") not in m_used)  # music_gen 直调不写回执，正常
         mmeta["refunds"] = "无退款路径（failed＝确定性未扣）"
     findings["_music"] = mmeta
+    # H31：ledger 退款记录完整度（只计数、不入金额类别）。failed_tasks_platform_refunded＝ledger 有 failed 行、平台 job 已 refunded
+    # 的 task；其中无任一车道 refunded 行＝少报（logged_refund_missing）。backfill_rows＝网关见平台事后退款补记的行（H31 上线后才有）。
+    failed_t = {e["task_id"] for e in events if e["kind"] in ("image", "video", "audio") and e["task_id"] and e["event"] == "failed"}
+    pr = {t for t in failed_t if t in jobs and jobs[t]["status"] == "refunded"}
+    findings["_refund_logging"] = {"failed_tasks_platform_refunded": len(pr), "with_refunded_row": len(pr & gw_ref),
+                                   "logged_refund_missing": len(pr - gw_ref),
+                                   "backfill_rows": sum(1 for e in events if e["event"] == "refunded" and e.get("refund_backfill_of"))}
     findings["_confirmed_compared"] = compared[0]
     findings["_confirm_linked"] = tuple(linked)
     return findings
@@ -473,17 +481,20 @@ def main():
     compared = findings.pop("_confirmed_compared")
     linked_job, linked_wf = findings.pop("_confirm_linked")
     music_meta = findings.pop("_music")
+    refund_logging = findings.pop("_refund_logging")
     summary = summarize(findings)
     job_ids = {j["id"] for j in pg["jobs"]}
     meta = {"jobs": len(pg["jobs"]), "ops": len(pg["ops"]), "acct": len(pg["acct"]), "receipts": len(receipts),
             "confirmations": len(confirmations) if has_conf else "未取得", "ledger_events": len(events) if has_ledger else "未取得",
             "confirmed_compared": compared, "confirm_events_linked": linked_job, "confirm_events_workflow_batch": linked_wf,
-            "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids), "music": music_meta}
+            "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids), "music": music_meta,
+            "refund_logging": refund_logging}
     if args.json:
         print(json.dumps({"meta": meta, "summary": summary}, ensure_ascii=False, indent=1))
         return
     print("# H18 计费三方对帐（只读）")
-    print("输入：" + "，".join("%s=%s" % kv for kv in meta.items() if kv[0] != "music"))
+    print("输入：" + "，".join("%s=%s" % kv for kv in meta.items() if kv[0] not in ("music", "refund_logging")))
+    print("退款记录（ledger×平台，只计数）：" + "，".join("%s=%s" % kv for kv in refund_logging.items()))
     mmeta = meta["music"]
     print("音乐（music_charge）：" + (mmeta if isinstance(mmeta, str) else "，".join("%s=%s" % kv for kv in sorted(mmeta.items()))))
     print("\n| 类别 | 笔数 | 金额(币) | 金额未取得 |\n|---|---:|---:|---:|")

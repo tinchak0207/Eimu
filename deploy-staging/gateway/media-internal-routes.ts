@@ -18,7 +18,7 @@ import { emitToSession } from "./sse-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 import { flushPendingCompact } from "./messages-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
-import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
+import { emitQuotaChanged, appendLedgerFor, claimLedgerRefunded } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
@@ -632,13 +632,14 @@ export function settleConfirm(
 // generation_job.status；平台仅在全额 refund operation applied 后才把 job 置 refunded（billing-ledger/write.ts）。
 // 调用方 /internal/emit 自带的 refunded:true 无此证据时记 failed＋refund_claim="caller"/refund_status="unconfirmed"。
 // 只改日志语义：SSE 帧的 refunded 字段、退款/扣费路径一律不动。
-function failureLedgerFields(task_id: string, refunded: boolean): { event: string; refund_source?: string; refund_claim?: string; refund_status?: string } {
+// H31：refunded 行经 claimLedgerRefunded 幂等——该 task 已记过 refunded（job-completion 补记、先前渲染或重启前旧行）
+// 时返回 null＝本次不写 ledger（SSE/画布照发）。
+function failureLedgerFields(task_id: string, refunded: boolean): { event: string; refund_source?: string; refund_claim?: string; refund_status?: string } | null {
   if (!refunded) return { event: "failed" }
   let platformRefunded = false
   try { platformRefunded = !!task_id && generationReceipt(task_id)?.status === "refunded" } catch {}
-  return platformRefunded
-    ? { event: "refunded", refund_source: "platform_job" }
-    : { event: "failed", refund_claim: "caller", refund_status: "unconfirmed" }
+  if (platformRefunded) return claimLedgerRefunded(task_id) ? { event: "refunded", refund_source: "platform_job" } : null
+  return { event: "failed", refund_claim: "caller", refund_status: "unconfirmed" }
 }
 
 // 用 task_id（或按序）把 loading 节点置 error，resume 的 agent 文案讲人话。
@@ -669,9 +670,10 @@ export function emitImageFailed(
     // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
     applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
-  void appendLedgerFor(state, {
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
     kind: "image",
-    ...failureLedgerFields(task_id, refunded),
+    ...ledgerFields,
     task_id,
   })
 }
@@ -703,9 +705,10 @@ export function emitVideoFailed(
     // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
     applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
-  void appendLedgerFor(state, {
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
     kind: "video",
-    ...failureLedgerFields(task_id, refunded),
+    ...ledgerFields,
     task_id,
   })
 }
@@ -737,9 +740,10 @@ export function emitAudioFailed(
     // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
     applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
-  void appendLedgerFor(state, {
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
     kind: "audio",
-    ...failureLedgerFields(task_id, refunded),
+    ...ledgerFields,
     task_id,
   })
 }

@@ -15,6 +15,7 @@ import path from "node:path"
 import { probeMedia } from "./media-quality"
 import { PLATFORM_BASE } from "./constants-gateway"
 import { resolveCanonicalIdentity } from "./auth-gw"
+import { appendLedger, appendLedgerFor, claimLedgerRefunded } from "./quota-ledger.ts"
 
 function parentOf(session: string): any {
   return resolveSession(session) ?? (generationParent(session) ? resolveSession(generationParent(session)!.parent_gw) : undefined)
@@ -111,7 +112,22 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const artifacts = Array.isArray(input.artifacts) ? input.artifacts : []
       if ((input.status === "succeeded" && !artifacts.length) || artifacts.some((a: any) => typeof a.url !== "string" || !/^https?:\/\//.test(a.url)))
         return Response.json({ ok: false, error: "success requires all public artifact URLs" }, { status: 400 })
+      const priorStatus = receipt.status
       const completed = completeGenerationReceipt(input.task_id, input.status, artifacts, { reason: input.reason, cost_coins: input.cost_coins })
+      // H31（2026-11-04）：平台事后退款补记。回执先落 failed/cancelled（ledger 已/将记 failed）、后经 poller 晚对账或
+      // image_get_result 读到平台 generation_job.status=refunded（平台仅在全额 refund applied 后置此态）→ 当场补记一行
+      // refunded＋refund_source=platform_job＋refund_backfill_of=<原终态>。不依赖 drain/父会话可解析/opencode 在线。
+      // 幂等：回执 refunded 是终态只转换一次；claimLedgerRefunded 再挡已有 refunded 行（重启从 ledger 尾部种子）与随后
+      // drain 重渲染的同 task refunded 行。只写日志：回执、SSE、扣费、退款路径一律不动；写失败不影响本路由回包。
+      if (completed.status === "refunded" && (priorStatus === "failed" || priorStatus === "cancelled") && completed.kind !== "message"
+        && claimLedgerRefunded(completed.task_id)) {
+        const fields = { kind: completed.kind, event: "refunded", refund_source: "platform_job", refund_backfill_of: priorStatus, task_id: completed.task_id }
+        try {
+          const owner = resolveSession(completed.parent_gw)
+          void (owner ? appendLedgerFor(owner, fields)
+            : appendLedger({ ts: new Date().toISOString(), user_id: "", session_id: completed.parent_gw, opencode_session_id: completed.consumer_oc, ...fields }))
+        } catch (e) { console.error(`[gateway] ledger refund backfill failed: ${e}`) }
+      }
       // 只有全部 artifact 的 mimeType 一致时才用介质证据纠正登记 kind；混合类型保留原登记。
       if (input.status === "succeeded" && completed.kind !== "message" && artifacts.length) {
         const mimes = artifacts.map((a: any) => typeof a?.mimeType === "string" ? a.mimeType : "")

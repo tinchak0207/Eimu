@@ -104,6 +104,8 @@ export interface LedgerEntry {
   refund_source?: string
   refund_claim?: string
   refund_status?: string
+  // H31（2026-11-04）：平台事后退款补记行的标注＝补记前回执的终态（failed/cancelled）；首个终态即 refunded 的行无此键。
+  refund_backfill_of?: string
 }
 
 export async function appendLedger(entry: LedgerEntry): Promise<void> {
@@ -166,6 +168,50 @@ export function claimLedgerDone(task_id: string | undefined, result_url: string 
   map.delete(k)
   map.set(k, costed(cost_coins))
   if (map.size > LEDGER_DONE_CAP) map.delete(map.keys().next().value as string)
+  return true
+}
+
+// H31（2026-11-04）：refunded 行每个 task 只记一次（幂等）。平台事后退款（回执 failed/cancelled→refunded）由
+// /internal/job-completion 当场补记一行；drain 随后重渲染同一终态时再走 failureLedgerFields，须共用此表才不重记。
+// 种子＝ledger 尾部任一车道（含旧 generation 车道）已有的 refunded 行：已有 refunded 行的 task 不再补。
+// 回执 refunded 为终态（completeGenerationReceipt 不再改写），故按 task_id 一键即可；只管 ledger 写入，不动 SSE/扣费/退款。
+let ledgerRefunded: Set<string> | undefined
+function refundedSet(): Set<string> {
+  if (ledgerRefunded) return ledgerRefunded
+  const seen = new Set<string>()
+  try {
+    if (existsSync(LEDGER_PATH)) {
+      const fd = openSync(LEDGER_PATH, "r")
+      try {
+        const size = fstatSync(fd).size
+        const len = Math.min(size, LEDGER_SEED_BYTES)
+        const buf = Buffer.alloc(len)
+        readSync(fd, buf, 0, len, size - len)
+        const lines = buf.toString("utf-8").split("\n")
+        if (size > len) lines.shift() // 截断的首行
+        for (const line of lines) {
+          if (!line.includes('"refunded"')) continue
+          try {
+            const o = JSON.parse(line)
+            if (o?.event === "refunded" && typeof o.task_id === "string" && o.task_id) { seen.delete(o.task_id); seen.add(o.task_id) }
+          } catch {}
+        }
+      } finally { closeSync(fd) }
+    }
+  } catch (e) {
+    console.error(`[gateway] ledger refunded-seed failed: ${e}`)
+  }
+  while (seen.size > LEDGER_DONE_CAP) seen.delete(seen.values().next().value as string)
+  ledgerRefunded = seen
+  return seen
+}
+// true＝本次应写 refunded 行（同步占位，防补记与 drain 两路并发同写）；无 task_id 不去重（照旧写）。
+export function claimLedgerRefunded(task_id: string | undefined): boolean {
+  if (!task_id) return true
+  const set = refundedSet()
+  if (set.has(task_id)) return false
+  set.add(task_id)
+  if (set.size > LEDGER_DONE_CAP) set.delete(set.values().next().value as string)
   return true
 }
 
