@@ -167,11 +167,6 @@ export async function emitAudioDone(
   state.announcedUrls.add(url)
   boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
   registerSessionArtifact(state, { url, kind: "audio", task_id })
-  // 音乐单成品闸（2026-11-04）：music_gen 成品（带 music_ref）记下本回合的交付，供 /internal/media/music-reuse 复用判定。
-  if (link?.music_ref) {
-    state.lastMusicDelivery = { url, ...(typeof meta?.duration_s === "number" ? { duration_s: meta.duration_s } : {}), at: Date.now(), turnAt: state.lastUserAt ?? 0 }
-    state.musicClaim = undefined
-  }
   // 音频 content 已是绝对公开 URL（平台 uploads），无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   // 可选元数据只带非空值：缺参数＝事件形状一字不变（向后兼容）。
   emitToSession(state, "audio.done", {

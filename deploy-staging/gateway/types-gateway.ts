@@ -22,8 +22,6 @@ export interface PendingConfirm {
 export interface PendingQuestion {
   requestId: string
   callId: string
-  /** 数量闸（question-quantity-guard）：卡里只展示了部分子问题，其余已自动代答；用户答覆时按此合并回完整 answers。 */
-  guardMerge?: { total: number; auto: Array<{ index: number; answer: string }> }
   questions: Array<{
     question: string
     header?: string
@@ -352,10 +350,6 @@ export interface SessionState {
   // volatile；pendingVideoWorkflows 记录被冻结的 workflowId（回覆完成后放行）。
   lastUserMessage?: string
   lastUserAt?: number
-  /** 音乐单成品闸（2026-11-04）：本会话最近一条 music_gen 交付（emitAudioDone 且带 music_ref 时记）；turnAt＝交付时的 lastUserAt。 */
-  lastMusicDelivery?: { url: string; duration_s?: number; at: number; turnAt: number }
-  /** 音乐单成品闸：正在生成的席位占位（music-reuse 端点置，emitAudioDone/release/超时清）。 */
-  musicClaim?: { sessionId: string; at: number }
   pendingVideoWorkflows?: string[]
   // 规格1：节点终态汇报去重（同一节点同一终态只汇报一次，rerun 后会再触发）。
   nodeTerminalReported?: Set<string>
