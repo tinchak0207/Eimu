@@ -160,7 +160,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
         </nav>
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">
+          <p className="text-ios-footnote font-semibold text-ios-blue">
             {AGENT_TEMPLATE_DOMAIN_LABELS[card.domain]}产线 · {page.keyword}
           </p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
@@ -173,7 +173,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
           ))}
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-ios-blue px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             打开工作台，用「{card.name}」开工
             <ArrowUpRight className="h-4 w-4" />
@@ -219,7 +219,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
             {steps.map((step, index) => (
               <li key={step.name} id={`step-${index + 1}`} className={tileClass}>
                 <h3 className="flex items-center gap-2 text-ios-headline font-semibold text-[rgba(0,0,0,0.8)]">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-[#007AFF]">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-ios-blue">
                     {index + 1}
                   </span>
                   {step.name}
@@ -236,7 +236,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
                   </div>
                   {step.checkpoint && (
                     <div className="sm:col-span-2">
-                      <dt className="font-semibold text-[#007AFF]">人工确认点</dt>
+                      <dt className="font-semibold text-ios-blue">人工确认点</dt>
                       <dd className="text-[rgba(0,0,0,0.58)]">{step.checkpoint}</dd>
                     </div>
                   )}
@@ -290,7 +290,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
           <ol className="mt-4 grid gap-3">
             {page.start.map((item, index) => (
               <li key={item} className={`flex gap-3 ${bodyClass}`}>
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-[#007AFF]">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-ios-blue">
                   {index + 1}
                 </span>
                 <span className="pt-0.5">{item}</span>
@@ -307,7 +307,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
           </div>
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-semibold text-white transition-colors hover:bg-[#0066DD]"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-ios-blue px-4 py-2.5 text-ios-footnote font-semibold text-white transition-colors hover:bg-[#0066DD]"
           >
             去首页点「{card.name}」
             <ArrowUpRight className="h-3.5 w-3.5" />
@@ -347,9 +347,9 @@ export default async function WorkflowPage({ params }: RouteParams) {
               <Link
                 key={item.page.slug}
                 href={`/workflows/${item.page.slug}`}
-                className={`group flex flex-col gap-1 ${tileClass} transition hover:text-[#007AFF]`}
+                className={`group flex flex-col gap-1 ${tileClass} transition hover:text-ios-blue`}
               >
-                <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-[#007AFF]">
+                <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-ios-blue">
                   {item.card.name}
                   <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 </span>
@@ -365,7 +365,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
                 href={`/use-cases/${hub.slug}`}
                 className={`group flex flex-col gap-1 ${tileClass} transition`}
               >
-                <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-[#007AFF]">
+                <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-ios-blue">
                   {hub.label}
                   <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 </span>
@@ -375,7 +375,7 @@ export default async function WorkflowPage({ params }: RouteParams) {
           </div>
           <Link
             href="/workflows"
-            className="mt-5 inline-flex items-center gap-1 text-ios-footnote font-medium text-[#007AFF] hover:underline"
+            className="mt-5 inline-flex items-center gap-1 text-ios-footnote font-medium text-ios-blue hover:underline"
           >
             查看全部 {WORKFLOW_PAGES.length} 条创作产线
             <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />

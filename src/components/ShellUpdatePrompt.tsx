@@ -69,7 +69,7 @@ export function ShellUpdatePrompt({ className }: ShellUpdatePromptProps) {
       <span aria-hidden="true" className="opacity-40">
         ·
       </span>
-      <span className="text-[#007AFF]">重启更新</span>
+      <span className="text-ios-blue">重启更新</span>
     </button>
   );
 }

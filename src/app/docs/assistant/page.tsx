@@ -44,7 +44,7 @@ export default function DocsAssistantPage() {
     <div className="flex flex-col gap-6">
       <a
         href="/docs"
-        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-[#007AFF]"
+        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-ios-blue"
       >
         ← 文档中心
       </a>
@@ -63,7 +63,7 @@ export default function DocsAssistantPage() {
               <ul className="mt-3 space-y-2">
                 {row.options.map((option) => (
                   <li key={option.k} className="text-ios-footnote leading-relaxed">
-                    <span className="mr-2 inline-flex items-center rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-0.5 font-semibold text-[#007AFF]">
+                    <span className="mr-2 inline-flex items-center rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-0.5 font-semibold text-ios-blue">
                       {option.k}
                     </span>
                     <span className="text-[rgba(0,0,0,0.58)]">{option.v}</span>

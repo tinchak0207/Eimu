@@ -122,7 +122,7 @@ function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectMode
                           onSelectModel();
                           onApplyTipParams(tip.params as ModelUsageTipParams);
                         }}
-                        className="shrink-0 cursor-pointer rounded-full bg-ios-blue/[0.12] px-2.5 py-1 text-[12px] font-semibold text-[#007AFF] transition-all duration-200 hover:bg-[rgba(0,122,255,0.22)] active:scale-95"
+                        className="shrink-0 cursor-pointer rounded-full bg-ios-blue/[0.12] px-2.5 py-1 text-[12px] font-semibold text-ios-blue transition-all duration-200 hover:bg-[rgba(0,122,255,0.22)] active:scale-95"
                       >
                         一键带入
                       </button>
@@ -357,7 +357,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
               {modelPriceLabel(model, priceOptions)}
             </span>
             {selected ? (
-              <Check className="absolute right-2.5 h-3.5 w-3.5 text-[#007AFF]" />
+              <Check className="absolute right-2.5 h-3.5 w-3.5 text-ios-blue" />
             ) : null}
           </span>
           {knowledge ? (
@@ -382,7 +382,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
               }}
               className={`relative z-10 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${
                 expanded
-                  ? "bg-[rgba(0,122,255,0.14)] text-[#007AFF]"
+                  ? "bg-[rgba(0,122,255,0.14)] text-ios-blue"
                   : "text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.72)]"
               }`}
             >

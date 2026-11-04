@@ -540,7 +540,7 @@ export function PromptInput({
           {dragActive && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-ios-xl bg-[rgba(0,122,255,0.08)] text-sm font-semibold text-[#007AFF]"
+              className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-ios-xl bg-[rgba(0,122,255,0.08)] text-sm font-semibold text-ios-blue"
             >
               松开以添加参考图
             </div>
@@ -581,7 +581,7 @@ export function PromptInput({
                 onClick={handlePrimaryAction}
                 disabled={isLoading}
                 aria-label="开始创作"
-                className="absolute bottom-2.5 right-4 z-30 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#007AFF] text-white shadow-[0_4px_18px_rgba(0,122,255,0.55),0_0_0_1px_rgba(0,122,255,0.35)] transition-all duration-150 hover:bg-[#0066DD] hover:scale-105 hover:shadow-[0_6px_22px_rgba(0,122,255,0.70)] active:scale-90 disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none disabled:scale-100"
+                className="absolute bottom-2.5 right-4 z-30 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-ios-blue text-white shadow-[0_4px_18px_rgba(0,122,255,0.55),0_0_0_1px_rgba(0,122,255,0.35)] transition-all duration-150 hover:bg-[#0066DD] hover:scale-105 hover:shadow-[0_6px_22px_rgba(0,122,255,0.70)] active:scale-90 disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none disabled:scale-100"
               >
                 <Sparkles className="h-4 w-4" />
               </button>
@@ -594,7 +594,7 @@ export function PromptInput({
             点下去把已经打的半句话一起带进对话（不用重打）。 */}
         {agentHintOpen && displayMode === "generate" && !isLoading && (
           <div className="lg-float animate-[dust-enter-kf_320ms_cubic-bezier(0.22,1,0.36,1)_forwards] flex items-start gap-2.5 rounded-ios-2xl bg-[rgba(0,122,255,0.06)] px-3.5 py-2.5 ring-1 ring-[rgba(0,122,255,0.14)]">
-            <Bot className="mt-0.5 h-4 w-4 shrink-0 text-[#007AFF]" aria-hidden="true" />
+            <Bot className="mt-0.5 h-4 w-4 shrink-0 text-ios-blue" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <button
                 type="button"
@@ -604,7 +604,7 @@ export function PromptInput({
                   // 使用者不用重打一遍。
                   onModeChange("agent");
                 }}
-                className="cursor-pointer text-left text-ios-footnote font-semibold text-[#007AFF] hover:underline"
+                className="cursor-pointer text-left text-ios-footnote font-semibold text-ios-blue hover:underline"
               >
                 想不下去？让 AI 助理帮你完成
               </button>

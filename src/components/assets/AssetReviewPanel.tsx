@@ -490,7 +490,7 @@ export function AssetReviewPanel({
                               disabled={busy}
                               onClick={() => void handleRegenerate(card.id, index)}
                               className={cn(
-                                "flex items-center justify-center gap-1 rounded-lg bg-[rgba(0,122,255,0.10)] px-1.5 py-1 text-[11px] font-medium text-[#007AFF] hover:bg-[rgba(0,122,255,0.18)]",
+                                "flex items-center justify-center gap-1 rounded-lg bg-[rgba(0,122,255,0.10)] px-1.5 py-1 text-[11px] font-medium text-ios-blue hover:bg-[rgba(0,122,255,0.18)]",
                                 busy ? "cursor-wait opacity-60" : "cursor-pointer",
                               )}
                               title={`重新生成这一张（直接扣费，不过确认卡）· 单价 ${unitPrice}`}
@@ -596,7 +596,7 @@ export function AssetReviewPanel({
           onClick={() => void handleApproveAll()}
           disabled={cards.length === 0}
           className={cn(
-            "flex items-center gap-1 rounded-lg bg-[#007AFF] px-2.5 py-1.5 text-ios-caption1 font-medium text-white",
+            "flex items-center gap-1 rounded-lg bg-ios-blue px-2.5 py-1.5 text-ios-caption1 font-medium text-white",
             cards.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-[#0066D6]",
           )}
         >

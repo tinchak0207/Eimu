@@ -76,7 +76,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "edit"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
+                  ? "bg-ios-blue/[0.12] text-ios-blue ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >
@@ -88,7 +88,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "upscale"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
+                  ? "bg-ios-blue/[0.12] text-ios-blue ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >
@@ -107,7 +107,7 @@ export function ActionRow({
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "agent"
-                  ? "bg-ios-blue/[0.12] text-[#007AFF] ring-1 ring-ring/25"
+                  ? "bg-ios-blue/[0.12] text-ios-blue ring-1 ring-ring/25"
                   : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
               )}
             >
@@ -116,7 +116,7 @@ export function ActionRow({
           </div>
 
           {activeStyle ? (
-            <div className="lg-tint-blue inline-flex h-9 min-w-0 max-w-full shrink-0 items-center gap-1 self-start rounded-full pl-3.5 pr-1 text-ios-footnote font-medium text-[#007AFF]">
+            <div className="lg-tint-blue inline-flex h-9 min-w-0 max-w-full shrink-0 items-center gap-1 self-start rounded-full pl-3.5 pr-1 text-ios-footnote font-medium text-ios-blue">
               <span className="truncate">已套用 {activeStyle.label}</span>
               <button
                 type="button"
@@ -137,7 +137,7 @@ export function ActionRow({
             type="button"
             onClick={handlePrimaryAction}
             disabled={primaryDisabled}
-            className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-6 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.40),0_2px_8px_rgba(0,122,255,0.24)] transition-colors duration-200 hover:bg-[#0066DD] hover:shadow-[0_10px_32px_rgba(0,122,255,0.52),0_4px_12px_rgba(0,122,255,0.30)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none cursor-pointer sm:ml-auto sm:w-auto"
+            className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-ios-xl bg-ios-blue px-6 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.40),0_2px_8px_rgba(0,122,255,0.24)] transition-colors duration-200 hover:bg-[#0066DD] hover:shadow-[0_10px_32px_rgba(0,122,255,0.52),0_4px_12px_rgba(0,122,255,0.30)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none cursor-pointer sm:ml-auto sm:w-auto"
           >
             {displayMode === "edit" ? (
               editBusy ? (

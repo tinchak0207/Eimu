@@ -545,7 +545,7 @@ export function HistoryClient() {
                       "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
                       "text-ios-footnote font-medium transition-colors duration-200",
                       "focus:outline-none focus:ring-2 focus:ring-ring/20",
-                      selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
+                      selectionMode ? "text-ios-blue" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
                     )}
                   >
                     <CheckSquare className="h-3.5 w-3.5" />
@@ -598,7 +598,7 @@ export function HistoryClient() {
                   "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
                   "text-ios-footnote font-medium transition-colors duration-200",
                   "focus:outline-none focus:ring-2 focus:ring-ring/20",
-                  selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
+                  selectionMode ? "text-ios-blue" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
                 )}
               >
                 <CheckSquare className="h-3.5 w-3.5" />
@@ -628,7 +628,7 @@ export function HistoryClient() {
 
         {notice && (
           <div role="status" className="mb-4 rounded-ios-2xl bg-[rgba(0,122,255,0.08)] px-4 py-3">
-            <p className="text-ios-footnote text-[#007AFF]">{notice}</p>
+            <p className="text-ios-footnote text-ios-blue">{notice}</p>
           </div>
         )}
 

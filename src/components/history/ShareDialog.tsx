@@ -195,7 +195,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
                   className={cn(
                     "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
                     share
-                      ? "cursor-pointer text-[#007AFF] hover:bg-[rgba(0,122,255,0.10)]"
+                      ? "cursor-pointer text-ios-blue hover:bg-[rgba(0,122,255,0.10)]"
                       : "cursor-default text-[rgba(0,0,0,0.30)]",
                   )}
                 >
@@ -226,7 +226,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
               <span
                 className={cn(
                   "text-ios-caption1 font-medium",
-                  share?.hidePrompt ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.44)]",
+                  share?.hidePrompt ? "text-ios-blue" : "text-[rgba(0,0,0,0.44)]",
                 )}
               >
                 {share?.hidePrompt ? "已隐藏" : "公开"}
@@ -257,7 +257,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
                 onClick={() => void copyLink()}
                 disabled={!share}
                 className={cn(
-                  "rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-medium text-white",
+                  "rounded-ios-xl bg-ios-blue px-4 py-2.5 text-ios-footnote font-medium text-white",
                   "shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200",
                   "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/30",
                   share ? "cursor-pointer" : "cursor-default opacity-60 active:scale-100",

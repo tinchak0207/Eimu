@@ -20,7 +20,7 @@ export default function DocsHistoryPage() {
     <div className="flex flex-col gap-6">
       <a
         href="/docs"
-        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-[#007AFF]"
+        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-ios-blue"
       >
         ← 文档中心
       </a>
@@ -75,7 +75,7 @@ export default function DocsHistoryPage() {
           重跑前会预检余额，不足时提示「余额不足，请先充值再重跑」——充值见〈
           <a
             href="/docs/billing"
-            className="font-semibold text-[#007AFF] lg-transition hover:underline"
+            className="font-semibold text-ios-blue lg-transition hover:underline"
           >
             充值与计费
           </a>

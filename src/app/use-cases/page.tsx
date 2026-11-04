@@ -104,7 +104,7 @@ export default async function UseCaseIndexPage() {
         </nav>
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">场景指南</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">场景指南</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             17 个行业的 AI 影像场景指南
           </h1>
@@ -113,7 +113,7 @@ export default async function UseCaseIndexPage() {
           </p>
           <p className="mt-3 max-w-2xl text-ios-body leading-relaxed text-[rgba(0,0,0,0.58)]">
             单张图和一套工序是两件事。这里解决的是「这一类图到底该怎么做」；如果你要把小说改成片、把一套上市素材铺齐，或者给一部短剧做完投放封面，这些十几步的活去
-            <Link href="/workflows" className="mx-1 font-medium text-[#007AFF] hover:underline">
+            <Link href="/workflows" className="mx-1 font-medium text-ios-blue hover:underline">
               创作产线
             </Link>
             看，那里按环节拆好了。
@@ -135,12 +135,12 @@ export default async function UseCaseIndexPage() {
                 className="group lg-card flex flex-col justify-between rounded-ios-3xl p-5 lg-transition hover:-translate-y-0.5"
               >
                 <div>
-                  <p className="text-ios-caption1 font-semibold text-[#007AFF]">{category.keyword}</p>
-                  <h3 className="mt-2 text-ios-headline font-semibold leading-snug text-[rgba(0,0,0,0.85)] group-hover:text-[#007AFF]">
+                  <p className="text-ios-caption1 font-semibold text-ios-blue">{category.keyword}</p>
+                  <h3 className="mt-2 text-ios-headline font-semibold leading-snug text-[rgba(0,0,0,0.85)] group-hover:text-ios-blue">
                     {category.name}
                   </h3>
                 </div>
-                <span className="mt-4 inline-flex items-center gap-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.5)] group-hover:text-[#007AFF]">
+                <span className="mt-4 inline-flex items-center gap-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.5)] group-hover:text-ios-blue">
                   {category.scenarios.length} 个子场景
                   <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </span>
@@ -167,7 +167,7 @@ export default async function UseCaseIndexPage() {
                     className="group lg-card flex items-start justify-between gap-3 rounded-ios-2xl p-4 lg-transition hover:-translate-y-0.5"
                   >
                     <span className="flex flex-col gap-1">
-                      <span className="text-ios-callout font-semibold leading-snug text-[rgba(0,0,0,0.85)] group-hover:text-[#007AFF]">
+                      <span className="text-ios-callout font-semibold leading-snug text-[rgba(0,0,0,0.85)] group-hover:text-ios-blue">
                         {guide.keyword}
                       </span>
                       <span className="text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.55)]">
@@ -175,7 +175,7 @@ export default async function UseCaseIndexPage() {
                       </span>
                     </span>
                     <ArrowUpRight
-                      className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(0,0,0,0.4)] group-hover:text-[#007AFF]"
+                      className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(0,0,0,0.4)] group-hover:text-ios-blue"
                       aria-hidden="true"
                     />
                   </Link>
@@ -200,14 +200,14 @@ export default async function UseCaseIndexPage() {
                 className="group lg-card flex flex-col justify-between rounded-ios-3xl p-5 lg-transition hover:-translate-y-0.5"
               >
                 <div>
-                  <h3 className="text-ios-headline font-semibold text-[rgba(0,0,0,0.85)] group-hover:text-[#007AFF]">
+                  <h3 className="text-ios-headline font-semibold text-[rgba(0,0,0,0.85)] group-hover:text-ios-blue">
                     {card!.name}
                   </h3>
                   <p className="mt-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
                     {card!.note}
                   </p>
                 </div>
-                <span className="mt-4 inline-flex items-center gap-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.5)] group-hover:text-[#007AFF]">
+                <span className="mt-4 inline-flex items-center gap-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.5)] group-hover:text-ios-blue">
                   查看产线
                   <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </span>

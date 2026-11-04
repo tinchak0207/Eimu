@@ -768,7 +768,7 @@ test("D-1 AI 助理 is a toggle beside 改图/放大, not a page takeover", () =
   // 选中态也要跟邻居一致：未选中时是灰的，不许自己常亮蓝底冒充「已开启」。
   // 2026-10-04 全站规格对齐（2320dd1c）：底色改走品牌 token bg-ios-blue/[0.12]，
   // 仍是「12% 蓝底 + 蓝字 + 细环」的选中态，不常亮实心蓝。
-  assert.match(code, /mode === "agent"\s*\?\s*"bg-ios-blue\/\[0\.12\] text-\[#007AFF\]/);
+  assert.match(code, /mode === "agent"\s*\?\s*"bg-ios-blue\/\[0\.12\] text-ios-blue/);
   assert.match(code, /aria-pressed=\{mode === "agent"\}/);
 
   // 聊天区长在模式控件区里（和 edit / upscale 两块同级），不是另一层壳。

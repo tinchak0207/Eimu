@@ -286,7 +286,7 @@ function CanvasNodeCreateMenu({
             <a
               href="/downloads/eimu-blender-addon.py"
               download
-              className="font-semibold text-[#007AFF] hover:underline"
+              className="font-semibold text-ios-blue hover:underline"
             >
               下载 Blender 插件
             </a>

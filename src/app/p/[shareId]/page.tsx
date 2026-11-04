@@ -138,7 +138,7 @@ export default async function PublicSharePage({ params }: RouteParams) {
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
 
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[#007AFF]" aria-hidden="true" />
+                <Sparkles className="h-4 w-4 text-ios-blue" aria-hidden="true" />
                 <h1 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">Eimu 用户作品</h1>
               </div>
 

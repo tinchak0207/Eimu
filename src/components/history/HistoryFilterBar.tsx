@@ -183,13 +183,13 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
             "transition-all duration-200",
             "focus:outline-none focus:ring-2 focus:ring-ring/20",
             expanded || activeFilters
-              ? "bg-ios-blue/[0.12] text-[#007AFF]"
+              ? "bg-ios-blue/[0.12] text-ios-blue"
               : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
           )}
         >
           <Filter className="h-3.5 w-3.5" />
           {activeFilters > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ios-blue/[0.12] px-1 text-ios-caption2 font-medium tabular-nums text-[#007AFF]">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ios-blue/[0.12] px-1 text-ios-caption2 font-medium tabular-nums text-ios-blue">
               {activeFilters}
             </span>
           )}

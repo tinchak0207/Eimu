@@ -113,7 +113,7 @@ function LineageRow({
       </span>
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-1.5 text-ios-footnote text-foreground">
-          <span className="shrink-0 rounded-full bg-[rgba(0,122,255,0.10)] px-1.5 py-0.5 text-ios-caption1 font-medium text-[#007AFF]">
+          <span className="shrink-0 rounded-full bg-[rgba(0,122,255,0.10)] px-1.5 py-0.5 text-ios-caption1 font-medium text-ios-blue">
             {nodeKindLabel(node)}
           </span>
           <span className="min-w-0 flex-1 truncate">{node.label || text("common.noDescription")}</span>
@@ -142,7 +142,7 @@ function LineageRow({
           onClick={() => onOpenNode(node)}
           aria-label={node.link ? text("lineage.openSource") : text("lineage.openRecord")}
           title={text("lineage.jumpTitle")}
-          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] transition-colors hover:bg-black/5 hover:text-[#007AFF] focus:outline-none focus:ring-2 focus:ring-ring/20"
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] transition-colors hover:bg-black/5 hover:text-ios-blue focus:outline-none focus:ring-2 focus:ring-ring/20"
         >
           <CornerUpLeft className="h-3.5 w-3.5" />
         </button>
@@ -283,7 +283,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
             <button
               type="button"
               onClick={() => setVisibleDepth((depth) => Math.min(MAX_VISIBLE_DEPTH, depth + LINEAGE_DEPTH_STEP))}
-              className="w-full cursor-pointer rounded-ios-xl bg-[rgba(0,122,255,0.10)] px-4 py-2.5 text-ios-footnote font-medium text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.16)] focus:outline-none focus:ring-2 focus:ring-ring/20"
+              className="w-full cursor-pointer rounded-ios-xl bg-[rgba(0,122,255,0.10)] px-4 py-2.5 text-ios-footnote font-medium text-ios-blue transition-colors hover:bg-[rgba(0,122,255,0.16)] focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               {text("lineage.expandMore", { depth: visibleDepth })}
             </button>

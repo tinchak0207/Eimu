@@ -37,7 +37,7 @@ function readFamily(value: string | string[] | undefined): AgentSkillFamily | un
 function pillClass(active: boolean): string {
   return [
     "lg-float inline-flex items-center gap-1 rounded-full px-3.5 py-2 text-ios-footnote font-medium lg-transition",
-    active ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.68)] hover:text-[#007AFF]",
+    active ? "text-ios-blue" : "text-[rgba(0,0,0,0.68)] hover:text-ios-blue",
   ].join(" ");
 }
 
@@ -55,7 +55,7 @@ export default async function SkillsIndexPage({ searchParams }: SkillsIndexProps
     <main className="min-h-screen bg-transparent px-4 pb-20 pt-20 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">技能库</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">技能库</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             把 Eimu 会做的事，一条条摊开
           </h1>
@@ -100,7 +100,7 @@ export default async function SkillsIndexPage({ searchParams }: SkillsIndexProps
                   className="lg-card flex h-full flex-col rounded-ios-3xl p-4 lg-transition"
                 >
                   <span className="flex flex-wrap items-center gap-1.5 text-ios-caption1">
-                    <span className="rounded-full bg-[rgba(0,122,255,0.10)] px-2 py-0.5 font-semibold text-[#007AFF]">
+                    <span className="rounded-full bg-[rgba(0,122,255,0.10)] px-2 py-0.5 font-semibold text-ios-blue">
                       {AGENT_SKILL_FAMILY_LABELS[skill.family]}
                     </span>
                     <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-2 py-0.5 text-[rgba(0,0,0,0.5)]">
@@ -123,7 +123,7 @@ export default async function SkillsIndexPage({ searchParams }: SkillsIndexProps
                       </span>
                     ))}
                   </span>
-                  <span className="mt-auto pt-3 text-ios-caption1 font-semibold text-[#007AFF]">查看详情</span>
+                  <span className="mt-auto pt-3 text-ios-caption1 font-semibold text-ios-blue">查看详情</span>
                 </Link>
               </li>
             ))}

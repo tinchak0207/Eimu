@@ -32,7 +32,7 @@ interface OpenApiSchema {
 }
 
 const METHOD_COLORS: Record<string, string> = {
-  get: "bg-[#007AFF]/10 text-[#007AFF]",
+  get: "bg-ios-blue/10 text-ios-blue",
   post: "bg-[#34C759]/[0.12] text-[#1E9E4F]",
   put: "bg-[#FF9500]/[0.12] text-[#C76A00]",
   delete: "bg-[#FF3B30]/[0.12] text-[#D92A20]",
@@ -103,7 +103,7 @@ export function DevAppendix() {
         <div className="grid gap-6 p-5 sm:grid-cols-3 sm:gap-8 sm:p-7">
           <div>
             <div className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-[#007AFF]" />
+              <Server className="h-4 w-4 text-ios-blue" />
               <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">Base URL</p>
             </div>
             <code className="mt-2 block overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote text-[#242830]">
@@ -118,7 +118,7 @@ export function DevAppendix() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-[#007AFF]" />
+              <KeyRound className="h-4 w-4 text-ios-blue" />
               <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">认证</p>
             </div>
             <code className="mt-2 block overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote text-[#242830]">
@@ -127,7 +127,7 @@ export function DevAppendix() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-[#007AFF]" />
+              <ShieldCheck className="h-4 w-4 text-ios-blue" />
               <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">限流</p>
             </div>
             <p className="mt-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
@@ -215,7 +215,7 @@ export function DevAppendix() {
                 <li key={path}>
                   <a
                     href={`#endpoint-${encodeURIComponent(path)}`}
-                    className="inline-flex items-center rounded-full bg-[rgba(0,122,255,0.08)] px-3 py-1.5 text-ios-footnote font-medium text-[#007AFF] lg-transition hover:bg-[rgba(0,122,255,0.14)]"
+                    className="inline-flex items-center rounded-full bg-[rgba(0,122,255,0.08)] px-3 py-1.5 text-ios-footnote font-medium text-ios-blue lg-transition hover:bg-[rgba(0,122,255,0.14)]"
                   >
                     <span className="font-mono">{path}</span>
                   </a>
@@ -323,7 +323,7 @@ export function DevAppendix() {
             </p>
             <a
               href="/api/v1/openapi.json"
-              className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#007AFF] px-4 py-2.5 text-ios-body font-semibold text-white transition-colors hover:bg-[#0066DD]"
+              className="mt-3 inline-flex items-center gap-2 rounded-full bg-ios-blue px-4 py-2.5 text-ios-body font-semibold text-white transition-colors hover:bg-[#0066DD]"
             >
               下载 /api/v1/openapi.json
             </a>

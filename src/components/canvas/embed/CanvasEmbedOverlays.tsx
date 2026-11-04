@@ -455,7 +455,7 @@ export function CanvasEmbedOverlays({
                         {CHARACTER_CARD_KIND_LABEL[card.kind]}
                       </span>
                       {card.variantOf && (
-                        <span className="shrink-0 rounded-full bg-ios-blue/[0.12] px-1.5 py-0.5 text-ios-caption2 text-[#007AFF]">
+                        <span className="shrink-0 rounded-full bg-ios-blue/[0.12] px-1.5 py-0.5 text-ios-caption2 text-ios-blue">
                           变体
                         </span>
                       )}
@@ -486,7 +486,7 @@ export function CanvasEmbedOverlays({
                     type="button"
                     aria-label={`溯源卡 ${card.name}`}
                     onClick={() => setLineageCardId(card.id)}
-                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-ios-caption1 text-foreground/45 hover:bg-black/5 hover:text-[#007AFF]"
+                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-ios-caption1 text-foreground/45 hover:bg-black/5 hover:text-ios-blue"
                   >
                     溯源
                   </button>

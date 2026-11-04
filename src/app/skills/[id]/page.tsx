@@ -88,7 +88,7 @@ function SkillDetailView({ skill }: { skill: AgentSkillView }) {
         </nav>
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">
+          <p className="text-ios-footnote font-semibold text-ios-blue">
             {familyLabel} · {outputKindLabel}
           </p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
@@ -156,7 +156,7 @@ function SkillDetailView({ skill }: { skill: AgentSkillView }) {
             所属家族：
             <Link
               href={`/skills?family=${skill.family}`}
-              className="font-semibold text-[#007AFF] lg-transition hover:underline"
+              className="font-semibold text-ios-blue lg-transition hover:underline"
             >
               {familyLabel}
             </Link>
@@ -166,13 +166,13 @@ function SkillDetailView({ skill }: { skill: AgentSkillView }) {
         <section className="mt-4 flex flex-wrap gap-3">
           <Link
             href="/skills"
-            className="inline-flex items-center rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD]"
+            className="inline-flex items-center rounded-ios-xl bg-ios-blue px-4 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD]"
           >
             返回技能库
           </Link>
           <Link
             href="/"
-            className="lg-float inline-flex items-center rounded-ios-xl px-4 py-2.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] lg-transition hover:text-[#007AFF]"
+            className="lg-float inline-flex items-center rounded-ios-xl px-4 py-2.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] lg-transition hover:text-ios-blue"
           >
             去工作台
           </Link>

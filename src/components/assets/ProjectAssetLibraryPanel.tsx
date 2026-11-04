@@ -46,7 +46,7 @@ const VISIBILITY_KEY: Record<AssetVisibility, UiStringKey> = {
 
 const VISIBILITY_CLASSES: Record<AssetVisibility, string> = {
   owner: "bg-black/5 text-muted-foreground",
-  "in-project": "bg-ios-blue/10 text-[#007AFF]",
+  "in-project": "bg-ios-blue/10 text-ios-blue",
   "in-team": "bg-ios-indigo/10 text-[#5856D6]",
   "shared-in": "bg-ios-green/10 text-[#248A3D]",
 };
@@ -267,7 +267,7 @@ export function ProjectAssetLibraryPanel({
           className={cn(
             "shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption2 font-medium disabled:opacity-40",
             filterByTag && tagProjectId
-              ? "bg-ios-blue/10 text-[#007AFF]"
+              ? "bg-ios-blue/10 text-ios-blue"
               : "bg-black/5 text-muted-foreground hover:bg-black/10",
           )}
         >
@@ -298,7 +298,7 @@ export function ProjectAssetLibraryPanel({
             aria-pressed={kindFilter === value}
             className={cn(
               "cursor-pointer rounded-full px-2 py-0.5 text-ios-caption2 font-medium",
-              kindFilter === value ? "bg-ios-blue/10 text-[#007AFF]" : "bg-black/5 text-muted-foreground hover:bg-black/10",
+              kindFilter === value ? "bg-ios-blue/10 text-ios-blue" : "bg-black/5 text-muted-foreground hover:bg-black/10",
             )}
           >
             {text(key)}
@@ -322,7 +322,7 @@ export function ProjectAssetLibraryPanel({
         </p>
       ) : (
         <div className="overflow-y-auto" style={{ maxHeight: "min(52dvh, 400px)" }}>
-          {notice && <p className="border-b px-3.5 py-1.5 text-ios-caption2 text-[#007AFF]">{notice}</p>}
+          {notice && <p className="border-b px-3.5 py-1.5 text-ios-caption2 text-ios-blue">{notice}</p>}
           <p className="border-b px-3.5 py-1 text-ios-caption2 text-foreground/45">
             {text("assets.summary.total", { total: summary.total })}
           </p>
@@ -360,7 +360,7 @@ export function ProjectAssetLibraryPanel({
                     className={cn(
                       "shrink-0 cursor-pointer rounded-lg px-1.5 py-0.5 text-ios-caption2 font-medium disabled:opacity-40",
                       tagged
-                        ? "bg-ios-blue/10 text-[#007AFF] hover:bg-ios-blue/20"
+                        ? "bg-ios-blue/10 text-ios-blue hover:bg-ios-blue/20"
                         : "bg-black/5 text-muted-foreground hover:bg-black/10",
                     )}
                   >

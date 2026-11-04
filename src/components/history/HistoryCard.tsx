@@ -322,7 +322,7 @@ function HistoryCardComponent({
             "absolute left-3 top-3 z-20 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full",
             "transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring/20",
             selected
-              ? "bg-[#007AFF] text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)]"
+              ? "bg-ios-blue text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)]"
               : "bg-[rgba(255,255,255,0.78)] text-transparent backdrop-blur-[22px] hover:bg-[rgba(255,255,255,0.92)]",
           )}
         >
