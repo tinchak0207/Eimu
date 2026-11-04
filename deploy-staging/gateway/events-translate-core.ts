@@ -64,7 +64,7 @@ export function parseToolOutput(
 // 纯函式、无副作用。
 export function collectToolOutputMediaUrls(parsed: unknown): {
   video: { url: string; cost_coins?: number; title?: string }[]
-  audio: { url: string; cost_coins?: number; title?: string; cover?: string }[]
+  audio: { url: string; cost_coins?: number; title?: string; cover?: string; duration_s?: number }[]
 } {
   const video: { url: string; cost_coins?: number; title?: string }[] = []
   const audio: { url: string; cost_coins?: number; title?: string; cover?: string }[] = []
@@ -78,7 +78,7 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
   const MAX_SCAN_DEPTH = 3
   const MAX_SCAN_NODES = 200
   const vidCands: { url: string; cost_coins?: number; title?: string }[] = []
-  const audCands: { url: string; cost_coins?: number; title?: string; cover?: string }[] = []
+  const audCands: { url: string; cost_coins?: number; title?: string; cover?: string; duration_s?: number }[] = []
   let visited = 0
   const walk = (node: unknown, depth: number): void => {
     if (node === null || depth > MAX_SCAN_DEPTH || visited >= MAX_SCAN_NODES) return
@@ -102,7 +102,9 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
           const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : undefined
           const cover = typeof obj.cover === "string" && obj.cover.trim() ? obj.cover.trim() : undefined
           if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}) })
-          if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}), ...(cover ? { cover } : {}) })
+          // 真实时长（秒）：候选物件自带 duration_seconds（music_gen audios[] / 顶层 ffprobe 实测）才认。
+          const dur = typeof obj.duration_seconds === "number" && obj.duration_seconds > 0 ? obj.duration_seconds : undefined
+          if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}), ...(cover ? { cover } : {}), ...(dur !== undefined ? { duration_s: dur } : {}) })
         }
         continue
       }
@@ -115,6 +117,6 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
       ? ((parsed as Record<string, unknown>).cost_coins as number)
       : undefined
   for (const c of vidCands) video.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}) })
-  for (const c of audCands) audio.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}), ...(c.cover ? { cover: c.cover } : {}) })
+  for (const c of audCands) audio.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}), ...(c.cover ? { cover: c.cover } : {}), ...(c.duration_s !== undefined ? { duration_s: c.duration_s } : {}) })
   return { video, audio }
 }

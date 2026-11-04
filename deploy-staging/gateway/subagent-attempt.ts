@@ -3,7 +3,7 @@ import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascad
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { currentKernelFingerprint } from "./agent-kernel.ts"
-import { renderContractDirective, DELIVERY_CONTRACTS } from "./delivery-gate"
+import { renderContractDirective, contractAgentFor, DELIVERY_CONTRACTS } from "./delivery-gate"
 import { WORKER_HARD_RULES, FORK_HARD_RULES, buildForkDirective, effortVariant, stripAuthorizationSection, shouldRetryWithoutVariant } from "./subagent-policy.ts"
 import type { SubagentRun, ForkContext } from "./subagent-types.ts"
 import { isOpenCodeSessionId } from "./subagent-types.ts"
@@ -215,7 +215,7 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
   // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。
   // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回归。重派链的
   // run.prompt 已含 buildReworkDirective（自我标注「自动重派」），此段与之共存于尾部不冲突。
-  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
+  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(contractAgentFor(run), DELIVERY_CONTRACTS) : ""
   // 2026-10-02：模板空位事实注入。父 sessionId 用 run.parentGatewaySessionId（派工发起端
   // 的 gateway 会话 id，= canvasStates 的 key；**禁用子会话 opencodeSessionId**，那会指到
   // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。

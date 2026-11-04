@@ -140,6 +140,21 @@
       "changed_layer": [
         "英文|English"
       ]
+    },
+    {
+      "id": "viewer-gate-image-then-music",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "max_coins_music": 30,
+      "cap_note": "2026-11-04 赏阅交付闸：第一句出图（上限 8 币），第二句给这张图配 10 秒轻音乐（上限 30 币）。原话取自暴君派工单，非历史会话摘录，source.session 为本轮建会话前的占位前缀，真 sid 见 REPORT.md「生产交付闸」。",
+      "source": {
+        "session": "ses_viewer_gate_20261104"
+      },
+      "turns": [
+        "给我一张极简风的咖啡馆海报",
+        "给这张图配一段 10 秒的轻音乐"
+      ]
     }
   ]
 }

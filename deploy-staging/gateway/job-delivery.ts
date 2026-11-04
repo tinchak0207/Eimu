@@ -223,7 +223,14 @@ export async function drainGenerationInbox(): Promise<void> {
   if (draining) return
   draining = true
   try {
-    const receipts = generationReceipts().filter((r) => !["queued", "running", "unknown"].includes(r.status) && (r.kind === "image" && r.artifacts.length ? !r.downloaded_at : !r.observed_at))
+    // 2026-11-04 出图不交付根因：此前过滤把「已 ACK」的收据整条挡在渲染循环外——子代理/主模型
+    // image_get_result（自己 POST job-completion）→ image_result_download（ACK downloaded）几秒内走完，
+    // 早于 10s 的 drain tick ⇒ 收据永远进不了渲染分支 ⇒ 整条 SSE 无 image.done（扣了钱、图在 task 里、聊天无图）。
+    // 渲染（SSE 展示副作用）与 ACK（模型已取件）是两件事：终态且 !rendered_at 一律进循环渲染；
+    // 唤醒通知仍只给「未 ACK」的（见循环内 acked 判定）。
+    const receipts = generationReceipts().filter((r) => !["queued", "running", "unknown"].includes(r.status) &&
+      ((!r.rendered_at && Date.now() - Math.max(r.created_at || 0, r.updated_at || 0) < 3600_000 && !!resolveSession(r.parent_gw)) ||
+        (r.kind === "image" && r.artifacts.length ? !r.downloaded_at : !r.observed_at)))
     if (!receipts.length) return
     const statusesResponse = await opencodeFetch("/session/status", { timeoutMs: 5000 })
     if (!statusesResponse.ok) return
@@ -248,6 +255,8 @@ export async function drainGenerationInbox(): Promise<void> {
         }
         renderedGeneration(receipt.task_id)
       }
+      // 已被模型取件 ACK 的收据只补渲染，不再唤醒（避免对已处理结果重复投递收件箱）。
+      if (receipt.kind === "image" && receipt.artifacts.length ? receipt.downloaded_at : receipt.observed_at) continue
       if (generationMaintenanceEnabled()) continue
       // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
       if (receipt.kind === "message" && receipt.notified_at !== null) continue

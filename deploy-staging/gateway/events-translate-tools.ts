@@ -487,7 +487,7 @@ if (status === "pending" || status === "running") {
           tool_call_id: callId || undefined,
           music_ref: toolOutputMusicRef(parsed),
         }
-        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover }, audioLink)
+        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover, duration_s: c.duration_s }, audioLink)
         // 出曲后自动 lyric-align（异步）：歌词来自工具入参，URL 来自出参；失败不挡播放。
         if (media.audio.length > 0) {
           maybeEnqueueLyricAlignFromTool({

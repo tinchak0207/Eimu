@@ -231,6 +231,9 @@ const RAW_PREFIX_RE = /^(?:\s*(?:tool execution failed|error)\s*[:：]\s*)+/i
 const LEADING_CODE_RE = /^([a-z][a-z0-9_]+)\s*[:：]/i
 /** 写给模型的指令词：改参数后再调。 */
 const MODEL_INSTRUCTION_RE = /再调用|改好|重新调用|修改.{0,40}?后(?:重新)?调用/
+/** 沙箱守卫的越界拒绝（eimu-guard DENY_MESSAGE：outside_workspace／uploads_root）：写给模型的，模型自己换路径，不该变成用户屏幕上的红 session.error。
+ *  2026-11-04：生产真会话里模型因找不到出图成品去 glob /root，被拒后弹出红色「只能访问创作工作区」。 */
+const SANDBOX_DENY_RE = /^只能访问创作工作区（workspace）内的文件。?$|^不能列出全部上传目录/
 /** 用户需要知道的事实（账务/审核/上游/服务状态）：出现即不是自修类。 */
 const USER_FACT_RE = /欠费|余额|额度|充值|审核|已扣费|上游|(?<!\d)5(?:\d\d|xx)(?!\d)|超时|限流|不可用/i
 
@@ -268,6 +271,7 @@ export function isModelSelfFixError(raw: unknown): boolean {
     const t = rawText.trim().replace(RAW_PREFIX_RE, "")
     const lead = LEADING_CODE_RE.exec(t)
     if (lead && MODEL_SELF_FIX_CODES.has(lead[1].toLowerCase())) return true
+    if (SANDBOX_DENY_RE.test(t)) return true
     if (/未提交/.test(t) && MODEL_INSTRUCTION_RE.test(t) && !USER_FACT_RE.test(t)) return true
   }
   return false

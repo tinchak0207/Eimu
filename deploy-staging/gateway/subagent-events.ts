@@ -241,7 +241,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "audio", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
             // H34：子代理产出——tool_session＝子会话（music_charge ref 里的会话就是它），账本行带关联键。
-            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover }, {
+            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover, duration_s: c.duration_s }, {
               tool_session: typeof part.sessionID === "string" ? part.sessionID : undefined,
               tool_call_id: childCallId || undefined,
               music_ref: toolOutputMusicRef(parsedOut),

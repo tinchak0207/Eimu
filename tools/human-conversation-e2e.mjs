@@ -956,7 +956,28 @@ async function sceneLayerRevision(scene, reasons) {
   return { sid, turns, names: turns.namesSeen, reconnects: sse.reconnects, facts: { ...facts, prompts: facts.prompts.length } }
 }
 
+async function sceneViewerGate(scene, reasons) {
+  // 赏阅交付闸（2026-11-04）：同一会话先出图再配 10 秒轻音乐，两句分别限额；取 image.done / audio.done 的 URL 给真浏览器截图用。
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const t1 = await runTurn(sid, scene.turns[0], { sse, spend: true, maxCoins: scene.max_coins })
+  for (let i = 0; i < 60 && !eventNames(sse.frames, 0).includes("image.done") && !eventNames(sse.frames, 0).includes("image.failed"); i++) await sleep(3000)
+  if (!eventNames(sse.frames, 0).includes("image.done")) fail(reasons, `${scene.id} 第 1 句没有 image.done${sseNote(sse)}`)
+  const mark = sse.frames.length
+  const t2 = await runTurn(sid, scene.turns[1], { sse, spend: true, maxCoins: scene.max_coins_music })
+  for (let i = 0; i < 100 && !eventNames(sse.frames, mark).includes("audio.done") && !eventNames(sse.frames, mark).includes("audio.failed"); i++) await sleep(3000)
+  const names2 = eventNames(sse.frames, mark)
+  if (!names2.includes("audio.done")) fail(reasons, `${scene.id} 第 2 句没有 audio.done${sseNote(sse)}；事件：${[...new Set(names2)].slice(0, 20).join(",")}`)
+  if (/blender|渠道.{0,6}不可用|全部不可用/i.test(t1.reply + t2.reply)) fail(reasons, `${scene.id} 回复里出现降级话术`)
+  const media = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "image.done" || x.ev === "audio.done").map((x) => ({ ev: x.ev, obj: x.obj }))
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
+  const facts = await sessionFacts(sid)
+  await sse.stop()
+  return { sid, approved: [t1.approved, t2.approved], maxQuoted: [t1.maxQuoted, t2.maxQuoted], receipts: facts.receipts, seat: facts.seat, media, reply1: t1.reply.slice(0, 300), reply2: t2.reply.slice(0, 300) }
+}
+
 const runners = {
+  "viewer-gate-image-then-music": sceneViewerGate,
   "layer-revision-still": sceneLayerRevision,
   "layer-revision-mv-text": sceneLayerRevision,
   "long-revision-yuri-3turn": sceneLayerRevision,

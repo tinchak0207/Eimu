@@ -1,7 +1,7 @@
 import { notify } from "./internal-waiters.ts"
 import { parseToolOutput, collectToolOutputMediaUrls } from "./events-translate.ts"
 import { saveDurableSubagentRun, durableSubagentRun } from "./job-store"
-import { checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, conflictingVerdicts, CRITIC_VERDICT_CONFLICT_CODE, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
+import { contractAgentFor, checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, conflictingVerdicts, CRITIC_VERDICT_CONFLICT_CODE, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
 import { listArtifacts, artifactLocalEvidenceMatches } from "./artifact-store.ts"
 import { saveReworkRecord, deleteReworkRecord, saveCriticVerdict, saveExpertLesson, saveDelivery } from "./persistence"
 import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, MeasuredMediaResult } from "./media-quality.ts"
@@ -213,7 +213,8 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   } else if (status === "ok" && ((run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent || artifactVerify.length > 0)) {
     // 历史契约范围不扩大；其他 run 仅检查其实际登记的产物证据。
     const enforceContract = run.beastMode === true || run.agent === "lyricist" || run.agent === "music"
-    const verdict = checkDelivery(enforceContract ? run.agent : undefined, fullText, DELIVERY_CONTRACTS, artifactVerify)
+    const contractAgent = contractAgentFor(run) ?? run.agent
+    const verdict = checkDelivery(enforceContract ? contractAgent : undefined, fullText, DELIVERY_CONTRACTS, artifactVerify)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
     // 非 Expert/已失败收场零污染；status==="ok" 是必要条件——上游 error/超时不进重派链。
@@ -254,12 +255,12 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       } else if (run.reworkFailure) {
         // 重派投递从未成功（如 opencode 不可达）：重派没跑过，done 不伪称 reworked——
         // 维持片 C 原「未达标」标记语义，仅缀一行失败事实。
-        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
+        summary = `${formatDeliveryGateNotice(contractAgent ?? "", verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing }
       } else {
         // 重派后复检仍 FAIL：标记升级「重派后仍未达标」，交由既有唤醒链如实回报。
         // status 栏语义不动（仍 ok——重派是补救尝试，不保证成功，也不把缺口洗成错误）。
-        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
+        summary = `${formatDeliveryGateNotice(contractAgent ?? "", verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing, reworked: true, stillFailing: true }
       }
       run.summary = summary
@@ -677,7 +678,7 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
   // D11：重派是新的完整 attempt——旧 attempt 的 usage 必须清掉，否则终态会回带首轮数字。
   run.usage = undefined
   // D6：childPath／parentSubagentId（深度来源）原样保留；重派不是「回到根层」。
-  run.prompt = `${run.prompt}\n\n---\n\n${buildReworkDirective(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}`
+  run.prompt = `${run.prompt}\n\n---\n\n${buildReworkDirective(contractAgentFor(run) ?? run.agent ?? "", verdict, DELIVERY_CONTRACTS)}`
   if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
   const hardMs = run.asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
   run.timeoutTimer = setTimeout(() => {

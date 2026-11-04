@@ -44,3 +44,27 @@ A–M：PASS 10（A B C D E H I J K L），FAIL 2（F 3D、G 文档），M 已�
 - P3（新发现）：AgentMarkdown 内嵌影片/音频把 `<div>`（Viewer）渲染进 `<p>`，Viewer 内部还有 `<p>`，React 报 `<div> cannot be a descendant of <p>` / `<p> cannot contain a nested <p>`，SSR 场景会触发 hydration error。位置：`src/components/agent-chat/AgentMarkdown.tsx:110-126`（MdVideo/MdAudio）由 `:194` 的 `<p>` 段落包裹。复现：渲染含 `![x](a.mp4)` 或 `[链接](x.mp3)` 的 markdown，开 dev 控制台。聊天内纯客户端渲染下仅 dev 警告，用户无感。
 - 视觉瑕疵（未定位）：390px 宽手机图片赏阅底部「适应 / 100% / 框选」胶囊内文字竖排折行（mobile-oivb-tap-outside-390）。
 - 复验用的假 store 音频 URL 404 触发的 CORS/404 日志属夹具所致，非产品缺陷。
+
+## 生产交付闸
+
+时间 2026-11-04 20:09–20:50（+08）。生产 https://www.eimu.dev（revision e8c5d3bc2）。截图目录 `docs/evidence/viewer-20261104/prod/`，下列截图均已逐张 Read 审看。
+
+总判：赏阅本体（/view 图片、音乐、手机视口、框选标记、复制给助理）PASS；agent 卡 → 赏阅壳 → 「发给助理」预填 未验（登录硬闸）；真会话路径 FAIL（出图未交付、10 秒要求未达成，非赏阅缺陷）。
+
+### 1. 真会话（tools/human-conversation-e2e.mjs，场景 `viewer-gate-image-then-music`，已补进 corpus，runner 为 sceneViewerGate）
+- sid：`16b511d6-ceac-4d58-863c-4c2424078335`（opencode `ses_e598955cbffewPVAVsEx0PJaMd`），证据 `/tmp/human-e2e-2026-11-04T12-09-16-544Z/`（含完整 .sse）。
+- 原话 1「给我一张极简风的咖啡馆海报」：助理先弹「三个方向共 18 币」问题卡（用户只要一张，属多余确认），选一张后确认卡 6 币已批准，扣费 6 币、1 条回执；SSE 全程无 `image.done`，图经子代理落到 task `fcc59ada-33c8-4ec5-a19f-c0611ea074fc`，会话里查不到可公开 URL（`uploads/fcc59ada…_0.png` 404），截至 20:50 仍未把图交到聊天。FAIL。
+- 原话 2「给这张图配一段 10 秒的轻音乐」：收到 `audio.done` ×2（m4a 公开可取、带 CORS），但实测时长 180.59s／160.02s／180.97s／173.91s，没有一段是 10 秒；子代理交付闸报「契约 6 栏实到 0 栏」并撞「daily usage limit for Chat」；另有一次 `session.error`「只能访问创作工作区（workspace）内的文件」（glob）。10 秒要求 FAIL，音频本身可播。
+- 夹具侧：回合在子代理仍跑时因 25 秒安静就判 turn 结束，需更长的安静窗口才能等到子代理回执；本轮会话到 20:50 仍在自行续跑（又派了「音频裁10秒+循环」「海报独立评审」两路）。
+- 花费：约 6 币图 + 1 币音乐 + 其余音乐 take（cost 0），远低于上限（图 8／音乐 30）。
+
+### 2. 真浏览器（chrome-stable headless，生产，非第三方登录）
+- 登录硬闸：`/api/agent/sessions` 回 401 `agent_not_signed_in`，首页只有交互式「登录」；本机无可用生产用户 token，不 headless 登录、不读用户 Chrome 档案。故「打开该会话、截 agent 图卡/音频卡、点放大进赏阅壳、发给助理预填」未验。biz key 会话不属任何站点用户，浏览器看不到。
+- `/view?u=<公开图>&k=image` 桌面 1440×900：PASS，1200×1200 渲染、顶栏「图片」、缩放「66%」、适应/100%/框选胶囊、存图库/下载/再来N组/微调（`view-image-desktop.png`）。
+- 手机 390×844（dsr3）：PASS，图居中、胶囊内文字单行、无折行（`view-image-mobile.png`；复验里的「竖排折行」瑕疵在生产版已不复现）。
+- 框选+标签+备注：PASS，拖出选区 → 面板「画面 (25%,15%) 起 30%×15%」→ 点「文字错」+ 备注 → 保存标记 → 框上出现序号 1，列表「已标 1 处」（`view-image-select-desktop.png`、`view-image-mark-saved-desktop.png`、`view-image-copy-desktop.png`）。匿名 /view 里按钮是「复制给助理」（无会话可预填），剪贴板文本：「《未命名》观感反馈（共 1 处）：1. 画面 (25%,15%) 起 30%×15%：画面里的文字错误或乱码；标题字间距太松，改成紧凑一点 / 请只针对以上标记的位置调整，没提到的部分保持不变。」
+- 音频赏阅 `/view?u=<本会话 m4a>&k=audio`：PASS（`view-audio-desktop.png`、`view-audio-mobile.png`）。时长 03:00 与真实 180.59s 一致；波形是真解码峰值（源码 `AudioSurface.tsx:298-330`，解码失败退化为朴素条，不造假波形；该存储域对 www.eimu.dev 带 CORS）；无歌词诚实标「本曲暂无歌词」；A-B 循环、倍速、标记、音量齐全；不冒充歌词、不假造 LRC。
+- 控制台：赏阅页面零报错；唯一错误是整站级 `/_vercel/insights/script.js` 404（返回 text/html 被 MIME 拒绝），非赏阅代码，另有 2 条 CSS preload 未使用警告。
+
+### 未达成的一件事
+以真实登录用户打开会话，验证 agent 图卡/音频卡 → 放大进赏阅 → 「发给助理」只预填不自动发送（需暴君本人登录一次生产站，或给出可用于浏览器的 napi_token 文件，`AUTH_TOKEN_FILE` 即 agent-intent-map.mjs 的现成接口）。

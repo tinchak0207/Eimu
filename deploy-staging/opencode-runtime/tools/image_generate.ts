@@ -19,6 +19,7 @@ import {
   ok,
   fail,
 } from "../lib/client"
+import { fitImageSize, type ImageSizeFit } from "../lib/image-size-fit"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
 import { VIDEO_MOTION_FALLBACK, hasMotionContract } from "../lib/video-prompt-schema"
 import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash, sameShotSubmissions } from "../lib/image-journal"
@@ -33,6 +34,8 @@ import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSub
  */
 let sizeWhitelistCache: { at: number; sizes: string[] } | null = null
 const SIZE_WHITELIST_TTL_MS = 10 * 60 * 1000
+/** 仅在 openapi 真源不可达、且需要把比例/档位映射成像素尺寸时兜底（= src/lib/generation-core/durable-image-sizes.ts DURABLE_IMAGE_SIZES，改那边时同步）。 */
+const FALLBACK_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]
 
 async function supportedImageSizes(sessionID: string, signal?: AbortSignal): Promise<string[] | null> {
   if (sizeWhitelistCache && Date.now() - sizeWhitelistCache.at < SIZE_WHITELIST_TTL_MS) return sizeWhitelistCache.sizes
@@ -295,7 +298,13 @@ export default tool({
       .string()
       .optional()
       .describe(
-        "图片写像素尺寸（如 1024x1536）；视频写画面比例（9:16/16:9/1:1/4:3/3:4/21:9）或像素写法（如 1920x1080），会原样作为视频契约的 size，不自动改写比例。",
+        "图片写像素尺寸（如 1024x1536）；非白名单尺寸/比例（3:4、1536x2048、2k 等）会被自动落到最接近的合法尺寸并告知，不会报错；视频写画面比例（9:16/16:9/1:1/4:3/3:4/21:9）或像素写法（如 1920x1080），会原样作为视频契约的 size，不自动改写比例。",
+      ),
+    aspect_ratio: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "仅图片用：画面比例（如 3:4、9:16、4:3）。上游只认少数几档像素尺寸，工具会自动落到最接近的合法尺寸（3:4/竖版海报→1024x1536）并在回执 size_adjusted 里告知；不要为凑比例反复试 size，也不要自己再方形出图后裁切。",
       ),
     n: tool.schema.number().int().min(1).max(4).optional().describe("生成张数，预设 1"),
     kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
@@ -314,7 +323,7 @@ export default tool({
       .enum(["480p", "540p", "720p", "1080p", "2k", "4k"])
       .optional()
       .describe(
-        "仅 video 用：成片分辨率档。用户要高清/2K/4K/电影级时填对应档，一次填对直接出成片——minimax-h3 的高清档由平台自动完成（768P 出片后 auto-hd 超分），不要自己分两步超分，视频也没有独立超分工具。可选档以 video_quote 的 resolutions 为准；模型到不了该档会在提交前被拒，不静默降档。省略则用模型默认档。",
+        "video：成片分辨率档；image：仅作档位提示（2k/4k），按比例就近落到合法尺寸。以下为 video 说明：成片分辨率档。用户要高清/2K/4K/电影级时填对应档，一次填对直接出成片——minimax-h3 的高清档由平台自动完成（768P 出片后 auto-hd 超分），不要自己分两步超分，视频也没有独立超分工具。可选档以 video_quote 的 resolutions 为准；模型到不了该档会在提交前被拒，不静默降档。省略则用模型默认档。",
       ),
     generate_audio: tool.schema.boolean().optional().describe("是否生成音讯，仅 video 用"),
     rework_reason: tool.schema.string().max(300).optional().describe("同一镜头（同prompt同帧）已有在途或已成功任务时，确需再付费重出（换模、返工、多候选）才填，写明原因；不填会被同镜头去重闸拦下且不扣费。多候选优先用n。"),
@@ -332,7 +341,18 @@ export default tool({
     const kind = args.kind ?? "image"
     // 视频默认比例档 16:9：平台 VideoGenerationRequest.size 接受 "16:9" 或 "1920x1080"，
     // 归一成 catalog aspectRatio；「1024x1024」这类图片像素尺寸不是合法视频比例，会被平台回落到默认档。
-    const size = args.size ?? (kind === "video" ? "16:9" : "1024x1024")
+    let size = args.size ?? (kind === "video" ? "16:9" : "1024x1024")
+    // 图片尺寸就近落档（2026-11-04）：非白名单尺寸/比例不报错，映射到最接近的合法尺寸并告知。
+    // 病灶：3:4 竖版海报 → 1536x2048 被白名单挡下 → 子代理反复试错烧步骤。必须在 input_signature／
+    // 去重键／报价之前定稿，保证同一请求同一 size。白名单仍以站点 openapi 真源为准；取不到时才用兜底 5 档。
+    let size_fit: ImageSizeFit | undefined
+    if (kind === "image" && (args.size || args.aspect_ratio || (args.resolution && /^(1k|2k|4k)$/i.test(args.resolution)))) {
+      const allowedSizes = (await supportedImageSizes(context.sessionID, context.abort)) ?? FALLBACK_IMAGE_SIZES
+      const fit = fitImageSize({ size: args.size, aspect_ratio: args.aspect_ratio, resolution: args.resolution }, allowedSizes)
+      size = fit.size
+      if (fit.adjusted) size_fit = fit
+    }
+    const sizeAdjustedNote = size_fit?.note ? `【尺寸已自动调整】请求「${size_fit.requested}」→ 实际提交 ${size_fit.size}。${size_fit.note}` : ""
     const n = args.n ?? 1
     if (args.frame != null && (!args.project || kind !== "image" || n !== 1)) return fail("invalid_frame_contract", "逐帧生成必须提供project，kind=image且n=1；不允许以拼图或多候选冒充多帧。")
     if (args.project && (args.project.length > 200 || !args.project.trim())) return fail("invalid_project", "project必须为非空稳定ID，最多200字。")
@@ -581,8 +601,11 @@ export default tool({
             request_id,project:args.project,frame:args.frame,reference_version:identity.reference_version,style_version:identity.style_version,
             kind,
             model,
+            size,
+            ...(size_fit ? { size_adjusted: { requested: size_fit.requested, used: size_fit.size, note: size_fit.note } } : {}),
             estimated_cost_coins: cost_coins,
             note:
+              (sizeAdjustedNote ? sizeAdjustedNote + "\n" : "") +
               "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。" +
               (kind === "video"
                 ? "视频完成后用video_result_fetch读取，再video_fetch {task_id} 下载全部artifact、验证落盘并提交downloaded ACK；"
@@ -603,7 +626,7 @@ export default tool({
           const extra={model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,result_source:"synchronous_receipt",completion:{status,artifacts,cost_coins:data.cost_coins??cost_coins}}
           acceptTaskSubmission(scope,request_id,receiptID,{task_id:receiptID,session_id:context.sessionID,kind,...extra})
           const receipt=await registerTask(receiptID,context.sessionID,kind,context.abort,extra)
-          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),...(card_note?{note:card_note}:{})})
+          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),size,...(size_fit?{size_adjusted:{requested:size_fit.requested,used:size_fit.size,note:size_fit.note}}:{}),...((card_note||sizeAdjustedNote)?{note:[sizeAdjustedNote,card_note].filter(Boolean).join("\n")}:{})})
         }
       }
 

@@ -177,6 +177,7 @@ export async function emitAudioDone(
     ...(meta?.title ? { title: meta.title } : {}),
     ...(meta?.cover ? { cover: meta.cover } : {}),
     ...(meta?.lyric_status ? { lyric_status: meta.lyric_status } : {}),
+    ...(typeof meta?.duration_s === "number" && meta.duration_s > 0 ? { duration_s: Math.round(meta.duration_s * 100) / 100 } : {}),
   })
   // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
   if (claimLedgerDone(task_id, url, cost_coins)) void appendLedgerFor(state, {
