@@ -84,7 +84,13 @@ interface JobRuntime {
   pending_question_items: PendingQuestionItem[] | null;
   recent_approved_coins: number | null;
   last_activity_at: number | null;
-  source: "status_endpoint" | "session_list" | "assumed_running";
+  /**
+   * session_list：旧网关（/status 404）回落，无投影；
+   * session_list_degraded：/status 非 404 失败（5xx／biz 代理 10s 超时→502／断线），投影未知 ⇒ 完成闸不得判 completed（H85）。
+   */
+  source: "status_endpoint" | "session_list" | "session_list_degraded" | "assumed_running";
+  /** /status 失败时的 HTTP 码（抛错为 0）；成功为 null。 */
+  status_http?: number | null;
   detail?: unknown;
 }
 
@@ -383,14 +389,22 @@ function questionFields(runtime: JobRuntime): Record<string, unknown> {
 
 async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: string): Promise<JobRuntime> {
   const statusPath = agentSessionPath(jobId, "/status");
-  const statusRes = await ctx.dispatcher({
-    method: "GET",
-    path: statusPath,
-    authorization: ctx.authorization,
-    traceId: ctx.traceId,
-    toolName,
-  });
-  if (statusRes.status >= 200 && statusRes.status < 300) {
+  let statusRes: Awaited<ReturnType<McpToolContext["dispatcher"]>> | null = null;
+  try {
+    statusRes = await ctx.dispatcher({
+      method: "GET",
+      path: statusPath,
+      authorization: ctx.authorization,
+      traceId: ctx.traceId,
+      toolName,
+    });
+  } catch {
+    statusRes = null;
+  }
+  // H85：只有 404（旧网关无 /status 或会话不存在）才算「无投影」的合法回落；
+  // 5xx／超时／断线／非对象体 = 投影暂不可用，列表 idle 不能当完成（11-04 真路径：/status 被 biz 代理 10s 超时→502，回落列表 idle 误报 completed）。
+  const statusHttp: number | null = statusRes ? statusRes.status : 0;
+  if (statusRes && statusRes.status >= 200 && statusRes.status < 300) {
     const payload = parseJsonLoose(statusRes.text);
     if (isPlainObject(payload)) {
       const status = parseRuntimeStatus(payload.status) ?? "idle";
@@ -406,19 +420,26 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
         recent_approved_coins: finiteOrNull(payload.recent_approved_coins),
         last_activity_at: finiteOrNull(payload.last_activity_at),
         source: "status_endpoint",
+        status_http: null,
         detail: payload,
       };
     }
   }
+  const degraded = statusHttp !== 404;
 
-  const listRes = await ctx.dispatcher({
-    method: "GET",
-    path: AGENT_SESSIONS_PATH,
-    authorization: ctx.authorization,
-    traceId: ctx.traceId,
-    toolName,
-  });
-  if (listRes.status >= 200 && listRes.status < 300) {
+  let listRes: Awaited<ReturnType<McpToolContext["dispatcher"]>> | null = null;
+  try {
+    listRes = await ctx.dispatcher({
+      method: "GET",
+      path: AGENT_SESSIONS_PATH,
+      authorization: ctx.authorization,
+      traceId: ctx.traceId,
+      toolName,
+    });
+  } catch {
+    listRes = null;
+  }
+  if (listRes && listRes.status >= 200 && listRes.status < 300) {
     const payload = parseJsonLoose(listRes.text);
     const sessions = isPlainObject(payload) && Array.isArray(payload.sessions) ? payload.sessions : [];
     for (const entry of sessions) {
@@ -436,7 +457,8 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
         pending_question_items: null,
         recent_approved_coins: null,
         last_activity_at: null,
-        source: "session_list",
+        source: degraded ? "session_list_degraded" : "session_list",
+        status_http: statusHttp,
         detail: entry,
       };
     }
@@ -455,6 +477,7 @@ async function resolveJobRuntime(jobId: string, ctx: McpToolContext, toolName: s
     recent_approved_coins: null,
     last_activity_at: null,
     source: "assumed_running",
+    status_http: statusHttp,
   };
 }
 
@@ -560,6 +583,13 @@ async function ensureSession(args: Record<string, unknown>, ctx: McpToolContext,
 const IN_PROGRESS_CLAIM_RE =
   /正在(?:并行|批量)?(?:生成|出图|渲染|制作|处理|跑)|生成中|渲染中|排队中|并行(?:生成|出图|跑)|(?:现在)?派出(?:了)?(?:生成|子代理)|已派(?:出|遣)|两路已经派|子代理[^。\n]{0,12}(?:在跑|执行中|进行中|生成)|稍等|稍候|请等待|跑完(?:后|再)|in progress|still generating/i;
 
+/**
+ * 回覆声称「在等子代理回来再收尾」（产物非空也成立：已出初稿、派听审／核对，等回报再定）。
+ * 11-04 真路径：「已派核对独立听审（subagent_id=…）…等它回来我再定」「研究这一路已经派出去了…等它把…落盘，我再…」。
+ */
+const AWAITING_CHILD_CLAIM_RE =
+  /等(?:它|它们|子代理|这一?路|听审|核对|研究)[^。\n]{0,40}?(?:回来|回报|回传|落盘|跑完|做完|完成|结束)|已经派(?:出|遣|了)|派出去了|waiting (?:for|on) (?:the )?sub-?agent/i;
+
 function artifactCount(artifacts: ReturnType<typeof slimArtifacts>): number {
   return Object.values(artifacts).reduce((sum, list) => sum + list.length, 0);
 }
@@ -574,9 +604,15 @@ type IdleGate =
  * - 网关投影 active_children／inflight_generations 任一 >0 ⇒ busy（后台子代理／生成仍在跑）；
  * - 产物为空且无助手摘要 ⇒ busy（启动／回合间隙竞态；久无活动 ⇒ stalled）；
  * - 产物为空且最新回覆声称还在生成 ⇒ busy；距 last_activity_at 超过 EIMU_IDLE_CLAIM_STALL_MS ⇒ stalled；
+ * - /status 非 404 失败（投影不可用）⇒ busy（H85）；
+ * - 回覆声称在等子代理回来再收尾（不论产物是否为空）⇒ busy；久无活动 ⇒ stalled（H85）；
  * - 否则 done。旧网关（无投影）靠后两条兜底。
  */
 function idleGate(runtime: JobRuntime, summary: string, artifacts: ReturnType<typeof slimArtifacts>, nowMs: number): IdleGate {
+  // H85：投影不可用（/status 5xx／超时／断线）时子代理与在途生成未知，不判 completed；/status 恢复后下一轮正常判。
+  if (runtime.source === "session_list_degraded") {
+    return { kind: "busy", reason: `status_projection_unavailable(http=${runtime.status_http ?? 0})` };
+  }
   if ((runtime.active_children ?? 0) > 0) return { kind: "busy", reason: `active_children=${runtime.active_children}` };
   if ((runtime.inflight_generations ?? 0) > 0) {
     return { kind: "busy", reason: `inflight_generations=${runtime.inflight_generations}` };
@@ -588,6 +624,12 @@ function idleGate(runtime: JobRuntime, summary: string, artifacts: ReturnType<ty
       return { kind: "stalled", reason: "idle_empty_no_assistant_summary" };
     }
     return { kind: "busy", reason: "idle_empty_no_assistant_summary" };
+  }
+  if (AWAITING_CHILD_CLAIM_RE.test(summary)) {
+    if (runtime.last_activity_at !== null && nowMs - runtime.last_activity_at > EIMU_IDLE_CLAIM_STALL_MS) {
+      return { kind: "stalled", reason: "idle_claims_awaiting_subagent" };
+    }
+    return { kind: "busy", reason: "claims_awaiting_subagent" };
   }
   if (emptyArtifacts && IN_PROGRESS_CLAIM_RE.test(summary)) {
     if (runtime.last_activity_at !== null && nowMs - runtime.last_activity_at > EIMU_IDLE_CLAIM_STALL_MS) {
