@@ -19,6 +19,12 @@
 #   H20 关联键：ledger confirm/approved 自 H20 起带 request_id（＝工具提交平台的 Idempotency-Key＝
 #   generation_job.idempotency_key；upscale_audit 逐张为 <request_id>-<i>）与 workflow_id（wfgen_ 批次）。
 #   旧行两键皆无＝「无法逐笔关联」；新行按 request_id 连 job，再比 确认额 vs 实扣。
+#   H23 音乐：音乐不经 generation_job，扣费记 music_charge（PK charge_ref＝music:<keyId>:<ref>，
+#   只在音频产出后扣 1 次；status applied＝已扣，failed＝确定性未扣，pending/unknown＝未明冻结；
+#   无退款路径）＋ account_ledger consumption 行（job_id＝charge_ref，source=music-charge）。
+#   music-operation 回执（task_id＝music-operation:sha256(producer\0operation)，data.operation_id）
+#   的 ref＝music:<producer_oc 或 parent_gw>:<operation_id>（call_… 直调 / pg:… 工程图节点），
+#   故按 (会话, operation_id) 逐笔连 music_charge，比 回执确认额 vs 实扣；music_charge 表缺失＝「未取得」。
 #
 # 用法（VPS）：
 #   python3 deploy/vps/billing-recon.py                       # 默认路径 + 只读 psql
@@ -34,6 +40,10 @@ PG_QUERIES = {
     "jobs": "SELECT id, billing_user_id, source, kind, model_id, status, billing_amount, requested_count, completed_count, created_at, idempotency_key FROM generation_job",
     "ops": "SELECT job_id, operation, amount, status, idempotency_ref, created_at FROM billing_operation",
     "acct": "SELECT id, billing_user_id, entry_type, amount, source, job_id, created_at FROM account_ledger",
+}
+# 可选表：缺表/无权限不终止对帐，按「未取得」输出（H23 music_charge）。
+OPTIONAL_PG_QUERIES = {
+    "music": "SELECT charge_ref, billing_user_id, amount_quota, status, created_at, updated_at FROM music_charge",
 }
 FAIL_STATES = {"failed", "cancelled", "canceled"}
 UNKNOWN_STATES = {"submit_unknown", "billing_unknown"}
@@ -57,6 +67,13 @@ CATS = [
     ("ledger_missing", "帐本缺行（操作已扣，帐本接管后无对应行）"),
     ("gw_ledger_ne_charged", "网关 ledger.jsonl done 记帐≠平台实扣"),
     ("receipt_no_job", "回执无对应平台 job"),
+    ("music_confirmed_ne_charged", "音乐：回执确认额≠music_charge 实扣"),
+    ("music_success_uncharged", "音乐：回执成功但 music_charge 无 applied 扣费（漏扣，含扣费未完成）"),
+    ("music_unfinished_charged", "音乐：回执未成功（failed/queued 等）却有 applied 扣费"),
+    ("music_charge_dup", "音乐：同一 operation 多笔 applied 扣费"),
+    ("music_charge_unsettled", "音乐：music_charge pending/unknown（INC-0831 冻结，仅列示）"),
+    ("music_ledger_ne_charge", "音乐：account_ledger music-charge 净额≠music_charge applied 额"),
+    ("music_receipt_unlinked", "音乐回执无法关联（music_charge 未取得或回执缺 operation_id）"),
     ("confirm_unlinked_event", "确认事件无法逐笔关联（ledger confirm/approved 无 task_id 也无 request_id，H20 前旧行）"),
     ("confirm_rid_no_job", "确认已放行但平台无该 request_id 的 job（提交前中止/未提交，待甄别）"),
     ("confirm_event_lt_charged", "确认额<平台实扣（按 request_id 关联，实扣超出用户放行额）"),
@@ -93,6 +110,20 @@ def read_pg(args):
         if res.returncode != 0:
             raise SystemExit("psql 只读导出失败（%s）：%s" % (name, res.stderr.strip()[:300]))
         out[name] = list(csv.DictReader(io.StringIO(res.stdout)))
+    for name, sql in OPTIONAL_PG_QUERIES.items():
+        out[name] = None  # None＝未取得（不以空表冒充）
+        if args.pg_dir:
+            fp = os.path.join(args.pg_dir, name + ".csv")
+            if os.path.exists(fp):
+                with open(fp, newline="") as f:
+                    out[name] = list(csv.DictReader(f))
+            continue
+        res = subprocess.run(shlex.split(args.psql), input="COPY (%s) TO STDOUT WITH CSV HEADER;\n" % sql,
+                             capture_output=True, text=True, timeout=300)
+        if res.returncode == 0:
+            out[name] = list(csv.DictReader(io.StringIO(res.stdout)))
+        else:
+            print("注意：可选表 %s 只读导出失败，按「未取得」处理" % name, file=sys.stderr)
     return out
 
 
@@ -107,7 +138,11 @@ def read_gateway(args):
         except ValueError:
             d = {}
         receipts.append({"task_id": task_id, "kind": kind, "status": status, "cost": num(d.get("cost_coins")),
-                         "request_id": d.get("request_id"), "model": d.get("model"), "created": created})
+                         "request_id": d.get("request_id"), "model": d.get("model"), "created": created,
+                         "operation_id": d.get("operation_id") if isinstance(d.get("operation_id"), str) else None,
+                         "producer_oc": d.get("producer_oc") if isinstance(d.get("producer_oc"), str) else None,
+                         "parent_gw": d.get("parent_gw") if isinstance(d.get("parent_gw"), str) else None,
+                         "result_source": d.get("result_source")})
     confirmations = []
     has_conf = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_confirmations'").fetchone()
     if has_conf:
@@ -229,11 +264,85 @@ def reconcile(pg, receipts, confirmations, events):
     # 网关回执 × 平台
     by_req = collections.defaultdict(list)
     compared = [0]
+    music = pg.get("music")
+    mm = collections.Counter()  # 音乐对帐计数（meta）
+    m_idx = collections.defaultdict(list)  # (会话, operation_id) → music_charge 行
+    if music is not None:
+        for c in music:
+            ref = c.get("charge_ref") or ""
+            parts = ref.split(":", 2)  # music:<keyId>:<ref>
+            inner = parts[2].split(":", 2) if len(parts) == 3 else []
+            if len(inner) == 3 and inner[0] == "music":
+                m_idx[(inner[1], inner[2])].append(c)
+            st = c.get("status")
+            amt = num(c.get("amount_quota")) or 0
+            mm["charges"] += 1
+            mm["charges_" + str(st)] += 1
+            if st == "applied":
+                mm["_applied_q"] += amt
+            mbase = dict(user=pfx(c.get("billing_user_id"), 3), charge_status=st, ts=pfx(c.get("created_at"), 16))
+            if st in ("pending", "unknown"):
+                add("music_charge_unsettled", coins(amt), reason="music_charge %s" % st, **mbase)
+            rows = acct.get(ref, [])
+            net = -sum(num(a["amount"]) or 0 for a in rows)
+            exp = amt if st == "applied" else 0.0
+            if rows:
+                mm["_ledger_q"] += net
+            if abs(net - exp) > 0.5:
+                add("music_ledger_ne_charge", coins(net - exp),
+                    reason="ledger=%s(%d 行) charge=%s" % (coins(net), len(rows), coins(exp)), **mbase)
+    m_used = set()
+
+    def music_receipt(r):
+        h = r["task_id"].split(":", 1)[-1]
+        base = dict(job="mop:" + h[:8], kind=r["kind"], gw=r["status"])
+        mm["receipts"] += 1
+        op = r.get("operation_id")
+        if music is None or not op:
+            mm["receipts_unlinked"] += 1
+            add("music_receipt_unlinked", r["cost"], reason="music_charge 未取得" if music is None else "回执缺 operation_id", **base)
+            return
+        cands, seen = [], set()
+        for sess in (r.get("producer_oc"), r.get("parent_gw")):
+            for c in (m_idx.get((sess, op), []) if sess else []):
+                if c["charge_ref"] not in seen:
+                    seen.add(c["charge_ref"]); cands.append(c)
+        m_used.update(seen)
+        applied = [c for c in cands if c.get("status") == "applied"]
+        unsettled = [c for c in cands if c.get("status") in ("pending", "unknown")]
+        ch = coins(sum(num(c.get("amount_quota")) or 0 for c in applied))
+        if len(applied) > 1:
+            add("music_charge_dup", coins(sum(num(c.get("amount_quota")) or 0 for c in applied[1:])),
+                reason="applied×%d" % len(applied), **base)
+        if r["status"] == "succeeded":
+            if applied:
+                mm["receipts_linked_charged"] += 1
+                ch1 = coins(num(applied[0].get("amount_quota")) or 0)  # 多扣部分已入 music_charge_dup，不双计
+                if r["cost"] is not None and abs(ch1 - r["cost"]) > TOL:
+                    add("music_confirmed_ne_charged", ch1 - r["cost"], reason="confirmed=%s charged=%s" % (r["cost"], ch1), **base)
+                else:
+                    mm["_matched_coins"] += ch1
+            elif unsettled:
+                mm["receipts_linked_frozen"] += 1  # 已在 music_charge_unsettled 列示
+            elif r["cost"] is None or r["cost"] > TOL:
+                add("music_success_uncharged", r["cost"],
+                    reason="回执 cost_coins=%s，music_charge 无 applied" % ("null（扣费未完成）" if r["cost"] is None else r["cost"]), **base)
+            else:
+                mm["receipts_succeeded_zero_cost"] += 1
+        elif applied:
+            add("music_unfinished_charged", ch, reason="回执 %s 但已扣 %s" % (r["status"], ch), **base)
+        else:
+            mm["receipts_unfinished_uncharged"] += 1  # 未出音频即不扣：正确，不计差额
+            mm["receipts_unfinished_uncharged_" + str(r["status"])] += 1
+
     for r in receipts:
         j = jobs.get(r["task_id"])
         base = dict(job=pfx(r["task_id"]), kind=r["kind"], model=r["model"], gw=r["status"])
         if r.get("request_id"):
             by_req[r["request_id"]].append(r)
+        if j is None and (str(r["task_id"]).startswith("music-operation:") or r.get("result_source") == "runtime_music"):
+            music_receipt(r)
+            continue
         if j is None:
             add("receipt_no_job", r["cost"], **base)
             continue
@@ -323,6 +432,16 @@ def reconcile(pg, receipts, confirmations, events):
         if e["cost"] is not None and ch - e["cost"] > TOL:
             add("confirm_event_lt_charged", ch - e["cost"], req=pfx(rid, 12), jobs=len(tids),
                 reason="confirmed=%s charged=%s" % (e["cost"], round(ch, 4)))
+    if music is None:
+        mmeta = "未取得"
+    else:
+        mmeta = {k: v for k, v in mm.items() if not k.startswith("_")}
+        mmeta["charged_coins_applied"] = coins(mm["_applied_q"])
+        mmeta["ledger_coins"] = coins(mm["_ledger_q"])
+        mmeta["receipt_matched_coins"] = round(mm["_matched_coins"], 4)
+        mmeta["charges_without_receipt"] = sum(1 for c in music if c.get("charge_ref") not in m_used)  # music_gen 直调不写回执，正常
+        mmeta["refunds"] = "无退款路径（failed＝确定性未扣）"
+    findings["_music"] = mmeta
     findings["_confirmed_compared"] = compared[0]
     findings["_confirm_linked"] = tuple(linked)
     return findings
@@ -344,7 +463,7 @@ def main():
     ap.add_argument("--sessions-db", default="/opt/agent-harness/state/sessions.db")
     ap.add_argument("--ledger", default="/opt/agent-harness/ledger.jsonl")
     ap.add_argument("--psql", default=os.environ.get("BILLING_RECON_PSQL", DEFAULT_PSQL))
-    ap.add_argument("--pg-dir", help="离线：读 DIR/jobs.csv ops.csv acct.csv 取代 psql")
+    ap.add_argument("--pg-dir", help="离线：读 DIR/jobs.csv ops.csv acct.csv（可选 music.csv）取代 psql")
     ap.add_argument("--json", action="store_true", help="只输出汇总 JSON")
     ap.add_argument("--limit", type=int, default=15, help="每类明细最多列几笔")
     args = ap.parse_args()
@@ -353,17 +472,20 @@ def main():
     findings = reconcile(pg, receipts, confirmations, events)
     compared = findings.pop("_confirmed_compared")
     linked_job, linked_wf = findings.pop("_confirm_linked")
+    music_meta = findings.pop("_music")
     summary = summarize(findings)
     job_ids = {j["id"] for j in pg["jobs"]}
     meta = {"jobs": len(pg["jobs"]), "ops": len(pg["ops"]), "acct": len(pg["acct"]), "receipts": len(receipts),
             "confirmations": len(confirmations) if has_conf else "未取得", "ledger_events": len(events) if has_ledger else "未取得",
             "confirmed_compared": compared, "confirm_events_linked": linked_job, "confirm_events_workflow_batch": linked_wf,
-            "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids)}
+            "receipts_joined": sum(1 for r in receipts if r["task_id"] in job_ids), "music": music_meta}
     if args.json:
         print(json.dumps({"meta": meta, "summary": summary}, ensure_ascii=False, indent=1))
         return
     print("# H18 计费三方对帐（只读）")
-    print("输入：" + "，".join("%s=%s" % kv for kv in meta.items()))
+    print("输入：" + "，".join("%s=%s" % kv for kv in meta.items() if kv[0] != "music"))
+    mmeta = meta["music"]
+    print("音乐（music_charge）：" + (mmeta if isinstance(mmeta, str) else "，".join("%s=%s" % kv for kv in sorted(mmeta.items()))))
     print("\n| 类别 | 笔数 | 金额(币) | 金额未取得 |\n|---|---:|---:|---:|")
     for r in summary:
         print("| %s | %d | %s | %d |" % (r["label"], r["count"], "未取得" if r["coins"] is None else r["coins"], r["coins_missing"]))
