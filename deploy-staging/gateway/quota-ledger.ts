@@ -209,6 +209,10 @@ function refundedSet(): Set<string> {
   ledgerRefunded = seen
   return seen
 }
+// H47（2026-11-04）：只读查询——该 task 是否已记过 refunded 行（本进程写过或 ledger 尾部种子里有）。不占位。
+export function ledgerHasRefunded(task_id: string | undefined): boolean {
+  return !!task_id && refundedSet().has(task_id)
+}
 // true＝本次应写 refunded 行（同步占位，防补记与 drain 两路并发同写）；无 task_id 不去重（照旧写）。
 export function claimLedgerRefunded(task_id: string | undefined): boolean {
   if (!task_id) return true

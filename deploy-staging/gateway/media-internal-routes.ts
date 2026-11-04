@@ -18,7 +18,7 @@ import { emitToSession } from "./sse-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 import { flushPendingCompact } from "./messages-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
-import { emitQuotaChanged, appendLedgerFor, claimLedgerRefunded } from "./quota-ledger.ts"
+import { emitQuotaChanged, appendLedgerFor, claimLedgerRefunded, ledgerHasRefunded } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
@@ -634,11 +634,18 @@ export function settleConfirm(
 // 只改日志语义：SSE 帧的 refunded 字段、退款/扣费路径一律不动。
 // H31：refunded 行经 claimLedgerRefunded 幂等——该 task 已记过 refunded（job-completion 补记、先前渲染或重启前旧行）
 // 时返回 null＝本次不写 ledger（SSE/画布照发）。
+// H47：ledger 终态单调——refunded 之后不再写 failed。生产 285 个 task 先 refunded 后 failed（平台 refunded 274：
+// image 173／旧 generation 车道 42／video 59），failed 行全落在回执终态守卫缺位窗口（4af310238 整树还原撤下 b3c825d92，
+// 886514909 H17 拣回前）：poller 两小时硬停把 refunded 回执改回 failed、清 rendered_at，drain 重渲染以 refunded=false 记 failed。
+// 守卫已回，这里在 ledger 层再闸一次，不依赖回执守卫与调用方旗标：回执已 refunded（平台证实）一律按 refunded 处理
+//（未记过才记），ledger 已有该 task 的 refunded 行一律不写 failed。billing-recon 对 refunded 取「任一行即算」的集合语义，
+// failed（无 refund_claim）不入金额类别，故不写后到 failed 与对账口径一致；SSE/画布/扣费/退款不动，历史行不改。
 function failureLedgerFields(task_id: string, refunded: boolean): { event: string; refund_source?: string; refund_claim?: string; refund_status?: string } | null {
-  if (!refunded) return { event: "failed" }
   let platformRefunded = false
   try { platformRefunded = !!task_id && generationReceipt(task_id)?.status === "refunded" } catch {}
   if (platformRefunded) return claimLedgerRefunded(task_id) ? { event: "refunded", refund_source: "platform_job" } : null
+  if (ledgerHasRefunded(task_id)) return null
+  if (!refunded) return { event: "failed" }
   return { event: "failed", refund_claim: "caller", refund_status: "unconfirmed" }
 }
 
