@@ -134,6 +134,8 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
     if (ctx.ok === false) return `fork 上下文不可用，已拒绝 fork：${ctx.error}`
     forkModel = ctx.model
     forkAgent = ctx.agent
+    // H62：fork 的 run.agent 为空，记下实际继承的 agent，供 rememberChildParent 登记 consumer_agent（收件箱唤醒沿用）。
+    run.forkAgent = ctx.agent
     forkVariant = ctx.variant
     try {
       const res = await fetch(`${deps!.openCodeUrl}/session/${source}/fork`, {

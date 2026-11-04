@@ -451,6 +451,8 @@ export interface SubagentRun {
   // fork：子会话由父会话 `/session/{id}/fork` 服务端复制完整历史（含 tool_use/tool_result），
   // 继承同一 agent 工具面与模型；结果只取 fork 自己新产生的最后一则 assistant 文本。
   isFork?: boolean
+  /** H62：fork 实际继承的父会话 agent（run.agent 对 fork 恒空）；只用于登记 generation_consumers.consumer_agent，不进请求体。 */
+  forkAgent?: string
   /** fork 的历史来源（呼叫者的 opencode 会话 id）。父字段仍指向主会话，避免破坏归属/唤醒链。 */
   forkSourceOpencodeSessionId?: string
   /** D4/D3：fork 的 boundary messageID（必须在父消息列表中找到）与 fork 会话创建时刻。

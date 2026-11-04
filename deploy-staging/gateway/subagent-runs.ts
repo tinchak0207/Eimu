@@ -465,7 +465,8 @@ export function pruneCompleted(): void {
 
 // FIX-B：记住子会话→父会话绑定（有界）；byChildOc 收尾删除后仍能解析父 state 供晚到取件。
 export function rememberChildParent(childId: string, run: SubagentRun): void {
-  bindGenerationConsumer(childId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent)
+  // H62：fork 的 run.agent 恒空 ⇒ 用实际继承的 forkAgent 登记，否则收件箱唤醒体无 agent 落 opencode 内建 build。
+  bindGenerationConsumer(childId, run.parentGatewaySessionId, run.parentOpencodeSessionId, run.agent || run.forkAgent)
   recentChildParent.set(childId, {
     parentGatewaySessionId: run.parentGatewaySessionId,
     parentOpencodeSessionId: run.parentOpencodeSessionId,

@@ -57,7 +57,8 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const info: any = child.ok ? await child.json() : null
       if (!existing && info?.parentID !== parent.opencodeSessionId && info?.parent_id !== parent.opencodeSessionId)
         return Response.json({ ok: false, error: "unproven child ownership; import existing jobs via tenant-scoped lookup instead" }, { status: 409 })
-      bindGenerationConsumer(input.child_oc, parent.sessionId, parent.opencodeSessionId)
+      // H62：兼容绑定也登记子会话自身 agent（opencode session.agent），收件箱唤醒沿用，不再缺 agent 落内建 build。
+      bindGenerationConsumer(input.child_oc, parent.sessionId, parent.opencodeSessionId, typeof info?.agent === "string" && info.agent ? info.agent : undefined)
       return Response.json({ ok: true, durable: true, consumer_available: child.ok, collector_transfer_required: !child.ok })
     }
     if (route === "/internal/job-pending") return Response.json({ ok: true, durable: true, tasks: generationReceipts(undefined, true) })
@@ -200,6 +201,23 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
   }
 }
 
+// H62：子会话自身当前 agent——先看 opencode session info 的 agent；没有再取最近一条消息的 agent（user.agent／assistant.agent|mode）。
+// 只在 consumer_agent 为 NULL 时调用；读不到返回 undefined（由调用方回退 creator），不抛。
+async function consumerSelfAgent(consumer: string, info: any): Promise<string | undefined> {
+  if (typeof info?.agent === "string" && info.agent) return info.agent
+  try {
+    const res = await opencodeFetch(`/session/${consumer}/message`, { timeoutMs: 5000 })
+    if (!res.ok) return undefined
+    const msgs: any = await res.json()
+    if (!Array.isArray(msgs)) return undefined
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]?.info
+      const a = m?.agent || (m?.role === "assistant" ? m?.mode : undefined)
+      if (typeof a === "string" && a && a !== "compaction") return a
+    }
+  } catch { /* 读不到即回退 */ }
+  return undefined
+}
 let draining = false
 export async function drainGenerationInbox(): Promise<void> {
   if (draining) return
@@ -272,6 +290,12 @@ export async function drainGenerationInbox(): Promise<void> {
         continue
       }
       const parent = resolveSession(group[0].parent_gw)
+      // H62：非主会话 consumer 的 agent 回退链：consumer_agent → 子会话自身当前 agent（session info／最近消息）→ creator。
+      // 修前 consumer_agent 为 NULL 时请求体无 agent ⇒ opencode 1.18 落 defaultInfo()＝内建 build（而不是会话当前 agent）。
+      // 不回退父会话 beastAgentField：生产 NULL 行 400/585 的父会话是 orchestrator，而子会话本身是 build——给子会话塞 orchestrator 会换人设并嵌套派工。
+      // 必须在 admission 检查之前算完（下面「admission→claim→send 之间不 await」不变量）。不带 model。
+      const childAgent = parent?.opencodeSessionId === consumer ? undefined
+        : (generationParent(consumer)?.consumer_agent || await consumerSelfAgent(consumer, consumerInfo) || "creator")
       // No await between admission, the durable claim and sending: an accepted user turn wins.
       if (generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
       const claimed = new Set(claimGenerationMessages(group.filter((r) => r.kind === "message").map((r) => r.task_id), consumer))
@@ -286,8 +310,8 @@ export async function drainGenerationInbox(): Promise<void> {
         .map((j) => `- task_id=${j.task_id} delivery_id=${j.delivery_id} kind=${j.kind} status=${j.status} download_tool=${j.download_tool}`)
         .join("\n")
       const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${jobLines}`
-      const agent = generationParent(consumer)?.consumer_agent
-      const inboxBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
+      // 主会话 consumer 照旧 beastAgentField（H43）；子会话用上面算好的 childAgent（H62）。H46 孤儿主会话已在分组前跳过。
+      const inboxBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : { agent: childAgent }), parts: [{ type: "text", text }] }
       // H19：仅主会话 consumer 挂原始需求钉（子代理 consumer 不挂，与 beastAgentField 同口径）。
       const promptBody = parent?.opencodeSessionId === consumer ? withPinnedWakeSystem(parent, inboxBody) : inboxBody
       let ownTurnGen: number | undefined
