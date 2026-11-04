@@ -188,7 +188,7 @@ export function shouldExtendQueueDeadline(input: {
 
 /**
  * 欠费无替补即时失败（2026-09-28 漫剧评测实锤）：唯一视频渠道回 401＋insufficient_user_quota
- * 时，registry 只认原生 402 为硬停，job 被放回伫列；帐号进 30 分钟 cooldown 后再无可租
+ * 时，registry 只认原生 402 为硬停，job 被放回伫列；帐号进欠费 cooldown（现 3 分钟）后再无可租
  * 供应商，单子以 overloaded 空转到 25 分钟 deadline 才死——用户等 25 分钟只拿到「超时」。
  * 本 job 上一次失败已判定欠费，且诊断显示没有别的可用供应商（全被排除／冷却／不健康）
  * → 立即失败＋退款，让上游如实说「渠道余额不足」。容量满（capacity_saturated）不算：
