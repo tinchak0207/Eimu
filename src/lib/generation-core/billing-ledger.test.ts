@@ -10,6 +10,7 @@ import {
   retryStrandedRefundOperations,
 } from "./billing-ledger.ts";
 import { terminalReservedJobs } from "./billing-ledger/schema.ts";
+import { classifyRefundFailure, detailOf } from "./billing-ledger/types.ts";
 import { resolveReplayPolicy } from "./operation-registry.ts";
 import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
 import type { GenerationSql } from "./database.ts";
@@ -113,6 +114,29 @@ test("only explicit client rejections or 429 are safe billing retries", () => {
   assert.equal(classifyBillingFailure(new ImageBillingGatewayError("gateway unavailable", 503)), "unknown");
   assert.equal(classifyBillingFailure(new TypeError("fetch failed")), "unknown");
   assert.equal(classifyBillingFailure(new ImageBillingRevertedError("compensated")), "retry");
+});
+
+test("H28 refund: only pre-send fetch failures (connect never established) become safe retries", () => {
+  const fetchFailed = (code?: string, nested = false) => {
+    const inner = code ? Object.assign(new Error(`connect ${code} 127.0.0.1:3000`), { code }) : undefined;
+    const cause = nested && inner ? Object.assign(new Error("wrapped"), { cause: inner }) : inner;
+    return new TypeError("fetch failed", cause ? { cause } : undefined);
+  };
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]) {
+    assert.equal(classifyRefundFailure(fetchFailed(code)), "retry", code);
+    assert.equal(classifyBillingFailure(fetchFailed(code)), "unknown", `reserve keeps ${code} frozen`);
+  }
+  assert.equal(classifyRefundFailure(fetchFailed("ECONNREFUSED", true)), "retry");
+  // 可能已送达：绝不放宽（INC-0831）
+  for (const code of ["ECONNRESET", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "EPIPE"]) {
+    assert.equal(classifyRefundFailure(fetchFailed(code)), "unknown", code);
+  }
+  assert.equal(classifyRefundFailure(fetchFailed()), "unknown");
+  assert.equal(classifyRefundFailure(Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED" } })), "unknown");
+  assert.equal(classifyRefundFailure(new DOMException("The operation was aborted due to timeout", "TimeoutError")), "unknown");
+  assert.equal(detailOf(fetchFailed("ECONNRESET")), "fetch failed (cause: ECONNRESET)");
+  assert.equal(detailOf(fetchFailed()), "fetch failed");
+  assert.equal(detailOf(new ImageBillingGatewayError("rate limited", 429)), "rate limited");
 });
 
 test("429 retry timing honors Retry-After and retry delay is bounded", () => {
