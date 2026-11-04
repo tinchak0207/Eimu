@@ -1,0 +1,15 @@
+# Install: /etc/systemd/system/eimu-gw-errlog.timer  (H51)
+# Every 5 min; journal currently reaches back ~6h, so nothing is missed between runs.
+# Rollback: systemctl disable --now eimu-gw-errlog.timer; rm the .timer/.service,
+#   /usr/local/bin/eimu-gw-errlog.py, /etc/logrotate.d/eimu-gateway-errors;
+#   systemctl daemon-reload. Keep /var/log/eimu-gateway-errors.log* as evidence.
+[Unit]
+Description=Eimu gateway error log export every 5 min
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
