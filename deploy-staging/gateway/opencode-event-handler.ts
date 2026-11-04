@@ -16,7 +16,7 @@ import { getActiveGoal, buildGoalEvaluatorSpec, parseGoalEvaluatorOutput, record
 import { beastAgentField } from "./session-lifecycle.ts"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
-import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet, minimalNudgeBody } from "./events-translate.ts"
+import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet, minimalNudgeBody, turnAgentField } from "./events-translate.ts"
 import { markOcActivity } from "./session-activity.ts"
 import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
@@ -522,7 +522,8 @@ export function handleOpencodeEvent(event: any): void {
             ? // 有中断处：注入续写指示（＋孤儿工具补注），让模型从断点续跑。
               // H24：续写体只有 parts ⇒ 本跳 system 为空、模型看不到原始需求钉；同 H19 套
               // withPinnedWakeSystem（只写 body.system，不进 parts、不上屏；旧会话无钉则逐字同修前）。
-              withPinnedWakeSystem(state, { parts: [{ type: "text", text: retryInjection }] })
+              // H42：续写体不带 agent ⇒ opencode 回退内建 build（换人设/工具表、绕过能力断路）；沿用本回合 agent。
+              withPinnedWakeSystem(state, { ...turnAgentField(baseBody), parts: [{ type: "text", text: retryInjection }] })
             : baseBody
               ? // 零产出：重放原任务书（没有中断处可续，不注入）。
                 { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }

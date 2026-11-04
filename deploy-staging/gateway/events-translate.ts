@@ -44,16 +44,28 @@ export function finalizeIdleStep(state: SessionState): void {
  * H36（24 项后续）：最小体只有 parts、没有 system ⇒ 该跳模型看不到【用户原始目标/后续修订/硬约束】。
  * 传入 state 时套 withPinnedWakeSystem（只写 body.system，parts 逐字不变、不上屏）；
  * 旧会话无原始需求或未传 state ⇒ 原样返回 { parts }，与修前逐字相同。不重放完整 admission system（19 项 [!] 待拍板）。
+ * H42：最小体也不带 agent ⇒ opencode 1.18.14 createUserMessage 走 agents.defaultInfo()＝内建 build
+ *（无 Eimu 人设、工具表 84 开，绕过 orchestrator 能力断路）；生产 opencode.db 122/122 条最小体落成 build。
+ * 沿用本回合投递体（full＝lastPromptBody 派生）的 agent；full 无 agent ⇒ 键集同修前。model 不带：
+ * 缺 model 时 opencode 取会话当前 model（=上一跳实发），full.model 在 failover 换模后是旧值，带了反而回退。
  */
 export function minimalNudgeBody(
-  full: { parts: Array<Record<string, unknown>> },
+  full: { parts: Array<Record<string, unknown>>; agent?: string },
   state?: SessionState | null,
-): { parts: Array<Record<string, unknown>>; system?: string } {
+): { parts: Array<Record<string, unknown>>; system?: string; agent?: string } {
   const texts = full.parts.filter((p) => p && p.type === "text" && typeof p.text === "string") as Array<{ type: string; text: string }>
   const last = texts.length > 0 ? texts[texts.length - 1].text : ""
   const at = last.lastIndexOf("---\n【系统注入·尾端】")
   const tail = at >= 0 ? last.slice(at) : last
-  return withPinnedWakeSystem(state, { parts: [{ type: "text", text: tail }] })
+  return withPinnedWakeSystem(state, { ...turnAgentField(full), parts: [{ type: "text", text: tail }] })
+}
+
+/**
+ * H42：非 admission 体沿用本回合 agent（orchestrator/creator/…）。只认非空字符串；缺席 ⇒ {}（键集同修前）。
+ */
+export function turnAgentField(body: { agent?: unknown } | null | undefined): { agent?: string } {
+  const a = body?.agent
+  return typeof a === "string" && a.trim() ? { agent: a } : {}
 }
 
 export function triggerIdleStepBreaker(

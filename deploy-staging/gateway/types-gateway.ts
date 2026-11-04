@@ -182,7 +182,8 @@ export interface SessionState {
   // 抖动重试（2026-08-22）：turn 结束但零文本输出 = 上游模型抖动死亡的特征，
   // gateway 自动重发同一条 prompt（上限 TURN_MAX_RETRIES）。volatile，不持久化；
   // revive 后为 undefined，读取处一律带 ?? 预设值。
-  lastPromptBody?: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string } } | null
+  /** H42：agent 运行时本就随 admission 体存在（orchestrator/creator），补进型别供非 admission 体沿用。 */
+  lastPromptBody?: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } | null
   // 修复1（2026-09-19 cn:deepseek-v4.1-flash 死链事故）：本轮「实际 dispatch 出去」
   // 的模型（prompt 首投与 failover/jitter 重投都更新）。volatile。降权判定必须用它——
   // lastPromptBody.model 是 turn 起点模型，failover 换模后不回写，用旧值会把死帐户
