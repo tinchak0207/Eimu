@@ -180,7 +180,7 @@ async function applyLoginSideFacts(payload: unknown, req: NextRequest): Promise<
 // HTTP 200 + {success:false, message:"Unauthorized, invalid access token"}（2026-11-04 生产
 // 日志 34 次；mem 2026-10-11-shell-session-invalid-diagnosis 也实测过）。只认 401 会把它映射成
 // 502，前端按 transient 处理、不清 token，用户卡在坏会话里反复打本路由（加固 66）。
-// 只收「token 无效／过期」这一族；超时、5xx、New-Api-User 不匹配、权限不足、封禁等一律
+// 只收「token 无效／过期」这一族（含 new-api zh-TW 文案「access token 無效」，加固 77）；超时、5xx、New-Api-User 不匹配、权限不足、封禁等一律
 // 不算——不能重演 2026-09-05「上游故障被当成登出」。
 const NEWAPI_INVALID_CREDENTIAL_CODES = new Set([
   "AUTH_UNAUTHORIZED",
@@ -190,7 +190,7 @@ const NEWAPI_INVALID_CREDENTIAL_CODES = new Set([
   "ACCESS_TOKEN_LEGACY_RETIRED",
 ]);
 const NEWAPI_INVALID_CREDENTIAL_MESSAGE =
-  /invalid access token|access token (?:has )?expired|access token\s*(?:无效|已过期|已失效)|legacy access tokens? (?:have|has) been retired/i;
+  /invalid access token|access token (?:has )?expired|access token\s*(?:无效|已过期|已失效|無效|已過期)|legacy access tokens? (?:have|has) been retired/i;
 
 /** 上游是否明确判定「这把凭证无效／过期」（＝会话已失效，而不是上游暂时不可用）。 */
 function isUpstreamInvalidCredential(
