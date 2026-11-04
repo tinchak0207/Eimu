@@ -849,7 +849,7 @@ export function handleOpencodeEvent(event: any): void {
                 try {
                   // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
                   const reverted = await revertDeadTail(cur.opencodeSessionId)
-                  const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
+                  const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody, cur) // H36：最小体补挂原始需求钉
                   const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
                     method: "POST",
                     body: JSON.stringify(toSend),
