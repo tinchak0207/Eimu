@@ -247,6 +247,9 @@ export async function drainGenerationInbox(): Promise<void> {
       if (receipt.notified_at && Date.now() - receipt.notified_at < backoff) continue
       if (statuses[receipt.consumer_oc]?.type && statuses[receipt.consumer_oc].type !== "idle") continue
       if (parent?.opencodeSessionId === receipt.consumer_oc && (parent.lastTurnActiveAt || 0) > 0) continue
+      // H46：主会话 consumer（非子代理绑定）但父网关会话解析不到（parent_gw 空 / 网关行已删）时，收件箱请求体既拿不到
+      // beastAgentField 也没有 consumer_agent，会落 opencode 内建 build（无 Eimu 人设、84 工具）。不唤醒，收据保持未读，待父会话可解析再投。
+      if (!parent && !generationParent(receipt.consumer_oc)) continue
       const group = groups.get(receipt.consumer_oc) || []
       group.push(receipt); groups.set(receipt.consumer_oc, group)
     }
