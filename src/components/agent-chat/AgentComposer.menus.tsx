@@ -360,15 +360,28 @@ export function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
       {open && (
         <AnchoredMenuPanel panelRef={panelRef} coords={coords} ariaLabel="思考级别">
           {notice && (
-            <div className="flex max-w-[17rem] items-start justify-between gap-2 px-2.5 py-2">
-              <p role="status" className={cn("text-ios-caption2 leading-snug", notice.tone === "error" ? "text-ios-red" : "text-ios-orange")}>
+            // 提示条：低饱和底色 + 小圆点，文字回到中性灰；不再用大红字 + 描边按钮抢面板主角。
+            <div
+              className={cn(
+                "mx-1 mb-1 flex max-w-[17rem] items-center gap-2 rounded-xl px-2.5 py-1.5",
+                notice.tone === "error" ? "bg-[rgba(255,59,48,0.07)]" : "bg-[rgba(255,149,0,0.09)]",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  notice.tone === "error" ? "bg-ios-red/70" : "bg-ios-orange/80",
+                )}
+              />
+              <p role="status" className="min-w-0 flex-1 text-ios-caption2 leading-snug text-[rgba(0,0,0,0.56)]">
                 {notice.text}
               </p>
               {notice.retry && (
                 <button
                   type="button"
                   onClick={reconcile}
-                  className="shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue transition-colors hover:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+                  className="shrink-0 cursor-pointer rounded-full px-1.5 py-0.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.72)] underline decoration-[rgba(0,0,0,0.25)] underline-offset-2 transition-colors hover:text-[rgba(0,0,0,0.9)] hover:decoration-[rgba(0,0,0,0.5)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(0,0,0,0.25)]"
                 >
                   重试
                 </button>

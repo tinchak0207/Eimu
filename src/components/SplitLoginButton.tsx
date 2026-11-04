@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { Github } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ChevronDown, Github } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface SplitLoginButtonProps {
   onGoogle: () => void;
@@ -73,75 +77,39 @@ function GoogleLogo({ className }: { className?: string }) {
   );
 }
 
-const DIAGONAL = 12;
-
-// 三段斜切（Google → GitHub → 微信）：每段在「自己的框」内斜切，相邻两段的
-// 公共边必须是同一条斜线——段 N 的右边界（底 100%-12px）与段 N+1 的左边界
-// （底 -12px）在容器座标里逐点重合，否则交界处会露出一道透明楔形缺口。
+// 与 Header 同一套扁平语言：不再摆三块品牌色，只留一颗淡彩渐变「登录」胶囊（取 Eimu 输入框描边同款蓝紫），
+// 三种方式收进下拉（沿用顶栏其它菜单的 DropdownMenu），品牌色只出现在菜单图标里。
 export function SplitLoginButton({ onGoogle, onGithub, onWechat, githubBusy }: SplitLoginButtonProps) {
-  const [hover, setHover] = useState<"google" | "github" | "wechat" | null>(null);
-
   return (
-    <div
-      className="relative isolate h-10 w-[196px] overflow-hidden rounded-full shadow-[0_4px_14px_rgba(0,0,0,0.16)] sm:w-[330px]"
-      onMouseLeave={() => setHover(null)}
-    >
-      <button
-        type="button"
-        onClick={onGoogle}
-        onMouseEnter={() => setHover("google")}
-        aria-label="使用 Google 登录"
-        className={cn(
-          "absolute inset-y-0 left-0 z-0 flex w-[33.333%] items-center justify-center gap-1.5 text-[13px] font-semibold text-white",
-          "transition-colors duration-200",
-          "focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-inset",
-          hover === "google" ? "bg-[#3367D6]" : "bg-[#4285F4]",
-        )}
-        style={{
-          clipPath: `polygon(0 0, calc(100% + ${DIAGONAL}px) 0, calc(100% - ${DIAGONAL}px) 100%, 0 100%)`,
-        }}
-      >
-        <GoogleLogo className="h-4 w-4 shrink-0" />
-        <span className="hidden sm:inline">Google</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={onGithub}
-        onMouseEnter={() => setHover("github")}
-        aria-label="使用 GitHub 登录"
-        className={cn(
-          "absolute inset-y-0 left-[33.333%] z-10 flex w-[33.333%] items-center justify-center gap-1.5 text-[13px] font-semibold text-white",
-          "transition-colors duration-200",
-          "focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-inset",
-          hover === "github" ? "bg-[#16181c]" : "bg-[#1f2328]",
-        )}
-        style={{
-          clipPath: `polygon(${DIAGONAL}px 0, calc(100% + ${DIAGONAL}px) 0, calc(100% - ${DIAGONAL}px) 100%, -${DIAGONAL}px 100%)`,
-        }}
-      >
-        <Github className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="hidden sm:inline">{githubBusy ? "连接中…" : "GitHub"}</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={onWechat}
-        onMouseEnter={() => setHover("wechat")}
-        aria-label="使用微信登录"
-        className={cn(
-          "absolute inset-y-0 left-[66.667%] z-20 flex w-[33.333%] items-center justify-center gap-1.5 text-[13px] font-semibold text-white",
-          "transition-colors duration-200",
-          "focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-inset",
-          hover === "wechat" ? "bg-[#06ad56]" : "bg-[#07c160]",
-        )}
-        style={{
-          clipPath: `polygon(${DIAGONAL}px 0, 100% 0, 100% 100%, -${DIAGONAL}px 100%)`,
-        }}
-      >
-        <WechatLogo className="h-4 w-4 shrink-0" />
-        <span className="hidden sm:inline">微信</span>
-      </button>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="登录"
+          className="group inline-flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[linear-gradient(135deg,#e9f2ff_0%,#f2eaff_100%)] pl-4 pr-3 text-ios-footnote font-semibold text-[rgba(0,0,0,0.78)] ring-1 ring-inset ring-[rgba(120,120,255,0.22)] transition-[box-shadow,transform,color] duration-200 hover:text-black hover:ring-[rgba(120,120,255,0.42)] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(120,120,255,0.55)] data-[state=open]:ring-[rgba(120,120,255,0.5)]">
+          登录
+          <ChevronDown
+            className="h-3.5 w-3.5 text-[rgba(0,0,0,0.45)] transition-transform duration-200 group-data-[state=open]:rotate-180"
+            aria-hidden="true"
+          />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={8} className="min-w-[11rem]">
+        <DropdownMenuItem onSelect={onWechat} className="cursor-pointer gap-2.5">
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-[#07c160]">
+            <WechatLogo className="h-2.5 w-2.5" />
+          </span>
+          微信登录
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onGoogle} className="cursor-pointer gap-2.5">
+          <GoogleLogo className="h-4 w-4 shrink-0" />
+          Google 登录
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onGithub} className="cursor-pointer gap-2.5">
+          <Github className="h-4 w-4 shrink-0 text-[#1f2328]" aria-hidden="true" />
+          {githubBusy ? "连接中…" : "GitHub 登录"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
