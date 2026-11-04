@@ -36,8 +36,15 @@
 #        ≥截断且超过宽限（默认 30 分钟，--music-stuck-grace-min）⇒ 截断后新增（告警）；宽限内＝在途，只计数；
 #        created_at 解析不了 ⇒ 新增（不藏）。只分栏：这些回执本来只在 meta.music.receipts_unfinished_uncharged 计数，
 #        不在任何汇总类别里，汇总表口径不变；不改账、不终态化、不写库。
+#     D.（H61）图/视频回执非终态卡单：generation_receipts（非音乐车道）停在 queued/running/unknown 等非终态。
+#        截断 D＝H17 poller 存量截止 POLLER_STOCK_CUTOFF（poller 对 created_at 早于它的回执一律跳过、只计数，等暴君拍板），
+#        故 created_at 严格早于截断 D ⇒ legacy（H17 存量，poller 按设计不碰，不告警）；≥截断且超过回收阈值＋宽限
+#        （图/其他 180 分钟、视频 360 分钟，镜像 poller POLLER_IMAGE/VIDEO_REAP_MIN；宽限默认 30 分钟，--gen-stuck-grace-min）
+#        ⇒ 截断后新增（告警：回收器本应已收尾）；之内＝在途，只计数；created_at 解析不了 ⇒ 新增（不藏）。
+#        明细带平台 job 状态与实扣／冻结币（只列示）；只分栏：这些回执不入任何汇总类别（其中 submit_unknown 的仍在 frozen_unknown），
+#        汇总表口径不变；不改账、不终态化、不写库、不补交付。
 #     截断取真实生效时刻（VPS /opt/agent-harness/releases/gateway/history.log 第 3 列 epoch，非 commit 时间）。
-#     告警与退出码只看截断后新增（A＋B＋C）：加 --alert-exit 时有新增 rc=2、否则 rc=0（其他类别仍只列示，不影响退出码）；
+#     告警与退出码只看截断后新增（A＋B＋C＋D）：加 --alert-exit 时有新增 rc=2、否则 rc=0（其他类别仍只列示，不影响退出码）；
 #     不加时 rc 恒 0（兼容既有调用方/探针，rc≠0 只表示脚本出错）。
 #
 # 用法（VPS）：
@@ -76,6 +83,15 @@ LEGACY_CUTOFF_MUSIC_OP = "2026-10-30T08:17:42Z"
 LEGACY_SRC_MUSIC_OP = "4af310238 撤下工程图 music-operation 回执写入方，网关 release 4af310238e8f-20261030T081715Z-176185 生效（history.log epoch 1793348262）"
 MUSIC_STUCK_GRACE_MIN = 30
 MUSIC_TERMINAL = {"succeeded", "failed", "cancelled", "canceled", "refunded"}
+# H61 截断 D（UTC）＝H17 poller 存量截止：886514909 deploy-staging/poller/index.ts:36 POLLER_STOCK_CUTOFF 默认
+# 2026-11-04T05:00:00+08:00；生产 agent-poller 无该 env 覆盖，05:15:20 SGT 起动日志 stock_cutoff=2026-11-03T21:00:00.000Z。
+# poller 只对 created_at >= 截断 的回执 poll／回收，早于截断＝存量（left untouched … awaiting owner decision）。
+LEGACY_CUTOFF_GEN_STUCK = "2026-11-03T21:00:00Z"
+LEGACY_SRC_GEN_STUCK = "H17 poller 存量截止 POLLER_STOCK_CUTOFF 默认值（886514909 poller/index.ts:36；生产无 env 覆盖，起动日志 stock_cutoff=2026-11-03T21:00:00.000Z）"
+GEN_REAP_MIN = {"video": 360}  # 其余 kind 180（镜像 poller reapAfterMs：video ? VIDEO_REAP_MIN : IMAGE_REAP_MIN）
+GEN_REAP_MIN_DEFAULT = 180
+GEN_STUCK_GRACE_MIN = 30
+GEN_TERMINAL = MUSIC_TERMINAL
 
 CATS = [
     ("confirmed_ne_charged_over", "confirmed≠扣费（实扣>确认）"),
@@ -399,6 +415,7 @@ def reconcile(pg, receipts, confirmations, events, cutoffs=None):
                     reason="ledger=%s(%d 行) charge=%s" % (coins(net), len(rows), coins(exp)), **mbase)
     m_used = set()
     stuck = []  # H35
+    gen_stuck = []  # H61
 
     def music_receipt(r):
         h = r["task_id"].split(":", 1)[-1]
@@ -453,6 +470,16 @@ def reconcile(pg, receipts, confirmations, events, cutoffs=None):
         if j is None and (str(r["task_id"]).startswith("music-operation:") or r.get("result_source") == "runtime_music"):
             music_receipt(r)
             continue
+        if r["status"] not in GEN_TERMINAL:  # H61：图/视频非终态卡单候选（分栏见 legacy_split D）
+            jid = r["task_id"]
+            pend = [o for o in ops.get(jid, []) if o["status"] in ("pending", "unknown")] if j is not None else []
+            frozen = None
+            if j is not None and (j["status"] in UNKNOWN_STATES or pend):
+                frozen = coins(charged[jid] + sum(num(o["amount"]) or 0 for o in pend if o["operation"] == "reserve"))
+            gen_stuck.append(dict(job=pfx(jid), kind=r["kind"], model=r["model"], gw=r["status"],
+                                  platform=j["status"] if j is not None else None,
+                                  charged=coins(charged[jid]) if j is not None else None,
+                                  frozen=frozen, confirmed=r["cost"], created=r.get("created")))
         if j is None:
             add("receipt_no_job", r["cost"], **base)
             continue
@@ -560,7 +587,7 @@ def reconcile(pg, receipts, confirmations, events, cutoffs=None):
     findings["_refund_logging"] = {"failed_tasks_platform_refunded": len(pr), "with_refunded_row": len(pr & gw_ref),
                                    "logged_refund_missing": len(pr - gw_ref),
                                    "backfill_rows": sum(1 for e in events if e["event"] == "refunded" and e.get("refund_backfill_of"))}
-    findings["_legacy_split"] = legacy_split(findings, jobs, charged, events, cutoffs or {}, stuck)
+    findings["_legacy_split"] = legacy_split(findings, jobs, charged, events, cutoffs or {}, stuck, gen_stuck)
     findings["_confirmed_compared"] = compared[0]
     findings["_confirm_linked"] = tuple(linked)
     return findings
@@ -581,14 +608,19 @@ def sgt(e):
     return datetime.datetime.fromtimestamp(e, datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S SGT")
 
 
-def legacy_split(findings, jobs, charged, events, cutoffs, stuck=()):
+def legacy_split(findings, jobs, charged, events, cutoffs, stuck=(), gen_stuck=()):
     """H33：两类历史已知旧帐按真实生效时刻分栏。只读、只计数；在明细上加 legacy= 标记，不增删任何类别条目。"""
     ca_iso = cutoffs.get("done_dup") or LEGACY_CUTOFF_DONE_DUP
     cb_iso = cutoffs.get("gen_refund") or LEGACY_CUTOFF_GEN_REFUND
     cc_iso = cutoffs.get("music_op") or LEGACY_CUTOFF_MUSIC_OP
-    ca, cb, cc = ts_epoch(ca_iso), ts_epoch(cb_iso), ts_epoch(cc_iso)
-    if ca is None or cb is None or cc is None:
-        raise SystemExit("截断时刻解析失败：%s / %s / %s" % (ca_iso, cb_iso, cc_iso))
+    cd_iso = cutoffs.get("gen_stuck") or LEGACY_CUTOFF_GEN_STUCK
+    ca, cb, cc, cd = ts_epoch(ca_iso), ts_epoch(cb_iso), ts_epoch(cc_iso), ts_epoch(cd_iso)
+    if ca is None or cb is None or cc is None or cd is None:
+        raise SystemExit("截断时刻解析失败：%s / %s / %s / %s" % (ca_iso, cb_iso, cc_iso, cd_iso))
+    ggrace = cutoffs.get("gen_grace_min")
+    ggrace = GEN_STUCK_GRACE_MIN if ggrace is None else ggrace
+    if ggrace < 0:
+        raise SystemExit("--gen-stuck-grace-min 不能为负：%s" % ggrace)
     grace = cutoffs.get("music_grace_min")
     grace = MUSIC_STUCK_GRACE_MIN if grace is None else grace
     if grace < 0:
@@ -658,6 +690,31 @@ def legacy_split(findings, jobs, charged, events, cutoffs, stuck=()):
         else:
             d["age_min"] = round((now - e) / 60.0, 1) if e is not None else None
             c_new.append(d)
+    # D. H61 图/视频回执非终态卡单：legacy（H17 存量）／新增（告警）／在途
+    d_cols = {"legacy": [], "new": [], "in_flight": []}
+    for x in gen_stuck:
+        e = created_epoch(x.get("created"))
+        d = {k: v for k, v in x.items() if k != "created"}
+        d["created"] = sgt(e) if e is not None else "未取得"
+        limit = (GEN_REAP_MIN.get(x["kind"], GEN_REAP_MIN_DEFAULT) + ggrace) * 60
+        if e is not None and e < cd:
+            d_cols["legacy"].append(d)
+        elif e is not None and now - e < limit:
+            d_cols["in_flight"].append(d)
+        else:
+            d["age_min"] = round((now - e) / 60.0, 1) if e is not None else None
+            d_cols["new"].append(d)
+
+    def d_agg(rows):
+        by = collections.Counter(str(x["platform"] or "未取得") for x in rows)
+        ch = [x["charged"] for x in rows if x["charged"] is not None]
+        fz = [x["frozen"] for x in rows if x["frozen"] is not None]
+        su = [x["charged"] for x in rows if x["platform"] == "succeeded" and x["charged"] is not None]
+        return {"count": len(rows), "by_platform": dict(sorted(by.items())),
+                "charged_coins": round(sum(ch), 4), "charged_missing": len(rows) - len(ch),
+                "succeeded_charged_undelivered": sum(1 for x in rows if x["platform"] == "succeeded"),
+                "succeeded_charged_coins": round(sum(su), 4),
+                "frozen_count": len(fz), "frozen_coins": round(sum(fz), 4)}
     r4 = lambda x: round(x, 4)
     return {
         "done_dup_costed": {"cutoff": ca_iso, "cutoff_source": LEGACY_SRC_DONE_DUP if not cutoffs.get("done_dup") else "命令行覆盖",
@@ -674,7 +731,13 @@ def legacy_split(findings, jobs, charged, events, cutoffs, stuck=()):
                            "legacy_count": len(c_legacy), "legacy_detail": sorted(c_legacy, key=lambda x: x["created"]),
                            "new_count": len(c_new), "new_detail": sorted(c_new, key=lambda x: x["created"]),
                            "in_flight_count": len(c_flight), "in_flight_detail": c_flight},
-        "alerts": a["new"][0] + b["new"][0] + len(c_new),
+        "gen_receipt_stuck": {"cutoff": cd_iso, "cutoff_source": LEGACY_SRC_GEN_STUCK if not cutoffs.get("gen_stuck") else "命令行覆盖",
+                              "grace_min": ggrace, "reap_min": {"video": GEN_REAP_MIN["video"], "other": GEN_REAP_MIN_DEFAULT},
+                              "legacy": d_agg(d_cols["legacy"]), "legacy_detail": sorted(d_cols["legacy"], key=lambda x: x["created"]),
+                              "new": d_agg(d_cols["new"]), "new_count": len(d_cols["new"]),
+                              "new_detail": sorted(d_cols["new"], key=lambda x: x["created"]),
+                              "in_flight_count": len(d_cols["in_flight"]), "in_flight_detail": d_cols["in_flight"]},
+        "alerts": a["new"][0] + b["new"][0] + len(c_new) + len(d_cols["new"]),
     }
 
 
@@ -701,8 +764,10 @@ def main():
     ap.add_argument("--cutoff-gen-refund", help="H33 覆盖截断 B（ISO，默认 %s）" % LEGACY_CUTOFF_GEN_REFUND)
     ap.add_argument("--cutoff-music-op", help="H35 覆盖截断 C（ISO，默认 %s）" % LEGACY_CUTOFF_MUSIC_OP)
     ap.add_argument("--music-stuck-grace-min", type=float, help="H35：截断后 music-op 非终态超过 N 分钟才告警（默认 %d）" % MUSIC_STUCK_GRACE_MIN)
+    ap.add_argument("--cutoff-gen-stuck", help="H61 覆盖截断 D（ISO，默认 %s）" % LEGACY_CUTOFF_GEN_STUCK)
+    ap.add_argument("--gen-stuck-grace-min", type=float, help="H61：截断后图/视频回执非终态超过回收阈值＋N 分钟才告警（默认 %d）" % GEN_STUCK_GRACE_MIN)
     ap.add_argument("--now", help="H35：以该 ISO 时刻当作现在（离线复现用；默认真实当前时刻）")
-    ap.add_argument("--alert-exit", action="store_true", help="H33/H35：截断后新增（双费 done／refunded 矛盾／music-op 卡单）>0 时退出码 2")
+    ap.add_argument("--alert-exit", action="store_true", help="H33/H35/H61：截断后新增（双费 done／refunded 矛盾／music-op 卡单／图视频回执卡单）>0 时退出码 2")
     args = ap.parse_args()
     pg = read_pg(args)
     receipts, confirmations, events, has_conf, has_ledger = read_gateway(args)
@@ -713,7 +778,8 @@ def main():
             raise SystemExit("--now 解析失败：%s" % args.now)
     findings = reconcile(pg, receipts, confirmations, events,
                          cutoffs={"done_dup": args.cutoff_done_dup, "gen_refund": args.cutoff_gen_refund,
-                                  "music_op": args.cutoff_music_op, "music_grace_min": args.music_stuck_grace_min, "now": now})
+                                  "music_op": args.cutoff_music_op, "music_grace_min": args.music_stuck_grace_min,
+                                  "gen_stuck": args.cutoff_gen_stuck, "gen_grace_min": args.gen_stuck_grace_min, "now": now})
     legacy = findings.pop("_legacy_split")
     compared = findings.pop("_confirmed_compared")
     linked_job, linked_wf = findings.pop("_confirm_linked")
@@ -758,6 +824,13 @@ def main():
         C["cutoff"], C["cutoff_source"], C["legacy_count"]))
     for d in C["legacy_detail"][:args.limit]:
         print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
+    D = legacy["gen_receipt_stuck"]
+    L = D["legacy"]
+    print("- 图/视频回执非终态卡单（H61，H17 存量；截断 %s；%s）：legacy %d 笔，平台 %s；平台实扣 %s 币（其中平台已成功未交付 %d 笔 %s 币），冻结 %d 笔 %s 币（不改账、不终态化、不补交付，待拍板）" % (
+        D["cutoff"], D["cutoff_source"], L["count"], ",".join("%s×%d" % kv for kv in L["by_platform"].items()) or "-",
+        L["charged_coins"], L["succeeded_charged_undelivered"], L["succeeded_charged_coins"], L["frozen_count"], L["frozen_coins"]))
+    for d in D["legacy_detail"][:args.limit]:
+        print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
     print("\n## 告警（截断后新增）：%d" % legacy["alerts"])
     print("- 双费 done 新增：%d 个 task，虚高 %s 币（未取得 %d）" % (A["new_tasks"], A["new_overcount_coins"], A["new_overcount_missing"]))
     for d in A["new_detail"][:args.limit]:
@@ -768,6 +841,10 @@ def main():
     print("- music-op 非终态卡单新增（截断后且超过 %s 分钟）：%d 笔；在途（宽限内，不告警）：%d 笔" % (
         C["grace_min"], C["new_count"], C["in_flight_count"]))
     for d in C["new_detail"][:args.limit]:
+        print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
+    print("- 图/视频回执非终态卡单新增（截断后且超过回收阈值 %s＋%s 分钟）：%d 笔；在途：%d 笔" % (
+        "视频 %d／其他 %d" % (D["reap_min"]["video"], D["reap_min"]["other"]), D["grace_min"], D["new_count"], D["in_flight_count"]))
+    for d in D["new_detail"][:args.limit]:
         print("  - " + " ".join("%s=%s" % (k, "未取得" if v is None else v) for k, v in d.items()))
     sys.exit(rc)
 
