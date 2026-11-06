@@ -50,8 +50,11 @@ const DEFAULT_USER_SETTINGS: UserSettingsShape = { interrupt_mode: "steer", pers
 // 野兽模式开关（MOE 改革，2026-09-08）：settings 布林栏，缺省=false（零回归）。
 // 不入 USER_SETTINGS_ENUMS（那是枚举字串栏白名单）；POST 专门放行本栏（仅接受
 // 真布林），sanitize 显式列出栏位、缺栏=保持现值。
-export type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean }
-export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode">, readonly string[]> = {
+// 记忆开关（2026-11-06，对标 ChatGPT「引用保存的记忆／参考聊天记录」与 Codex use_memories／generate_memories 分离）：
+// memory_use=false → 不注入／不召回该账号的私有记忆、历史对话；memory_generate=false → 不写新私有记忆、
+// 不入历史索引、批次跳过。缺省（未存）一律视为 true；只有显式 false 才落盘。
+export type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean; memory_use?: boolean; memory_generate?: boolean }
+export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode" | "memory_use" | "memory_generate">, readonly string[]> = {
   interrupt_mode: ["steer", "queue"],
   persona: ["efficient", "thoughtful"],
   cost_mode: ["economy", "balanced", "premium"],
@@ -63,7 +66,7 @@ export function normalizeUserSettings(raw: unknown): UserSettingsShape {
   const s: UserSettingsShape = { ...DEFAULT_USER_SETTINGS }
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const r = raw as Record<string, unknown>
-    for (const k of Object.keys(USER_SETTINGS_ENUMS) as Exclude<keyof UserSettingsShape, "beast_mode">[]) {
+    for (const k of Object.keys(USER_SETTINGS_ENUMS) as Exclude<keyof UserSettingsShape, "beast_mode" | "memory_use" | "memory_generate">[]) {
       const v = r[k]
       if (typeof v === "string" && USER_SETTINGS_ENUMS[k].includes(v)) s[k] = v
     }

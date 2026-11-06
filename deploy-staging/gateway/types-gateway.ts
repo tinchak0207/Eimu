@@ -134,6 +134,8 @@ export interface SessionState {
   }
   /** 账户无画像：开场用选择题采集（question 工具）。 */
   profileOnboardingPending: boolean
+  /** 临时对话（2026-11-06）：整场不注入、不写、不索引记忆；创建时由 payload.temporary 决定。 */
+  memoryTemporary?: boolean
   // 2026-08-25 模板隐形注入：站点点模板卡时上送的引导指示，随首条讯息 system 注入。
   // 不进 transcript、用户不可见；注入一次即弃（directiveInjected），换模板可覆盖重注。
   sessionDirective?: string

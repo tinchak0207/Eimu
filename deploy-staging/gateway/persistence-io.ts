@@ -28,6 +28,7 @@ export const PERSISTED_DATA_KEYS = [
   "vettingInjected",
   "userMemory",
   "profileOnboardingPending",
+  "memoryTemporary",
   "compact",
   "lastTurnActiveAt",
   "title", // 别名：记忆体 sessionTitle ↔ 落盘 title（见 hydrateRow）
@@ -60,6 +61,7 @@ export function serialize(state: PersistableState): PersistedData {
     vettingInjected: state.vettingInjected,
     userMemory: state.userMemory,
     profileOnboardingPending: state.profileOnboardingPending,
+    memoryTemporary: state.memoryTemporary === true ? true : undefined,
     compact: state.compact,
     lastTurnActiveAt: state.lastTurnActiveAt,
     title: state.sessionTitle ?? null,
@@ -108,6 +110,7 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     vettingInjected: d.vettingInjected === true,
     userMemory: d.userMemory,
     profileOnboardingPending: d.profileOnboardingPending === true,
+    memoryTemporary: d.memoryTemporary === true,
     compact: d.compact,
     lastTurnActiveAt: typeof d.lastTurnActiveAt === "number" ? d.lastTurnActiveAt : 0,
     sessionTitle: typeof d.title === "string" && d.title ? d.title : null,

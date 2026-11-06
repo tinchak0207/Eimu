@@ -44,6 +44,7 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     memory_empty?: boolean
     memory_docs?: MemoryDocLite[]
     memory_index_md?: string
+    temporary?: boolean
   } = {}
   try {
     const raw = (await req.json()) as typeof memoryBody | null
@@ -55,8 +56,11 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
   const memoryIndexIncoming = typeof memoryBody.memory_index_md === "string" ? memoryBody.memory_index_md : ""
   const memoryProfileIncoming =
     memoryBody.user_profile && typeof memoryBody.user_profile === "object" ? memoryBody.user_profile : undefined
-  const memoryIncoming =
-    (memoryProfileIncoming && Object.keys(memoryProfileIncoming).length > 0) ||
+  const memoryTemporary = memoryBody.temporary === true
+  // 临时对话：创建即丢弃站点送来的 L0 记忆，整场零注入。
+  const memoryIncoming = memoryTemporary
+    ? undefined
+    : (memoryProfileIncoming && Object.keys(memoryProfileIncoming).length > 0) ||
     memoryDocsIncoming.length > 0 ||
     memoryIndexIncoming.trim().length > 0
       ? {
@@ -126,7 +130,8 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
     vettingInjected: false,
     userMemory: memoryIncoming,
     // memoryInjected 死旗标已删（D1，2026-09-15 PRD P0-4）：真闸是 vettingInjected。
-    profileOnboardingPending: memoryBody.memory_empty === true,
+    profileOnboardingPending: memoryTemporary ? false : memoryBody.memory_empty === true,
+    memoryTemporary: memoryTemporary || undefined,
     lastPromptBody: null,
     turnGen: 0,
     turnTextChars: 0,

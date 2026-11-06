@@ -54,6 +54,7 @@ import { enqueueMemorySignal, appendMemoryAudit } from "./memory-queue.ts"
 import { emitTurnDone, setPendingSubagentWakeFlusher, emitOtherPartTails, flushQueuedSubagentWakes, closeTurnAndFlushWakes, noteToolInFlight, takeInFlightTools, clearInFlightTools, parkInFlightToolsAsOrphans } from "./opencode-event-handler-hooks.ts"
 import { installGoalEvalTeardown, deliverGoalNudge, maybeRunGoalAcceptance } from "./opencode-event-handler-goal.ts"
 import { withPinnedWakeSystem } from "./pinned-goal.ts"
+import { indexSessionHistory } from "./memory-history-wiring.ts"
 
 // H14（2026-10-02）：系统唤醒不冒充用户发言。prompt_async 注入的唤醒文本在 opencode 里只能是
 // user-role message（身份由 opencode 存储决定）；网关侧能做的是把它从「用户发言」语义摘出——
@@ -871,6 +872,9 @@ export function handleOpencodeEvent(event: any): void {
             }
           }
         }
+        // 记忆 v2（2026-11-06）：本轮真正收盘后把新增文本轮增量写入历史对话索引（fire-and-forget；
+        // 临时对话／memory_generate=false 在函数内自行短路）。
+        void indexSessionHistory(state)
         // 2026-10-19 记忆触发（能力建设）：收盘前用确定性规则侦测「该写记忆」信号。
         // 位置＝画布硬闸之后、turn.done 之前：重试/failover/补写腿都在上方 break，
         // 到这里的一定是本轮真正的最终收盘，turnRetries 已稳定。

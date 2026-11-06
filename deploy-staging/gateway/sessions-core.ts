@@ -20,6 +20,7 @@ import { rejectOpencodeQuestion } from "./questions-gw.ts"
 import { notify } from "./internal-waiters.ts"
 import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
 import { withPinnedWakeSystem } from "./pinned-goal.ts"
+import { forgetSessionHistory } from "./memory-history-wiring.ts"
 // TODO(整合 Wave1): 以下为「仍住 index.ts 且尚未 export」符号的 declare 占位（stage1 记忆「subagent 占位符法」，bun build 不查名可过）。
 // 整合阶段把下行注释还原成真 import、删除全部 declare，即完成桥接：
 // import { workflowOwnerBySession, workflowSnapshotFor, workflowService, sseTickets, SSE_TICKET_TTL_MS, stripStaleTurnTextFromReplay, armWatchdogTimer, armHeartbeatTimer, personaModel, restoreWorkflowsFromSnapshot, memoryRecallPrefetch, memoryRecallInflight, rejectOpencodeQuestion, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, closeSessionStreams } from "./index.ts"
@@ -593,6 +594,7 @@ export async function handleDeleteSession(key: string, id: string): Promise<Resp
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   // 删除会话后父代理不再存在，残留子代理会继续重试上游（2026-11-01 实测：删除后仍跑 attempt 1/7→3/7）。
+  void forgetSessionHistory(key, id) // 记忆 v2：会话删除＝该会话的历史索引一并删
   const stopped = stopSubagentsForParent(id, "user", "会话已删除，子代理一并停止")
   teardownSession(id, state, "deleted")
   await deleteOpencodeSession(state.opencodeSessionId)

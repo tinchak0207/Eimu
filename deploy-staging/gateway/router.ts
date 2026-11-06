@@ -53,6 +53,7 @@ import { handleArtifact } from "./artifact-http.ts"
 import { handleCron } from "./cron-http.ts"
 import { handlePlan } from "./plan-http.ts"
 import { handleMemory } from "./memory-http.ts"
+import { handleMemoryV2, handleHistoryStatus, handleHistoryClear } from "./memory-history-wiring.ts"
 // 2026-10-18：harness hook 总线的 loopback HTTP 面（plugin 的 Pre/PostToolUse 跨进程入口）。
 import { handleHooks, runHooksWithBudget } from "./hooks-http.ts"
 // 2026-10-18：工具前置检查合并端点复用 hook 运行器；预算由本端点控制，沿用同一 fail-open 语义。
@@ -348,6 +349,13 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           pathname === "/internal/memory/note")
       ) {
         return handleMemory(req, pathname)
+      }
+      // 记忆 v2（2026-11-06）：历史对话检索／私有记忆召回／按 id 遗忘（loopback 工具后端）。
+      if (
+        req.method === "POST" &&
+        (pathname === "/internal/memory/history-search" || pathname === "/internal/memory/recall" || pathname === "/internal/memory/forget")
+      ) {
+        return handleMemoryV2(req, pathname.slice("/internal/memory/".length))
       }
       // CC 2.1.302 hook 总线：opencode plugin 的工具生命周期 hook 唯一入口。
       // 精确路径匹配，放在 memory 家族旁，不遮蔽下方任何 startsWith 路由。
@@ -690,7 +698,8 @@ if (req.method === "GET" && pathname === "/agent/v1/sessions") {
 // GET 无记录回默认值 steer/efficient/balanced；POST 同 shape 部分更新（读旧值合并，缺栏保持旧值），
 // 未知栏位/非法值一律 400，不静默吞。
 if (req.method === "GET" && pathname === "/agent/v1/settings") {
-  return Response.json({ ...normalizeUserSettings(loadUserSettings(key)), beast_mode: loadUserSettings(key)?.beast_mode === true })
+  const stored = loadUserSettings(key)
+  return Response.json({ ...normalizeUserSettings(stored), beast_mode: stored?.beast_mode === true, memory_use: stored?.memory_use !== false, memory_generate: stored?.memory_generate !== false })
 }
 if (req.method === "POST" && pathname === "/agent/v1/settings") {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -698,7 +707,7 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
   for (const k of Object.keys(body)) {
-    if (k === "beast_mode") {
+    if (k === "beast_mode" || k === "memory_use" || k === "memory_generate") {
       if (typeof body[k] !== "boolean") {
         return jsonError(400, `invalid settings field: ${k}`, "bad_request", "bad_request")
       }
@@ -717,8 +726,16 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
   if (typeof body.beast_mode === "boolean") next.beast_mode = body.beast_mode
   else if (prev?.beast_mode === true) next.beast_mode = true
   else delete next.beast_mode
+  // 记忆开关：只有显式 false 才落盘；缺栏＝保持旧值（部分保存不得把已关闭的开关抹回开启）。
+  for (const f of ["memory_use", "memory_generate"] as const) {
+    if (typeof body[f] === "boolean") {
+      if (body[f] === false) next[f] = false
+      else delete next[f]
+    } else if (prev?.[f] === false) next[f] = false
+    else delete next[f]
+  }
   saveUserSettings(key, next)
-  return Response.json(next)
+  return Response.json({ ...next, memory_use: next.memory_use !== false, memory_generate: next.memory_generate !== false })
 }
 
 
@@ -880,6 +897,13 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     // 从共享语料跑 §7 召回。契约 §3 未列此路由，属本片新增（已在回报中标明）。
     if (req.method === "POST" && pathname === "/agent/v1/memory/recall") {
       return handleMemoryRecallSearch(key, req)
+    }
+    // 记忆 v2：历史对话索引状态／清空（站点 /api/agent/memory/mine/history 薄壳转发）。
+    if (req.method === "GET" && pathname === "/agent/v1/memory/history/status") {
+      return handleHistoryStatus(key)
+    }
+    if (req.method === "DELETE" && pathname === "/agent/v1/memory/history") {
+      return handleHistoryClear(key)
     }
 
     // 用户面 peek 子代理：停止 → 单 run 转录增量 → 本会话子代理列表（顺序不可颠倒）。
