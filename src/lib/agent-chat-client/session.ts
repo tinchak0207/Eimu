@@ -1,3 +1,4 @@
+import { consumeTemporaryArmed, markSessionTemporary, setTemporaryArmed } from "./temporary-chat";
 import type { AgentAttachmentRef, AgentQuotaState } from "../agent-chat-types/types-core";
 import type { AgentSessionHistoryResponse, AgentSubagentRunSummary, AgentSubagentTranscriptEntry, AgentSubagentTranscriptPage, OpenCodeMessage } from "../agent-chat-types/types-agent";
 import type { AgentQuotaWire, AgentSessionInfo, AgentSessionSummary, DirectSendContext, SendAgentMessageOptions } from "./types";
@@ -94,11 +95,20 @@ export async function stopAgentSubagent(sessionId: string, runId: string): Promi
 
 /** 建一个 agent 会话。 */
 export async function createAgentSession(): Promise<AgentSessionInfo> {
-  const data = await agentFetch("/api/agent/sessions", { method: "POST", body: "{}" });
+  const temporary = consumeTemporaryArmed();
+  let data: unknown;
+  try {
+    data = await agentFetch("/api/agent/sessions", { method: "POST", body: temporary ? JSON.stringify({ temporary: true }) : "{}" });
+  } catch (err) {
+    if (temporary) setTemporaryArmed(true); // 建号失败：标记还给用户，重试仍是临时对话
+    throw err;
+  }
   const sessionId = (data as AgentSessionInfo)?.session_id;
   if (typeof sessionId !== "string" || sessionId.length === 0) {
+    if (temporary) setTemporaryArmed(true);
     throw new AgentChatError("parse_error", "服务器未返回有效的 session_id。");
   }
+  if (temporary) markSessionTemporary(sessionId);
   return data as AgentSessionInfo;
 }
 /**

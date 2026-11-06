@@ -19,6 +19,9 @@ function sanitizeAgentSettings(raw: unknown): AgentSettings {
       : DEFAULT_AGENT_SETTINGS.interaction_mode,
     // beast_mode：布尔白名单（=== true 才为 ON，其余脏数据一律默认 OFF）。
     beast_mode: d.beast_mode === true,
+    // 记忆两开关：缺省／脏数据＝开（只有显式 false 才关，与网关的「仅 false 才落盘」对齐）。
+    memory_use: d.memory_use !== false,
+    memory_generate: d.memory_generate !== false,
   };
 }
 
@@ -83,7 +86,7 @@ function sanitizeAgentSettingsPatch(patch: Partial<AgentSettings>): Partial<Agen
   for (const k of Object.keys(patch) as (keyof AgentSettings)[]) {
     if (!(k in full) || patch[k] === undefined) continue;
     // 非法值（sanitize 后与原值不同）直接丢弃，不拿默认值顶替。
-    if (k === "beast_mode" ? typeof patch[k] !== "boolean" : full[k] !== patch[k]) continue;
+    if (typeof full[k] === "boolean" ? typeof patch[k] !== "boolean" : full[k] !== patch[k]) continue;
     (out as Record<string, unknown>)[k] = full[k];
   }
   return out;

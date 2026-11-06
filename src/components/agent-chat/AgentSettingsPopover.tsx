@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MySkillsDialog } from "./MySkillsDialog";
+import { MyMemoriesDialog } from "./MyMemoriesDialog";
 import { setHideAgentReasoning, useHideAgentReasoning } from "@/lib/agent-display-preferences";
 import {
   getAgentSettings,
@@ -49,6 +50,8 @@ export function AgentSettingsPopover() {
   const [open, setOpen] = useState(false);
   /** 「我的技能」管理面：在同一个设定弹层里再开一张 lg-sheet（不造第二个入口）。 */
   const [skillsOpen, setSkillsOpen] = useState(false);
+  /** 「我的记忆」管理面（同样挂在设定弹层里，portal 到 body）。 */
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
   // 初值直接吃本地缓存：弹层打开立即是用户上次的值，不等网络。
   const [settings, setSettings] = useState<AgentSettings>(() => readCachedAgentSettings());
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +99,7 @@ export function AgentSettingsPopover() {
     if (!open) return;
     const onDocPointerDown = (ev: PointerEvent): void => {
       const el = ev.target instanceof Element ? ev.target : null;
-      if (el?.closest("[data-my-skills-dialog]")) return;
+      if (el?.closest("[data-my-skills-dialog],[data-my-memories-dialog]")) return;
       if (rootRef.current && !rootRef.current.contains(el)) {
         setOpen(false);
       }
@@ -157,6 +160,22 @@ export function AgentSettingsPopover() {
               </div>
               <p className="mt-1 text-ios-caption2 leading-relaxed text-foreground/45">
                 把你自己的做法存成技能，输入框打「/」就能直呼
+              </p>
+            </div>
+            {/* a1) 我的记忆：助理记住了什么——查看／新增／编辑／删除，两个总开关也在里面。 */}
+            <div className="px-2.5 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ios-footnote font-medium text-foreground">我的记忆</span>
+                <button
+                  type="button"
+                  onClick={() => setMemoriesOpen(true)}
+                  className="cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue transition-colors hover:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+                >
+                  管理
+                </button>
+              </div>
+              <p className="mt-1 text-ios-caption2 leading-relaxed text-foreground/45">
+                看看助理记住了你什么，随时改、随时删
               </p>
             </div>
             <div className="px-2.5 py-2.5">
@@ -233,6 +252,7 @@ export function AgentSettingsPopover() {
       {/* 管理面：无公开市集，只有「我自己的技能」。对话框自行 portal 到 document.body，
           点它内部由上面的 outside-click 以 data-my-skills-dialog 放行、不收设定弹层。 */}
       {skillsOpen && <MySkillsDialog onClose={() => setSkillsOpen(false)} />}
+      {memoriesOpen && <MyMemoriesDialog onClose={() => setMemoriesOpen(false)} />}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import {
   Boxes,
   History,
   Loader2,
+  Ghost,
   LogIn,
   Search,
   Settings,
@@ -51,6 +52,7 @@ import {
 } from "./AgentChatSurface.helpers";
 import type { AgentChatSurfaceProps } from "./AgentChatSurface.types";
 import { useAgentSurfaceSessionActions } from "./AgentChatSurface.session-actions";
+import { setTemporaryArmed, useTemporaryChat } from "@/lib/agent-chat-client/temporary-chat";
 
 export type { AgentChatSurfaceProps } from "./AgentChatSurface.types";
 export { formatSessionLabel, isInsideHistorySurface } from "./AgentChatSurface.helpers";
@@ -136,6 +138,7 @@ export function AgentChatSurface({
   useEffect(() => {
     setCurrentAgentSession(sessionId ?? null);
   }, [sessionId]);
+  const temporaryChat = useTemporaryChat(sessionId);
   // D-26：已经问过锚定的那张图。问过就不再问——同一张图反复弹卡是骚扰。
   const [anchorAskedFor, setAnchorAskedFor] = useState<string | null>(null);
   const [anchorBusy, setAnchorBusy] = useState(false);
@@ -395,6 +398,35 @@ export function AgentChatSurface({
           {/* 右簇靠 ml-auto 顶到最右（中间没有 flex-1 的标题块可撑了）。
               窄屏 contents 后 ml-auto 自动失效，由外层 justify-between 接管。 */}
           <div className="ml-auto flex items-center gap-0.5 max-sm:contents">
+            {(temporaryChat.armed || temporaryChat.temporary) && (
+              <span className="rounded-full bg-ios-blue/[0.12] px-2 py-0.5 text-ios-caption2 font-medium text-ios-blue" data-temporary-chat-badge="true">
+                临时对话 · 不记忆
+              </span>
+            )}
+            {/* 临时对话：这场不读取、也不写入任何记忆；再点一次取消。 */}
+            <button
+              type="button"
+              onClick={() => {
+                if (temporaryChat.armed) {
+                  setTemporaryArmed(false);
+                  return;
+                }
+                void (async () => {
+                  if (sessionId) await onStartNewSession();
+                  setTemporaryArmed(true);
+                })();
+              }}
+              disabled={startingNew}
+              aria-pressed={temporaryChat.armed || temporaryChat.temporary}
+              aria-label="临时对话"
+              title="临时对话：不读取、不记录记忆"
+              className={cn(
+                "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-colors hover:bg-ios-blue/[0.12] active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] touch-manipulation max-sm:hidden disabled:cursor-wait",
+                temporaryChat.armed || temporaryChat.temporary ? "bg-ios-blue/[0.12] text-ios-blue" : "text-foreground/45 hover:text-foreground/75",
+              )}
+            >
+              <Ghost className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
+            </button>
             <button
               type="button"
               onClick={() => void onStartNewSession()}
