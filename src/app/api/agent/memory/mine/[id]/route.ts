@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteUserMemories, updateUserMemory } from "@/lib/agent-memory-store";
 import { noStore, resolveSkillOwner } from "@/app/api/skills/mine/owner";
+import { notifyGatewayMemoryChanged } from "../notify";
 import { toMineView } from "../view";
 
 export const runtime = "nodejs";
@@ -31,6 +32,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
       const status = result.reason === "not_found" ? 404 : 400;
       return NextResponse.json({ error: result.reason }, { status, headers: noStore });
     }
+    await notifyGatewayMemoryChanged(owner.key, { ids: [result.value.id] });
     return NextResponse.json({ memory: toMineView(result.value) }, { headers: noStore });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500, headers: noStore });
@@ -46,6 +48,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx): Promise<NextResponse> 
     if (result.deleted.length === 0 && result.failed.length === 0) {
       return NextResponse.json({ error: "not_found" }, { status: 404, headers: noStore });
     }
+    await notifyGatewayMemoryChanged(owner.key, { ids: [...result.deleted, ...result.failed] });
     return NextResponse.json({ deleted: result.deleted.length, failed: result.failed.length }, { headers: noStore });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500, headers: noStore });

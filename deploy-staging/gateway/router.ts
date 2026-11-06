@@ -53,7 +53,7 @@ import { handleArtifact } from "./artifact-http.ts"
 import { handleCron } from "./cron-http.ts"
 import { handlePlan } from "./plan-http.ts"
 import { handleMemory } from "./memory-http.ts"
-import { handleMemoryV2, handleHistoryStatus, handleHistoryClear } from "./memory-history-wiring.ts"
+import { handleMemoryV2, handleHistoryStatus, handleHistoryClear, handleMemoryChanged } from "./memory-history-wiring.ts"
 // 2026-10-18：harness hook 总线的 loopback HTTP 面（plugin 的 Pre/PostToolUse 跨进程入口）。
 import { handleHooks, runHooksWithBudget } from "./hooks-http.ts"
 // 2026-10-18：工具前置检查合并端点复用 hook 运行器；预算由本端点控制，沿用同一 fail-open 语义。
@@ -904,6 +904,9 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     }
     if (req.method === "DELETE" && pathname === "/agent/v1/memory/history") {
       return handleHistoryClear(key)
+    }
+    if (req.method === "POST" && pathname === "/agent/v1/memory/changed") {
+      return handleMemoryChanged(key, req)
     }
 
     // 用户面 peek 子代理：停止 → 单 run 转录增量 → 本会话子代理列表（顺序不可颠倒）。

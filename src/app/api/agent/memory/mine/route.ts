@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUserMemory, deleteUserMemories, listMemoryDocs } from "@/lib/agent-memory-store";
 import { noStore, resolveSkillOwner } from "@/app/api/skills/mine/owner";
+import { notifyGatewayMemoryChanged } from "./notify";
 import { toMineView } from "./view";
 
 export const runtime = "nodejs";
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const status = result.reason === "quota_exceeded" ? 429 : 400;
       return NextResponse.json({ error: result.reason }, { status, headers: noStore });
     }
+    await notifyGatewayMemoryChanged(owner.key, {});
     return NextResponse.json({ memory: toMineView(result.value) }, { status: 201, headers: noStore });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500, headers: noStore });
@@ -56,6 +58,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   }
   try {
     const result = await deleteUserMemories(owner.ownerKey, null);
+    await notifyGatewayMemoryChanged(owner.key, { all: true });
     return NextResponse.json(
       { deleted: result.deleted.length, failed: result.failed.length },
       { headers: noStore },

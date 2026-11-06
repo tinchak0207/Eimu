@@ -28,7 +28,7 @@ import { memoryRecallScoringOptions, memorySharedCorpus } from "./memory-wiring-
 import { opencodeFetch } from "./opencode-client.ts"
 import { loadUserSettings } from "./persistence-io.ts"
 import { db } from "./persistence-schema.ts"
-import { resolveSession } from "./sessions-core.ts"
+import { markDirty, resolveSession, sessions as liveSessions } from "./sessions-core.ts"
 import { subagentParentState } from "./subagent.ts"
 import type { SessionState } from "./types-gateway.ts"
 
@@ -426,6 +426,34 @@ export async function handleHistoryStatus(key: string): Promise<Response> {
   const ownerKey = await hashKey(key)
   const s = ownerHistoryStats(h, ownerKey)
   return Response.json({ ...s, backfill_pending: historyBackfillState.pending, available: true }, { headers: { "Cache-Control": "no-store" } })
+}
+
+/**
+ * POST /agent/v1/memory/changed —— 站点「我的记忆」删改后的失效通知（best-effort）。
+ * body `{ ids?: string[], all?: boolean }`：失效私有语料缓存（召回立刻看不到已删条目），
+ * 并把该账号在线会话 L0 里已删的条目摘掉（同一场对话里删了就不再被想起）。
+ */
+export async function handleMemoryChanged(key: string, req: Request): Promise<Response> {
+  let body: { ids?: unknown; all?: unknown } = {}
+  try {
+    body = (await req.json()) as typeof body
+  } catch {
+    body = {}
+  }
+  const all = body.all === true
+  const ids = new Set(Array.isArray(body.ids) ? body.ids.map((x) => String(x)) : [])
+  memorySharedCorpus.invalidate()
+  let touched = 0
+  for (const state of liveSessions.values()) {
+    if (state.apiKey !== key || !state.userMemory?.memory_docs?.length) continue
+    const before = state.userMemory.memory_docs.length
+    state.userMemory.memory_docs = all ? [] : state.userMemory.memory_docs.filter((d) => !(typeof d.id === "string" && ids.has(d.id)))
+    if (state.userMemory.memory_docs.length !== before) {
+      touched += 1
+      markDirty(state)
+    }
+  }
+  return Response.json({ ok: true, sessions: touched }, { headers: { "Cache-Control": "no-store" } })
 }
 
 export async function handleHistoryClear(key: string): Promise<Response> {
