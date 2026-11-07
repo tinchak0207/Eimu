@@ -202,7 +202,7 @@ export function deleteSessionHistory(db: Db, ownerKey: string, sessionId: string
  * 只删索引里的轮次，不动对话本身。needle 太短（<3 个检索词）不处理，宁可少删也不误伤。
  */
 export function forgetHistoryContaining(db: Db, ownerKey: string, needles: string[], opts: { containment?: number; replyContainment?: number } = {}): number {
-  const containment = opts.containment ?? 0.8
+  const containment = opts.containment ?? 0.6
   const replyContainment = opts.replyContainment ?? 0.35
   const doomed = new Set<number>()
   const getTurn = db.prepare("SELECT id, role, text FROM chat_history WHERE owner_key=? AND session_id=? AND turn_idx=?")
@@ -211,6 +211,14 @@ export function forgetHistoryContaining(db: Db, ownerKey: string, needles: strin
     const have = new Set(historyTokens(text, true))
     for (const t of needle) if (have.has(t)) hit += 1
     return hit / needle.size
+  }
+  // 记忆正文是模型转述，常比用户原话长或换了说法：原话（较短一方）的词被记忆正文覆盖得够多，也算同一件事。
+  const covered = (needle: Set<string>, text: string): number => {
+    const have = new Set(historyTokens(text, true))
+    if (have.size < 6) return 0
+    let hit = 0
+    for (const t of have) if (needle.has(t)) hit += 1
+    return hit / have.size
   }
   for (const raw of needles) {
     const text = String(raw ?? "").trim()
@@ -223,7 +231,7 @@ export function forgetHistoryContaining(db: Db, ownerKey: string, needles: strin
       if (seen.has(k)) continue
       seen.add(k)
       const row = getTurn.get(ownerKey, h.sessionId, h.turnIdx) as { id: number; role: string; text: string } | undefined
-      if (!row || share(needle, row.text) < containment) continue
+      if (!row || (row.role === "user" ? Math.max(share(needle, row.text), covered(needle, row.text)) : share(needle, row.text)) < containment) continue
       doomed.add(row.id)
       const next = getTurn.get(ownerKey, h.sessionId, h.turnIdx + 1) as { id: number; role: string; text: string } | undefined
       if (next && next.role === "assistant" && share(needle, next.text) >= replyContainment) doomed.add(next.id)
@@ -244,6 +252,36 @@ export function forgetHistoryContaining(db: Db, ownerKey: string, needles: strin
     throw err
   }
   return doomed.size
+}
+
+/** 一次性迁移：改写已入库的 user 轮正文（剥掉网关注入尾巴），同步重建 FTS 词；剥空则整行删除。 */
+export function rewriteUserHistoryText(db: Db, marker: string, transform: (text: string) => string): number {
+  const rows = db.prepare("SELECT id, owner_key, text FROM chat_history WHERE role='user' AND text LIKE ?").all(`%${marker}%`) as Array<{ id: number; owner_key: string; text: string }>
+  if (rows.length === 0) return 0
+  const delFts = db.prepare("DELETE FROM chat_history_fts WHERE rowid=?")
+  const insFts = db.prepare("INSERT INTO chat_history_fts(rowid, tok) VALUES (?, ?)")
+  const upd = db.prepare("UPDATE chat_history SET text=? WHERE id=?")
+  const delRow = db.prepare("DELETE FROM chat_history WHERE id=?")
+  let changed = 0
+  db.exec("BEGIN")
+  try {
+    for (const r of rows) {
+      const next = transform(r.text)
+      if (next === r.text) continue
+      delFts.run(r.id)
+      if (!next.trim()) delRow.run(r.id)
+      else {
+        upd.run(next, r.id)
+        insFts.run(r.id, `${ownerTerm(r.owner_key)} ${historyTokens(next).join(" ")}`)
+      }
+      changed += 1
+    }
+    db.exec("COMMIT")
+  } catch (err) {
+    db.exec("ROLLBACK")
+    throw err
+  }
+  return changed
 }
 
 export function deleteOwnerHistory(db: Db, ownerKey: string): number {

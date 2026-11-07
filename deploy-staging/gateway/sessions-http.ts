@@ -232,7 +232,7 @@ function gwTokenNoG(): RegExp {
  *  该标记之后若真有注入块（带凭证）→ 从真注入块那处截断（用户气泡不再露出内部注入正文）。
  *  2026-10-18：无凭证的资料块（模板偏好等）使用 TAIL_DATA_MARKER，恒定可从标记处剥离。
  *  找不到可剥离标记＝原样返回（零回归）。 */
-function stripTailInjectedPayload(text: string): string {
+export function stripTailInjectedPayload(text: string): string {
   // 资料块无凭证，但标记是网关专属：先按它截断。
   const dataMarker = TAIL_DATA_MARKER.trim()
   const dataAt = text.indexOf(dataMarker)

@@ -15,6 +15,7 @@ import {
   deleteSessionHistory,
   ensureHistorySchema,
   forgetHistoryContaining,
+  rewriteUserHistoryText,
   indexTurns,
   ownerHistoryStats,
   searchHistory,
@@ -30,6 +31,7 @@ import { opencodeFetch } from "./opencode-client.ts"
 import { loadUserSettings } from "./persistence-io.ts"
 import { db } from "./persistence-schema.ts"
 import { markDirty, resolveSession, sessions as liveSessions } from "./sessions-core.ts"
+import { stripTailInjectedPayload } from "./sessions-http.ts"
 import { subagentParentState } from "./subagent.ts"
 import type { SessionState } from "./types-gateway.ts"
 
@@ -64,6 +66,10 @@ function historyDb(): Db | null {
       "CREATE TABLE IF NOT EXISTS chat_history_progress (session_id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, done_at INTEGER NOT NULL, turns INTEGER NOT NULL)",
     )
     schemaReady = true
+    // 旧版把网关注入的记忆／历史摘录连用户消息一起入了库：摘录再被检索出来又入库，删除后还能“复活”。一次性剥掉。
+    try {
+      rewriteUserHistoryText(db as unknown as Db, "系统注入·尾端", (t) => stripTailInjectedPayload(t))
+    } catch {}
   }
   return db as unknown as Db
 }
@@ -87,13 +93,14 @@ export function messagesToTurns(msgs: OcMessage[], ownerKey: string, sessionId: 
       .map((p) => (p.text as string).trim())
       .filter(Boolean)
       .join("\n")
-    if (!text) return
+    const clean = role === "user" ? stripTailInjectedPayload(text).trim() : text
+    if (!clean) return
     out.push({
       ownerKey,
       sessionId,
       turnIdx: idx,
       role,
-      text: redactSecrets(text).slice(0, TURN_MAX_CHARS),
+      text: redactSecrets(clean).slice(0, TURN_MAX_CHARS),
       ts: m.info?.time?.created ?? Date.now(),
       sessionTitle: title,
     })
