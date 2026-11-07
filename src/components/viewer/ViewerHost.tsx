@@ -52,6 +52,8 @@ import type {
   ViewerSurfaceProps,
 } from "@/lib/viewer/types";
 import { VIEWER_SURFACES } from "./adapters";
+import { downloadAsset } from "@/lib/viewer/download";
+import { MusicBackdrop } from "./MusicBackdrop";
 import { ReviewSheet, useAnnotations } from "./ReviewSheet";
 
 /* ---------- 小工具 ---------- */
@@ -213,10 +215,13 @@ function ActionBar({
   asset,
   actions,
   extraActions,
+  hideDownload,
 }: {
   asset: ViewAsset;
   actions?: ViewerActions;
   extraActions?: readonly ViewerExtraAction[];
+  /** 听歌舞台自带下载钮，动作栏不再重复。 */
+  hideDownload?: boolean;
 }) {
   const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">(
     savedIds.has(asset.id) ? "saved" : "idle",
@@ -252,14 +257,16 @@ function ActionBar({
   };
 
   const handleDownload = async () => {
-    if (!onDownload || downState === "loading") return;
+    if (downState === "loading" || !asset.url) return;
     setDownState("loading");
     let ok = false;
     try {
-      ok = await onDownload(asset);
+      ok = onDownload ? await onDownload(asset) : false;
     } catch {
       ok = false;
     }
+    // 调用方没接 / 接了但没成：用赏阅自带的通用下载兜底，任何入口打开的成品都能下载。
+    if (!ok) ok = await downloadAsset(asset).catch(() => false);
     if (ok) {
       setDownState("idle");
       return;
@@ -289,9 +296,9 @@ function ActionBar({
               <Library className="h-4 w-4" aria-hidden="true" />
             )}
           </ActionButton>
-          <ActionButton
+          {!hideDownload && <ActionButton
             label={downState === "failed" ? "失败" : "下载"}
-            disabled={!onDownload || downState === "loading"}
+            disabled={!asset.url || downState === "loading"}
             danger={downState === "failed"}
             onClick={() => void handleDownload()}
           >
@@ -300,7 +307,7 @@ function ActionBar({
             ) : (
               <Download className="h-4 w-4" aria-hidden="true" />
             )}
-          </ActionButton>
+          </ActionButton>}
           <RerunMenu disabled={!onRerun} onPick={(count) => onRerun?.(asset, count)} />
           <ActionButton label="微调" disabled={!onVariant} onClick={() => onVariant?.(asset)}>
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
@@ -683,6 +690,8 @@ export function ViewerStage({
   const rows = useMemo(() => (current ? provenanceRows(current) : []), [current]);
 
   if (!current) return null;
+  // 听歌：沉浸舞台（背景糊封面、顶栏只留功能钮、没有标记/评审）。
+  const music = current.kind === "audio";
   const footerNode = typeof extraFooter === "function" ? extraFooter(current) : extraFooter;
   const kindLabel = viewKindLabel(current.kind);
   const title = current.title?.trim() || "";
@@ -699,8 +708,9 @@ export function ViewerStage({
       onKeyDown={onRootKeyDown}
       className="relative flex h-full w-full flex-col overflow-hidden bg-[#0d0f14] text-white outline-none"
     >
+      {music && <MusicBackdrop cover={current.cover} seed={current.title || current.id} />}
       {/* 顶栏 */}
-      <div className="flex shrink-0 items-center gap-1 px-2 pt-[max(0.25rem,env(safe-area-inset-top))]">
+      <div className="relative z-30 flex shrink-0 items-center gap-1 px-2 pt-[max(0.25rem,env(safe-area-inset-top))]">
         {leading}
         {trail.length > 0 && (
           <button type="button" onClick={back} aria-label="返回上一级" className={iconBtn}>
@@ -708,8 +718,8 @@ export function ViewerStage({
           </button>
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2 px-1">
-          <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[13px] font-medium text-white/80">{kindLabel}</span>
-          {title && (
+          {!music && <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-[13px] font-medium text-white/80">{kindLabel}</span>}
+          {title && !music && (
             <h1 className="min-w-0 truncate text-[15px] font-semibold" title={title}>
               {title}
             </h1>
@@ -732,7 +742,7 @@ export function ViewerStage({
             <Info className="h-5 w-5" aria-hidden="true" />
           </button>
         )}
-        <button
+        {!music && <button
           type="button"
           onClick={() => setPanel((p) => (p === "review" ? null : "review"))}
           aria-label="标记"
@@ -745,7 +755,7 @@ export function ViewerStage({
               {review.annotations.length}
             </span>
           )}
-        </button>
+        </button>}
         <button type="button" onClick={() => setHelp(true)} aria-label="快捷键帮助" className={cn(iconBtn, "max-sm:hidden")}>
           <CircleHelp className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -757,7 +767,7 @@ export function ViewerStage({
       </div>
 
       {/* 成品 */}
-      <div className="relative min-h-0 flex-1" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="relative z-10 min-h-0 flex-1" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <SurfaceSlot
           key={`${trail.length}:${current.id}`}
           asset={current}
@@ -797,7 +807,9 @@ export function ViewerStage({
         <div className="flex max-h-[30dvh] shrink-0 justify-center overflow-y-auto px-2 pb-1">{footerNode}</div>
       ) : null}
       {(actions || (extraActions && extraActions.length > 0)) && (
-        <ActionBar key={current.id} asset={current} actions={actions} extraActions={extraActions} />
+        <div className="relative z-20">
+          <ActionBar key={current.id} asset={current} actions={actions} extraActions={extraActions} hideDownload={music} />
+        </div>
       )}
 
       {panel === "provenance" && rows.length > 0 && (
@@ -814,7 +826,7 @@ export function ViewerStage({
           </dl>
         </SidePanel>
       )}
-      <ReviewSheet
+      {!music && <ReviewSheet
         asset={current}
         review={review}
         controllerRef={controllerRef}
@@ -822,7 +834,7 @@ export function ViewerStage({
         open={panel === "review"}
         onClose={() => setPanel(null)}
         recaptureKey={recapture}
-      />
+      />}
       {help && <HelpDialog onClose={() => setHelp(false)} />}
     </div>
   );
