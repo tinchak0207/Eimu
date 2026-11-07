@@ -156,17 +156,21 @@ export function updateUserMemory(
 export function deleteUserMemories(
   ownerKey: string,
   ids: string[] | null,
-): Promise<{ deleted: string[]; failed: string[] }> {
+): Promise<{ deleted: string[]; failed: string[]; removed: Array<{ id: string; description: string; body: string }> }> {
   return withCatalogLock(async () => {
     const deleted: string[] = [];
     const failed: string[] = [];
-    if (!ownerKey) return { deleted, failed };
+    const removed: Array<{ id: string; description: string; body: string }> = [];
+    if (!ownerKey) return { deleted, failed, removed };
     const idSet = ids ? new Set(ids.map((id) => String(id))) : null;
-    if (idSet && idSet.size === 0) return { deleted, failed };
+    if (idSet && idSet.size === 0) return { deleted, failed, removed };
     const catalog = await loadCatalog();
     const targets = ownerEntries(catalog.entries, ownerKey).filter((entry) => !idSet || entryMatchesIds(entry, idSet));
     const gone = new Set<MemoryCatalogEntry>();
     for (const entry of targets) {
+      // 删之前先留下正文：网关要凭它把历史对话索引里复述同一事实的轮次一并抹掉。
+      const doc = await readDoc(entry.scope, entry.ownerKey, entry.domain, entry.slug);
+      if (doc) removed.push({ id: entry.id, description: doc.description, body: doc.body });
       const clean = await purgeDocBlobs(entry);
       // 目录条目无论 blob 删净与否都先摘掉：用户视角它必须立刻消失、不再被召回；
       // blob 残留只会让该 id 进 failed 上报，不会回到目录。
@@ -178,6 +182,6 @@ export function deleteUserMemories(
       await saveCatalog(catalog, catalog.revision ?? 0);
       await rebuildIndex("private", ownerKey);
     }
-    return { deleted, failed };
+    return { deleted, failed, removed };
   });
 }

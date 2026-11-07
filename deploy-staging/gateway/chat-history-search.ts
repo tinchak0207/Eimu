@@ -196,6 +196,56 @@ export function deleteSessionHistory(db: Db, ownerKey: string, sessionId: string
   return deleteWhere(db, "owner_key=? AND session_id=?", ownerKey, sessionId)
 }
 
+/**
+ * 「忘掉」联动：删记忆时，把历史对话索引里复述了同一事实的轮次一并抹掉，否则换个会话一问还能从流水里捞回来。
+ * 判据：needle 的检索词有 ≥containment 落在某一轮里（该轮是用户原话或助手复述）；紧随其后的助手轮用更低的门槛（回复多半换了说法）。
+ * 只删索引里的轮次，不动对话本身。needle 太短（<3 个检索词）不处理，宁可少删也不误伤。
+ */
+export function forgetHistoryContaining(db: Db, ownerKey: string, needles: string[], opts: { containment?: number; replyContainment?: number } = {}): number {
+  const containment = opts.containment ?? 0.8
+  const replyContainment = opts.replyContainment ?? 0.35
+  const doomed = new Set<number>()
+  const getTurn = db.prepare("SELECT id, role, text FROM chat_history WHERE owner_key=? AND session_id=? AND turn_idx=?")
+  const share = (needle: Set<string>, text: string): number => {
+    let hit = 0
+    const have = new Set(historyTokens(text, true))
+    for (const t of needle) if (have.has(t)) hit += 1
+    return hit / needle.size
+  }
+  for (const raw of needles) {
+    const text = String(raw ?? "").trim()
+    const needle = new Set(historyTokens(text, true))
+    if (needle.size < 3) continue
+    const hits = searchHistory(db, { ownerKey, query: text.slice(0, 400), now: Date.now(), limit: 40, context: 0, timeBoost: 1 })
+    const seen = new Set<string>()
+    for (const h of hits) {
+      const k = `${h.sessionId}\u0000${h.turnIdx}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      const row = getTurn.get(ownerKey, h.sessionId, h.turnIdx) as { id: number; role: string; text: string } | undefined
+      if (!row || share(needle, row.text) < containment) continue
+      doomed.add(row.id)
+      const next = getTurn.get(ownerKey, h.sessionId, h.turnIdx + 1) as { id: number; role: string; text: string } | undefined
+      if (next && next.role === "assistant" && share(needle, next.text) >= replyContainment) doomed.add(next.id)
+    }
+  }
+  if (doomed.size === 0) return 0
+  const delFts = db.prepare("DELETE FROM chat_history_fts WHERE rowid=?")
+  const delRow = db.prepare("DELETE FROM chat_history WHERE id=?")
+  db.exec("BEGIN")
+  try {
+    for (const id of doomed) {
+      delFts.run(id)
+      delRow.run(id)
+    }
+    db.exec("COMMIT")
+  } catch (err) {
+    db.exec("ROLLBACK")
+    throw err
+  }
+  return doomed.size
+}
+
 export function deleteOwnerHistory(db: Db, ownerKey: string): number {
   return deleteWhere(db, "owner_key=?", ownerKey)
 }

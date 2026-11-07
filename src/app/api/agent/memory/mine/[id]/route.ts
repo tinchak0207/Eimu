@@ -48,7 +48,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx): Promise<NextResponse> 
     if (result.deleted.length === 0 && result.failed.length === 0) {
       return NextResponse.json({ error: "not_found" }, { status: 404, headers: noStore });
     }
-    await notifyGatewayMemoryChanged(owner.key, { ids: [...result.deleted, ...result.failed] });
+    await notifyGatewayMemoryChanged(owner.key, { ids: [...result.deleted, ...result.failed], texts: result.removed.flatMap((r) => [r.description, r.body]) });
     return NextResponse.json({ deleted: result.deleted.length, failed: result.failed.length }, { headers: noStore });
   } catch {
     return NextResponse.json({ error: "internal_error" }, { status: 500, headers: noStore });

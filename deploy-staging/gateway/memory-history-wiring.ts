@@ -14,6 +14,7 @@ import {
   deleteOwnerHistory,
   deleteSessionHistory,
   ensureHistorySchema,
+  forgetHistoryContaining,
   indexTurns,
   ownerHistoryStats,
   searchHistory,
@@ -408,10 +409,11 @@ export async function handleMemoryV2(req: Request, route: string): Promise<Respo
         body: raw,
         signal: AbortSignal.timeout(15_000),
       })
-      const json = (await res.json().catch(() => ({}))) as { deleted?: number }
+      const json = (await res.json().catch(() => ({}))) as { deleted?: number; removed?: Array<{ description?: string; body?: string }> }
       if (!res.ok) return jsonErr("forget_failed", "memory service rejected the request", 502)
       memorySharedCorpus.invalidate()
-      return Response.json({ ok: true, success: true, deleted: Number(json.deleted ?? 0) }, { headers: { "Cache-Control": "no-store" } })
+      const forgotten = purgeHistoryFor(ownerKey, (json.removed ?? []).flatMap((r) => [r.description, r.body]))
+      return Response.json({ ok: true, success: true, deleted: Number(json.deleted ?? 0), history_turns_removed: forgotten }, { headers: { "Cache-Control": "no-store" } })
     } catch {
       return jsonErr("forget_failed", "memory service unreachable", 502)
     }
@@ -428,13 +430,26 @@ export async function handleHistoryStatus(key: string): Promise<Response> {
   return Response.json({ ...s, backfill_pending: historyBackfillState.pending, available: true }, { headers: { "Cache-Control": "no-store" } })
 }
 
+/** 删记忆联动：把历史索引里复述同一事实的轮次一并抹掉；失败只记日志，不挡删除。 */
+function purgeHistoryFor(ownerKey: string, texts: Array<string | undefined>): number {
+  const needles = texts.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+  if (needles.length === 0) return 0
+  try {
+    const h = historyDb()
+    return h ? forgetHistoryContaining(h, ownerKey, needles) : 0
+  } catch (e) {
+    console.error(`[memory-history] purge on forget failed: ${e instanceof Error ? e.message : String(e)}`)
+    return 0
+  }
+}
+
 /**
  * POST /agent/v1/memory/changed —— 站点「我的记忆」删改后的失效通知（best-effort）。
  * body `{ ids?: string[], all?: boolean }`：失效私有语料缓存（召回立刻看不到已删条目），
  * 并把该账号在线会话 L0 里已删的条目摘掉（同一场对话里删了就不再被想起）。
  */
 export async function handleMemoryChanged(key: string, req: Request): Promise<Response> {
-  let body: { ids?: unknown; all?: unknown } = {}
+  let body: { ids?: unknown; all?: unknown; texts?: unknown } = {}
   try {
     body = (await req.json()) as typeof body
   } catch {
@@ -443,6 +458,7 @@ export async function handleMemoryChanged(key: string, req: Request): Promise<Re
   const all = body.all === true
   const ids = new Set(Array.isArray(body.ids) ? body.ids.map((x) => String(x)) : [])
   memorySharedCorpus.invalidate()
+  const purged = Array.isArray(body.texts) ? purgeHistoryFor(await hashKey(key), body.texts.slice(0, 400).map((t) => (typeof t === "string" ? t : undefined))) : 0
   let touched = 0
   for (const state of liveSessions.values()) {
     if (state.apiKey !== key || !state.userMemory?.memory_docs?.length) continue
@@ -453,7 +469,7 @@ export async function handleMemoryChanged(key: string, req: Request): Promise<Re
       markDirty(state)
     }
   }
-  return Response.json({ ok: true, sessions: touched }, { headers: { "Cache-Control": "no-store" } })
+  return Response.json({ ok: true, sessions: touched, history_turns_removed: purged }, { headers: { "Cache-Control": "no-store" } })
 }
 
 export async function handleHistoryClear(key: string): Promise<Response> {

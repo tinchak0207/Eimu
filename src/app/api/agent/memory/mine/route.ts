@@ -58,7 +58,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   }
   try {
     const result = await deleteUserMemories(owner.ownerKey, null);
-    await notifyGatewayMemoryChanged(owner.key, { all: true });
+    await notifyGatewayMemoryChanged(owner.key, { all: true, texts: result.removed.flatMap((r) => [r.description, r.body]) });
     return NextResponse.json(
       { deleted: result.deleted.length, failed: result.failed.length },
       { headers: noStore },

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const result = await deleteUserMemories(ownerKey, ids);
     return NextResponse.json(
-      { deleted: result.deleted.length, failed: result.failed.length },
+      { deleted: result.deleted.length, failed: result.failed.length, removed: result.removed.map((r) => ({ description: r.description, body: r.body })) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
