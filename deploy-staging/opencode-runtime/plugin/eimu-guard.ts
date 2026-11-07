@@ -264,6 +264,7 @@ function gatewayFallbackStatus(status: number): boolean {
 // 预算＝原 worst case（800 + 800），不会比旧路径更早判超时。
 const PRECHECK_PATH = "/internal/tool/precheck"
 const PRECHECK_HTTP_TIMEOUT_MS = GATE_HTTP_TIMEOUT_MS + HOOK_HTTP_TIMEOUT_MS
+const PRECHECK_RETRY_TIMEOUT_MS = 6000
 
 /** 合并端点里的单个检查：status 是等价 HTTP 状态；0 = 网关侧超时/不可判定。 */
 interface PrecheckChild {
@@ -318,26 +319,37 @@ async function gatewayPrecheck(
   args: Record<string, unknown>,
   checks: { plan: boolean; permission: boolean },
 ): Promise<PrecheckOutcome | "legacy" | null> {
-  let res: Response
-  try {
-    res = await fetch(`${GATEWAY}${PRECHECK_PATH}`, {
-      method: "POST",
-      headers: harnessInternalHeaders(),
-      body: JSON.stringify({
-        session_id: sessionID,
-        tool,
-        input: args,
-        // hook 的 cwd 语义是「工具执行进程的 cwd」，必须由插件传入（网关 cwd 不同）。
-        cwd: process.cwd(),
-        checks,
-      }),
-      signal: AbortSignal.timeout(PRECHECK_HTTP_TIMEOUT_MS),
-    })
-  } catch (e) {
+  const body = JSON.stringify({
+    session_id: sessionID,
+    tool,
+    input: args,
+    // hook 的 cwd 语义是「工具执行进程的 cwd」，必须由插件传入（网关 cwd 不同）。
+    cwd: process.cwd(),
+    checks,
+  })
+  // 2 核 VPS 上 ffmpeg/librosa 一压满，loopback 1.6s 就超时 → 写类工具被 fail-closed 误拒
+  // （2026-11-07 Write 被「计划模式状态查询超时」拒绝，子代理整条链卡住）。
+  // 超时/不可达先用宽限窗口重试一次，仍失败才按原语义 fail-closed。
+  let res: Response | null = null
+  let lastErr: unknown = null
+  for (const timeoutMs of [PRECHECK_HTTP_TIMEOUT_MS, PRECHECK_RETRY_TIMEOUT_MS]) {
+    try {
+      res = await fetch(`${GATEWAY}${PRECHECK_PATH}`, {
+        method: "POST",
+        headers: harnessInternalHeaders(),
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      break
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  if (!res) {
     if (!gatewayGateWarned) {
       gatewayGateWarned = true
       console.warn(
-        `[eimu-guard] gateway precheck unreachable; falling back to per-check semantics: ${e instanceof Error ? e.message : String(e)}`,
+        `[eimu-guard] gateway precheck unreachable; falling back to per-check semantics: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
       )
     }
     return null

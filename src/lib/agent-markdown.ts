@@ -17,8 +17,8 @@ export type MdInline =
   | { k: "code"; text: string }
   | { k: "link"; href: string; children: MdInline[] }
   | { k: "img"; src: string; alt: string }
-  | { k: "video"; src: string }
-  | { k: "audio"; src: string }
+  | { k: "video"; src: string; label?: string }
+  | { k: "audio"; src: string; label?: string }
   | { k: "br" };
 
 export type MdBlock =
@@ -102,6 +102,12 @@ export function isAudioUrl(url: string): boolean {
   );
 }
 
+/** 链接文字≠URL 本身时才算「标题」（裸 URL 自动链接的文字就是 URL，不当标题）。 */
+function mediaLabel(text: string, href: string): string | undefined {
+  const t = text.trim();
+  return t && t !== href.trim() ? t : undefined;
+}
+
 function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
   const out: MdInline[] = [];
   for (const t of tokens ?? []) {
@@ -134,9 +140,9 @@ function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
         if (isImageUrl(tok.href)) {
           out.push({ k: "img", src: tok.href, alt: tok.text });
         } else if (isVideoUrl(tok.href)) {
-          out.push({ k: "video", src: tok.href });
+          out.push({ k: "video", src: tok.href, label: mediaLabel(tok.text, tok.href) });
         } else if (isAudioUrl(tok.href)) {
-          out.push({ k: "audio", src: tok.href });
+          out.push({ k: "audio", src: tok.href, label: mediaLabel(tok.text, tok.href) });
         } else {
           out.push({ k: "link", href: tok.href, children: inlineFromTokens(tok.tokens) });
         }

@@ -106,24 +106,40 @@ function AgentImageThumb({ src, alt, onOpen }: { src: string; alt: string; onOpe
   );
 }
 
-/** 消息内影片：赏阅 inline（倍速/逐帧/标记，点「放大」进全屏）。 */
-function MdVideo({ src }: { src: string }) {
-  const asset = useMemo(() => viewAssetFromUrl(src, "video"), [src]);
+/** 播放器之外恒带完整可点链接：播放器不能替代链接，链接是用户复制、另开、转发的唯一抓手。 */
+function MdMediaLink({ src }: { src: string }) {
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-0.5 block break-all text-ios-caption1 text-ios-blue underline decoration-ios-blue/40 underline-offset-2"
+    >
+      {src}
+    </a>
+  );
+}
+
+/** 消息内影片：赏阅 inline（倍速/逐帧/标记，点「放大」进全屏）+ 明文链接。 */
+function MdVideo({ src, label }: { src: string; label?: string }) {
+  const asset = useMemo(() => viewAssetFromUrl(src, "video", label ? { title: label } : undefined), [src, label]);
   if (!asset) return null;
   return (
-    <div className="my-1 w-full max-w-md" aria-label={`影片：${src}`}>
+    <div className="my-1 w-full max-w-md" aria-label={`影片：${label ?? src}`}>
       <Viewer asset={asset} density="inline" />
+      <MdMediaLink src={src} />
     </div>
   );
 }
 
-/** 消息内音频：赏阅 inline（波形/歌词/标记，点「放大」进全屏）。 */
-function MdAudio({ src }: { src: string }) {
-  const asset = useMemo(() => viewAssetFromUrl(src, "audio"), [src]);
+/** 消息内音频：赏阅 inline（波形/歌词/标记，点「放大」进全屏）+ 曲名 + 明文链接。 */
+function MdAudio({ src, label }: { src: string; label?: string }) {
+  const asset = useMemo(() => viewAssetFromUrl(src, "audio", label ? { title: label } : undefined), [src, label]);
   if (!asset) return null;
   return (
-    <div className="my-1 w-full max-w-md" aria-label={`音频：${src}`}>
+    <div className="my-1 w-full max-w-md" aria-label={`音频：${label ?? src}`}>
       <Viewer asset={asset} density="inline" />
+      <MdMediaLink src={src} />
     </div>
   );
 }
@@ -160,10 +176,10 @@ function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: 
       // 消息里的平台图片直链：缩略图卡，点击放大（罪状 9）。
       return <AgentImageThumb src={span.src} alt={span.alt} onOpen={() => onOpenImage(span.src, span.alt)} />;
     case "video":
-      // 消息里的平台影片直链：内嵌赏阅播放器（可放大进全屏），不再是一串裸 URL。
-      return <MdVideo src={span.src} />;
+      // 消息里的平台影片直链：内嵌赏阅播放器（可放大进全屏）+ 明文链接，不吞 URL。
+      return <MdVideo src={span.src} label={span.label} />;
     case "audio":
-      return <MdAudio src={span.src} />;
+      return <MdAudio src={span.src} label={span.label} />;
     case "br":
       return <br />;
   }
