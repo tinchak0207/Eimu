@@ -196,52 +196,84 @@ export function deleteSessionHistory(db: Db, ownerKey: string, sessionId: string
   return deleteWhere(db, "owner_key=? AND session_id=?", ownerKey, sessionId)
 }
 
-/**
- * 「忘掉」联动：删记忆时，把历史对话索引里复述了同一事实的轮次一并抹掉，否则换个会话一问还能从流水里捞回来。
- * 判据：needle 的检索词有 ≥containment 落在某一轮里（该轮是用户原话或助手复述）；紧随其后的助手轮用更低的门槛（回复多半换了说法）。
- * 只删索引里的轮次，不动对话本身。needle 太短（<3 个检索词）不处理，宁可少删也不误伤。
- */
-export function forgetHistoryContaining(db: Db, ownerKey: string, needles: string[], opts: { containment?: number; replyContainment?: number } = {}): number {
-  const containment = opts.containment ?? 0.6
-  const replyContainment = opts.replyContainment ?? 0.35
-  const doomed = new Set<number>()
-  const getTurn = db.prepare("SELECT id, role, text FROM chat_history WHERE owner_key=? AND session_id=? AND turn_idx=?")
-  const share = (needle: Set<string>, text: string): number => {
-    let hit = 0
-    const have = new Set(historyTokens(text, true))
-    for (const t of needle) if (have.has(t)) hit += 1
-    return hit / needle.size
+// ─────────────────────────── 遗忘：指纹匹配＋墓碑
+// 记忆正文是模型转述（常比用户原话长、换了说法），词级重叠对不上；改用「字集合＋字三元组」指纹：
+// 短轮（≤160 字）看记忆里的字被覆盖的比例，长轮（含助理复述）看三元组被覆盖的比例。
+// 墓碑只存指纹（字集合＋三元组哈希），不存可读原文——硬删除之后库里不再留可读的被删内容。
+const FORGET_STOP_CHARS = new Set(Array.from("的了是我你在有和就也不这那个一他她它吗呢吧啊么都与及或把被让给对从向"))
+const FORGET_SHORT_TURN = 160
+
+export interface ForgetSig {
+  chars: string
+  grams: string[]
+}
+
+function forgetNorm(text: string): string {
+  return String(text ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")
+}
+function gramHash(g: string): string {
+  let h = 2166136261
+  for (let i = 0; i < g.length; i++) h = Math.imul(h ^ g.charCodeAt(i), 16777619) >>> 0
+  return h.toString(36)
+}
+function gramsOf(norm: string): Set<string> {
+  const out = new Set<string>()
+  const cs = Array.from(norm)
+  for (let i = 0; i + 3 <= cs.length; i++) out.add(gramHash(cs.slice(i, i + 3).join("")))
+  return out
+}
+
+export function forgetSigOf(text: string): ForgetSig | null {
+  const norm = forgetNorm(text)
+  const chars = [...new Set(Array.from(norm).filter((c) => !FORGET_STOP_CHARS.has(c)))].join("")
+  if (Array.from(chars).length < 6) return null
+  return { chars, grams: [...gramsOf(norm)] }
+}
+
+export function forgetSigMatches(sig: ForgetSig, text: string): boolean {
+  const norm = forgetNorm(text)
+  if (!norm) return false
+  const have = gramsOf(norm)
+  let g = 0
+  for (const h of sig.grams) if (have.has(h)) g += 1
+  if (sig.grams.length > 0 && g / sig.grams.length >= 0.5) return true
+  if (Array.from(norm).length > FORGET_SHORT_TURN) return false
+  const set = new Set(Array.from(norm))
+  const cs = Array.from(sig.chars)
+  let c = 0
+  for (const ch of cs) if (set.has(ch)) c += 1
+  return c / cs.length >= 0.75
+}
+
+function ensureTombstoneTable(db: Db): void {
+  db.exec("CREATE TABLE IF NOT EXISTS chat_history_forgotten (id INTEGER PRIMARY KEY, owner_key TEXT NOT NULL, ts INTEGER NOT NULL, sig TEXT NOT NULL)")
+  db.exec("CREATE INDEX IF NOT EXISTS idx_chat_history_forgotten_owner ON chat_history_forgotten(owner_key)")
+}
+
+function loadTombstones(db: Db, ownerKey: string): ForgetSig[] {
+  try {
+    ensureTombstoneTable(db)
+    const rows = db.prepare("SELECT sig FROM chat_history_forgotten WHERE owner_key=? ORDER BY id DESC LIMIT 200").all(ownerKey) as Array<{ sig: string }>
+    return rows.map((r) => JSON.parse(r.sig) as ForgetSig).filter((x) => x && typeof x.chars === "string" && Array.isArray(x.grams))
+  } catch {
+    return []
   }
-  // 记忆正文是模型转述，常比用户原话长或换了说法：原话（较短一方）的词被记忆正文覆盖得够多，也算同一件事。
-  const covered = (needle: Set<string>, text: string): number => {
-    const have = new Set(historyTokens(text, true))
-    if (have.size < 6) return 0
-    let hit = 0
-    for (const t of have) if (needle.has(t)) hit += 1
-    return hit / have.size
-  }
-  for (const raw of needles) {
-    const text = String(raw ?? "").trim()
-    const needle = new Set(historyTokens(text, true))
-    if (needle.size < 3) continue
-    const hits = searchHistory(db, { ownerKey, query: text.slice(0, 400), now: Date.now(), limit: 40, context: 0, timeBoost: 1 })
-    const seen = new Set<string>()
-    for (const h of hits) {
-      const k = `${h.sessionId}\u0000${h.turnIdx}`
-      if (seen.has(k)) continue
-      seen.add(k)
-      const row = getTurn.get(ownerKey, h.sessionId, h.turnIdx) as { id: number; role: string; text: string } | undefined
-      if (!row || (row.role === "user" ? Math.max(share(needle, row.text), covered(needle, row.text)) : share(needle, row.text)) < containment) continue
-      doomed.add(row.id)
-      const next = getTurn.get(ownerKey, h.sessionId, h.turnIdx + 1) as { id: number; role: string; text: string } | undefined
-      if (next && next.role === "assistant" && share(needle, next.text) >= replyContainment) doomed.add(next.id)
-    }
-  }
-  if (doomed.size === 0) return 0
+}
+
+/** 删记忆联动：抹掉该 owner 历史里复述同一事实的轮次，并留下墓碑，之后任何检索都不再返回同类内容。返回物理删除的轮数。 */
+export function forgetHistoryContaining(db: Db, ownerKey: string, needles: string[]): number {
+  const sigs = needles.map((n) => forgetSigOf(n)).filter((x): x is ForgetSig => !!x)
+  if (sigs.length === 0) return 0
+  ensureTombstoneTable(db)
+  const addTomb = db.prepare("INSERT INTO chat_history_forgotten(owner_key, ts, sig) VALUES (?,?,?)")
+  const rows = db.prepare("SELECT id, text FROM chat_history WHERE owner_key=?").all(ownerKey) as Array<{ id: number; text: string }>
+  const doomed: number[] = []
+  for (const r of rows) if (sigs.some((sg) => forgetSigMatches(sg, r.text))) doomed.push(r.id)
   const delFts = db.prepare("DELETE FROM chat_history_fts WHERE rowid=?")
   const delRow = db.prepare("DELETE FROM chat_history WHERE id=?")
   db.exec("BEGIN")
   try {
+    for (const sg of sigs) addTomb.run(ownerKey, Date.now(), JSON.stringify(sg))
     for (const id of doomed) {
       delFts.run(id)
       delRow.run(id)
@@ -251,7 +283,7 @@ export function forgetHistoryContaining(db: Db, ownerKey: string, needles: strin
     db.exec("ROLLBACK")
     throw err
   }
-  return doomed.size
+  return doomed.length
 }
 
 /** 一次性迁移：改写已入库的 user 轮正文（剥掉网关注入尾巴），同步重建 FTS 词；剥空则整行删除。 */
@@ -285,6 +317,12 @@ export function rewriteUserHistoryText(db: Db, marker: string, transform: (text:
 }
 
 export function deleteOwnerHistory(db: Db, ownerKey: string): number {
+  try {
+    ensureTombstoneTable(db)
+    db.prepare("DELETE FROM chat_history_forgotten WHERE owner_key=?").run(ownerKey)
+  } catch {
+    /* 墓碑表缺失不挡清空 */
+  }
   return deleteWhere(db, "owner_key=?", ownerKey)
 }
 
@@ -383,7 +421,10 @@ export function searchHistory(db: Db, q: HistoryQuery): HistoryHit[] {
 
   const exclude = new Set(q.excludeSessionIds ?? [])
   const range = parseTimeRange(q.query, now)
+  const tombs = loadTombstones(db, q.ownerKey)
+  const forgotten = (text: string) => tombs.length > 0 && tombs.some((sg) => forgetSigMatches(sg, text))
   const scored = rows
+    .filter((r) => !forgotten(r.text))
     .filter((r) => !exclude.has(r.session_id) && (q.since === undefined || r.ts >= q.since) && (q.until === undefined || r.ts < q.until))
     .map((r) => {
       let s = -r.rank
@@ -418,9 +459,10 @@ export function searchHistory(db: Db, q: HistoryQuery): HistoryHit[] {
     for (const c of centers) {
       if (hits.length >= limit) break
       const win = getWindow.all(q.ownerKey, sess.sid, c.r.turn_idx - context, c.r.turn_idx + context) as Array<{ turn_idx: number; role: string; text: string; ts: number }>
-      const centerBudget = Math.floor(maxChars * (win.length > 1 ? 0.6 : 1))
-      const sideBudget = win.length > 1 ? Math.floor((maxChars - centerBudget) / Math.max(1, win.length - 1)) : 0
-      const lines = win.map((w) => {
+      const visible = tombs.length > 0 ? win.filter((w) => w.turn_idx === c.r.turn_idx || !forgotten(w.text)) : win
+      const centerBudget = Math.floor(maxChars * (visible.length > 1 ? 0.6 : 1))
+      const sideBudget = visible.length > 1 ? Math.floor((maxChars - centerBudget) / Math.max(1, visible.length - 1)) : 0
+      const lines = visible.map((w) => {
         const budget = w.turn_idx === c.r.turn_idx ? centerBudget : sideBudget
         const text = w.text.length > budget ? w.text.slice(0, Math.max(0, budget - 1)) + "…" : w.text
         return `[${fmtTime(w.ts)} ${w.role === "user" ? "用户" : "助理"}] ${text}`
