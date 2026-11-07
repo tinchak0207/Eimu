@@ -48,7 +48,8 @@ export async function downloadAsset(asset: ViewAsset): Promise<boolean> {
   const url = (asset.url || "").trim();
   if (!url) return false;
   const attempts: Array<() => Promise<Response>> = [
-    () => fetch(url, { mode: "cors", credentials: "omit" }),
+    // no-store：<audio> 先前的无 CORS 请求会把没带 ACAO 头的响应写进缓存，复用它会让 fetch 被 CORS 拦下。
+    () => fetch(url, { mode: "cors", credentials: "omit", cache: "no-store" }),
     () => fetch(`/api/media-download?url=${encodeURIComponent(url)}`, { headers: stationAuthHeaders() }),
   ];
   for (const go of attempts) {

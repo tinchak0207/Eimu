@@ -405,7 +405,14 @@ export async function handleMemoryV2(req: Request, route: string): Promise<Respo
   if (route === "forget") {
     if (!memoryWriteActive(state) && state.memoryTemporary === true) return disabledResponse(state)
     const id = typeof body.id === "string" ? body.id.trim() : ""
-    if (!/^mem-[a-f0-9]{16}$/.test(id)) return jsonErr("invalid_request", "id must be a memory id (mem-xxxxxxxxxxxxxxxx) from memory_recall", 400)
+    const forgetText = typeof body.forget_text === "string" ? body.forget_text.trim().slice(0, 600) : ""
+    if (id && !/^mem-[a-f0-9]{16}$/.test(id)) return jsonErr("invalid_request", "id must be a memory id (mem-xxxxxxxxxxxxxxxx) from memory_recall", 400)
+    if (!id && !forgetText) return jsonErr("invalid_request", "need id (from memory_recall) or forget_text (what to erase from history)", 400)
+    // 只活在对话历史里的事实（长期记忆里没有 id）：只做历史抹除＋墓碑，不碰记忆库。
+    if (!id) {
+      const purged = purgeHistoryFor(ownerKey, [forgetText])
+      return Response.json({ ok: true, success: true, deleted: 0, history_turns_removed: purged, history_tombstoned: true }, { headers: { "Cache-Control": "no-store" } })
+    }
     const secret = String(MEMORY_INGEST_SECRET ?? "").trim()
     if (!secret) return jsonErr("forget_unavailable", "memory service is not configured", 503)
     const raw = JSON.stringify({ owner_key: ownerKey, ids: [id] })
@@ -419,7 +426,7 @@ export async function handleMemoryV2(req: Request, route: string): Promise<Respo
       const json = (await res.json().catch(() => ({}))) as { deleted?: number; removed?: Array<{ description?: string; body?: string }> }
       if (!res.ok) return jsonErr("forget_failed", "memory service rejected the request", 502)
       memorySharedCorpus.invalidate()
-      const forgotten = purgeHistoryFor(ownerKey, (json.removed ?? []).flatMap((r) => [r.description, r.body]))
+      const forgotten = purgeHistoryFor(ownerKey, [...(json.removed ?? []).flatMap((r) => [r.description, r.body]), forgetText])
       return Response.json({ ok: true, success: true, deleted: Number(json.deleted ?? 0), history_turns_removed: forgotten }, { headers: { "Cache-Control": "no-store" } })
     } catch {
       return jsonErr("forget_failed", "memory service unreachable", 502)

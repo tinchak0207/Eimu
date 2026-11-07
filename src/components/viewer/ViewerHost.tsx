@@ -282,7 +282,7 @@ function ActionBar({
     >
       {actions && (
         <>
-          <ActionButton
+          {!(hideDownload && !onSaveToLibrary) && <ActionButton
             label={saveState === "saved" ? "已存" : saveState === "failed" ? "未存入" : "存图库"}
             disabled={!onSaveToLibrary || saveState === "loading" || saveState === "saved"}
             danger={saveState === "failed"}
@@ -295,7 +295,7 @@ function ActionBar({
             ) : (
               <Library className="h-4 w-4" aria-hidden="true" />
             )}
-          </ActionButton>
+          </ActionButton>}
           {!hideDownload && <ActionButton
             label={downState === "failed" ? "失败" : "下载"}
             disabled={!asset.url || downState === "loading"}
@@ -308,10 +308,10 @@ function ActionBar({
               <Download className="h-4 w-4" aria-hidden="true" />
             )}
           </ActionButton>}
-          <RerunMenu disabled={!onRerun} onPick={(count) => onRerun?.(asset, count)} />
-          <ActionButton label="微调" disabled={!onVariant} onClick={() => onVariant?.(asset)}>
+          {!(hideDownload && !onRerun) && <RerunMenu disabled={!onRerun} onPick={(count) => onRerun?.(asset, count)} />}
+          {!(hideDownload && !onVariant) && <ActionButton label="微调" disabled={!onVariant} onClick={() => onVariant?.(asset)}>
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-          </ActionButton>
+          </ActionButton>}
         </>
       )}
       {extraActions
@@ -806,7 +806,7 @@ export function ViewerStage({
       {footerNode ? (
         <div className="flex max-h-[30dvh] shrink-0 justify-center overflow-y-auto px-2 pb-1">{footerNode}</div>
       ) : null}
-      {(actions || (extraActions && extraActions.length > 0)) && (
+      {((actions && !(music && !actions.onSaveToLibrary && !actions.onRerun && !actions.onVariant)) || (extraActions && extraActions.length > 0)) && (
         <div className="relative z-20">
           <ActionBar key={current.id} asset={current} actions={actions} extraActions={extraActions} hideDownload={music} />
         </div>
