@@ -62,7 +62,9 @@ export function glbReport(bytes: Uint8Array): GlbReport {
   if (buf.length < 20 || buf.toString("ascii", 0, 4) !== "glTF") throw new Error("产物不是 GLB（魔数不符）")
   const version = buf.readUInt32LE(4)
   if (version !== 2) throw new Error(`GLB 版本 ${version} 不支持`)
+  if (buf.readUInt32LE(8) !== buf.length) throw new Error("GLB 文件长度与头部声明不一致")
   const jsonLen = buf.readUInt32LE(12)
+  if (jsonLen % 4 || 20 + jsonLen > buf.length) throw new Error("GLB JSON chunk 长度无效")
   if (buf.toString("ascii", 16, 20) !== "JSON") throw new Error("GLB 第一个 chunk 不是 JSON")
   const gltf = JSON.parse(buf.toString("utf8", 20, 20 + jsonLen))
   const accessors: any[] = gltf.accessors ?? []
@@ -85,10 +87,14 @@ export function glbReport(bytes: Uint8Array): GlbReport {
       }
       if (prim.attributes?.TEXCOORD_0 !== undefined) hasUv = true
       const mode = prim.mode ?? 4
+      const idx = prim.indices !== undefined ? accessors[prim.indices] : null
+      const count = idx ? idx.count : pos?.count
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error("GLB primitive 缺少有效的 accessor count")
       if (mode === 4) {
-        const idx = prim.indices !== undefined ? accessors[prim.indices] : null
-        triangles += Math.floor((idx ? idx.count : pos?.count ?? 0) / 3)
-      }
+        if (count % 3) throw new Error("GLB triangle primitive 的元素数量不是 3 的倍数")
+        triangles += count / 3
+      } else if (mode === 5 || mode === 6) triangles += Math.max(0, count - 2)
+      else throw new Error(`GLB primitive mode=${mode} 不是三角网格`)
     }
   }
   return {

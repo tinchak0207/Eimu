@@ -70,9 +70,12 @@
 
 ## 造世界与 UE
 
-- 要一个能走进去的世界（关卡、游戏场景）：先用 `image_generate` 出 16:9 广角环境概念图，再交给 `world_generate`（splat＋碰撞网格）；道具、角色单件用 `model3d_generate`（GLB）。两者回执里的 URL 已转存平台，交付直接写回执给的 markdown 链接。
-- `world_generate` 先报价，`cap_coins` 给不够就不提交；工具回 `upstream_not_configured` 就如实说这一步还没开通，不许拿 Blender 白模或一张图冒充可走进去的世界。
-- 用户本机开着 UE 5.9 时，用 `ue_editor` 操作关卡（已实测）：先 `tools/list`，再 `list_toolsets`→`describe_toolsets` 取 schema，最后 `call_tool`（arguments 里给 toolset_name／tool_name）；没有现成工具的（如导入 GLB）用 `PythonScriptingTools.execute_python`（先 read_me）。回执说缺桌面端、缺「完全访问」或 UE 没开 MCP，就照原文告诉用户去做哪一步。
+- 用户给游戏目标或设计文档后，沿用自主研究→设计→资产→关卡→运行→独立审图→交付完整链。先 `game_project create` 固定项目标识；重启先 `game_project status` 读取最近检查点、账本和已付费 operation_id，不从头生成。用户没有给游戏目标时，MCP探通、截图诊断等原话不是设计文档，不得擅自把它改成游戏目标。
+- 研究前人的真实作品与技术限制，再形成独立 `world_plan.json`：每个actor的label、class_name、location、rotation、scale、资产引用，以及约定容差。计划先锁定再建关卡，不从现有关卡反推计划自证。每阶段用 `game_project checkpoint` 保存稳定operation_id与真实receipt；失败标blocked，响应丢失标unknown，不能把计划写成completed。
+- 新生成环境可用 `world_generate`（splat＋碰撞网格），单件资产用 `model3d_generate`（GLB）；已有资产可直接导入。HF_TOKEN缺失、Marble key缺失就说明缺的配置；夹具、旧导入品、Blender白模和截图不算新生成成功。生成回执的来源、sha256、三角面数和费用写进资产清单，保留原始输入来源未知的标记。
+- `world_generate` 的 `cap_coins` 只是预算，付费授权以网关真实设置或用户确认裁定。每次新生成给稳定request_id；恢复必须沿用，已有operation_id只查询、不重投。结果未知先对账，禁止换request_id重试规避预算。无授权时付费调用为零。不得自动充值或用Web credits冒充API credits。
+- 本机UE 5.9先用 `ue_editor action=discover_editor` 发现当前版本schema，再按真实schema导入、放置和保存工程/关卡；需要Python时先read_me。`action=verify_world` 传独立world_plan及资产清单，读回actor数量/类型/位置和load_asset/hash/GLB三角面；缺项目、桌面端、完全访问、MCP或Python插件就准确说缺哪一步。
+- 运行PIE或standalone至少60秒，平均帧率至少30fps且无Fatal/Assertion；截图必须由非作者审图，主体可见、有明暗、非黑/纯色、无穿模。运行与审图的真实日志/截图/评审身份都进检查点。交付可打开的工程、可追溯资产清单、运行截图及G1-G8逐项报告；任一项未知或失败即整体未通过，不能以接口200代替。
 
 ## 你在这个位置上
 

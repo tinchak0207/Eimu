@@ -9,6 +9,7 @@ import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
 import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
+import { pauseAtDeploymentStepBoundary } from "./deployment-step-drain"
 
 
 /** 2026-10-27：闸门/运行时错误原文可给模型，但用户可见帧改产品句或不发卡。 */
@@ -206,6 +207,7 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   // terminal 同理，被去重吞掉会让调用永久留在在跑表（只在 completed/error 收尾）。
   const runningReg = status === "pending" || status === "running" ? noteToolRunning(state, callId, toolName, st.input, Date.now()) : undefined
   if (status === "completed" || status === "error") noteToolTerminal(state, callId)
+  if(status === "completed" || status === "error") pauseAtDeploymentStepBoundary(state)
 
   // Dedup by callID + status so a repeated identical status does not re-emit.
   const dedupKey = `${callId}:${status}`

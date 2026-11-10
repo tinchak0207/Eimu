@@ -6,6 +6,7 @@ import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
 import { withPinnedWakeSystem } from "./pinned-goal.ts"
+import { pauseAtDeploymentStepBoundary } from "./deployment-step-drain"
 // events-translate.ts —— 自 index.ts 第二阶段 Wave2 抽取：opencode 事件翻译层——eventSessionId/boundMap/boundSet/isAssistantMessage/parseToolOutput、resolveResultUrl、emitImageDone/emitVideoDone/emitAudioDone、自动制画布（canvasUnitId/readGenerateInput/autoCreateCanvasUnit/attachCanvasTask/emitCanvasResult）、toolErrorPayload、bash deny 归因（bashDenyCache）、findUploadsByBasename/resolveInvisibleUploadPaths/deniedOperationLabel、trackTurnNodeTerminal、workflowStartSchemaHint、handleToolPartUpdate、idle-step breaker（finalizeIdleStep/triggerIdleStepBreaker）。
 // 原 index.ts 2708–3618 行，逐行原样搬运（仅顶层宣告加 export 前缀）。
 // 2026-10-04 W：守卫家族文案（空转止损 nudge／deny 守卫等）书写体镜像已整体拆除——一律简体。
@@ -16,6 +17,7 @@ import { withPinnedWakeSystem } from "./pinned-goal.ts"
 // step 结算：无 tool、无非空正文、无非空 reasoning = 空 step。空 step 连续累计；
 // 任一活动归零。达阈值且 turn 活跃 → 中止 + 同轮补一次动作导向 nudge。
 export function finalizeIdleStep(state: SessionState): void {
+  if(pauseAtDeploymentStepBoundary(state)) return
   // 空转补丁：本 step 只有 no-op bash 且无正文 → 视为空 step（即使有 reasoning）
   const noopOnly = !!state.stepNoopTool && !state.stepHasTool && !state.stepHasText
   const empty = noopOnly || (!state.stepHasTool && !state.stepHasText && !state.stepHasReasoning)

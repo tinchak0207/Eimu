@@ -228,6 +228,7 @@ drain_then_maintenance() {
     DRAIN_PHASE=force drain_gate "$@"
     return 0
   fi
+  step_drain_begin "$mdb" "${2:-180}"
   DRAIN_PHASE=soft drain_gate "$@"
   maintenance_begin "$mdb"
   DRAIN_PHASE=final drain_gate "$1" "${DRAIN_FINAL_SECS:-30}" "${@:3}"
@@ -236,7 +237,31 @@ drain_then_maintenance() {
 emit_drain_lib() {
   printf 'DRAIN_FINAL_SECS=%q\nDRAIN_COOLDOWN_SECS=%q\nDRAIN_COOLDOWN_MAX_SECS=%q\nDRAIN_STAMP=%q\n' \
     "$DRAIN_FINAL_SECS_DEFAULT" "$DRAIN_COOLDOWN_SECS_DEFAULT" "$DRAIN_COOLDOWN_MAX_DEFAULT" "$DRAIN_STAMP_DEFAULT"
-  declare -f drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end
+  declare -f drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end step_drain_begin step_drain_end
+}
+
+# 软drain只请求在步骤边界停，不开启公开503；复用生成账本control表与现有activation锁。
+step_drain_begin() {
+  STEP_DRAIN_DB="$1"
+  python3 - "$1" "$ACTIVATION_LOCK" "${2:-180}" <<'STEP_DRAIN'
+import json,sqlite3,sys,time
+c=sqlite3.connect(sys.argv[1],timeout=5)
+value=json.dumps({'owner':sys.argv[2],'expires_at':int(time.time()*1000)+(int(sys.argv[3])+120)*1000})
+c.execute("INSERT INTO generation_runtime_control(name,value) VALUES('step-drain',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",(value,))
+c.commit()
+STEP_DRAIN
+}
+step_drain_end() {
+  if [ -z "${STEP_DRAIN_DB:-}" ]; then return 0; fi
+  python3 - "$STEP_DRAIN_DB" "$ACTIVATION_LOCK" <<'STEP_DRAIN'
+import json,sqlite3,sys
+c=sqlite3.connect(sys.argv[1],timeout=5)
+row=c.execute("SELECT value FROM generation_runtime_control WHERE name='step-drain'").fetchone()
+if row and json.loads(row[0]).get('owner')==sys.argv[2]:
+ c.execute("DELETE FROM generation_runtime_control WHERE name='step-drain'")
+c.commit()
+STEP_DRAIN
+  STEP_DRAIN_DB=""
 }
 
 # 复用既有 maintenance 布尔；同表所有权记录只用于 finally 与下次激活恢复原值。
@@ -283,6 +308,7 @@ maintenance_end() {
     maintenance_control "$MAINT_DB" end "$MAINT_TOKEN" || return 1
     MAINT_TOKEN=""
   fi
+  step_drain_end
 }
 
 gateway_prepare() {

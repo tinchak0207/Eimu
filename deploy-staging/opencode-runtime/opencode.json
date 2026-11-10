@@ -521,7 +521,8 @@
         "write": true,
         "ue_editor": true,
         "model3d_generate": true,
-        "world_generate": true
+        "world_generate": true,
+        "game_project": true
       }
     },
     "plan": {
@@ -701,7 +702,8 @@
         "write": false,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "compaction": {
@@ -881,7 +883,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       },
       "permission": {
         "*": "deny"
@@ -1067,7 +1070,8 @@
         "write": true,
         "ue_editor": true,
         "model3d_generate": true,
-        "world_generate": true
+        "world_generate": true,
+        "game_project": true
       }
     },
     "orchestrator": {
@@ -1250,7 +1254,8 @@
         "write": false,
         "ue_editor": true,
         "model3d_generate": true,
-        "world_generate": true
+        "world_generate": true,
+        "game_project": true
       }
     },
     "director3d": {
@@ -1433,7 +1438,8 @@
         "write": true,
         "ue_editor": true,
         "model3d_generate": true,
-        "world_generate": true
+        "world_generate": true,
+        "game_project": true
       }
     },
     "music": {
@@ -1616,7 +1622,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "video-director": {
@@ -1799,7 +1806,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "editor": {
@@ -1982,7 +1990,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "screenwriter": {
@@ -2165,7 +2174,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "motion-director": {
@@ -2348,7 +2358,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "web3d-director": {
@@ -2531,7 +2542,8 @@
         "write": true,
         "ue_editor": true,
         "model3d_generate": true,
-        "world_generate": true
+        "world_generate": true,
+        "game_project": true
       }
     },
     "critic": {
@@ -2714,7 +2726,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     },
     "lyricist": {
@@ -2897,7 +2910,8 @@
         "write": true,
         "ue_editor": false,
         "model3d_generate": false,
-        "world_generate": false
+        "world_generate": false,
+        "game_project": false
       }
     }
   }

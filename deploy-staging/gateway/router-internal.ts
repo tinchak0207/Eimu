@@ -4,6 +4,8 @@ import { handlePermission } from "./permission-http.ts"
 import { runHooksWithBudget } from "./hooks-http.ts"
 import { escapeInjectedData, type HookRunResult } from "./harness-hooks.ts"
 import type { PrecheckChild } from "./router-types.ts"
+import { generationStepDrainRequested } from "./job-store"
+import { isReadOnlyTool } from "./permission-policy"
 
 // ── 工具前置检查合并端点（2026-10-18）────────────────────────────────────────
 // 背景：eimu-guard 的 tool.execute.before 对每个非只读工具最多 3 个 loopback 往返
@@ -135,6 +137,11 @@ export async function handleToolPrecheck(req: Request): Promise<Response> {
     return jsonError(400, "session_id and tool are required", "bad_request", "bad_request")
   }
   const input = precheckIsRecord(parsed.input) ? parsed.input : {}
+  // 旧进程完成当前工具后，拒绝下一次写/执行调用，封住abort请求在途的启动竞态。
+  // 状态读取与检查点仍可用；租约失效后原规则自动恢复，不创建第二套权限真源。
+  if(generationStepDrainRequested() && !isReadOnlyTool(tool) && tool!=="report_checkpoint" && !(tool==="game_project" && ["status","checkpoint"].includes(String(input.action)))) {
+    return Response.json({ok:true,plan:{status:200,body:{inPlanMode:false}},permission:{status:200,body:{behavior:"deny",reason:{reason:"发布已请求在当前步骤完成后暂停；已提交任务继续，更新后接续。"}}},hook:null})
+  }
   const checks = precheckIsRecord(parsed.checks) ? parsed.checks : {}
   // 只读工具原本就不查 plan/permission（插件短路径），保持零评估。
   const wantPlan = checks.plan !== false

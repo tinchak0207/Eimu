@@ -1,7 +1,9 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail } from "../lib/client"
+import { ok, fail, productionScope } from "../lib/client"
 import { GradioSession, GradioSpaceError } from "../lib/gradio-space"
 import { fetchInputImage, glbReport, storeAsset } from "../lib/asset3d"
+import { createHash } from "node:crypto"
+import { gameCheckpoint, gameProject } from "../lib/game-project"
 
 // model3d_generate — 图生 3D 网格（造世界：主角道具、陈设、可交互物件）。
 //
@@ -52,6 +54,8 @@ export default tool({
     const stages: Array<{ stage: string; seconds: number }> = []
     const mark = (stage: string) => stages.push({ stage, seconds: Math.round((Date.now() - started) / 100) / 10 })
     try {
+      const scope = args.project ? await productionScope(context.sessionID, args.project, context.abort) : null
+      if (scope && args.project) gameProject(scope, args.project, context.sessionID)
       const input = await fetchInputImage(args.image_url, context.abort)
       const space = new GradioSession(TRELLIS_SPACE, token)
       await space.call("start_session", [], { signal: context.abort, timeoutMs: 60_000 })
@@ -76,11 +80,31 @@ export default tool({
       const stored = await storeAsset(glb, `${slug}.glb`, context.sessionID)
       mark("stored")
       const label = args.label?.trim() || "3D 模型"
-      return ok({
+      const receipt = {
         title: `3D 模型：${label}`,
         glb_url: stored.url,
         markdown_link: `[${label}（GLB，${report.triangles} 面）](${stored.url})`,
         asset_report: report,
+        asset_manifest_entry: {
+          id: `sha256:${stored.sha256}`,
+          label,
+          url: stored.url,
+          sha256: stored.sha256,
+          bytes: stored.bytes,
+          triangles: report.triangles,
+          source: {
+            kind: "generated",
+            upstream: "trellis2",
+            uri: TRELLIS_SPACE,
+            input_image_sha256: createHash("sha256").update(input.bytes).digest("hex"),
+            seed,
+          },
+          cost_coins: 0,
+          cost_basis: "TRELLIS.2 Hugging Face ZeroGPU 上游不收费；未计入生成参考图的独立费用。",
+          ue_asset_paths: [],
+          verification_status: "unknown",
+          missing: ["local_path", "ue_import_and_load_receipt", "world_plan_actor_reconciliation"],
+        },
         upstream: "trellis2",
         upstream_space: TRELLIS_SPACE,
         seed,
@@ -88,7 +112,24 @@ export default tool({
         cost_coins: 0,
         stages,
         note: "GLB 已转存平台存储（长期有效）。交付时写 markdown_link；要进 UE 时把 glb_url 交给 ue_editor 的导入工具。",
-      })
+      }
+      let checkpoint: Record<string, unknown> | null = null
+      if (scope && args.project) {
+        try {
+          const snapshot = gameProject(scope, args.project, context.sessionID)
+          const operationID = `model3d:${stored.sha256}`
+          const prior = snapshot.checkpoints.find((entry: any) => entry.operation_id === operationID)
+          const saved = prior ? snapshot : gameCheckpoint(scope, args.project, context.sessionID, operationID, "assets", "completed", {
+            asset_manifest_entry: receipt.asset_manifest_entry,
+            glb_url: stored.url,
+          })
+          checkpoint = { status: "persisted", workspace: saved.workspace, operation_id: operationID }
+        } catch (error: any) {
+          // The stored GLB is already valid. Preserve its delivery even if optional project bookkeeping fails.
+          checkpoint = { status: "unknown", error: String(error?.message ?? error) }
+        }
+      }
+      return ok({ ...receipt, checkpoint })
     } catch (e: any) {
       const code = e instanceof GradioSpaceError ? e.code : "model3d_failed"
       return fail(code, String(e?.message ?? e).slice(0, 600), { stages, upstream: "trellis2" })

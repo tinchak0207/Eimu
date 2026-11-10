@@ -1,7 +1,9 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail } from "../lib/client"
+import { ok, fail, confirmSpend, productionScope } from "../lib/client"
+import { claimSubmission, contentHash, getSubmission, finishSubmission, recordArtifacts, verifiedArtifactEntries, recordSubmissionCost } from "../lib/image-journal"
 import { fetchInputImage, storeAsset } from "../lib/asset3d"
 import { safeFetch } from "../lib/sandbox"
+import { createHash } from "node:crypto"
 
 // world_generate — 一张概念图／一段文字 → 可走进去的 3D 世界（World Labs Marble API）。
 //
@@ -27,7 +29,7 @@ const GENERATE_CREDITS: Record<string, number> = {
   "marble-1.0-draft": 230,
   "marble-1.0": 1580,
   "marble-1.1": 1580,
-  "marble-1.1-plus": 1580,
+  "marble-1.1-plus": 3080,
 }
 
 function creditsToCoins(credits: number): number {
@@ -49,18 +51,18 @@ async function wl(path: string, key: string, init: RequestInit & { signal?: Abor
   if (!res.ok) {
     const msg = String(data?.detail ?? data?.message ?? data?.error ?? data?.raw ?? "").slice(0, 400)
     const code = res.status === 402 ? "upstream_insufficient_credits" : res.status === 401 || res.status === 403 ? "upstream_auth_failed" : res.status === 422 || res.status === 400 ? "upstream_rejected" : "upstream_error"
-    throw Object.assign(new Error(`Marble HTTP ${res.status}${msg ? `：${msg}` : ""}`), { code })
+    throw Object.assign(new Error(`Marble HTTP ${res.status}${msg ? `：${msg}` : ""}`), { code, upstreamStatus:res.status })
   }
   return data
 }
 
-async function rehost(url: string | undefined | null, filename: string, sessionID: string, signal?: AbortSignal): Promise<string | null> {
+async function rehost(url: string | undefined | null, filename: string, sessionID: string, signal?: AbortSignal): Promise<{url:string;sha256:string;bytes:number} | null> {
   if (!url) return null
   const res = await safeFetch(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000) })
   if (!res.ok) throw new Error(`下载 ${filename} 失败 HTTP ${res.status}`)
   const buf = new Uint8Array(await res.arrayBuffer())
   if (buf.byteLength > MAX_ASSET_BYTES) throw new Error(`${filename} 超过 180MB`)
-  return (await storeAsset(buf, filename, sessionID)).url
+  return {url:(await storeAsset(buf, filename, sessionID)).url,sha256:createHash("sha256").update(buf).digest("hex"),bytes:buf.byteLength}
 }
 
 // 描述随开通状态如实变化（同 model3d_generate）：没 key 时不让模型对用户承诺「能走进去的场景能先做出来」。
@@ -81,17 +83,15 @@ export default tool({
     seed: tool.schema.number().int().min(0).max(2147483647).optional(),
     display_name: tool.schema.string().max(64).optional().describe("世界名（≤64 字）。"),
     project: tool.schema.string().optional().describe("项目名（写进回执，供 game_asset_manifest 归档）。"),
+    request_id: tool.schema.string().min(1).max(160).describe("本次生成的稳定幂等身份。重启、超时和重试沿用原值；同一身份只向上游提交一次。"),
     cap_coins: tool.schema.number().min(0).describe("本次最多可花的币；低于报价直接回报价、不提交。"),
   },
   async execute(args, context) {
     if (!args.image_url && !args.prompt?.trim()) return fail("bad_request", "image_url 与 prompt 至少给一个。")
     const model = args.model ?? "marble-1.1"
-    const quoteCredits = GENERATE_CREDITS[model]
+    const quoteCredits = args.image_url && args.is_pano ? model === "marble-1.0-draft" ? 150 : model === "marble-1.1-plus" ? 3000 : 1500 : GENERATE_CREDITS[model]
     const quoteCoins = creditsToCoins(quoteCredits)
-    const quote = { model, credits: quoteCredits, usd: +(quoteCredits / CREDITS_PER_USD).toFixed(3), coins: quoteCoins, basis: args.image_url ? "定价页图片输入单价" : "文字输入未单列，按同档图片输入上限报价" }
-    if (args.cap_coins < quoteCoins) {
-      return fail("budget_exceeded", `这次世界生成报价 ${quoteCoins} 币（${model}，${quoteCredits} credits），超过 cap_coins=${args.cap_coins}，未提交。`, { quote })
-    }
+    const quote = { model, credits: quoteCredits, usd: +(quoteCredits / CREDITS_PER_USD).toFixed(3), coins: quoteCoins, usd_cny_estimate:USD_CNY, pricing_source:"https://docs.worldlabs.ai/api/pricing", pricing_checked_at:"2026-11-11", actual_cost:null, basis:args.image_url&&args.is_pano?"官方全景图片输入价":"官方文字/非全景图片输入价" }
     const key = process.env.WORLDLABS_API_KEY || process.env.WLT_API_KEY || ""
     if (!key) {
       return fail(
@@ -101,9 +101,28 @@ export default tool({
       )
     }
     const started = Date.now()
+    let scope: string | undefined
+    let opId: string | undefined
+    let submitting = false
     try {
+      scope=await productionScope(context.sessionID,args.project,context.abort)
+      const identity={image_url:args.image_url??null,prompt:args.prompt?.trim()??null,is_pano:args.is_pano??false,model,seed:args.seed??null,display_name:args.display_name??null}
+      const existing=getSubmission(scope,args.request_id)
+      if(existing&&existing.payload_hash!==contentHash(identity)) return fail("idempotency_key_reused","同一request_id的生成输入已改变，未提交。",{request_id:args.request_id})
+      if(!existing&&args.cap_coins<quoteCoins) return fail("budget_exceeded",`这次世界生成报价${quoteCoins}币，超过cap_coins=${args.cap_coins}，未提交。`,{quote})
+      if(existing?.state==="completed"&&existing.task_id) {
+        const receipt=verifiedArtifactEntries(scope,existing.task_id)[0]
+        if(receipt) return ok({...receipt,resumed:true})
+      }
+      opId=existing?.task_id??undefined
+      if(existing&&!opId) return fail("submission_unknown","原提交尚无operation_id，保留原预算与幂等身份；必须先向World Labs对账，禁止再次提交。",{request_id:args.request_id,state:existing.state,quote})
+      // cap是预算，不是授权。沿用网关真实full/auto与人工确认；恢复已接受操作不再请求或扣费。
+      if(!opId) {
+        const approved=await confirmSpend({sessionID:context.sessionID,amount_coins:quoteCoins,description:`World Labs ${model}：${quoteCredits} credits，上限${args.cap_coins}币`,model,request_id:`world:${contentHash({scope,request_id:args.request_id})}`},context.abort)
+        if(!approved) return fail("payment_not_authorized","本次世界生成尚未取得真实付费授权，未调用上游。",{quote,request_id:args.request_id})
+      }
       const worldPrompt: Record<string, unknown> = args.image_url
-        ? await (async () => {
+        ? opId ? {} : await (async () => {
             const img = await fetchInputImage(args.image_url!, context.abort)
             return {
               type: "image",
@@ -113,12 +132,19 @@ export default tool({
             }
           })()
         : { type: "text", text_prompt: args.prompt!.trim() }
-      const body: Record<string, unknown> = { world_prompt: worldPrompt, model, display_name: (args.display_name || args.project || "Eimu world").slice(0, 64) }
+      const body: Record<string, unknown> = { world_prompt: worldPrompt, model, permission:{public:false}, display_name: (args.display_name || args.project || "Eimu world").slice(0, 64) }
       if (args.seed !== undefined) body.seed = args.seed
-      const op = await wl("/marble/v1/worlds:generate", key, { method: "POST", body: JSON.stringify(body), signal: context.abort })
-      const opId = String(op?.operation_id ?? "")
-      if (!opId) throw Object.assign(new Error("Marble 没回 operation_id"), { code: "upstream_bad_response" })
-      let done = op
+      let done: any
+      if(opId) done=await wl(`/marble/v1/operations/${encodeURIComponent(opId)}`,key,{signal:context.abort})
+      else {
+        if(!claimSubmission({scope,request_id:args.request_id,session_id:context.sessionID,project:args.project,model,cost_coins:quoteCoins,pricing_source:quote.pricing_source,pricing_checked_at:quote.pricing_checked_at,actual_cost_coins:null},identity,args.cap_coins)) return fail("submission_unknown","同一操作已被其他进程占位，请沿用request_id恢复，未重复提交。",{request_id:args.request_id,quote})
+        submitting=true
+        done=await wl("/marble/v1/worlds:generate", key, { method:"POST",body:JSON.stringify(body),signal:context.abort })
+        opId=String(done?.operation_id??"")
+        if(!opId) throw Object.assign(new Error("Marble没回operation_id；结果未知，保留原身份与预算，禁止重投。"),{code:"submission_unknown"})
+        finishSubmission(scope,args.request_id,"accepted",opId)
+        submitting=false
+      }
       while (!done?.done) {
         if (Date.now() - started > MAX_WAIT_MS) {
           return fail("upstream_timeout", `Marble 15 分钟未完成，operation_id=${opId}（已提交，费用以上游为准；勿重复提交）。`, { operation_id: opId, quote })
@@ -126,20 +152,37 @@ export default tool({
         await new Promise((r) => setTimeout(r, POLL_MS))
         done = await wl(`/marble/v1/operations/${encodeURIComponent(opId)}`, key, { signal: context.abort })
       }
-      if (done.error) throw Object.assign(new Error(`Marble 生成失败：${JSON.stringify(done.error).slice(0, 400)}`), { code: "upstream_failed" })
+      if (done.error) {
+        finishSubmission(scope,args.request_id,"failed",opId)
+        throw Object.assign(new Error(`Marble 生成失败：${JSON.stringify(done.error).slice(0, 400)}`), { code: "upstream_failed" })
+      }
       const world = done.response?.assets ? done.response : await wl(`/marble/v1/worlds/${encodeURIComponent(String(done.response?.world_id ?? ""))}`, key, { signal: context.abort })
+      const upstreamCost=done.cost??world?.cost??null
+      const actualCostCoins=typeof upstreamCost?.total_credits==="number"&&Number.isFinite(upstreamCost.total_credits)&&upstreamCost.total_credits>=0?((upstreamCost.total_credits/CREDITS_PER_USD)*USD_CNY)/COIN_CNY:null
+      recordSubmissionCost(scope,args.request_id,upstreamCost,actualCostCoins)
       const assets = world?.assets ?? {}
       const spzEntries = Object.entries((assets.splats?.spz_urls ?? {}) as Record<string, string>)
+      if(!spzEntries.length && !assets.mesh?.collider_mesh_url) return fail("upstream_assets_incomplete","Marble虽报告done，但没有splat或碰撞网格；保留operation_id以查询恢复，不能把空回执报成世界交付。",{operation_id:opId,request_id:args.request_id,quote})
       const splats: Record<string, string> = {}
+      const artifactErrors: Array<{filename:string;message:string}>=[]
+      const assetManifestEntries: Array<Record<string,unknown>>=[]
+      const preserve=async(url: string | undefined | null,filename:string):Promise<string|null>=>{
+        try {
+          const artifact=await rehost(url,filename,context.sessionID,context.abort)
+          if(!artifact) return null
+          assetManifestEntries.push({id:`${opId}:${filename}`,filename,url:artifact.url,sha256:artifact.sha256,bytes:artifact.bytes,source:{kind:"worldlabs",uri:`${API}/marble/v1/operations/${encodeURIComponent(opId!)}`,operation_id:opId,role:filename}})
+          return artifact.url
+        }catch(e:any){artifactErrors.push({filename,message:String(e?.message??e).slice(0,300)});return null}
+      }
       for (const [res, url] of spzEntries) {
-        const stored = await rehost(url, `world-${res}.spz`, context.sessionID, context.abort)
+        const stored = await preserve(url, `world-${res}.spz`)
         if (stored) splats[res] = stored
       }
-      const collider = await rehost(assets.mesh?.collider_mesh_url, "world-collider.glb", context.sessionID, context.abort)
-      const pano = await rehost(assets.imagery?.pano_url, "world-pano.png", context.sessionID, context.abort)
-      const thumb = await rehost(assets.thumbnail_url, "world-thumb.png", context.sessionID, context.abort)
+      const collider = await preserve(assets.mesh?.collider_mesh_url, "world-collider.glb")
+      const pano = await preserve(assets.imagery?.pano_url, "world-pano.png")
+      const thumb = await preserve(assets.thumbnail_url, "world-thumb.png")
       const name = args.display_name || world?.display_name || "3D 世界"
-      return ok({
+      const receipt={
         title: `3D 世界：${name}`,
         world_id: world?.world_id ?? null,
         viewer_url: world?.world_marble_url ?? null,
@@ -154,14 +197,24 @@ export default tool({
           ...(pano ? [`[${name} 全景](${pano})`] : []),
         ],
         quote,
-        upstream_cost: done.cost ?? world?.cost ?? null,
+        upstream_cost: upstreamCost,
+        actual_cost_coins:actualCostCoins,
+        asset_manifest_entries:assetManifestEntries,
+        artifact_errors:artifactErrors,
         operation_id: opId,
+        request_id: args.request_id,
         project: args.project ?? null,
         seconds: Math.round((Date.now() - started) / 1000),
-        note: "splat 与碰撞网格已转存平台。进 UE：碰撞网格当地形碰撞、splat 用 UE 的 Gaussian splat 插件或官方查看器预览；交付文写 markdown_links。",
-      })
+        note: "只以asset_manifest_entries与markdown_links中的真实产物为准。碰撞网格用于UE碰撞，splat需Gaussian splat插件；缺项与转存错误见artifact_errors。",
+      }
+      recordArtifacts(scope,opId!,[receipt])
+      if(!collider || !Object.keys(splats).length || artifactErrors.length) return fail("upstream_assets_incomplete","已保留可用产物；存在缺项或转存错误，此步骤尚未交付完整世界，沿用operation_id恢复查询。",{...receipt,partial:true})
+      finishSubmission(scope,args.request_id,"completed",opId)
+      return ok(receipt)
     } catch (e: any) {
-      return fail(e?.code ?? "world_failed", String(e?.message ?? e).slice(0, 600), { quote, seconds: Math.round((Date.now() - started) / 1000) })
+      // 提交之后异常一律保留预算；HTTP拒绝也不假定已退款。响应丢失不等于未提交。
+      if(scope&&submitting) finishSubmission(scope,args.request_id,"submission_unknown",opId)
+      return fail(submitting?"submission_unknown":e?.code ?? "world_failed", String(e?.message ?? e).slice(0, 600), { quote,request_id:args.request_id,operation_id:opId??null, seconds: Math.round((Date.now() - started) / 1000) })
     }
   },
 })
