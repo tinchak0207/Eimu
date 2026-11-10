@@ -20,18 +20,19 @@ const NEXT_STEP: Record<string, string> = {
 
 export default tool({
   description:
-    "驱动使用者本机的 Unreal Editor（UE 5.8 官方 Unreal MCP，经 Eimu 桌面端本机桥中继），做游戏关卡时用。" +
-    "能做什么只以 UE 回来的工具清单为准：官方 5.8 文档列的是场景、Actor、材质实例、对象四类工具集，没有列导入资产或执行脚本；" +
-    "tools/list 回来之前不要向用户承诺具体能力（尤其不要说能导入模型），清单里真有再说。" +
-    "用法固定三步：① method=tools/list 看 UE 暴露了什么（开 Tool Search 时只有 list_toolsets／describe_toolset／call_tool 三个元工具）；" +
-    "② tools/call name=list_toolsets → name=describe_toolset 取目标工具的参数 schema；" +
-    "③ tools/call name=call_tool（或 UE 列出的具体工具名）照 schema 传 arguments。" +
+    "驱动使用者本机的 Unreal Editor（已在 UE 5.9.0 实测：官方 Unreal MCP 经 Eimu 桌面端本机桥中继），做游戏关卡时用。" +
+    "用法：① method=tools/list 看 UE 暴露的元工具（list_toolsets／describe_toolsets／describe_tools／call_tool）；" +
+    "② name=list_toolsets 看工具集，name=describe_toolsets 取工具名与 schema；" +
+    "③ name=call_tool，arguments={toolset_name, tool_name, arguments} 调用。" +
+    "已知工具集（5.9.0）：EditorToolset.ActorToolset（改 actor 变换、标签、组件）、EditorToolset.LevelToolset（加 actor 到场景、查关卡）、" +
+    "EditorToolset.AssetToolset（查找／移动／删除资产，不含导入）、EditorToolset.MaterialInstanceToolset（材质实例参数）；" +
+    "editor_toolset.toolsets.python_scripting.PythonScriptingTools.execute_python 可跑 unreal Python（先调 read_me 一次）——导入 GLB 等没有现成工具的动作走它。" +
     "参数格式只信 UE 回来的 schema，禁止凭印象编字段。UE 工具在游戏线程串行执行，一次只发一个调用，等结果再发下一个。" +
     "回执 is_error=true 表示 UE 工具本身报错（照原文修参数），不是链路坏了。" +
     "前提：使用者开着 Eimu 桌面端（完全访问）且 UE 5.8 已启用 Unreal MCP＋All Toolsets 插件并执行 ModelContextProtocol.StartServer；不满足时回执会写明缺哪一步，照原文转告使用者，不要假装已放好。",
   args: {
     method: tool.schema.enum(["tools/list", "tools/call"]).describe("MCP 方法：tools/list 列工具；tools/call 调工具。"),
-    name: tool.schema.string().optional().describe("tools/call 的工具名（如 list_toolsets／describe_toolset／call_tool，或 UE 列出的具体工具名）。"),
+    name: tool.schema.string().optional().describe("tools/call 的工具名（如 list_toolsets／describe_toolsets／call_tool，或 UE 列出的具体工具名）。"),
     arguments: tool.schema
       .record(tool.schema.string(), tool.schema.any())
       .optional()
