@@ -80,25 +80,67 @@ function readAgentMessageCount(payload: unknown): number | null {
 
 // ── artifacts 抽取（「透传」的核心）：抽媒体 URL 的同时保留原文 reply ──
 
-const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g)(?:[?#]|$)/i;
+const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g|gif|avif)(?:[?#]|$)/i;
 const ARTIFACT_VIDEO_EXTENSION = /\.(mp4|webm|mov)(?:[?#]|$)/i;
-const ARTIFACT_AUDIO_EXTENSION = /\.(mp3|wav|flac|m4a)(?:[?#]|$)/i;
+const ARTIFACT_AUDIO_EXTENSION = /\.(mp3|wav|flac|m4a|ogg|opus|aac)(?:[?#]|$)/i;
+/** 3D 网格（造世界：道具／人物／碰撞体）。 */
+const ARTIFACT_MODEL_EXTENSION = /\.(glb|gltf|fbx|obj|usdz|usd|stl|blend)(?:[?#]|$)/i;
+/** 高斯泼溅世界（Marble 等导出 PLY/SPZ）。 */
+const ARTIFACT_SPLAT_EXTENSION = /\.(spz|splat|ksplat|ply)(?:[?#]|$)/i;
+/** 文档类产物；只收站内存储的（研究引用的外站 pdf 不是成品）。 */
+const ARTIFACT_DOCUMENT_EXTENSION = /\.(md|markdown|pdf|txt|json|csv|docx|ya?ml)(?:[?#]|$)/i;
+const ARTIFACT_OWNED_DOCUMENT_PATH = /\/image-data\/files\/|\/artifacts\/\d+\/versions\//;
 /** 非 ASCII（全形标点／中文）一律视为 URL 边界：回覆常写「…/a.png（2.31 MB）」，不截会把「（2.31」吞进 URL（2026-11-01 生产实测）。合法 URL 的非 ASCII 字元应已 percent-encode。 */
 const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}\u0080-\uFFFF]+/g;
 const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s\u0080-\uFFFF]+)\s*\)/g;
 /** 既知媒体目录：即使无副档名也当产物（kind=file）。 */
 const ARTIFACT_MEDIA_PATH = "/image-data/files/";
 
-export type AgentArtifactKind = "image" | "video" | "audio" | "file";
+export type AgentArtifactKind = "image" | "video" | "audio" | "model" | "splat" | "document" | "file";
 
 function artifactKind(url: string): AgentArtifactKind {
   if (ARTIFACT_VIDEO_EXTENSION.test(url)) return "video";
   if (ARTIFACT_AUDIO_EXTENSION.test(url)) return "audio";
   if (ARTIFACT_IMAGE_EXTENSION.test(url)) return "image";
+  if (ARTIFACT_MODEL_EXTENSION.test(url)) return "model";
+  if (ARTIFACT_SPLAT_EXTENSION.test(url)) return "splat";
+  if (ARTIFACT_DOCUMENT_EXTENSION.test(url)) return "document";
   return "file";
 }
 
+/** 新增类型的 MIME；旧类型（图／影／音）仍走下方原有判定，输出不变。 */
+const EXTRA_EXTENSION_MIME: Record<string, string> = {
+  gif: "image/gif",
+  avif: "image/avif",
+  ogg: "audio/ogg",
+  opus: "audio/opus",
+  aac: "audio/aac",
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  obj: "model/obj",
+  stl: "model/stl",
+  usdz: "model/vnd.usdz+zip",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  json: "application/json",
+  csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+};
+
+/** URL 路径（含 query 前）末尾的副档名，小写；没有则 null。 */
+export function artifactExtension(url: string): string | null {
+  const m = url.match(/\.([a-z0-9]{1,10})(?:[?#]|$)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 export function guessArtifactMime(url: string, kind: AgentArtifactKind): string {
+  const ext = artifactExtension(url);
+  if (ext && EXTRA_EXTENSION_MIME[ext]) return EXTRA_EXTENSION_MIME[ext];
+  if (kind === "model" || kind === "splat") return "application/octet-stream";
   const lower = url.toLowerCase();
   if (lower.includes(".webm")) return "video/webm";
   if (lower.includes(".mov")) return "video/quicktime";
@@ -120,7 +162,16 @@ export function guessArtifactMime(url: string, kind: AgentArtifactKind): string 
  * 导演产物分类（film / storyboard / brief / bible / keyframes / stills / audio）。
  * keyframes 只承接首尾帧／镜头帧语义；非分镜板的成品静帧（电商主图、卖点、细节、包装等）进 stills。
  */
-export type DirectorArtifactCategory = "film" | "storyboard" | "brief" | "bible" | "keyframes" | "stills" | "audio";
+export type DirectorArtifactCategory =
+  | "film"
+  | "storyboard"
+  | "brief"
+  | "bible"
+  | "keyframes"
+  | "stills"
+  | "audio"
+  | "models"
+  | "world";
 
 export const DIRECTOR_ARTIFACT_CATEGORIES: readonly DirectorArtifactCategory[] = [
   "film",
@@ -130,6 +181,8 @@ export const DIRECTOR_ARTIFACT_CATEGORIES: readonly DirectorArtifactCategory[] =
   "keyframes",
   "stills",
   "audio",
+  "models",
+  "world",
 ];
 
 export interface ClassifiedArtifact {
@@ -160,6 +213,17 @@ export function classifyArtifactCategory(url: string, kind: AgentArtifactKind, l
   if (kind === "video" || ARTIFACT_VIDEO_EXTENSION.test(url)) {
     if (/storyboard|story-board|story_board/.test(u) || STORYBOARD_LABEL.test(l)) return "storyboard";
     return "film";
+  }
+  // 造世界：泼溅＝环境世界；网格默认是资产，标明碰撞／导航的网格跟着世界走。
+  if (kind === "splat" || ARTIFACT_SPLAT_EXTENSION.test(url)) return "world";
+  if (kind === "model" || ARTIFACT_MODEL_EXTENSION.test(url)) {
+    return /collider|collision|navmesh|碰撞|导航网格/.test(`${u} ${l}`) ? "world" : "models";
+  }
+  if (kind === "document") {
+    // 文档只落文字类：不让「product-brief.md」这类命名掉进 stills／keyframes。
+    if (/bible|world.?build|lore|art.?direction|character.?sheet|style.?guide/.test(u) || BIBLE_LABEL.test(l)) return "bible";
+    if (STORYBOARD_URL.test(u) || STORYBOARD_LABEL.test(l)) return "storyboard";
+    return "brief";
   }
   if (/\bbrief\b|treatment|synopsis/.test(u)) return "brief";
   if (/bible|world.?build|lore|art.?direction|character.?sheet|style.?guide/.test(u) || BIBLE_LABEL.test(l)) return "bible";
@@ -240,11 +304,13 @@ export function extractLabeledAgentArtifacts(text: string): Array<{ url: string;
     const kind = artifactKind(url);
     // 原始 URL 只收媒体（已知副档名或 /image-data/files/）；markdown 图片一律收。
     if (!viaMarkdownImage && kind === "file" && !url.includes(ARTIFACT_MEDIA_PATH)) return;
-    const resolved = viaMarkdownImage && kind === "file" ? "image" : kind;
+    // 文档只收站内存储／发布件；外站 pdf 多半是研究引用，不是成品。
+    if (!viaMarkdownImage && kind === "document" && !ARTIFACT_OWNED_DOCUMENT_PATH.test(url)) return;
+    const resolved = viaMarkdownImage && (kind === "file" || kind === "document") ? "image" : kind;
     const existing = found.get(url);
     if (existing) {
       if (!existing.label && label) existing.label = label;
-      if (existing.kind === "image" || existing.kind === "video" || existing.kind === "audio") return;
+      if (existing.kind !== "file") return;
       existing.kind = resolved;
       return;
     }
@@ -263,6 +329,55 @@ export function collectClassifiedArtifacts(texts: string[]): Record<DirectorArti
   const merged: Array<{ url: string; kind: AgentArtifactKind; label?: string }> = [];
   for (const text of texts) merged.push(...extractLabeledAgentArtifacts(text));
   return classifyDirectorArtifacts(merged);
+}
+
+export interface GameAssetManifestEntry {
+  /** 本清单内稳定序号（category-序号），编码智能体按它落盘命名。 */
+  id: string;
+  kind: AgentArtifactKind;
+  category: DirectorArtifactCategory;
+  label: string;
+  url: string;
+  mime: string;
+  ext: string | null;
+}
+
+export interface GameAssetManifest {
+  schema: "eimu.game_asset_manifest/v1";
+  assets: GameAssetManifestEntry[];
+  counts: Partial<Record<AgentArtifactKind, number>>;
+  note: string;
+}
+
+/**
+ * 成品的扁平清单（编码智能体拉取用）：同一份分类结果拍平成一行一件，带 kind／ext／mime。
+ * 没有哈希与体积——这些只有下载后才知道，由拉取端校验，不在这里编。
+ */
+export function buildGameAssetManifest(
+  classified: Record<DirectorArtifactCategory, ClassifiedArtifact[]>,
+): GameAssetManifest {
+  const assets: GameAssetManifestEntry[] = [];
+  const counts: Partial<Record<AgentArtifactKind, number>> = {};
+  for (const category of DIRECTOR_ARTIFACT_CATEGORIES) {
+    classified[category].forEach((item, index) => {
+      assets.push({
+        id: `${category}-${index + 1}`,
+        kind: item.kind,
+        category,
+        label: item.label,
+        url: item.url,
+        mime: item.mime,
+        ext: artifactExtension(item.url),
+      });
+      counts[item.kind] = (counts[item.kind] ?? 0) + 1;
+    });
+  }
+  return {
+    schema: "eimu.game_asset_manifest/v1",
+    assets,
+    counts,
+    note: "清单取自导演回复里的成品链接；体积与 sha256 需下载后校验。world＝泼溅世界与碰撞网格，models＝网格资产。",
+  };
 }
 
 /**

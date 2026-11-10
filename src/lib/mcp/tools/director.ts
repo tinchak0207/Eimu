@@ -11,10 +11,19 @@
 import { machineError, structuredResult, type McpToolCallResult } from "../protocol";
 import {
   agentSessionPath,
+  buildGameAssetManifest,
   collectClassifiedArtifacts,
   DIRECTOR_ARTIFACT_CATEGORIES,
   type DirectorArtifactCategory,
 } from "./agent";
+import {
+  DIRECTOR_MAX_DOCUMENTS,
+  DIRECTOR_MAX_IMAGES,
+  directorAttachmentText,
+  readDirectorDocuments,
+  readDirectorImageUrls,
+  uploadDirectorInputs,
+} from "./director-inputs";
 import {
   AGENT_SESSIONS_PATH,
   EIMU_DIRECT_DEFAULT_WAIT_SECONDS,
@@ -488,6 +497,7 @@ function buildDirectorPrompt(
   mode: DirectorMode,
   budgetCap: number | null,
   baselineBalance: number | null,
+  fallbackImageUrls: string[] = [],
 ): {
   content: string;
   session_directive?: string;
@@ -496,6 +506,8 @@ function buildDirectorPrompt(
   const refs = Array.isArray(args.reference_urls)
     ? args.reference_urls.filter((u): u is string => typeof u === "string" && u.trim() !== "").slice(0, 8)
     : [];
+  // 抓不到／传不上的参考图退回 URL 行（见 uploadDirectorInputs）。
+  for (const url of fallbackImageUrls) if (!refs.includes(url)) refs.push(url);
   const lines = [
     mode === "plan" ? "【模式=plan】只出方案／brief／分镜计划，不要开拍成片。" : "【模式=full】按导演全链路推进到成片。",
     pickString(args, "aspect_ratio") ? `画幅：${pickString(args, "aspect_ratio")}` : "",
@@ -823,13 +835,16 @@ async function judgeSnapshotCore(opts: {
   extra?: Record<string, unknown>;
 }): Promise<Judgement> {
   const { runtime } = opts;
-  const artifacts = slimArtifacts(collectClassifiedArtifacts(opts.fresh.map((m) => m.text)));
+  const classified = collectClassifiedArtifacts(opts.fresh.map((m) => m.text));
+  const artifacts = slimArtifacts(classified);
+  const manifest = buildGameAssetManifest(classified);
   const summary = latestAssistantText(opts.fresh);
   const base = {
     job_id: opts.jobId,
     session_id: opts.jobId,
     status_source: runtime.source,
     artifacts,
+    ...(manifest.assets.length > 0 ? { game_asset_manifest: manifest } : {}),
     summary,
     elapsed_ms: opts.elapsedMs,
     do_not_resubmit: true,
@@ -1064,6 +1079,12 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
     });
   }
 
+  // 文档／图片输入先校验（坏参数不建会话、不读余额）。
+  const docInput = readDirectorDocuments(args.documents);
+  if (!docInput.ok) return docInput.error;
+  const imageInput = readDirectorImageUrls(args.image_urls);
+  if (!imageInput.ok) return imageInput.error;
+
   const mode = normalizeMode(args.mode);
   const preflight = args.preflight === true || mode === "quote";
   const confirm = args.confirm === true;
@@ -1152,18 +1173,34 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
   if (before.error) return withSettingsApplied(before.error, settingsApplied);
   const baselineCount = before.message_count;
 
-  const built = buildDirectorPrompt(args, mode, budgetCap, quota.balance_coins);
+  const inputs = await uploadDirectorInputs(jobId, docInput.documents, imageInput.urls, ctx);
+  if (!inputs.ok) return withSettingsApplied(inputs.error, settingsApplied);
+
+  const built = buildDirectorPrompt(args, mode, budgetCap, quota.balance_coins, inputs.fallbackImageUrls);
   const sent = await ctx.dispatcher({
     method: "POST",
     path: agentSessionPath(jobId, "/messages"),
     authorization: ctx.authorization,
     traceId: ctx.traceId,
     toolName: "eimu_direct",
-    body: compact({ content: built.content, session_directive: built.session_directive }),
+    body: compact({
+      content: `${built.content}${directorAttachmentText(inputs.attachments)}`,
+      session_directive: built.session_directive,
+    }),
   });
   if (sent.status < 200 || sent.status >= 300) {
     return withSettingsApplied(upstreamFailure("POST", agentSessionPath(jobId, "/messages"), sent), settingsApplied);
   }
+
+  const inputExtra =
+    inputs.attachments.length > 0 || inputs.warnings.length > 0
+      ? {
+          attachments: inputs.attachments.map(({ name, path, size, mime, source, url }) =>
+            compact({ name, path, size, mime, source, url }),
+          ),
+          ...(inputs.warnings.length > 0 ? { input_warnings: inputs.warnings } : {}),
+        }
+      : undefined;
 
   const result = await waitForTerminal({
     jobId,
@@ -1174,6 +1211,7 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
     now,
     sleep,
     startedAt,
+    ...(inputExtra ? { extra: inputExtra } : {}),
   });
   return withSettingsApplied(result, settingsApplied);
 }
@@ -1496,6 +1534,21 @@ const DIRECTOR_OUTPUT_SCHEMA: Record<string, unknown> = {
     budget: { type: "object", description: "预算记账（cap／基线／当前余额／累计估算与来源）。" },
     confirm_results: { type: "array", items: { type: "object" } },
     artifacts: { type: "object" },
+    game_asset_manifest: {
+      type: "object",
+      description:
+        "有成品时附：扁平成品清单（schema eimu.game_asset_manifest/v1；每项 id/kind/category/label/url/mime/ext）。kind 含 image/video/audio/model/splat/document/file；category 含 models（网格资产）与 world（泼溅世界与碰撞网格）。",
+    },
+    attachments: {
+      type: "array",
+      description: "本次随任务上传给导演的文档与参考图（name/path/size/mime/source/url）。",
+      items: { type: "object" },
+    },
+    input_warnings: {
+      type: "array",
+      description: "抓取或上传失败的参考图（url/reason）；这些 URL 已退回参考行交给导演。",
+      items: { type: "object" },
+    },
     generated_media: {
       type: ["array", "null"],
       description: "终态时附：本会话全部成功生成的媒体（网关回执真源，含返工稿；每项 task_id/kind/created_at/artifacts[url,mime,width,height]）。null＝清单不可用。",
@@ -1516,8 +1569,8 @@ export function defineDirectorTools(): ToolDefinition[] {
       name: "eimu_direct",
       title: "导演派工",
       description: bilingual(
-        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价（不建任务，之后再调本工具正式跑不算重提交）；正式跑须 budget_cap 或 confirm=true。带 budget_cap 时轮询中会在上限内（单卡与累计）自动批准扣费确认卡，超出回 code=budget_exceeded。终态产物含成片与分镜／brief／首尾帧／成品静帧 stills（电商主图／卖点／细节等，带原标签）／配音。极限模式＝thinking_level=extreme（开拍前先写账号设置，野兽模式开）。",
-        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge, no job; calling eimu_direct again for the real run is not a resubmit); a real run requires budget_cap (coins) or confirm=true. With budget_cap, charge confirm cards within the cap (per card and cumulative) are auto-approved while polling; over the cap returns code=budget_exceeded. Terminal results include film, storyboard, brief, bible, keyframes (first/last frames), stills (finished stills such as e-commerce main/detail images, with their labels) and audio. Extreme mode = thinking_level=extreme (saved to account settings before the run; turns beast mode on).",
+        "把一句话交给 Eimu 导演。有界等待≤45s；超时回 processing＋job_id，勿重提交，用 eimu_job 续查。quote/preflight 只报价（不建任务，之后再调本工具正式跑不算重提交）；正式跑须 budget_cap 或 confirm=true。带 budget_cap 时轮询中会在上限内（单卡与累计）自动批准扣费确认卡，超出回 code=budget_exceeded。终态产物含成片与分镜／brief／首尾帧／成品静帧 stills（电商主图／卖点／细节等，带原标签）／配音／models（3D 网格）／world（泼溅世界与碰撞网格），另附扁平清单 game_asset_manifest。长设计案用 documents 按附件上传（不占 prompt 8000 字），截图／参考图用 image_urls（服务端抓取后交导演看图）。极限模式＝thinking_level=extreme（开拍前先写账号设置，野兽模式开）。",
+        "Hand a one-line brief to the Eimu director. Bounded wait <=45s; on timeout returns processing + job_id + poll_after_seconds - do NOT resubmit, poll with eimu_job. preflight/mode=quote only quotes (no charge, no job; calling eimu_direct again for the real run is not a resubmit); a real run requires budget_cap (coins) or confirm=true. With budget_cap, charge confirm cards within the cap (per card and cumulative) are auto-approved while polling; over the cap returns code=budget_exceeded. Terminal results include film, storyboard, brief, bible, keyframes (first/last frames), stills (finished stills such as e-commerce main/detail images, with their labels), audio, models (3D meshes) and world (splat worlds and collider meshes), plus a flat game_asset_manifest. Pass long design docs via documents (uploaded as attachments, not counted against the 8000-char prompt) and screenshots/reference images via image_urls (fetched server-side and handed to the director as images). Extreme mode = thinking_level=extreme (saved to account settings before the run; turns beast mode on).",
       ),
       annotations: {
         readOnlyHint: false,
@@ -1566,7 +1619,29 @@ export function defineDirectorTools(): ToolDefinition[] {
             type: "array",
             items: { type: "string" },
             maxItems: 8,
-            description: "参考图／视频／音频的公网 URL 列表。",
+            description: "参考图／视频／音频的公网 URL 列表（只作为文字地址交给导演）。",
+          },
+          documents: {
+            type: "array",
+            maxItems: DIRECTOR_MAX_DOCUMENTS,
+            description:
+              "设计案／剧本等长文档，按附件上传给导演通读（不受 prompt 8000 字限制）。每份 UTF-8 不超过约 4MB，超了按章节拆分；文件名支持 .md/.txt/.json/.csv/.yaml，其余补成 .md。",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "文件名，如 design-doc.md。" },
+                content: { type: "string", description: "文档全文。" },
+              },
+              required: ["content"],
+              additionalProperties: false,
+            },
+          },
+          image_urls: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: DIRECTOR_MAX_IMAGES,
+            description:
+              "截图／参考图的 https 公网 URL；服务端抓取后作为附件交给导演看图（单张 ≤4MB）。抓不到的退回成文字地址并在 input_warnings 里列出。",
           },
           style: { type: "string", description: "风格关键词（可选）。" },
           thinking_level: THINKING_LEVEL_SCHEMA,
