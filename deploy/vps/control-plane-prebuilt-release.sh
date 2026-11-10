@@ -278,6 +278,16 @@ cd "$D" || { echo "ABORT 无 $D"; exit 1; }
 BK=""; DONE=0
 dc() { docker compose -p "$PJ" -f "$CF" "$@"; }
 readyz() { docker exec "$A" wget -S -O /dev/null -T 8 http://127.0.0.1:3000/api/readyz 2>&1 | grep -m1 "HTTP/" | awk "{print \$2}"; }
+# agent-gateway（宿主 systemd）按容器 IP 直连 api 验 key；容器重建 IP 会漂，漂了＝全员 401（2026-11-10 实测 .10→.8）。
+sync_gateway() {
+  local f=/etc/systemd/system/agent-gateway.service.d/91-platform-base.conf ip
+  ip="$(docker inspect "$A" --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" 2>/dev/null)"
+  [ -f "$f" ] && [ -n "$ip" ] || return 0
+  grep -qx "Environment=PLATFORM_BASE=http://$ip:3000" "$f" && return 0
+  sed -i "s#^Environment=PLATFORM_BASE=.*#Environment=PLATFORM_BASE=http://$ip:3000#" "$f" && systemctl daemon-reload && systemctl restart agent-gateway \
+    && echo "GATEWAY PLATFORM_BASE → http://$ip:3000（api 容器 IP 漂移，已重启 agent-gateway）" || echo "GATEWAY PLATFORM_BASE 同步失败，需人工改 $f"
+  return 0
+}
 healthy() {
   local i=0 c=""
   while [ "$i" -lt "$HT" ]; do c="$(readyz)"; [ "$c" = 200 ] && break; sleep 3; i=$((i+3)); done
@@ -291,6 +301,7 @@ healthy() {
   [ "${n%% *}" = running ] && [ "${n##* }" = "${b##* }" ] || { echo "HEALTH worker 前=[$b] 30s 后=[$n]"; docker logs --tail 20 "$W" 2>&1 | sed "s/^/  worker| /"; return 1; }
   echo "HEALTH worker running restarts=${n##* }（30s 稳定）"
   docker exec "$NG" nginx -t -q && docker exec "$NG" nginx -s reload && echo "NGINX reloaded" || { echo "HEALTH nginx -t/reload 失败"; return 1; }
+  sync_gateway
 }
 swap_lines() {
   # 只替换与「旧镜像」逐字相等的两行 image:，其余字节不动（compose 内含秘密，从不打印）。
