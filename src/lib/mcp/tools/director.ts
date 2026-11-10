@@ -1541,7 +1541,7 @@ const DIRECTOR_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
     attachments: {
       type: "array",
-      description: "本次随任务上传给导演的文档与参考图（name/path/size/mime/source/url）。",
+      description: "本次随任务上传给导演的文档与参考图（name/path/size/mime/source/url；网关落盘名与原名不同时另附 stored_name）。",
       items: { type: "object" },
     },
     input_warnings: {

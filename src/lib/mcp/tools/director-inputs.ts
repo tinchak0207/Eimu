@@ -42,7 +42,10 @@ export interface DirectorDocumentInput {
 }
 
 export interface DirectorAttachmentRef {
+  /** 调用方给的文件名（中文原样保留，供导演辨认）。 */
   name: string;
+  /** 网关落盘名；网关只留 ASCII，中文名会塌成 `_.md`，与 name 不同时才带。 */
+  stored_name?: string;
   path: string;
   size: number | null;
   mime: string;
@@ -241,7 +244,14 @@ export async function uploadDirectorInputs(
         }),
       };
     }
-    attachments.push({ name: sent.name, path: sent.path, size: sent.size, mime: sent.mime, source: "document" });
+    attachments.push({
+      name: doc.name,
+      ...(sent.name !== doc.name ? { stored_name: sent.name } : {}),
+      path: sent.path,
+      size: sent.size,
+      mime: sent.mime,
+      source: "document",
+    });
   }
 
   const warnings: DirectorInputWarning[] = [];
@@ -271,7 +281,7 @@ export function directorAttachmentText(attachments: DirectorAttachmentRef[]): st
   const images = attachments.filter((a) => a.source === "image");
   const notes = [
     docs.length > 0
-      ? `设计文档 ${docs.length} 份（完整原文在附件里，动手前先通读；它是本项目的只读真源）：${docs.map((d) => d.name).join("、")}`
+      ? `设计文档 ${docs.length} 份（完整原文在附件里，动手前先通读；它是本项目的只读真源）：${docs.map((d) => `「${d.name}」→ ${d.path}`).join("、")}`
       : "",
     images.length > 0 ? `参考图 ${images.length} 张（已作为附件上传，请直接看图）：${images.map((i) => i.name).join("、")}` : "",
   ].filter(Boolean);
