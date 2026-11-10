@@ -1195,8 +1195,8 @@ export async function eimuDirect(args: Record<string, unknown>, ctx: McpToolCont
   const inputExtra =
     inputs.attachments.length > 0 || inputs.warnings.length > 0
       ? {
-          attachments: inputs.attachments.map(({ name, path, size, mime, source, url }) =>
-            compact({ name, path, size, mime, source, url }),
+          attachments: inputs.attachments.map(({ name, stored_name, path, size, mime, source, url }) =>
+            compact({ name, stored_name, path, size, mime, source, url }),
           ),
           ...(inputs.warnings.length > 0 ? { input_warnings: inputs.warnings } : {}),
         }
