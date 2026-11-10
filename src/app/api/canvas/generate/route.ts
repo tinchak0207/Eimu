@@ -41,6 +41,8 @@ import {
 } from "@/lib/canvas/project-style";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { GENERATION_TRACE_ID_HEADER, resolveGenerationTraceId } from "@/lib/generation-request-headers";
+import { requireVerifiedUser } from "@/lib/server-user";
+import { safeFetchPublicImage } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -151,7 +153,11 @@ async function fetchReferenceBuffer(url: string): Promise<{ buffer: Buffer; mime
     }
     return { buffer, mime };
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(REFERENCE_FETCH_TIMEOUT_MS), redirect: "follow" });
+  // SSRF：仅 https 公网（DNS 解析后校验 IP、连接钉 IP、重定向手动逐跳 ≤3 跳），见 @/lib/ssrf-guard。
+  const res = await safeFetchPublicImage(url, {
+    signal: AbortSignal.timeout(REFERENCE_FETCH_TIMEOUT_MS),
+    maxBytes: MAX_REFERENCE_BYTES,
+  });
   if (!res.ok) throw new Error(`上游返回 ${res.status}`);
   const mime = res.headers.get("content-type") ?? "";
   if (!mime.startsWith("image/")) throw new Error(`不是图片（${mime || "无 content-type"}）`);
@@ -232,7 +238,11 @@ export async function POST(req: NextRequest) {
     name: string;
   }
   const refSpecs: RefSpec[] = [];
-  if (body.source_image && typeof body.source_image === "string") {
+  if (
+    body.source_image &&
+    typeof body.source_image === "string" &&
+    (body.source_image.startsWith("https:") || body.source_image.startsWith("data:image/"))
+  ) {
     refSpecs.push({ url: body.source_image, role: "general", name: "source-image" });
   }
   for (const ref of Array.isArray(body.reference_images) ? body.reference_images : []) {
@@ -262,13 +272,24 @@ export async function POST(req: NextRequest) {
     })
     .slice(0, MAX_REFERENCE_IMAGES);
 
+  // 出站抓取前先做真实鉴权（上游 /api/user/self 验证，30s 进程内缓存）：上面只验了 header 存在，
+  // 伪造 Authorization/x-user-id 的匿名请求不得触发服务端出站抓取。纯 data: 参考图不出站，不额外往返。
+  if (limitedRefSpecs.some((spec) => !spec.url.startsWith("data:image/"))) {
+    const caller = await requireVerifiedUser(req);
+    if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
+  }
+
   const referenceBuffers: { buffer: Buffer; mime: string }[] = [];
   for (const spec of limitedRefSpecs) {
     try {
       referenceBuffers.push(await fetchReferenceBuffer(spec.url));
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return fail(400, `参考图获取失败（${truncate(spec.url, 80)}）：${truncate(reason, 100)}`, "reference_fetch_failed");
+      // 细节只进服务端日志；回给调用方的文案不含 URL/状态码/content-type（避免内网探测侧信道）。
+      console.warn("[canvas/generate] reference fetch failed", {
+        url: truncate(spec.url, 120),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return fail(400, "参考图获取失败", "reference_fetch_failed");
     }
   }
 

@@ -89,7 +89,7 @@ export default async function WorkflowsIndexPage() {
         </nav>
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">创作产线</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">创作产线</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             8 条 AI 创作产线：从一句话到整套成品
           </h1>
@@ -129,10 +129,10 @@ export default async function WorkflowsIndexPage() {
                     )}
                     <div className="flex flex-1 flex-col gap-2 p-4">
                       <span className="flex items-center justify-between gap-2">
-                        <span className="text-ios-headline font-semibold text-[rgba(0,0,0,0.85)] group-hover:text-[#007AFF]">
+                        <span className="text-ios-headline font-semibold text-[rgba(0,0,0,0.85)] group-hover:text-ios-blue">
                           {card.name}
                         </span>
-                        <ArrowUpRight className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.4)] group-hover:text-[#007AFF]" aria-hidden="true" />
+                        <ArrowUpRight className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.4)] group-hover:text-ios-blue" aria-hidden="true" />
                       </span>
                       <span className="text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.62)]">{card.note}</span>
                       <span className="mt-auto pt-1 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.45)]">

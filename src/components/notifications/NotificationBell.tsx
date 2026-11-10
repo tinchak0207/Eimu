@@ -315,7 +315,7 @@ function NotificationPanel({
             <button
               type="button"
               onClick={markAllVisibleRead}
-              className="inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 font-medium text-[#007AFF] transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 font-medium text-ios-blue transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
               全部已读
@@ -336,7 +336,7 @@ function NotificationPanel({
               <button
                 type="button"
                 onClick={() => void loadPage(1, false)}
-                className="ml-1 cursor-pointer text-[#007AFF] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="ml-1 cursor-pointer text-ios-blue hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               >
                 重试
               </button>
@@ -386,7 +386,7 @@ function NotificationPanel({
               type="button"
               onClick={() => void loadPage(page + 1, true)}
               disabled={loadingMore}
-              className="mt-1 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[0.95rem] px-3 py-2.5 text-ios-footnote font-medium text-[#007AFF] transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.40)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="mt-1 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[0.95rem] px-3 py-2.5 text-ios-footnote font-medium text-ios-blue transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.40)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               {loadingMore ? <Spinner className="h-3.5 w-3.5" /> : null}
               加载更多

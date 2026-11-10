@@ -93,7 +93,7 @@ export function WelcomeGiftDialog({
           <button
             type="button"
             onClick={onStart}
-            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl bg-[#007AFF] px-5 text-ios-subhead font-semibold text-white shadow-sm transition-colors hover:bg-[#0069DB] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:h-10"
+            className="flex h-11 cursor-pointer items-center justify-center rounded-ios-2xl bg-ios-blue px-5 text-ios-subhead font-semibold text-white shadow-sm transition-colors hover:bg-[#0069DB] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:h-10"
           >
             马上生成第一张
           </button>

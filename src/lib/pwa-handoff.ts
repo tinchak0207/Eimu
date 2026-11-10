@@ -19,7 +19,7 @@
 // "pwa-handoff"），由控制面侧执行同一套直连 SQL；有 DB（本地/控制面）时仍走
 // 下方原始直连实现，语义不变。
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   generationDatabaseConfigured,
   getGenerationSql,
@@ -27,6 +27,50 @@ import {
 import { signBizKeySync } from "@/lib/biz-key-sync";
 
 const HANDOFF_TTL_MINUTES = 10;
+
+// S-01/S-17（2026-11-04）：领取需 ticket + verifier（PKCE 式），库里只存 ticket 的 sha256。
+// 发起设备只上报 challenge = sha256hex(verifier)；verifier 永不离开发起设备（直到 claim 请求体）。
+const CHALLENGE_PATTERN = /^[0-9a-f]{64}$/;
+const VERIFIER_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
+// create 用 randomBytes(16).toString("hex") 生成：32 位小写 hex。非法 ticket 一律按"不存在"处理，不进 SQL
+//（含 NUL 等字符会让 PG 抛 invalid byte sequence）。ticket~invite 的打包值由客户端先拆再传，服务端不收。
+const TICKET_PATTERN = /^[0-9a-f]{32}$/;
+
+function isValidTicket(value: unknown): value is string {
+  return typeof value === "string" && TICKET_PATTERN.test(value);
+}
+
+/**
+ * 过渡开关：部署切换前已发出的旧 ticket（ticket_hash 与 challenge 均为 NULL）在其 10 分钟 TTL 内
+ * 仍可仅凭 ticket 领取一次。create 一律要求 challenge，部署后不会再产生旧式 ticket，
+ * 故部署满 1 天（所有旧行必已过期）后删除本开关与下方两处 legacy 分支；
+ * 紧急时设 PWA_HANDOFF_ALLOW_LEGACY_TICKETS 为 false/0/no/off（不分大小写）即刻关闭。
+ * 部署顺序：先部署 Vercel（新客户端发 challenge，旧控制面忽略它，期间无保护但功能正常），
+ * 紧接着部署控制面。反过来（旧 Vercel + 新控制面）会让 create 缺 challenge 返回 400。
+ */
+function legacyTicketsAllowed(): boolean {
+  const flag = process.env.PWA_HANDOFF_ALLOW_LEGACY_TICKETS?.trim().toLowerCase();
+  return !(flag === "false" || flag === "0" || flag === "no" || flag === "off");
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function isValidHandoffChallenge(value: unknown): value is string {
+  return typeof value === "string" && CHALLENGE_PATTERN.test(value);
+}
+
+export function isValidHandoffVerifier(value: unknown): value is string {
+  return typeof value === "string" && VERIFIER_PATTERN.test(value);
+}
+
+function constantTimeEqualHex(a: string, b: string): boolean {
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
 
 const RELAY_TIMEOUT_MS = 15_000;
 
@@ -75,6 +119,13 @@ async function ensureSchema(): Promise<void> {
           claimed_at   TIMESTAMPTZ
         )
       `;
+      // 与 db/migrations/041_pwa_handoff_challenge.sql 一致（迁移未落地前旧进程也能工作）。
+      await sql`ALTER TABLE pwa_login_handoff ADD COLUMN IF NOT EXISTS ticket_hash TEXT`;
+      await sql`ALTER TABLE pwa_login_handoff ADD COLUMN IF NOT EXISTS challenge TEXT`;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS pwa_login_handoff_ticket_hash_idx
+          ON pwa_login_handoff (ticket_hash) WHERE ticket_hash IS NOT NULL
+      `;
     })().catch((error) => {
       schemaReady = null;
       throw error;
@@ -83,27 +134,35 @@ async function ensureSchema(): Promise<void> {
   return schemaReady;
 }
 
-/** 签发新 ticket（10 分钟有效），顺手清理过期一天以上的旧行。 */
-export async function createHandoffTicket(): Promise<string> {
+/**
+ * 签发新 ticket（10 分钟有效），顺手清理过期 1 小时以上的旧行。
+ * challenge = sha256hex(发起设备本地 verifier)，必填；库里只存 ticket 的 sha256，不存明文。
+ */
+export async function createHandoffTicket(challenge: string): Promise<string> {
+  if (!isValidHandoffChallenge(challenge)) throw new Error("pwa-handoff challenge 非法");
   if (!generationDatabaseConfigured()) {
-    const data = await relayOp<{ ticket: string }>("create", {});
+    const data = await relayOp<{ ticket: string }>("create", { challenge });
     return data.ticket;
   }
   await ensureSchema();
   const sql = getGenerationSql();
   const ticket = randomBytes(16).toString("hex");
+  const ticketHash = sha256Hex(ticket);
+  // PK 列 ticket 同样只放摘要：明文 ticket 不落库；legacy 分支只认 ticket_hash IS NULL 的行，
+  // 所以泄露的摘要不能被当作 legacy 明文 ticket 使用。
   await sql`
-    INSERT INTO pwa_login_handoff (ticket, expires_at)
-    VALUES (${ticket}, now() + interval '10 minutes')
+    INSERT INTO pwa_login_handoff (ticket, ticket_hash, challenge, expires_at)
+    VALUES (${ticketHash}, ${ticketHash}, ${challenge}, now() + interval '10 minutes')
   `;
   await sql`
-    DELETE FROM pwa_login_handoff WHERE expires_at < now() - interval '1 day'
+    DELETE FROM pwa_login_handoff WHERE expires_at < now() - interval '1 hour'
   `;
   return ticket;
 }
 
 /** callback 侧投递：同一 ticket 只允许投递一次。返回是否命中。 */
 export async function deliverHandoff(ticket: string, token: string, user: unknown): Promise<boolean> {
+  if (!isValidTicket(ticket)) return false;
   if (!generationDatabaseConfigured()) {
     const data = await relayOp<{ delivered: boolean }>("deliver", { ticket, token, user });
     return data.delivered;
@@ -113,25 +172,63 @@ export async function deliverHandoff(ticket: string, token: string, user: unknow
   const rows = await sql`
     UPDATE pwa_login_handoff
     SET token = ${token}, user_json = ${sql.json((user ?? {}) as never)}, delivered_at = now()
-    WHERE ticket = ${ticket} AND delivered_at IS NULL AND expires_at > now()
+    WHERE (ticket_hash = ${sha256Hex(ticket)}
+           OR (${legacyTicketsAllowed()}::boolean AND ticket_hash IS NULL AND ticket = ${ticket}))
+      AND delivered_at IS NULL AND expires_at > now()
     RETURNING ticket
   `;
   return rows.length > 0;
 }
 
-/** PWA 侧原子一次性消费：只有已投递、未消费、未过期才命中。 */
-export async function claimHandoff(ticket: string): Promise<{ token: string; user: unknown } | null> {
+/**
+ * PWA 侧原子一次性消费：只有已投递、未消费、未过期才命中。
+ * 新式 ticket 必须同时出示 verifier（sha256(verifier) 与存档 challenge 常数时间比对）；
+ * verifier 错误不消费 ticket（避免持 ticket 者靠乱填 verifier 烧掉合法用户的登录）。
+ * 领取与清空 token 在同一条 UPDATE 内完成（S-17）。
+ */
+export async function claimHandoff(
+  ticket: string,
+  verifier?: string | null,
+): Promise<{ token: string; user: unknown } | null> {
+  if (!isValidTicket(ticket)) return null;
   if (!generationDatabaseConfigured()) {
-    const data = await relayOp<{ claimed: { token: string; user: unknown } | null }>("claim", { ticket });
+    const data = await relayOp<{ claimed: { token: string; user: unknown } | null }>("claim", {
+      ticket,
+      verifier: verifier ?? null,
+    });
     return data.claimed ?? null;
   }
   await ensureSchema();
   const sql = getGenerationSql();
+  const ticketHash = sha256Hex(ticket);
+  const found = await sql`
+    SELECT ticket_hash, challenge FROM pwa_login_handoff
+    WHERE (ticket_hash = ${ticketHash}
+           OR (${legacyTicketsAllowed()}::boolean AND ticket_hash IS NULL AND ticket = ${ticket}))
+      AND delivered_at IS NOT NULL AND claimed_at IS NULL AND expires_at > now()
+  `;
+  const head = found[0] as { ticket_hash: string | null; challenge: string | null } | undefined;
+  if (!head) return null;
+  // 旧行放行条件严格为 ticket_hash IS NULL 且 challenge IS NULL；只要 challenge 非 NULL 一律要求 verifier。
+  if (head.challenge !== null) {
+    if (!isValidHandoffVerifier(verifier)) return null;
+    if (!constantTimeEqualHex(sha256Hex(verifier), head.challenge)) return null;
+  } else if (head.ticket_hash !== null) {
+    return null; // 新式行缺 challenge：异常行，拒绝。
+  }
   const rows = await sql`
-    UPDATE pwa_login_handoff
-    SET claimed_at = now()
-    WHERE ticket = ${ticket} AND delivered_at IS NOT NULL AND claimed_at IS NULL AND expires_at > now()
-    RETURNING token, user_json
+    UPDATE pwa_login_handoff AS t
+    SET claimed_at = now(), token = '', user_json = '{}'::jsonb
+    FROM (
+      SELECT ticket AS pk, token AS old_token, user_json AS old_user
+      FROM pwa_login_handoff
+      WHERE (ticket_hash = ${ticketHash}
+             OR (${legacyTicketsAllowed()}::boolean AND ticket_hash IS NULL AND ticket = ${ticket}))
+        AND delivered_at IS NOT NULL AND claimed_at IS NULL AND expires_at > now()
+      FOR UPDATE
+    ) AS o
+    WHERE t.ticket = o.pk AND t.claimed_at IS NULL
+    RETURNING o.old_token AS token, o.old_user AS user_json
   `;
   const row = rows[0] as { token: string; user_json: unknown } | undefined;
   if (!row) return null;
@@ -142,6 +239,7 @@ export async function claimHandoff(ticket: string): Promise<{ token: string; use
 export async function pollHandoff(
   ticket: string,
 ): Promise<"pending" | "delivered" | "unknown"> {
+  if (!isValidTicket(ticket)) return "unknown";
   if (!generationDatabaseConfigured()) {
     const data = await relayOp<{ status: "pending" | "delivered" | "unknown" }>("poll", { ticket });
     return data.status;
@@ -150,7 +248,9 @@ export async function pollHandoff(
   const sql = getGenerationSql();
   const rows = await sql`
     SELECT delivered_at, claimed_at FROM pwa_login_handoff
-    WHERE ticket = ${ticket} AND expires_at > now()
+    WHERE (ticket_hash = ${sha256Hex(ticket)}
+           OR (${legacyTicketsAllowed()}::boolean AND ticket_hash IS NULL AND ticket = ${ticket}))
+      AND expires_at > now()
   `;
   const row = rows[0] as { delivered_at: Date | string | null; claimed_at: Date | string | null } | undefined;
   if (!row) return "unknown";

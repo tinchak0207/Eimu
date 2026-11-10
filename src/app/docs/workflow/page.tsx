@@ -78,7 +78,7 @@ export default function DocsWorkflowPage() {
     <div className="flex flex-col gap-6">
       <a
         href="/docs"
-        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-[#007AFF]"
+        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-ios-blue"
       >
         ← 文档中心
       </a>
@@ -107,7 +107,7 @@ export default function DocsWorkflowPage() {
               {TEMPLATE_GALLERY.map((template) => (
                 <div key={template.name} className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4">
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex shrink-0 items-center rounded-full bg-[#007AFF] px-2.5 py-0.5 text-ios-caption1 font-semibold text-white">
+                    <span className="inline-flex shrink-0 items-center rounded-full bg-ios-blue px-2.5 py-0.5 text-ios-caption1 font-semibold text-white">
                       {template.domain}
                     </span>
                     <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.85)]">{template.name}</p>
@@ -138,21 +138,21 @@ export default function DocsWorkflowPage() {
                   成品落进历史与画布之后，接着打一句「再来一组」「微调一下」就行；重型多环节需求，把
                   <a
                     href="/docs/assistant"
-                    className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                    className="font-semibold text-ios-blue lg-transition hover:underline"
                   >
                     思考级别
                   </a>
                   选到
                   <a
                     href="/docs/assistant#beast-mode"
-                    className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                    className="font-semibold text-ios-blue lg-transition hover:underline"
                   >
                     「极限」档
                   </a>
                   ，它会自动套成熟模板的工序结构当导演派活（详见
                   <a
                     href="/docs/assistant#beast-mode"
-                    className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                    className="font-semibold text-ios-blue lg-transition hover:underline"
                   >
                     野兽模式
                   </a>
@@ -169,7 +169,7 @@ export default function DocsWorkflowPage() {
                   {RECIPE_CHIPS.map((chip) => (
                     <span
                       key={chip}
-                      className="mr-1.5 mt-1.5 inline-block rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-0.5 text-ios-caption1 font-semibold text-[#007AFF]"
+                      className="mr-1.5 mt-1.5 inline-block rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-0.5 text-ios-caption1 font-semibold text-ios-blue"
                     >
                       {chip}
                     </span>

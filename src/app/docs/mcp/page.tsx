@@ -71,7 +71,7 @@ export default function DocsMcpPage() {
     <div className="flex flex-col gap-6">
       <a
         href="/docs"
-        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-[#007AFF]"
+        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-ios-blue"
       >
         ← 文档中心
       </a>
@@ -93,7 +93,7 @@ export default function DocsMcpPage() {
               <InlineCode>tools/list</InlineCode> 只露导演工具；原子工具用{" "}
               <InlineCode>?toolset=expert</InlineCode>。Codex、Claude Code、Cursor、OpenClaw 与任意 MCP
               客户端逐份可复制的配置都在{" "}
-              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /mcp 接入页
               </a>
               。
@@ -102,7 +102,7 @@ export default function DocsMcpPage() {
               先在{" "}
               <a
                 href="/settings/api-keys"
-                className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                className="font-semibold text-ios-blue lg-transition hover:underline"
               >
                 登录 eimu.dev → 设置 → API 密钥
               </a>{" "}
@@ -117,7 +117,7 @@ export default function DocsMcpPage() {
               <span className="font-semibold text-[rgba(0,0,0,0.68)]">字面引用</span>，不是要你填的值：客户端需支持{" "}
               <InlineCode>{"${VAR}"}</InlineCode> 插值，并且这个环境变量要持久化在 shell 启动文件里（只 export
               一次的话，重开终端客户端就读不到，会送出空 `Bearer ` 并拿到 401）。完整步骤见{" "}
-              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /mcp 接入页
               </a>
               {" "}的「一键安装指令」第 3 步。
@@ -138,7 +138,7 @@ export default function DocsMcpPage() {
         </h3>
         <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
           本机 stdio（仓库 mcp-server/）不是对外主路径；远端 HTTP MCP 才是。本机路线要自己跑一个 stdio MCP server：
-          <a href="https://github.com/tinchak0207/Eimu/tree/main/mcp-server" className="font-semibold text-[#007AFF] lg-transition hover:underline">源码已在 GitHub 公开</a>
+          <a href="https://github.com/tinchak0207/Eimu/tree/main/mcp-server" className="font-semibold text-ios-blue lg-transition hover:underline">源码已在 GitHub 公开</a>
           。这里只启动本机 MCP 客户端适配层，仍调用官方生成 API 并使用你的密钥计费；不等于自建完整生成服务。
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -164,7 +164,7 @@ export default function DocsMcpPage() {
           <KeyCard icon={ListChecks} title="本机 server 提供的 4 个工具">
             <p className="mb-3">
               远端 MCP 默认导演面约 5 个工具，专家面（toolset=expert）展开原子工具，清单见{" "}
-              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /mcp 接入页
               </a>
               ；本机 server 只提供下面这 4 个。
@@ -172,7 +172,7 @@ export default function DocsMcpPage() {
             <ul className="space-y-2.5">
               {MCP_TOOLS.map((tool) => (
                 <li key={tool.name} className="rounded-ios-2xl bg-[rgba(0,0,0,0.04)] px-4 py-3">
-                  <code className="font-mono text-ios-footnote font-semibold text-[#007AFF]">{tool.name}</code>
+                  <code className="font-mono text-ios-footnote font-semibold text-ios-blue">{tool.name}</code>
                   <p className="mt-1 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{tool.description}</p>
                 </li>
               ))}
@@ -183,7 +183,7 @@ export default function DocsMcpPage() {
           想用本地 AI 框架（DeepSeek Harness）把本站当双手？端点参考见〈
           <a
             href="/docs/api"
-            className="font-semibold text-[#007AFF] lg-transition hover:underline"
+            className="font-semibold text-ios-blue lg-transition hover:underline"
           >
             开发进阶
           </a>
@@ -192,12 +192,12 @@ export default function DocsMcpPage() {
             href="https://github.com/deepseek-ai/deepseek-harness"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-semibold text-[#007AFF] lg-transition hover:underline"
+            className="font-semibold text-ios-blue lg-transition hover:underline"
           >
             GitHub
           </a>
           。各条生成链路的实时健康度见{" "}
-          <a href="/status" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+          <a href="/status" className="font-semibold text-ios-blue lg-transition hover:underline">
             状态页
           </a>
           。

@@ -489,7 +489,7 @@ export function ShotReviewPanel({
           onClick={() => void handleApproveAll()}
           disabled={shots.length === 0}
           className={cn(
-            "flex items-center gap-1 rounded-lg bg-[#007AFF] px-2.5 py-1.5 text-ios-caption1 font-medium text-white",
+            "flex items-center gap-1 rounded-lg bg-ios-blue px-2.5 py-1.5 text-ios-caption1 font-medium text-white",
             shots.length === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-[#0066D6]",
           )}
         >

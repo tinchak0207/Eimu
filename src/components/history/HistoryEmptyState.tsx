@@ -59,7 +59,7 @@ export function HistoryEmptyState({ reason, message, onClearFilters, onRetry }: 
         {reason === "empty" && (
           <Link
             href="/"
-            className="mt-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#007AFF] px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98]"
+            className="mt-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-ios-blue px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98]"
           >
             去做图
           </Link>
@@ -79,7 +79,7 @@ export function HistoryEmptyState({ reason, message, onClearFilters, onRetry }: 
           <button
             type="button"
             onClick={onRetry}
-            className="mt-1 cursor-pointer rounded-full bg-[#007AFF] px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/20"
+            className="mt-1 cursor-pointer rounded-full bg-ios-blue px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             重试
           </button>
@@ -88,7 +88,7 @@ export function HistoryEmptyState({ reason, message, onClearFilters, onRetry }: 
         {reason === "logged-out" && (
           <Link
             href="/"
-            className="mt-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#007AFF] px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98]"
+            className="mt-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-ios-blue px-5 py-2 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] active:scale-[0.98]"
           >
             返回登录
           </Link>

@@ -6,14 +6,15 @@
 // POST claim 领回会话（服务端 Set-Cookie 种登入态），只 finish 一次。
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clearHandoffLogin } from "@/lib/github-login";
+import { clearHandoffLogin, getHandoffVerifier } from "@/lib/github-login";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 10 * 60_000;
 
 function extractTicket(loginUrl: string): string {
   const query = loginUrl.split("?", 2)[1] ?? "";
-  return new URLSearchParams(query).get("handoff") ?? "";
+  // handoff 值带邀请码时是 "ticket~invite"（start 路由需要原值）；poll/claim 只用真实 ticket。
+  return (new URLSearchParams(query).get("handoff") ?? "").split("~")[0];
 }
 
 /**
@@ -61,7 +62,12 @@ export function usePwaHandoffClaim(
           setClaiming(true);
           const claimRes = await fetch(
             `/api/auth/handoff?action=claim&ticket=${encodeURIComponent(ticket)}`,
-            { method: "POST" },
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              // verifier 只在本设备；旧式在途 ticket 没有 → null，服务端过渡分支放行。
+              body: JSON.stringify({ verifier: getHandoffVerifier(ticket) }),
+            },
           );
           const claimData = (await claimRes.json()) as { success?: boolean };
           if (!stopped && claimData?.success) {

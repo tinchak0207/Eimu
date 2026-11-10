@@ -47,7 +47,7 @@ export function RemixButton({ shareId, prompt, modelId, aspectRatio, imageSize }
     <button
       type="button"
       onClick={handleRemix}
-      className="lg-transition flex w-full items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-6 py-3.5 text-ios-body font-semibold text-white shadow-[0_8px_24px_rgba(0,122,255,0.30)] hover:bg-[#0066DD] active:scale-[0.98]"
+      className="lg-transition flex w-full items-center justify-center gap-2 rounded-ios-xl bg-ios-blue px-6 py-3.5 text-ios-body font-semibold text-white shadow-[0_8px_24px_rgba(0,122,255,0.30)] hover:bg-[#0066DD] active:scale-[0.98]"
     >
       <Sparkles className="h-4 w-4" aria-hidden="true" />
       做同款

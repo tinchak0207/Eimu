@@ -29,7 +29,7 @@ export default function DocsBillingPage() {
     <div className="flex flex-col gap-6">
       <a
         href="/docs"
-        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-[#007AFF]"
+        className="text-ios-footnote text-[rgba(0,0,0,0.48)] lg-transition hover:text-ios-blue"
       >
         ← 文档中心
       </a>
@@ -38,7 +38,7 @@ export default function DocsBillingPage() {
       <section id="billing" className="scroll-mt-28">
         <SectionTitle icon={CircleDollarSign}>充值与计费</SectionTitle>
         <div className="mt-4 flex items-center gap-2">
-          <Wallet className="h-4 w-4 shrink-0 text-[#007AFF]" />
+          <Wallet className="h-4 w-4 shrink-0 text-ios-blue" />
           <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">充值三步</p>
         </div>
         <div className="mt-3 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
@@ -70,7 +70,7 @@ export default function DocsBillingPage() {
               {PLAN_ROWS.map((plan) => (
                 <div key={plan.name} className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4">
                   <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.85)]">{plan.name}</p>
-                  <p className="mt-1 text-ios-caption1 font-semibold text-[#007AFF]">{plan.price}</p>
+                  <p className="mt-1 text-ios-caption1 font-semibold text-ios-blue">{plan.price}</p>
                   <p className="mt-1 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">{plan.coins}</p>
                 </div>
               ))}
@@ -90,7 +90,7 @@ export default function DocsBillingPage() {
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <KeyCard icon={Coins} title="一本账，跨模型可比价">
             所有模型用统一币制计价，不同模型之间可以直接比价。单价看定价页{" "}
-            <a href="/pricing" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+            <a href="/pricing" className="font-semibold text-ios-blue lg-transition hover:underline">
               /pricing
             </a>
             ，每一单的结算在历史里可查。
@@ -104,7 +104,7 @@ export default function DocsBillingPage() {
             余额不足时会直接拒绝并提示，绝不会静默扣成负数。至于它什么时候开口问你钱，由
             <a
               href="/docs/assistant"
-              className="font-semibold text-[#007AFF] lg-transition hover:underline"
+              className="font-semibold text-ios-blue lg-transition hover:underline"
             >
               互动模式
             </a>

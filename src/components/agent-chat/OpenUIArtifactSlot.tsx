@@ -64,7 +64,7 @@ function Gallery({ found, layout, ctx }: { found: AgentMediaItem[]; layout: Gall
               aria-label={`查看第 ${index + 1} 张`}
               aria-pressed={index === hero}
               onClick={() => setHero(index)}
-              className={`overflow-hidden rounded-ios-md border-2 ${index === hero ? "border-[#007aff]" : "border-transparent"}`}
+              className={`overflow-hidden rounded-ios-md border-2 ${index === hero ? "border-ios-blue" : "border-transparent"}`}
             >
               {item.kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element

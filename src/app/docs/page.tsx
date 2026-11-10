@@ -110,8 +110,8 @@ export default function DocsPage() {
       {/* ================= Hero ================= */}
       <section className="pt-2">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-[#007AFF]" />
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">教程与参考</p>
+          <Sparkles className="h-4 w-4 text-ios-blue" />
+          <p className="text-ios-footnote font-semibold text-ios-blue">教程与参考</p>
         </div>
         <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
           AI 助理快速上手
@@ -151,7 +151,7 @@ export default function DocsPage() {
                   key={example.text}
                   className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4"
                 >
-                  <p className="text-ios-footnote font-semibold text-[#007AFF]">“{example.text}”</p>
+                  <p className="text-ios-footnote font-semibold text-ios-blue">“{example.text}”</p>
                   <p className="mt-1.5 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">{example.note}</p>
                 </div>
               ))}
@@ -194,7 +194,7 @@ export default function DocsPage() {
                   里；然后按你设定的互动模式请求授权或直接开工（见〈
                   <a
                     href="/docs/assistant"
-                    className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                    className="font-semibold text-ios-blue lg-transition hover:underline"
                   >
                     助理设定
                   </a>
@@ -248,7 +248,7 @@ export default function DocsPage() {
                 className="lg-card flex flex-col rounded-ios-3xl p-5 lg-transition hover:bg-[rgba(0,122,255,0.06)]"
               >
                 <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+                  <Icon className="h-4 w-4 shrink-0 text-ios-blue" />
                   <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{doc.title}</p>
                 </div>
                 <p className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{doc.desc}</p>
@@ -276,7 +276,7 @@ export default function DocsPage() {
                 className="lg-card flex flex-col rounded-ios-3xl p-5 lg-transition hover:bg-[rgba(0,122,255,0.06)]"
               >
                 <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+                  <Icon className="h-4 w-4 shrink-0 text-ios-blue" />
                   <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{doc.title}</p>
                 </div>
                 <p className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{doc.desc}</p>

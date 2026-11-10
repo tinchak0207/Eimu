@@ -48,7 +48,7 @@ export function DocsSidebar() {
                       className={cn(
                         "flex items-center justify-center gap-2 rounded-ios-xl px-3 py-2.5 text-ios-footnote font-medium lg:justify-start lg:px-3.5",
                         active
-                          ? "bg-[rgba(0,122,255,0.10)] text-[#007AFF]"
+                          ? "bg-[rgba(0,122,255,0.10)] text-ios-blue"
                           : "text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,122,255,0.06)] hover:text-[rgba(0,0,0,0.82)]",
                       )}
                     >

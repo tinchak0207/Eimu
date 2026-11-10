@@ -15,6 +15,8 @@ import {
   claimHandoff,
   createHandoffTicket,
   deliverHandoff,
+  isValidHandoffChallenge,
+  isValidHandoffVerifier,
   pollHandoff,
 } from "@/lib/pwa-handoff";
 
@@ -29,6 +31,8 @@ interface HandoffBody {
   ticket?: unknown;
   token?: unknown;
   user?: unknown;
+  challenge?: unknown;
+  verifier?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -57,7 +61,10 @@ export async function POST(req: NextRequest) {
   try {
     switch (body.op) {
       case "create": {
-        const ticket2 = await createHandoffTicket();
+        if (!isValidHandoffChallenge(body.challenge)) {
+          return NextResponse.json({ ok: false, message: "缺少或非法的 challenge。" }, { status: 400 });
+        }
+        const ticket2 = await createHandoffTicket(body.challenge);
         return NextResponse.json({ ok: true, ticket: ticket2 });
       }
       case "deliver": {
@@ -74,7 +81,8 @@ export async function POST(req: NextRequest) {
       }
       case "claim": {
         if (!ticket) return NextResponse.json({ ok: false, message: "缺少 ticket。" }, { status: 400 });
-        const claimed = await claimHandoff(ticket);
+        const verifier = isValidHandoffVerifier(body.verifier) ? body.verifier : null;
+        const claimed = await claimHandoff(ticket, verifier);
         return NextResponse.json({ ok: true, claimed });
       }
       default:

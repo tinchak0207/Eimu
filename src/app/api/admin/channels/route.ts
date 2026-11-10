@@ -7,6 +7,7 @@
 // 等于把密钥交给任何拿到 admin session 的人。host 一律过 safeEndpointHost。
 
 import { NextRequest, NextResponse } from "next/server";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   buildModelQueue,
   describeChannels,
@@ -125,7 +126,7 @@ async function buildChannelsPayload(
     sub2apiEnabledState: sub2apiEnabledState(),
     dangerFlags: {
       mockMode: process.env.ENABLE_MOCK_MODE === "true",
-      localTestMode: process.env.NEXT_PUBLIC_LOCAL_TEST_MODE === "true",
+      localTestMode: LOCAL_TEST_MODE,
     },
     propagationNote:
       "保存后本实例立即生效；其他温实例的配置缓存最长 15 秒后刷新，期间可能仍按旧配置调度。",

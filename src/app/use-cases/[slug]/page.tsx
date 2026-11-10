@@ -197,7 +197,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
         />
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">{category.keyword}</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">{category.keyword}</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             {category.title}
           </h1>
@@ -208,7 +208,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
           ))}
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-ios-blue px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             开始生成
             <ArrowUpRight className="h-4 w-4" />
@@ -223,7 +223,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
                 <li key={scenario.id} className="text-ios-footnote">
                   <a
                     href={`#${scenario.id}`}
-                    className="text-[rgba(0,0,0,0.62)] transition-colors hover:text-[#007AFF]"
+                    className="text-[rgba(0,0,0,0.62)] transition-colors hover:text-ios-blue"
                   >
                     {index + 1}. {scenario.title}
                   </a>
@@ -236,7 +236,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
         {category.scenarios.map((scenario) => (
           <section key={scenario.id} id={scenario.id} className={`${sectionClass} scroll-mt-24`}>
             <h2 className={h2Class}>{scenario.title}</h2>
-            <p className="mt-2 text-ios-footnote font-semibold text-[#007AFF]">{scenario.searchKeyword}</p>
+            <p className="mt-2 text-ios-footnote font-semibold text-ios-blue">{scenario.searchKeyword}</p>
             {scenario.body.map((paragraph) => (
               <p key={paragraph} className={`mt-3 ${bodyClass}`}>
                 {paragraph}
@@ -283,7 +283,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
             <ol className="mt-4 grid gap-3">
               {category.checklist.map((step, index) => (
                 <li key={step} className={`flex gap-3 ${bodyClass}`}>
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-[#007AFF]">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-ios-blue">
                     {index + 1}
                   </span>
                   <span className="pt-0.5">{step}</span>
@@ -303,7 +303,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
                   href={`/workflows/${card.id.replace(/^agent-/, "")}`}
                   className={`group flex flex-col gap-1 ${tileClass} transition`}
                 >
-                  <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-[#007AFF]">
+                  <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-ios-blue">
                     {card.name}
                     <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   </span>
@@ -322,7 +322,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
                 <Link
                   key={item.slug}
                   href={`/use-cases/${item.slug}`}
-                  className="group flex items-center justify-between gap-2 rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3.5 py-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)] transition hover:text-[#007AFF]"
+                  className="group flex items-center justify-between gap-2 rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3.5 py-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)] transition hover:text-ios-blue"
                 >
                   {item.tagline || item.title}
                   <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -358,7 +358,7 @@ async function UseCaseCategoryHub({ category }: { category: UseCaseCategory }) {
                   href={`/use-cases/${item.slug}`}
                   className={`group flex flex-col gap-1 ${tileClass} transition`}
                 >
-                  <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-[#007AFF]">
+                  <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-ios-blue">
                     {item.name}
                     <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   </span>
@@ -450,7 +450,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
         </Link>
 
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">{useCase.keyword}</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">{useCase.keyword}</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             {useCase.title}
           </h1>
@@ -459,7 +459,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
           </p>
           <Link
             href="/"
-            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-[#007AFF] px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
+            className="mt-5 inline-flex items-center gap-2 rounded-ios-xl bg-ios-blue px-4 py-3 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.30)] transition-colors hover:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2"
           >
             开始生成
             <ArrowUpRight className="h-4 w-4" />
@@ -473,7 +473,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
               href={`/use-cases/${useCase.categorySlug}`}
               className={`group mt-4 flex flex-col gap-1 ${tileClass} transition`}
             >
-              <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-[#007AFF]">
+              <span className="flex items-center justify-between gap-2 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)] group-hover:text-ios-blue">
                 {category.name}
                 <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               </span>
@@ -523,7 +523,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
                     href={evidence.url}
                     target="_blank"
                     rel="noopener noreferrer nofollow"
-                    className="text-ios-footnote font-semibold text-[#007AFF] underline-offset-2 hover:underline"
+                    className="text-ios-footnote font-semibold text-ios-blue underline-offset-2 hover:underline"
                   >
                     {evidence.title}
                   </a>
@@ -546,7 +546,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
             <ol className="mt-4 grid gap-3">
               {useCase.workflowSteps.map((step, index) => (
                 <li key={step} className={`flex gap-3 ${bodyClass}`}>
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-[#007AFF]">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-ios-blue">
                     {index + 1}
                   </span>
                   <span className="pt-0.5">{step}</span>
@@ -622,7 +622,7 @@ async function UseCaseGuide({ useCase }: { useCase: UseCase }) {
                 <Link
                   key={item.slug}
                   href={`/use-cases/${item.slug}`}
-                  className="group flex items-center justify-between gap-2 rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3.5 py-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)] transition hover:text-[#007AFF]"
+                  className="group flex items-center justify-between gap-2 rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3.5 py-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)] transition hover:text-ios-blue"
                 >
                   {item.tagline}
                   <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

@@ -47,6 +47,32 @@ export type HandoffProvider = "github" | "google";
 interface PendingHandoff extends HandoffLogin {
   createdAt: number;
   provider: HandoffProvider;
+  /** PKCE 式 verifier：只留在本设备（localStorage + 内存），领取时随 claim 请求体提交。旧记录没有。 */
+  verifier?: string;
+}
+
+// localStorage 不可用时的内存兜底（同一页面生命周期内仍能 claim）。
+const memoryVerifiers = new Map<string, string>();
+
+function randomVerifier(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** 取该 ticket 对应的本地 verifier（claim 用）；旧式在途 ticket 没有 → null。 */
+export function getHandoffVerifier(ticket: string): string | null {
+  const mem = memoryVerifiers.get(ticket);
+  if (mem) return mem;
+  const pending = readPendingHandoff();
+  return pending && pending.ticket === ticket && pending.verifier ? pending.verifier : null;
 }
 
 // 本地 pending 票据键：PWA 切去浏览器授权期间可能被系统杀掉重启，
@@ -65,15 +91,17 @@ function readPendingHandoff(): PendingHandoff | null {
     if (Date.now() - parsed.createdAt >= PENDING_MAX_AGE_MS) return null;
     // 旧记录没有 provider 字段（Google 上线前写的），一律视作 github。
     const provider: HandoffProvider = parsed.provider === "google" ? "google" : "github";
-    return { ticket: parsed.ticket, loginUrl: parsed.loginUrl, createdAt: parsed.createdAt, provider };
+    const verifier = typeof parsed.verifier === "string" && parsed.verifier ? parsed.verifier : undefined;
+    return { ticket: parsed.ticket, loginUrl: parsed.loginUrl, createdAt: parsed.createdAt, provider, verifier };
   } catch {
     return null;
   }
 }
 
-function writePendingHandoff(login: HandoffLogin, provider: HandoffProvider): void {
+function writePendingHandoff(login: HandoffLogin, provider: HandoffProvider, verifier: string): void {
+  memoryVerifiers.set(login.ticket, verifier);
   try {
-    const pending: PendingHandoff = { ...login, createdAt: Date.now(), provider };
+    const pending: PendingHandoff = { ...login, createdAt: Date.now(), provider, verifier };
     window.localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
   } catch {
     // localStorage 不可用（隐私模式等）：登录流程照旧，仅失去续接能力。
@@ -82,6 +110,7 @@ function writePendingHandoff(login: HandoffLogin, provider: HandoffProvider): vo
 
 /** 清除本地 pending 票据（claim 成功或登录完成后调用）。 */
 export function clearHandoffLogin(): void {
+  memoryVerifiers.clear();
   try {
     window.localStorage.removeItem(PENDING_KEY);
   } catch {
@@ -103,7 +132,13 @@ export async function createHandoffLogin(
     return { ticket: pending.ticket, loginUrl: pending.loginUrl };
   }
   try {
-    const res = await fetch(`/api/auth/handoff?action=create&provider=${provider}`, { method: "POST" });
+    const verifier = randomVerifier();
+    const challenge = await sha256Hex(verifier);
+    const res = await fetch(`/api/auth/handoff?action=create&provider=${provider}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge }),
+    });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       success?: boolean;
@@ -112,7 +147,7 @@ export async function createHandoffLogin(
     };
     if (!data?.success || !data.ticket || !data.loginUrl) return null;
     const login = { ticket: data.ticket, loginUrl: data.loginUrl };
-    writePendingHandoff(login, provider);
+    writePendingHandoff(login, provider, verifier);
     return login;
   } catch {
     return null;

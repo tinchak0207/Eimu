@@ -91,7 +91,6 @@ jobs:
           #    src/components/pro-workstation/** 已被 canvas-workstation 取代并删除，
           #    下列测试仍 readFileSync 旧路径 → 干净 checkout 必 ENOENT。
           #    本地同样红；保留测试档不入库删除（大规模删测试需单独授权），只在本闸排除。
-          #    - src/components/ProfessionalWorkstation.test.ts
           #    - src/components/PricingSync.test.ts          → 另含一条旧 pro-workstation 源码断言
           #    - src/lib/kunpeng-assets.test.ts
           #    - src/lib/lora-user-state.test.ts
@@ -105,7 +104,6 @@ jobs:
             "src/lib/blender-honesty-gate.test.ts"
             "src/lib/critic-expert-frame.test.ts"
             "src/lib/music-expert-frame.test.ts"
-            "src/components/ProfessionalWorkstation.test.ts"
             "src/components/PricingSync.test.ts"
             "src/lib/kunpeng-assets.test.ts"
             "src/lib/lora-user-state.test.ts"
@@ -134,4 +132,5 @@ jobs:
 
           # 测试指令以 package.json 的 test script 为准（tsx --test）；
           # 不吞 exit code：任何非预期失败都会让 job 变红。
-          npx --yes tsx --test "${RUN[@]}"
+          # NODE_ENV=test：local-test-mode 白名单只在 development/test 放行 NEXT_PUBLIC_LOCAL_TEST_MODE。
+          NODE_ENV=test npx --yes tsx --test "${RUN[@]}"

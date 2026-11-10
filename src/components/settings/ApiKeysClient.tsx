@@ -176,7 +176,7 @@ export function ApiKeysClient() {
             </p>
             <Link
               href="/"
-              className="mt-6 inline-flex items-center rounded-full bg-[#007AFF] px-6 py-3 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
+              className="mt-6 inline-flex items-center rounded-full bg-ios-blue px-6 py-3 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
             >
               返回首页登录
             </Link>
@@ -203,7 +203,7 @@ export function ApiKeysClient() {
             type="button"
             onClick={() => setCreating(true)}
             disabled={remaining <= 0 || loading}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[#007AFF] px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-ios-blue px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             创建密钥
@@ -252,7 +252,7 @@ export function ApiKeysClient() {
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#007AFF] px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
+                className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-full bg-ios-blue px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 创建第一个密钥
@@ -301,9 +301,9 @@ export function ApiKeysClient() {
 
         <p className="mt-5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.46)]">
           密钥只在此页面显示一次，存储中仅保留哈希，关闭后无法再次查看；遗失只能吊销后重新创建。
-          使用方式见 <Link href="/docs" className="text-[#007AFF] hover:underline">接入文档</Link>；
+          使用方式见 <Link href="/docs" className="text-ios-blue hover:underline">接入文档</Link>；
           团队席位、成员角色、建画布权限与审批见{" "}
-          <Link href="/settings/team" className="text-[#007AFF] hover:underline">团队管理</Link>。
+          <Link href="/settings/team" className="text-ios-blue hover:underline">团队管理</Link>。
         </p>
       </div>
 
@@ -353,7 +353,7 @@ export function ApiKeysClient() {
                 type="button"
                 onClick={createKey}
                 disabled={saving}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#007AFF] px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-ios-blue px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
               >
                 {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
                 创建
@@ -453,7 +453,7 @@ export function ApiKeysClient() {
                 </div>
                 <p className="mt-3 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">
                   {DEV_QUICKSTART_BALANCE_NOTE}{" "}
-                  <Link href="/pricing" className="text-[#007AFF] hover:underline">
+                  <Link href="/pricing" className="text-ios-blue hover:underline">
                     前往充值
                   </Link>
                   。
@@ -469,7 +469,7 @@ export function ApiKeysClient() {
                   setCopied(false);
                   setCopiedCurl(null);
                 }}
-                className="cursor-pointer rounded-full bg-[#007AFF] px-6 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
+                className="cursor-pointer rounded-full bg-ios-blue px-6 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
               >
                 我已保存
               </button>

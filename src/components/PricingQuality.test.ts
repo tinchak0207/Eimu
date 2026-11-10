@@ -146,7 +146,6 @@ test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", ()
     "src/app/docs/page.tsx",
     "src/components/Navbar.tsx",
     "src/components/WalletBadge.tsx",
-    "src/components/CheckinCalendar.tsx",
     "src/components/ImageDisplay.tsx",
     "src/components/ui/toast.tsx",
   ];

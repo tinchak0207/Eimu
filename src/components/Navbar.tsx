@@ -469,7 +469,7 @@ export default function Navbar({ className }: NavbarProps) {
                       aria-label="API 密钥"
                       title="API 密钥"
                       className={cn(
-                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8",
+                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-ios-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8",
                         FLAT_CHROME,
                       )}
                     >

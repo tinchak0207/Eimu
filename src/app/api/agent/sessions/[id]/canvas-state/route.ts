@@ -5,13 +5,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）
 
-const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 /** 快照体积上限：压缩后仍超 512KB 属异常（前端已截断 content）。 */
 const MAX_STATE_BYTES = 512 * 1024;
 

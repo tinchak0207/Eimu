@@ -14,6 +14,13 @@ import { requireVerifiedUser } from "./server-user";
 import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "./agent-user-key";
 import { shouldBypassAuthForLocalTest } from "./local-test-mode";
 
+/**
+ * 会话 id / 子代理 runId 的统一白名单（S-15）：只许字母数字、`_`、`-`，长度 1-128。
+ * 不含 `.`，故 `.`、`..` 及任何由点组成的段天然被拒，拼进上游路径无法穿越。
+ * 所有 /api/agent/sessions/[id]/* 子路由共用，禁止各自再抄一份正则。
+ */
+export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
 export type AgentCaller =
   | { ok: true; userId: number; key: string }
   | { ok: false; status: number; message: string; code?: string };

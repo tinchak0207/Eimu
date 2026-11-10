@@ -9,7 +9,7 @@ interface ProxyOptions {
   browserCache?: number;
 }
 
-type RouteContext = { params: Promise<Record<string, string>> };
+type RouteContext = { params: Promise<Record<string, string | string[]>> };
 
 // 脱敏实作已抽到 `@/lib/upstream-sanitizer`（纯函式、零依赖，Edge middleware 可引用）；
 // 本档 re-export 以维持既有 import 面（各路由 import from "@/lib/proxy"）。
@@ -32,6 +32,30 @@ export {
   sanitizeUpstreamValue,
 };
 
+/**
+ * S-16：用户可控的路径段拼进上游 URL 前的唯一闸。
+ * 拒绝 ""、"."、".."（含 %2e 编码与多层编码后还原出的）、含 `/` `\\` 的段、控制字符。
+ * 路由参数已被 Next 解码一次，故这里再迭代解码至多 3 次，任何一层现出危险形态即拒。
+ */
+export function isUnsafeUpstreamSegment(segment: string): boolean {
+  let current = segment;
+  for (let i = 0; i < 4; i += 1) {
+    if (current === "" || /^\.+$/.test(current)) return true;
+    if (/[\/\\\u0000-\u001f\u007f]/.test(current)) return true;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      return true; // 残缺的 %xx：无法证明安全，按不安全处理
+    }
+    if (decoded === current) return false;
+    current = decoded;
+  }
+  return true; // 超过 3 层编码仍在变化：拒绝
+}
+
+const UNSAFE_PATH_MESSAGE = "请求路径无效";
+
 export function makeProxy(opts: ProxyOptions = {}) {
   return async function handler(
     req: NextRequest,
@@ -48,7 +72,15 @@ export function makeProxy(opts: ProxyOptions = {}) {
 
     let upstreamPath = opts.upstreamPath ?? req.nextUrl.pathname;
     for (const [key, val] of Object.entries(params)) {
-      upstreamPath = upstreamPath.replace(`:${key}`, val);
+      const placeholder = `:${key}`;
+      if (!upstreamPath.includes(placeholder)) continue;
+      const segments = Array.isArray(val) ? val : [val];
+      if (segments.some((seg) => typeof seg !== "string" || isUnsafeUpstreamSegment(seg))) {
+        return NextResponse.json({ success: false, message: UNSAFE_PATH_MESSAGE }, { status: 400 });
+      }
+      const encoded = segments.map((seg) => encodeURIComponent(seg)).join("/");
+      // 函式替换：避免 `$&` 等特殊替换样式；合法路径的上游 URL 形状不变。
+      upstreamPath = upstreamPath.replace(placeholder, () => encoded);
     }
 
     const qs = req.nextUrl.searchParams.toString();

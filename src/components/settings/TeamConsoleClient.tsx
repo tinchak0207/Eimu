@@ -185,7 +185,7 @@ function SmallButton({
       disabled={disabled}
       className={cn(
         "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-ios-caption1 font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40",
-        tone === "primary" && "bg-[#007AFF] text-white shadow-[0_2px_10px_rgba(0,122,255,0.24)] hover:bg-[#0066DD]",
+        tone === "primary" && "bg-ios-blue text-white shadow-[0_2px_10px_rgba(0,122,255,0.24)] hover:bg-[#0066DD]",
         tone === "danger" && "lg-tint-red text-[#b3271c] hover:bg-[rgba(255,59,48,0.16)]",
         tone === "plain" && "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.66)] hover:bg-[rgba(0,0,0,0.09)]",
       )}
@@ -306,7 +306,7 @@ export function TeamConsoleClient() {
           <Section title="连接团队" icon={<ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />}>
             <p className="text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.56)]">
               团队管理接口需要<b>团队主账号的 B 端密钥</b>（<code className="font-mono">sk-biz-…</code>）。
-              可在 <Link href="/settings/api-keys" className="text-[#007AFF] hover:underline">API 密钥</Link> 页签发。
+              可在 <Link href="/settings/api-keys" className="text-ios-blue hover:underline">API 密钥</Link> 页签发。
               密钥只保存在本页签的会话里（关闭标签页即失效），不会写入任何存储或日志。
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -577,7 +577,7 @@ export function TeamConsoleClient() {
           </div>
           <p className="mt-3 rounded-ios-xl px-4 py-3 text-ios-footnote leading-relaxed text-[#8a6410] lg-tint-gold">
             席位目前只是<b>人数上限的意图整数</b>：尚未接入计费，不能按席位购买、续费或扣款。购买与续费仍走
-            <Link href="/pricing" className="mx-1 text-[#007AFF] hover:underline">套餐页</Link>
+            <Link href="/pricing" className="mx-1 text-ios-blue hover:underline">套餐页</Link>
             （充值进团队主账号余额后，成员额度分配走 B 端接口）。
           </p>
         </Section>

@@ -18,7 +18,7 @@ export function SectionTitle({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <Icon className="h-4 w-4 text-[#007AFF]" />
+      <Icon className="h-4 w-4 text-ios-blue" />
       <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">{children}</h2>
     </div>
   );
@@ -44,7 +44,7 @@ export function Step({
   return (
     <div className="p-5 sm:p-7">
       <div className="flex items-center gap-2.5">
-        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#007AFF] text-ios-caption1 font-bold text-white">
+        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ios-blue text-ios-caption1 font-bold text-white">
           {n}
         </span>
         <h3 className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{title}</h3>
@@ -71,7 +71,7 @@ export function KeyCard({
   return (
     <div className="lg-card flex flex-col rounded-ios-3xl p-5">
       <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+        <Icon className="h-4 w-4 shrink-0 text-ios-blue" />
         <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{title}</p>
       </div>
       <div className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{children}</div>

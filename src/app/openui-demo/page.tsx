@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { useCallback, useState } from "react";
 import { ArrowLeft, Check, RotateCcw } from "lucide-react";
 import { AgentMarkdown } from "@/components/agent-chat/AgentMarkdown";
@@ -86,6 +87,8 @@ const EXAMPLES = [
 ];
 
 export default function OpenUIDemoPage() {
+  // 演示页仅限开发环境：生产直接 404（NODE_ENV 构建期内联；throw 在所有 hooks 之前，不破坏 hooks 顺序）。
+  if (process.env.NODE_ENV === "production") notFound();
   const [selected, setSelected] = useState(0);
   const [payload, setPayload] = useState("");
   const [submissionCount, setSubmissionCount] = useState(0);

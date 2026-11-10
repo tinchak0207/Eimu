@@ -125,12 +125,12 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
                   "text-ios-footnote font-medium transition-colors duration-200",
                   "focus:outline-none focus:ring-2 focus:ring-ring/20",
                   active
-                    ? "bg-ios-blue/[0.12] text-[#007AFF]"
+                    ? "bg-ios-blue/[0.12] text-ios-blue"
                     : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
                 )}
               >
                 <span>{CHARACTER_CARD_KIND_LABEL[value]}卡</span>
-                <span className={cn("text-ios-caption1", active ? "text-[#007AFF]/70" : "text-[rgba(0,0,0,0.42)]")}>
+                <span className={cn("text-ios-caption1", active ? "text-ios-blue/70" : "text-[rgba(0,0,0,0.42)]")}>
                   {KIND_HINT[value]}
                 </span>
               </button>
@@ -173,7 +173,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
             onClick={() => void handleSubmit()}
             disabled={saving}
             className={cn(
-              "rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-medium text-white",
+              "rounded-ios-xl bg-ios-blue px-4 py-2.5 text-ios-footnote font-medium text-white",
               "shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200",
               "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/30",
               saving && "cursor-wait opacity-70 active:scale-100",

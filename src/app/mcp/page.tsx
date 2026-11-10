@@ -305,7 +305,7 @@ const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
     body: (
       <>
         登录{" "}
-        <a href="/settings/api-keys" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+        <a href="/settings/api-keys" className="font-semibold text-ios-blue lg-transition hover:underline">
           设置 → API 密钥
         </a>{" "}
         自助签发一把 <InlineCode>sk-biz-…</InlineCode>（只显示一次，妥善保存），网页、REST API 与 MCP 共用这一把。
@@ -411,7 +411,7 @@ export default function McpPage() {
     <main className="min-h-screen bg-transparent px-4 pb-20 pt-20 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-6">
-          <p className="text-ios-footnote font-semibold text-[#007AFF]">MCP</p>
+          <p className="text-ios-footnote font-semibold text-ios-blue">MCP</p>
           <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
             把 Eimu 接到你的 coding agent
           </h1>
@@ -426,7 +426,7 @@ export default function McpPage() {
                 <a
                   key={item.id}
                   href={`#${item.id}`}
-                  className="lg-float inline-flex items-center rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] lg-transition hover:text-[#007AFF]"
+                  className="lg-float inline-flex items-center rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.68)] lg-transition hover:text-ios-blue"
                 >
                   {item.label}
                 </a>
@@ -441,7 +441,7 @@ export default function McpPage() {
             {STEPS.map((step) => (
               <li key={step.n}>
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#007AFF] text-ios-caption1 font-bold text-white">
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ios-blue text-ios-caption1 font-bold text-white">
                     {step.n}
                   </span>
                   <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{step.title}</p>
@@ -465,7 +465,7 @@ export default function McpPage() {
           </div>
           <p className="mt-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
             密钥在{" "}
-            <a href="/settings/api-keys" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+            <a href="/settings/api-keys" className="font-semibold text-ios-blue lg-transition hover:underline">
               {SITE_URL}/settings/api-keys
             </a>{" "}
             自助签发（只显示一次）；
@@ -523,7 +523,7 @@ export default function McpPage() {
             {MCP_TOOLS.map((tool) => (
               <li key={tool.name} className="lg-card rounded-ios-3xl p-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <code className="font-mono text-ios-footnote font-semibold text-[#007AFF]">{tool.name}</code>
+                  <code className="font-mono text-ios-footnote font-semibold text-ios-blue">{tool.name}</code>
                   <code className="font-mono text-ios-caption1 text-[rgba(0,0,0,0.45)]">{tool.scope}</code>
                   <code className="font-mono text-ios-caption1 text-[rgba(0,0,0,0.45)]">
                     {tool.surface === "director" ? "director" : "expert"}
@@ -541,13 +541,13 @@ export default function McpPage() {
             不想手写配置的话，Eimu 还提供一个 coding agent 插件包：一份{" "}
             <InlineCode>plugin.json</InlineCode> 声明能力与图标，一份 <InlineCode>.mcp.json</InlineCode>{" "}
             指向本文的 MCP 端点，外加三个随包技能。下载整包后解压，再按 README 配置客户端：
-            <a href={PLUGIN_URL} download className="font-semibold text-[#007AFF] lg-transition hover:underline">
+            <a href={PLUGIN_URL} download className="font-semibold text-ios-blue lg-transition hover:underline">
               下载 Eimu 插件包（tar.gz）
             </a>
             （入口说明：
             <a
               href={PLUGIN_README_URL}
-              className="font-semibold text-[#007AFF] lg-transition hover:underline"
+              className="font-semibold text-ios-blue lg-transition hover:underline"
             >
               README.md
             </a>
@@ -574,7 +574,7 @@ export default function McpPage() {
                 完整安装指令已移到上方「
                 <a
                   href="#agent-prompt"
-                  className="font-semibold text-[#007AFF] lg-transition hover:underline"
+                  className="font-semibold text-ios-blue lg-transition hover:underline"
                 >
                   一键：把这段发给你的 agent
                 </a>
@@ -589,23 +589,23 @@ export default function McpPage() {
           <ul className="mt-3 flex flex-col gap-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
             <li>
               受保护资源元数据（免授权可读）：{" "}
-              <a href={WELL_KNOWN_URL} className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href={WELL_KNOWN_URL} className="font-semibold text-ios-blue lg-transition hover:underline">
                 {WELL_KNOWN_URL}
               </a>
             </li>
             <li>
               REST API 参考：{" "}
-              <a href="/docs/api" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/docs/api" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /docs/api
               </a>
               ；文档中心：{" "}
-              <a href="/docs" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/docs" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /docs
               </a>
             </li>
             <li>
               生成链路实时健康度：{" "}
-              <a href="/status" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              <a href="/status" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /status
               </a>
             </li>
