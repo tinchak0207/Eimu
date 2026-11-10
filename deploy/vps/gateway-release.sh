@@ -385,10 +385,19 @@ capture_gateway_identity() {
 gateway_verify() {
   [ "$(readlink -f "$GATEWAY_PATH")" = "$1" ] || return 1
   (cd "$1" && md5sum -c ../manifest.md5 --quiet) || return 1
-  local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null)" || return 1
-  [ "$code" = 200 ] || { echo "HEALTH_UNEXPECTED http=$code" >&2; return 1; }
-  echo "VERIFY_OK current=$1 manifest=OK healthz=200"
+  # 逐行复用opencode-release.sh的有界ready loop；restart返回时监听口可能尚未就绪。
+  local code state attempt
+  for attempt in 1 2 3 4 5 6; do
+    state="$(systemctl is-active agent-gateway 2>/dev/null || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+    if [ "$state" = active ] && [ "$code" = 200 ]; then
+      echo "VERIFY_OK current=$1 manifest=OK healthz=200"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "HEALTH_UNEXPECTED service=$state http=$code" >&2
+  return 1
 }
 
 gateway_recover() {
