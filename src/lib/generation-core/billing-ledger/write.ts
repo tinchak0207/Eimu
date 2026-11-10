@@ -10,6 +10,8 @@ import { billingRetryAt, classifyBillingFailure, classifyRefundFailure, detailOf
 import { DEFAULT_RECONCILE_BATCH, ZOMBIE_RECLAIM_BATCH, ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT } from "./types";
 import type { FailureClass, GenerationJob } from "../types";
 import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { ImageBillingGatewayError } from "@/lib/image-billing";
 
 /**
@@ -36,12 +38,17 @@ function downgradedAmount(job: GenerationJob, actualResolution: string): number 
   const durationSeconds = Number(job.workflow?.durationSeconds ?? 0);
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
   const count = Math.max(1, Number(job.requestedCount ?? 1));
-  const amount = generationCoins(job.modelId, {
+  const coins = generationCoins(job.modelId, {
     resolution: actualResolution as never,
     durationSeconds,
     generateAudio: job.workflow?.generateAudio === true,
-  }) * count;
-  return Number.isFinite(amount) && amount > 0 ? amount : null;
+  });
+  // 目录没有该档时 generationCoins 回落到最小币步长（PRICING_COIN_STEP），那不是真价：
+  // 按它结算会把整单几乎全退。且账本单位是配额（币 × QUOTA_PER_COIN 的整数 bigint），
+  // 币值直接入账会写出 "0.00001" 这类小数 → bigint 报错，卡死整个 worker 迭代（2026-11-07 事故）。
+  if (!Number.isFinite(coins) || coins <= PRICING_COIN_STEP) return null;
+  const amount = Math.round(coins * count * QUOTA_PER_COIN);
+  return amount > 0 ? amount : null;
 }
 
 /**
@@ -345,7 +352,7 @@ export async function reconcileGenerationBilling(input: {
         await commitGenerationBilling(job, settled, sql);
         await refundGenerationBilling({
           job,
-          amount: Math.round((job.billingAmount - settled) * 1e6) / 1e6,
+          amount: Math.round(job.billingAmount - settled),
           executorId: input.executorId,
           adapter: input.adapter,
         }, sql);

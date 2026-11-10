@@ -21,6 +21,8 @@
 # 透明性铁律：opencode 内部可能把本档当一般 shell 用（Shell.preferred 等）——只要不是
 # `-c <cmd>` 形态，或 EIMU_LAUNCHER 未设，一律 exec /bin/bash "$@"，行为与原 shell 逐字相同。
 set -u
+# 使用者命令（-c 形态）的 stdin 一律 /dev/null：工具路 stdin 是永不关闭的管道，
+# ffmpeg/python input()/read 之类默认读 stdin 的命令会永久挂住（2026-11-07 子代理 ffmpeg 挂 192s 被强杀）。
 
 # 前台收齐：把已结束命令的输出原样交还，并阻止后台通知。
 deliver_finished() {
@@ -43,13 +45,13 @@ run_with_budget() {
   local bg_ms=${EIMU_BG_MS:-15000}
   local dir=${EIMU_BG_DIR:-}
   case "$bg_ms" in
-    ''|0) exec "$launcher" "$PWD" "$cmd" ;;
+    ''|0) exec "$launcher" "$PWD" "$cmd" </dev/null ;;
   esac
   case "$cmd" in
-    sleep|sleep[[:space:]]*) exec "$launcher" "$PWD" "$cmd" ;;
+    sleep|sleep[[:space:]]*) exec "$launcher" "$PWD" "$cmd" </dev/null ;;
   esac
   if [ -z "$dir" ] || ! mkdir -p "$dir"; then
-    exec "$launcher" "$PWD" "$cmd"
+    exec "$launcher" "$PWD" "$cmd" </dev/null
   fi
   local id="eimu-bg-$$-${EPOCHREALTIME:-$$}"
   id=${id//./}

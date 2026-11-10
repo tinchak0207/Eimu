@@ -20,6 +20,7 @@ REAL="/opt/agent-harness/bin/real/ffmpeg"
 GATE="/opt/agent-harness/bin/.ffmpeg-gate"
 MAX="${FFMPEG_MAX_CONCURRENT:-2}"
 MIN="${FFMPEG_MIN_MEM_MB:-400}"
+WAIT_S="${FFMPEG_GATE_WAIT_S:-180}"
 
 # 探测型旗标（detectFfmpeg 的 `ffmpeg -version` 等）不过闸，避免版本探测被编码阻塞
 case "${1:-}" in
@@ -27,9 +28,13 @@ case "${1:-}" in
     exec "$REAL" "$@";;
 esac
 
+# 一律 -nostdin：agent 工具路的 stdin 常是不会关的管道，ffmpeg 默认读 stdin 会永久挂住
+# （2026-11-07 子代理跑 `ffmpeg -i f -f null -` 挂 192s 被强杀；挂死的 ffmpeg 还占着 slot，
+# 后续 ffmpeg 全部排队 → 整条子代理链「长时间没有进展」）。`-i pipe:0` 显式输入不受影响。
 case "$MAX" in ''|*[!0-9]*) MAX=2;; esac
-[ "$MAX" -eq 0 ] && exec "$REAL" "$@"
-[ -d "$GATE" ] || exec "$REAL" "$@"   # fail-open：gate 目录缺失不阻断可用性
+case "$WAIT_S" in ''|*[!0-9]*) WAIT_S=180;; esac
+[ "$MAX" -eq 0 ] && exec "$REAL" -nostdin "$@"
+[ -d "$GATE" ] || exec "$REAL" -nostdin "$@"   # fail-open：gate 目录缺失不阻断可用性
 
 mem_ok() {
   local m
@@ -39,14 +44,19 @@ mem_ok() {
 }
 
 i=0
+deadline=$(( SECONDS + WAIT_S ))
 while :; do
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "ffmpeg-gate: 等待空闲 slot/内存超过 ${WAIT_S}s（有 ffmpeg 占着 slot 或内存不足），放弃排队；请查 'ps -C ffmpeg' 并终止挂死进程后重试" >&2
+    exit 75
+  fi
   slot=$(( i % MAX )); i=$(( i + 1 ))
   slotfile="$GATE/slot$slot.lock"
-  [ -r "$slotfile" ] || exec "$REAL" "$@"   # fail-open：slot 档不可读
+  [ -r "$slotfile" ] || exec "$REAL" -nostdin "$@"   # fail-open：slot 档不可读
   exec 9<"$slotfile"
   if flock -n 9 2>/dev/null; then
     if mem_ok; then
-      exec "$REAL" "$@"               # fd 9 续持 → ffmpeg 结束自动释放
+      exec "$REAL" -nostdin "$@"      # fd 9 续持 → ffmpeg 结束自动释放
     fi
     flock -u 9 2>/dev/null
   fi

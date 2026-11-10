@@ -15,6 +15,8 @@ import { planGenerationAttemptReplay } from "./operation-registry";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { persistOutputArtifact } from "./artifact-service";
 import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import {
   attemptedSupplierRoutingForOutput,
   beginGenerationAttempt,
@@ -259,14 +261,17 @@ async function refundResolutionDowngrade(
   const durationSeconds = Number(job.workflow?.durationSeconds ?? 0);
   const count = Math.max(1, Number(job.requestedCount ?? 1));
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
-  const actual = generationCoins(job.modelId, {
+  const coins = generationCoins(job.modelId, {
     resolution: downgraded.actualResolution as never,
     durationSeconds,
     generateAudio: job.workflow?.generateAudio === true,
-  }) * count;
-  // 目录里没有该档（或该档不认识）时不猜金额，直接不动账。
+  });
+  // 目录里没有该档（或该档不认识）时 generationCoins 回落到最小币步长，不是真价：不猜金额，直接不动账。
+  if (!Number.isFinite(coins) || coins <= PRICING_COIN_STEP) return 0;
+  // 账本单位是配额整数（币 × QUOTA_PER_COIN），币值不能直接和 billingAmount 相减/入账。
+  const actual = Math.round(coins * count * QUOTA_PER_COIN);
   const charged = Number(job.billingAmount ?? 0);
-  const refund = Math.round((charged - actual) * 1e6) / 1e6;
+  const refund = charged - actual;
   if (!Number.isFinite(refund) || refund <= 0 || refund >= charged) return 0;
   await commitGenerationBilling(job, actual, sql);
   const result = await refundGenerationBilling({ job, amount: refund, executorId: workerId }, sql);
