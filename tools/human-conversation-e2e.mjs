@@ -976,6 +976,26 @@ async function sceneViewerGate(scene, reasons) {
   return { sid, approved: [t1.approved, t2.approved], maxQuoted: [t1.maxQuoted, t2.maxQuoted], receipts: facts.receipts, seat: facts.seat, media, reply1: t1.reply.slice(0, 300), reply2: t2.reply.slice(0, 300) }
 }
 
+async function sceneUeEditor(scene, reasons) {
+  // UE 联动（2026-11-10）：必须真调 ue_editor 探本机编辑器，再照回执原文转告缺哪一步；不许空谈、不许拿 Blender 顶替。
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: false, maxCoins: 0 })
+  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
+  const raw = sse.frames.map((f) => f.raw).join("\n")
+  const called = /ue_editor/.test(raw)
+  if (!called) fail(reasons, `${scene.id} 没有调用 ue_editor 去探本机 UE`)
+  if (!/UE|Unreal|虚幻/i.test(turn.reply)) fail(reasons, `${scene.id} 回复没提 UE`)
+  if (called && !/StartServer|插件|MCP|桌面端|完全访问|工具清单|toolset/i.test(turn.reply)) fail(reasons, `${scene.id} 回复没照回执说清 UE 链路现状`)
+  if (/blender/i.test(turn.reply)) fail(reasons, `${scene.id} 回复拿 Blender 顶替 UE`)
+  // 2026-11-10 首发会话的真缺陷：world/model3d 上游未开通，回复却说「可走进去的场景、单件道具和角色模型都能先做出来」。
+  if (/(都能|可以|能够)先做出来|都能先做/.test(turn.reply)) fail(reasons, `${scene.id} 回复承诺了未开通的 3D/世界生成能力`)
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), raw)
+  const facts = await sessionFacts(sid)
+  await sse.stop()
+  return { sid, called, seat: facts.seat, reply: turn.reply.slice(0, 1200) }
+}
+
 const runners = {
   "viewer-gate-image-then-music": sceneViewerGate,
   "layer-revision-still": sceneLayerRevision,
@@ -987,6 +1007,7 @@ const runners = {
   "quote-before-generate": sceneQuote,
   "same-turn-text": sceneText,
   "generate-then-receipt": sceneGenerate,
+  "ue-editor-link": sceneUeEditor,
 }
 
 const selected = corpus.scenes.filter((scene) => !ONLY.size || ONLY.has(scene.id))

@@ -63,8 +63,13 @@ async function rehost(url: string | undefined | null, filename: string, sessionI
   return (await storeAsset(buf, filename, sessionID)).url
 }
 
+// 描述随开通状态如实变化（同 model3d_generate）：没 key 时不让模型对用户承诺「能走进去的场景能先做出来」。
+const CONFIGURED = !!(process.env.WORLDLABS_API_KEY || process.env.WLT_API_KEY)
+const STATUS = CONFIGURED ? "" : "【当前未开通：平台没配置 WORLDLABS_API_KEY，调用只会返回 upstream_not_configured。对用户如实说可走进去的 3D 世界暂时做不了，不要承诺能先做出来。】"
+
 export default tool({
   description:
+    STATUS +
     "造世界：一张环境概念图（或一段场景描述）→ 可走进去的 3D 世界（World Labs Marble）：Gaussian splat（.spz）＋碰撞网格（.glb）＋全景图，全部转存平台。" +
     "整片环境／关卡底图用它；单个道具、角色用 model3d_generate。优先给图（构图、光线、色调更可控），先用 image_generate 出一张 16:9 广角环境概念图再喂进来。" +
     "会真实扣上游费用：先报价，cap_coins 低于报价不提交（draft 约 " + creditsToCoins(230) + " 币，标准约 " + creditsToCoins(1580) + " 币）。单次约 5 分钟。",

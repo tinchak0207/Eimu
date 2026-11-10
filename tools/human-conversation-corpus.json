@@ -155,6 +155,18 @@
         "给我一张极简风的咖啡馆海报",
         "给这张图配一段 10 秒的轻音乐"
       ]
+    },
+    {
+      "id": "ue-editor-link",
+      "phase": "post",
+      "spend": false,
+      "source": {
+        "session": "ses_e3a49c748ffefa2n1bGbCYLWjJ",
+        "note": "暴君 2026-11-10 原话，首发于该生产会话"
+      },
+      "turns": [
+        "UE5 MCP联动呢？没有这个eimu就没有做游戏的能力"
+      ]
     }
   ]
 }

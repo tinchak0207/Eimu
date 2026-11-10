@@ -15,8 +15,13 @@ import { fetchInputImage, glbReport, storeAsset } from "../lib/asset3d"
 const TRELLIS_SPACE = process.env.EIMU_TRELLIS2_SPACE || "https://microsoft-trellis-2.hf.space"
 const MAX_GLB_BYTES = 150 * 1024 * 1024
 
+// 描述随开通状态如实变化：没配 HF_TOKEN 时模型会照描述对用户说「还没开通」，不会先承诺「能做出来」。
+const CONFIGURED = !!(process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN)
+const STATUS = CONFIGURED ? "" : "【当前未开通：平台没配置 HF_TOKEN，调用只会返回 upstream_not_configured。对用户如实说单件 3D 模型生成暂时做不了，不要承诺能先做出来。】"
+
 export default tool({
   description:
+    STATUS +
     "图生 3D：一张物件／角色概念图 → 带 PBR 贴图的 GLB 网格（TRELLIS.2），并转存平台、出资产报告（三角面数、贴图数、包围盒、sha256）。" +
     "适合主角道具、陈设、可拿起的交互物件；整片环境用 world_generate。输入图要单一主体、背景干净（会自动去背），多物件请先分别生图。" +
     "单次约 2–4 分钟。回执里的 glb_url 写进交付文（成品会归到 models 类）。",
