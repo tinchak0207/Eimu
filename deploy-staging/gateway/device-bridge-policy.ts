@@ -10,9 +10,19 @@
 //
 // 预设 OFF：本档本身不含开关；开关与否在 device-bridge.ts（EIMU_DEVICE_BRIDGE）。
 
-/** 允许经装置桥执行的工具**最小集合**。刻意不含任何写入／删除／执行命令工具。 */
-export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat"] as const
+/**
+ * 允许经装置桥执行的工具。档案类四件是唯读；`ue_mcp` 是唯一的引擎联动工具：
+ * 装置端只把 MCP JSON-RPC 转给本机回环 `127.0.0.1:<port>/mcp`（UE 5.8 官方 Unreal MCP），
+ * 会改动使用者的 UE 工程，所以**只在装置开「完全访问」（mode=full）时放行**，不进 READ_ONLY 白名单。
+ */
+export const DEVICE_BRIDGE_TOOLS = ["list_dir", "read_file", "grep", "stat", "ue_mcp"] as const
 export type DeviceBridgeTool = (typeof DEVICE_BRIDGE_TOOLS)[number]
+
+/** 不带路径、不走路径决策引擎的引擎联动工具。 */
+export const ENGINE_BRIDGE_TOOLS = ["ue_mcp"] as const
+export function isEngineBridgeTool(tool: unknown): tool is (typeof ENGINE_BRIDGE_TOOLS)[number] {
+  return typeof tool === "string" && (ENGINE_BRIDGE_TOOLS as readonly string[]).includes(tool)
+}
 
 /**
  * 只读工具白名单（模式 ask 下可自动放行的工具）：**新增写入型工具时不得加进来**——

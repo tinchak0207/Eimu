@@ -21,8 +21,54 @@ const policy = require("./policy.js");
 
 // ── 与云端侧一致的常数（device-bridge-policy.ts / device-bridge.ts）──────────
 
-/** 允许经装置桥执行的工具**最小集合**。无任何写入／删除／执行命令工具。 */
-const TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat"]);
+/**
+ * 允许经装置桥执行的工具。档案类四件唯读；`ue_mcp` 把 MCP JSON-RPC 转给本机回环
+ * UE 编辑器（会改 UE 工程，只在「完全访问」下放行，见 device-bridge-client）。
+ */
+const TOOLS = Object.freeze(["list_dir", "read_file", "grep", "stat", "ue_mcp"]);
+const ENGINE_TOOLS = Object.freeze(["ue_mcp"]);
+const ENGINE_METHODS = Object.freeze(["tools/list", "tools/call"]);
+const ENGINE_MAX_ARGS_BYTES = 64 * 1024;
+
+function isEngineTool(tool) {
+  return typeof tool === "string" && ENGINE_TOOLS.includes(tool);
+}
+
+/** 与闸道 device-bridge-types.ts:sanitizeEngineArgs 逐栏等价（同栏位、同夹制、同错误码）。 */
+function sanitizeEngineArgs(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, code: "bad_request", message: "args must be an object" };
+  }
+  const method = typeof raw.method === "string" ? raw.method : "";
+  if (!ENGINE_METHODS.includes(method)) return { ok: false, code: "bad_request", message: "method must be tools/list or tools/call" };
+  const args = { method };
+  if (raw.port !== undefined) {
+    const port = Number.isInteger(raw.port) ? raw.port : NaN;
+    if (!(port >= 1024 && port <= 65535)) return { ok: false, code: "bad_request", message: "port must be 1024..65535" };
+    args.port = port;
+  }
+  if (method === "tools/list") {
+    if (raw.cursor !== undefined) {
+      if (typeof raw.cursor !== "string" || raw.cursor.length > 512) return { ok: false, code: "bad_request", message: "cursor must be a string ≤512" };
+      args.cursor = raw.cursor;
+    }
+    return { ok: true, args };
+  }
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name || name.length > 128 || !/^[A-Za-z0-9_.:\-]+$/.test(name)) {
+    return { ok: false, code: "bad_request", message: "name must be a tool name (≤128, [A-Za-z0-9_.:-])" };
+  }
+  args.name = name;
+  const toolArgs = raw.arguments === undefined ? {} : raw.arguments;
+  if (typeof toolArgs !== "object" || toolArgs === null || Array.isArray(toolArgs)) {
+    return { ok: false, code: "bad_request", message: "arguments must be an object" };
+  }
+  if (Buffer.byteLength(JSON.stringify(toolArgs), "utf8") > ENGINE_MAX_ARGS_BYTES) {
+    return { ok: false, code: "bad_request", message: `arguments exceed ${ENGINE_MAX_ARGS_BYTES} bytes` };
+  }
+  args.arguments = toolArgs;
+  return { ok: true, args };
+}
 
 /** 单次回传内容硬上限（与云端 MAX_READ_BYTES 相同）。 */
 const MAX_READ_BYTES = 256 * 1024;
@@ -165,6 +211,7 @@ function denyReason(p, ctx) {
  * @returns {{ok:true,args:object}|{ok:false,code:string,message:string}}
  */
 function sanitizeToolArgs(tool, raw, ctx) {
+  if (isEngineTool(tool)) return sanitizeEngineArgs(raw);
   if (typeof raw !== "object" || raw === null) {
     return { ok: false, code: "bad_request", message: "args must be an object" };
   }
@@ -236,6 +283,9 @@ function nextBackoff(attempt, opts = {}) {
 
 module.exports = {
   TOOLS,
+  ENGINE_TOOLS,
+  isEngineTool,
+  sanitizeEngineArgs,
   MAX_READ_BYTES,
   DEFAULT_READ_BYTES,
   MAX_RESULT_BYTES,

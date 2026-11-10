@@ -1,7 +1,7 @@
 import { saveTenantPermissionMode } from "./persistence.ts"
-import { authorizationRuleSpecifier, evaluatePermission, isDeviceBridgeMode, isPathWithinRoot, isToolAllowed, sanitizeAuthorizedRoots, sanitizePermissionRules, sensitiveResultProblem, suggestAuthorizationRoot, type DeviceBridgeMode, type PermissionRule, type PermissionTool } from "./device-bridge-policy.ts"
+import { authorizationRuleSpecifier, evaluatePermission, isDeviceBridgeMode, isEngineBridgeTool, isPathWithinRoot, isToolAllowed, sanitizeAuthorizedRoots, sanitizePermissionRules, sensitiveResultProblem, suggestAuthorizationRoot, type DeviceBridgeMode, type DeviceBridgeTool, type PermissionRule, type PermissionTool } from "./device-bridge-policy.ts"
 import { SessionConsentStore } from "./device-bridge-session-consent.ts"
-import { AUTHORIZATION_OPTIONS, ConsentTokenStore, DEVICE_CONSENT_TTL_MS, DEVICE_HEARTBEAT_TTL_MS, DEVICE_POLL_MAX_WAIT_MS, DEVICE_REQUEST_TIMEOUT_MS, OnceGrantStore, finalizeDeviceResult, mapAskReason, randomId, sanitizeToolArgs, type ConsentTokenError, type DeviceBridgeErrorCode, type DeviceRecord, type DeviceRequestMessage, type InvokeResult, type NeedsAuthorizationInfo, type PendingRequest, type PickDeviceResult, type PollWaiter, type SanitizeErr, type TenantDeviceDescription } from "./device-bridge-types.ts"
+import { AUTHORIZATION_OPTIONS, ConsentTokenStore, DEVICE_CONSENT_TTL_MS, DEVICE_HEARTBEAT_TTL_MS, DEVICE_POLL_MAX_WAIT_MS, DEVICE_REQUEST_TIMEOUT_MS, ENGINE_REQUEST_MAX_TIMEOUT_MS, ENGINE_REQUEST_TIMEOUT_MS, OnceGrantStore, finalizeDeviceResult, mapAskReason, randomId, sanitizeEngineArgs, sanitizeToolArgs, type ConsentTokenError, type DeviceBridgeErrorCode, type DeviceRecord, type DeviceRequestMessage, type InvokeResult, type NeedsAuthorizationInfo, type PendingRequest, type PickDeviceResult, type PollWaiter, type SanitizeErr, type TenantDeviceDescription } from "./device-bridge-types.ts"
 // ── 桥本体 ─────────────────────────────────────────────────────────────
 
 export class DeviceBridge {
@@ -95,7 +95,9 @@ export class DeviceBridge {
     entry: { scope: "session" | "permanent"; root: string; tool?: PermissionTool },
   ): void {
     this.applyConsent(tenant, entry.scope, entry.root)
-    this.consentStore?.record({ tenant, root: entry.root, scope: entry.scope, tool: entry.tool ?? "*" })
+    // 引擎工具（ue_mcp）不走路径同意：authorize 路由已拒收，这里只防型别外溢。
+    if (entry.tool && isEngineBridgeTool(entry.tool)) return
+    this.consentStore?.record({ tenant, root: entry.root, scope: entry.scope, tool: (entry.tool ?? "*") as Exclude<PermissionTool, "ue_mcp"> })
   }
   /**
    * 启动时载入落盘的会话同意并**重建规则与同意记录**：gateway 重启（部署）后，已
@@ -345,6 +347,7 @@ export class DeviceBridge {
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(input.tool)}` }
     }
     const tool = input.tool
+    if (isEngineBridgeTool(tool)) return await this.invokeEngine({ ...input, tool })
     // H2：递回型工具（grep/list_dir）的根夹制需要装置的授权根，故先取记录读授权集
     // （这一步只读授权集，不是「装置在线」判定；denylist 仍先于在线检查）。
     const rec = this.getDevice(input.tenant, input.deviceId)
@@ -445,16 +448,54 @@ export class DeviceBridge {
       }
     }
 
-    const requestId = randomId("req")
-    const token = this.tokens.mint({ deviceId: rec.deviceId, tool, requestId }, this.consentTtlMs(), now)
     const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? this.requestTimeoutMs(), 10 * 60_000))
+    return await this.dispatch(input.tenant, rec, tool, cleaned.args, consent, timeoutMs, this.consentTtlMs(), now)
+  }
+
+  /**
+   * `ue_mcp`：把 MCP JSON-RPC 交给装置端转发到本机回环 UE 编辑器。
+   * 不走路径决策引擎（没有路径）；**只认装置 mode=full**（使用者在桌面端开了完全访问＝持续授权），
+   * 其余模式一律 permission_denied——改 UE 工程是写操作，不能靠 ask 档的「读取预设允许」放行。
+   * 引擎调用可能分钟级：逾时与同意票 TTL 一起拉长，否则结果回来时票已过期会被拒收。
+   */
+  private async invokeEngine(input: { tenant: string; deviceId: string; tool: DeviceBridgeTool; args?: unknown; timeoutMs?: number }): Promise<InvokeResult> {
+    const cleaned = sanitizeEngineArgs(input.args)
+    if (!cleaned.ok) {
+      const err = cleaned as SanitizeErr
+      return { ok: false, code: err.code, message: err.message }
+    }
+    const now = Date.now()
+    const rec = this.getDevice(input.tenant, input.deviceId)
+    if (!rec) return { ok: false, code: "device_offline", message: "device not registered" }
+    if (!this.isOnline(rec, now)) return { ok: false, code: "device_offline", message: "device heartbeat expired" }
+    if (rec.mode !== "full") {
+      return { ok: false, code: "permission_denied", message: "UE 编辑器联动需要桌面端开启「完全访问」（当前模式：" + rec.mode + "）" }
+    }
+    const timeoutMs = Math.max(1_000, Math.min(input.timeoutMs ?? ENGINE_REQUEST_TIMEOUT_MS, ENGINE_REQUEST_MAX_TIMEOUT_MS))
+    return await this.dispatch(input.tenant, rec, input.tool, cleaned.args, undefined, timeoutMs, timeoutMs + 15_000, now)
+  }
+
+  /** 下发一则装置请求并等结果／逾时（档案类与引擎类共用）。 */
+  private async dispatch(
+    tenant: string,
+    rec: DeviceRecord,
+    tool: DeviceBridgeTool,
+    args: Record<string, unknown>,
+    consent: DeviceRequestMessage["consent"] | undefined,
+    timeoutMs: number,
+    tokenTtlMs: number,
+    now: number,
+  ): Promise<InvokeResult> {
+    const input = { tenant }
+    const requestId = randomId("req")
+    const token = this.tokens.mint({ deviceId: rec.deviceId, tool, requestId }, tokenTtlMs, now)
     const message: DeviceRequestMessage = {
       request_id: requestId,
       tool,
-      args: cleaned.args,
+      args,
       consent_token: token,
       issued_at: now,
-      expires_at: now + Math.min(timeoutMs, this.consentTtlMs()),
+      expires_at: now + Math.min(timeoutMs, tokenTtlMs),
     }
     if (consent) message.consent = consent
 

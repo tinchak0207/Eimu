@@ -367,6 +367,55 @@ function asIntInRange(v: unknown, min: number, max: number): number | null {
  * 无授权根 ⇒ 递回型工具一律拒（fail-closed）。`read_file`/`stat` 是单档操作，不受此限
  * （单档 denylist 已足）。
  */
+/** UE MCP 中继：单次请求逾时（引擎导入／烘焙可能很慢）与上限。 */
+export const ENGINE_REQUEST_TIMEOUT_MS = 180_000
+export const ENGINE_REQUEST_MAX_TIMEOUT_MS = 600_000
+const ENGINE_METHODS = ["tools/list", "tools/call"] as const
+/** 引擎工具参数（JSON-RPC arguments）序列化上限；UE 工具参数本就不该大。 */
+const ENGINE_MAX_ARGS_BYTES = 64 * 1024
+
+/**
+ * `ue_mcp` 参数净化：只放行 method（tools/list | tools/call）／name／arguments／cursor／port。
+ * 主机写死回环（装置端也写死），这里不收 host／url，避免把装置桥变成内网代理。
+ */
+export function sanitizeEngineArgs(raw: unknown): SanitizeOk | SanitizeErr {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, code: "bad_request", message: "args must be an object" }
+  }
+  const r = raw as Record<string, unknown>
+  const method = typeof r.method === "string" ? r.method : ""
+  if (!(ENGINE_METHODS as readonly string[]).includes(method)) {
+    return { ok: false, code: "bad_request", message: "method must be tools/list or tools/call" }
+  }
+  const args: Record<string, unknown> = { method }
+  if (r.port !== undefined) {
+    const port = typeof r.port === "number" && Number.isInteger(r.port) ? r.port : NaN
+    if (!(port >= 1024 && port <= 65535)) return { ok: false, code: "bad_request", message: "port must be 1024..65535" }
+    args.port = port
+  }
+  if (method === "tools/list") {
+    if (r.cursor !== undefined) {
+      if (typeof r.cursor !== "string" || r.cursor.length > 512) return { ok: false, code: "bad_request", message: "cursor must be a string ≤512" }
+      args.cursor = r.cursor
+    }
+    return { ok: true, args }
+  }
+  const name = typeof r.name === "string" ? r.name.trim() : ""
+  if (!name || name.length > 128 || !/^[A-Za-z0-9_.:\-]+$/.test(name)) {
+    return { ok: false, code: "bad_request", message: "name must be a tool name (≤128, [A-Za-z0-9_.:-])" }
+  }
+  args.name = name
+  const toolArgs = r.arguments === undefined ? {} : r.arguments
+  if (typeof toolArgs !== "object" || toolArgs === null || Array.isArray(toolArgs)) {
+    return { ok: false, code: "bad_request", message: "arguments must be an object" }
+  }
+  if (Buffer.byteLength(JSON.stringify(toolArgs), "utf8") > ENGINE_MAX_ARGS_BYTES) {
+    return { ok: false, code: "bad_request", message: `arguments exceed ${ENGINE_MAX_ARGS_BYTES} bytes` }
+  }
+  args.arguments = toolArgs
+  return { ok: true, args }
+}
+
 export function sanitizeToolArgs(
   tool: DeviceBridgeTool,
   raw: unknown,

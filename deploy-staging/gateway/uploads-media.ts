@@ -62,6 +62,11 @@ export function contentTypeForExt(ext: string): string {
     ".json": "application/json",
     ".csv": "text/csv",
     ".zip": "application/zip",
+    // 造世界 3D 资产（model3d_generate／world_generate 转存）：网格与 Gaussian splat。
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+    ".spz": "application/x-spz",
+    ".ply": "application/x-ply",
     // Source attachments are read as text, never executed as an uploaded web page.
     ".html": "text/plain; charset=utf-8",
     ".htm": "text/plain; charset=utf-8",

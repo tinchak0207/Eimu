@@ -518,7 +518,10 @@
         "workflow_update_node": true,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true
       }
     },
     "plan": {
@@ -695,7 +698,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": false
+        "write": false,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "compaction": {
@@ -872,7 +878,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       },
       "permission": {
         "*": "deny"
@@ -1055,7 +1064,10 @@
         "workflow_update_node": true,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true
       }
     },
     "orchestrator": {
@@ -1235,7 +1247,10 @@
         "workflow_update_node": false,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": false
+        "write": false,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true
       }
     },
     "director3d": {
@@ -1415,7 +1430,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true
       }
     },
     "music": {
@@ -1595,7 +1613,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "video-director": {
@@ -1775,7 +1796,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "editor": {
@@ -1955,7 +1979,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "screenwriter": {
@@ -2135,7 +2162,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": true,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "motion-director": {
@@ -2315,7 +2345,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "web3d-director": {
@@ -2495,7 +2528,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true
       }
     },
     "critic": {
@@ -2675,7 +2711,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     },
     "lyricist": {
@@ -2855,7 +2894,10 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false
       }
     }
   }
