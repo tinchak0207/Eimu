@@ -20,8 +20,9 @@ const NEXT_STEP: Record<string, string> = {
 
 export default tool({
   description:
-    "驱动使用者本机的 Unreal Editor（UE 5.8 官方 Unreal MCP，经 Eimu 桌面端本机桥中继）：摆放 Actor、调灯光、建材质实例、查场景等，" +
-    "做游戏关卡、把 Eimu 生成的 3D 资产（models／world）放进 UE 时用。" +
+    "驱动使用者本机的 Unreal Editor（UE 5.8 官方 Unreal MCP，经 Eimu 桌面端本机桥中继），做游戏关卡时用。" +
+    "能做什么只以 UE 回来的工具清单为准：官方 5.8 文档列的是场景、Actor、材质实例、对象四类工具集，没有列导入资产或执行脚本；" +
+    "tools/list 回来之前不要向用户承诺具体能力（尤其不要说能导入模型），清单里真有再说。" +
     "用法固定三步：① method=tools/list 看 UE 暴露了什么（开 Tool Search 时只有 list_toolsets／describe_toolset／call_tool 三个元工具）；" +
     "② tools/call name=list_toolsets → name=describe_toolset 取目标工具的参数 schema；" +
     "③ tools/call name=call_tool（或 UE 列出的具体工具名）照 schema 传 arguments。" +

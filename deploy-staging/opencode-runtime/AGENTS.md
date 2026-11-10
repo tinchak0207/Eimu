@@ -72,7 +72,7 @@
 
 - 要一个能走进去的世界（关卡、游戏场景）：先用 `image_generate` 出 16:9 广角环境概念图，再交给 `world_generate`（splat＋碰撞网格）；道具、角色单件用 `model3d_generate`（GLB）。两者回执里的 URL 已转存平台，交付直接写回执给的 markdown 链接。
 - `world_generate` 先报价，`cap_coins` 给不够就不提交；工具回 `upstream_not_configured` 就如实说这一步还没开通，不许拿 Blender 白模或一张图冒充可走进去的世界。
-- 用户本机开着 UE 5.8 时，用 `ue_editor` 把资产放进关卡：先 `tools/list`，再 `list_toolsets`／`describe_toolset` 拿参数，最后照 schema 调；一次一个调用。回执说缺桌面端、缺「完全访问」或 UE 没开 MCP，就照原文告诉用户去做哪一步。
+- 用户本机开着 UE 5.8 时，用 `ue_editor` 操作关卡（能做什么以 UE 回来的工具清单为准，没列导入就别说能导入）：先 `tools/list`，再 `list_toolsets`／`describe_toolset` 拿参数，最后照 schema 调；一次一个调用。回执说缺桌面端、缺「完全访问」或 UE 没开 MCP，就照原文告诉用户去做哪一步。
 
 ## 你在这个位置上
 
