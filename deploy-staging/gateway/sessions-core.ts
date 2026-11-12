@@ -596,6 +596,17 @@ export async function handleDeleteSession(key: string, id: string): Promise<Resp
   // 删除会话后父代理不再存在，残留子代理会继续重试上游（2026-11-01 实测：删除后仍跑 attempt 1/7→3/7）。
   void forgetSessionHistory(key, id) // 记忆 v2：会话删除＝该会话的历史索引一并删
   const stopped = stopSubagentsForParent(id, "user", "会话已删除，子代理一并停止")
+  // 只删网关记录停不住引擎里那一轮：主 turn 会继续跑（实测删除后仍写 message/part 8 分钟），
+  // 既烧钱又让发版 drain 的 inflight 永不归零。删除前先 abort，失败不挡删除。
+  let aborted = false
+  if (state.opencodeSessionId) {
+    try {
+      const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/abort`, {
+        method: "POST", headers: opencodeHeaders(), signal: AbortSignal.timeout(5000),
+      })
+      aborted = res.ok
+    } catch { /* 上游不可达/404/400 不影响删除语义 */ }
+  }
   teardownSession(id, state, "deleted")
   await deleteOpencodeSession(state.opencodeSessionId)
   const delUploadDir = path.join(UPLOADS_DIR, state.sessionId)
@@ -604,6 +615,6 @@ export async function handleDeleteSession(key: string, id: string): Promise<Resp
       console.error(`[gateway] upload cleanup error for ${id}:`, e)
     })
   }
-  console.log(`[gateway] session deleted: ${id} (subagents stopped: ${stopped})`)
+  console.log(`[gateway] session deleted: ${id} (subagents stopped: ${stopped}, engine aborted: ${aborted})`)
   return Response.json({ ok: true })
 }
