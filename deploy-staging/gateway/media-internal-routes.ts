@@ -42,6 +42,8 @@ function isAllowedMediaUploadContentType(contentType: string): boolean {
   if (ct.startsWith("video/") || ct.startsWith("audio/") || ct.startsWith("image/")) return true
   if (ct.startsWith("text/")) return true
   if (ct === "application/json" || ct === "application/pdf") return true
+  // 3D 资产：GLB/glTF 网格、SPZ/PLY splat（扩展名由 contentTypeForExt 定，只认这四种）。
+  if (ct === "model/gltf-binary" || ct === "model/gltf+json" || ct === "application/x-spz" || ct === "application/x-ply") return true
   return false
 }
 
@@ -97,7 +99,7 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
     const srcExt = path.extname(fname).toLowerCase() || ".mp4"
     contentType = contentTypeForExt(srcExt)
     if (!isAllowedMediaUploadContentType(contentType)) {
-      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片/文稿 md·txt·json·csv·pdf）` }, { status: 415 })
+      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片/文稿 md·txt·json·csv·pdf/3D glb·gltf·spz·ply）` }, { status: 415 })
     }
     outExt = srcExt.replace(/^\./, "")
   } else if (typeof body.url === "string" && body.url.trim()) {

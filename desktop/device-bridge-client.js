@@ -45,6 +45,7 @@ const os = require("node:os");
 
 const proto = require("./lib/bridge-protocol.js");
 const { createBridgeExecutor, BridgeError } = require("./lib/bridge-executor.js");
+const { createUeMcpRelay } = require("./lib/ue-mcp-relay.js");
 const { PERMISSION_MODES, allowRuleForRoot } = require("./lib/permission-rules.js");
 const localWorker = require("./local-worker.js");
 
@@ -164,6 +165,9 @@ function withConsentAllowRules(base, consentRoots) {
 // 不另造第二套授权机制；空集 ⇒ bridge 拒绝服务（见 startDeviceBridge）。
 // W6c：mode/rules 为第二道防线的输入，即时读 runtime（由 startDeviceBridge 注入，
 // 未注入＝null/undefined，执行器回退 "auto" 以维持既有呼叫端行为）。
+// 引擎联动（UE 5.8 Unreal MCP）：全域串行的本机回环中继。
+const ueRelay = createUeMcpRelay({ clientVersion: (() => { try { return require("./package.json").version; } catch { return "0"; } })() });
+
 const executor = createBridgeExecutor({
   roots: () => Array.from(localWorker.authorizedRoots),
   mode: () => (runtime.mode === undefined ? undefined : runtime.mode),
@@ -327,6 +331,28 @@ async function handleRequest(request) {
   if (!proto.isToolAllowed(request.tool)) return submitError(requestId, consentToken, `tool_not_allowed: ${String(request.tool)}`);
   const clean = proto.sanitizeToolArgs(request.tool, request.args);
   if (!clean.ok) return submitError(requestId, consentToken, `${clean.code}: ${clean.message}`);
+
+  // 引擎联动：改的是使用者的 UE 工程 ⇒ 本机也只认「完全访问」（闸道已验一次，这里是本机第一道）。
+  if (proto.isEngineTool(request.tool)) {
+    if (runtime.mode !== "full") return submitError(requestId, consentToken, "permission_denied: UE 编辑器联动需要开启「完全访问」");
+    const remainingMs = Number.isFinite(request.expires_at) ? request.expires_at - Date.now() - 2000 : undefined;
+    let engineResult;
+    try {
+      engineResult = await ueRelay.relay(clean.args, { timeoutMs: remainingMs });
+    } catch (err) {
+      const code = err && err.code ? err.code : "engine_failed";
+      return submitError(requestId, consentToken, `${code}: ${err && err.message ? err.message : "UE MCP 调用失败"}`);
+    }
+    const clampedEngine = proto.clampResult(engineResult, proto.MAX_RESULT_BYTES);
+    await postOk(`${PREFIX}/result`, {
+      device_id: runtime.deviceId,
+      connection_id: runtime.connectionId,
+      request_id: requestId,
+      consent_token: consentToken,
+      result: clampedEngine.result,
+    });
+    return;
+  }
 
   // 对话内就地授权：解析本请求的 consent（形状不合／未知 scope ＝ 当没有，不得抛）。
   // session/permanent 的根累积进记忆体（去重）；permanent 另呼叫 persistConsentRoots 落盘。

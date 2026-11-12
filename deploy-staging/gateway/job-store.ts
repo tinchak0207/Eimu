@@ -41,10 +41,10 @@ export function bindGenerationConsumer(child: string, parentGw: string, parentOc
   if (agent) db().query("UPDATE generation_consumers SET consumer_agent=COALESCE(consumer_agent,?) WHERE child_oc=?").run(agent, child)
   db().query("UPDATE generation_receipts SET parent_gw=? WHERE producer_oc=? AND parent_gw=''").run(parentGw, child)
 }
-export function queueLegacyGenerationWake(session: string, content: string, parentGw = "", consumer = session): GenerationReceipt {
+export function queueLegacyGenerationWake(session: string, content: string, parentGw = "", consumer = session, resumeIntentVersion?: number): GenerationReceipt {
   const task_id = `wake:${createHash("sha256").update(session + "\0" + content).digest("hex")}`
   const row = registerGenerationReceipt({ task_id, parent_gw: parentGw, producer_oc: session, consumer_oc: consumer,
-    kind: "message", content })
+    kind: "message", content, ...(resumeIntentVersion!==undefined ? {resume_intent_version:resumeIntentVersion}: {}) })
   if (row.status === "queued") return completeGenerationReceipt(task_id, "succeeded", [], { content })
   return row
 }
@@ -206,6 +206,19 @@ export function renderedGeneration(id: string): void {
 
 export function generationMaintenanceEnabled(): boolean {
   return (db().query("SELECT value FROM generation_runtime_control WHERE name='maintenance'").get() as any)?.value === '1'
+}
+/** 发布软drain租约与生成收据共用真源；过期租约不永久停住制作。 */
+export function generationStepDrainRequested(): boolean {
+  return generationStepDrainState().status==="active"
+}
+export function generationStepDrainState(): {status:"active"|"inactive"|"unknown";reason?:string} {
+  const row=db().query("SELECT value FROM generation_runtime_control WHERE name='step-drain'").get() as any
+  if(!row) return {status:"inactive"}
+  try {
+    const lease=JSON.parse(row.value)
+    if(typeof lease?.owner!=="string" || !lease.owner || typeof lease.expires_at!=="number" || !Number.isFinite(lease.expires_at)) return {status:"unknown",reason:"step_drain_lease_invalid"}
+    return {status:lease.expires_at>Date.now()?"active":"inactive"}
+  } catch { return {status:"unknown",reason:"step_drain_lease_unreadable"} }
 }
 export function setGenerationMaintenance(enabled: boolean): void {
   db().query("INSERT INTO generation_runtime_control VALUES('maintenance',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0')

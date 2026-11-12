@@ -1,5 +1,5 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
-  assertGenerationWorkActive,
+  assertGenerationWorkActive, generationStepDrainRequested, generationWorkControl,
   completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
@@ -239,6 +239,10 @@ export async function drainGenerationInbox(): Promise<void> {
     for (const receipt of receipts) {
       // SSE is a display side effect; the durable inbox remains unread until tool ACK.
       const parent = resolveSession(receipt.parent_gw)
+      if(receipt.resume_intent_version!==undefined) {
+        const intent=generationWorkControl(receipt.parent_gw)
+        if(intent.cancelled || intent.version!==receipt.resume_intent_version) continue
+      }
       if (parent && !receipt.rendered_at) {
         if (receipt.artifacts.length) {
           for (const [index, artifact] of receipt.artifacts.entries()) {
@@ -257,7 +261,7 @@ export async function drainGenerationInbox(): Promise<void> {
       }
       // 已被模型取件 ACK 的收据只补渲染，不再唤醒（避免对已处理结果重复投递收件箱）。
       if (receipt.kind === "image" && receipt.artifacts.length ? receipt.downloaded_at : receipt.observed_at) continue
-      if (generationMaintenanceEnabled()) continue
+      if (generationMaintenanceEnabled() || generationStepDrainRequested()) continue
       // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
       if (receipt.kind === "message" && receipt.notified_at !== null) continue
       // 2026-10-23：过时通知硬闸——notify 次数封顶后不再唤醒（避免用户走后 12h 地板无限烧 token）。
@@ -306,7 +310,9 @@ export async function drainGenerationInbox(): Promise<void> {
       const childAgent = parent?.opencodeSessionId === consumer ? undefined
         : (generationParent(consumer)?.consumer_agent || await consumerSelfAgent(consumer, consumerInfo) || "creator")
       // No await between admission, the durable claim and sending: an accepted user turn wins.
-      if (generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
+      if (generationStepDrainRequested() || generationMaintenanceEnabled() || generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
+      const currentIntent=generationWorkControl(group[0].parent_gw)
+      if(group.some(receipt=>receipt.resume_intent_version!==undefined&&(currentIntent.cancelled||currentIntent.version!==receipt.resume_intent_version))) continue
       const claimed = new Set(claimGenerationMessages(group.filter((r) => r.kind === "message").map((r) => r.task_id), consumer))
       const pending = group.filter((r) => r.kind !== "message" || claimed.has(r.task_id))
       if (!pending.length) continue

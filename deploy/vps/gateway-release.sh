@@ -151,14 +151,10 @@ run_remote_binary() {
 # watcher（孤儿化，需断面 B 兜底），故同样在 deploy.sh 闸门前先 drain。
 # 命中在途 → 轮询到清空；上界后仍非空 → 回传码 3（呼叫端中止；--force 跳过）。
 # 一份 drain 实现；OpenCode 发布通过内部 __emit-drain 入口复用。
-drain_gate() {
-DRAIN_FORCE="${1:-0}"
-DRAIN_MAX_SECS="${2:-180}"
-DRAIN_POLL_SECS="${3:-5}"
-DRAIN_WINDOW_MS="${4:-180000}"
-DRAIN_SESSIONS_DB="${5:-/opt/agent-harness/state/sessions.db}"
-DRAIN_OPENCODE_DB="${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
 drain_inflight_count() {
+  local DRAIN_SESSIONS_DB="${1:-/opt/agent-harness/state/sessions.db}"
+  local DRAIN_OPENCODE_DB="${2:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
+  local DRAIN_WINDOW_MS="${3:-180000}"
   local now a b c v
   now=$(( $(date +%s) * 1000 ))
   a="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
@@ -169,19 +165,50 @@ drain_inflight_count() {
   for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
   echo $(( a + b + c ))
 }
+drain_runtime_inflight_count() {
+  sudo python3 - <<'PY' || echo ERR
+import base64, json, subprocess, urllib.request
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result: raise ValueError('ambiguous duplicate status key')
+        result[key] = value
+    return result
+try:
+    pid = subprocess.check_output(['systemctl', 'show', 'agent-gateway', '-p', 'MainPID', '--value'], text=True).strip()
+    env = dict(v.split(b'=', 1) for v in open('/proc/' + pid + '/environ', 'rb').read().split(b'\0') if b'=' in v)
+    origin = env.get(b'OPENCODE_URL', b'http://127.0.0.1:4096').decode().rstrip('/')
+    auth = 'Basic ' + base64.b64encode(b'opencode:' + env.get(b'OPENCODE_PASSWORD', b'')).decode()
+    states = json.load(urllib.request.urlopen(urllib.request.Request(origin + '/session/status', headers={'Authorization': auth}), timeout=8), object_pairs_hook=unique_object)
+    if not isinstance(states, dict) or any(not k.startswith('ses_') or not isinstance(v, dict) or v.get('type') not in ['idle', 'busy', 'retry'] for k, v in states.items()):
+        raise ValueError('activity unknown')
+    print(sum(v['type'] != 'idle' for v in states.values()))
+except Exception:
+    print('ERR')
+PY
+}
+drain_gate() {
+DRAIN_FORCE="${1:-0}"
+DRAIN_MAX_SECS="${2:-180}"
+DRAIN_POLL_SECS="${3:-5}"
+DRAIN_WINDOW_MS="${4:-180000}"
+DRAIN_SESSIONS_DB="${5:-/opt/agent-harness/state/sessions.db}"
+DRAIN_OPENCODE_DB="${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
 local phase="${DRAIN_PHASE:-drain}"
 if [ "$DRAIN_FORCE" = "1" ]; then
   echo "DRAIN_SKIPPED (--force) phase=$phase"
 else
   drain_waited=0
   while :; do
-    drain_n="$(drain_inflight_count)"
+    drain_n="$(drain_inflight_count "$DRAIN_SESSIONS_DB" "$DRAIN_OPENCODE_DB" "$DRAIN_WINDOW_MS")"
     if [ "$drain_n" = "ERR" ]; then
       echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 中止部署；明确跳过请加 --force"; exit 3
     fi
     if [ "$drain_n" = "0" ]; then
       echo "DRAIN_CLEAR phase=$phase waited=${drain_waited}s"
-      rm -f "${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" 2>/dev/null || true
+      if [ "${DRAIN_PRESERVE_STAMP:-0}" != "1" ]; then
+        rm -f "${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" 2>/dev/null || true
+      fi
       break
     fi
     if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
@@ -202,7 +229,7 @@ drain_stamp_timeout() {
   case "$n" in ''|*[!0-9]*) n=0;; esac
   printf '%s %s\n' "$(date +%s)" "$((n + 1))" > "$f" 2>/dev/null || true
 }
-# 冷却期内拒绝再次激活（不开维护、不探测）；--force 或 DRAIN_COOLDOWN_SECS=0 跳过。
+# 冷却期仍拒绝busy/unknown；仅在既有激活锁内完整证明当前为零时允许继续，保留失败历史。
 drain_cooldown_check() {
   local force="${1:-0}" f="${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}"
   local base="${DRAIN_COOLDOWN_SECS:-600}" cap="${DRAIN_COOLDOWN_MAX_SECS:-3600}" t n cd age
@@ -215,6 +242,14 @@ drain_cooldown_check() {
   [ "$cd" -le "$cap" ] || cd="$cap"
   age=$(( $(date +%s) - t ))
   if [ "$age" -lt "$cd" ]; then
+    local current runtime_current=ERR
+    current="$(drain_inflight_count "${5:-/opt/agent-harness/state/sessions.db}" "${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "${4:-180000}")"
+    if [ "$current" = "0" ]; then runtime_current="$(drain_runtime_inflight_count)"; fi
+    if [ "$current" = "0" ] && [ "$runtime_current" = "0" ]; then
+      DRAIN_PRESERVE_STAMP=1
+      echo "DRAIN_COOLDOWN_IDLE_CONFIRMED inflight=0 runtime=0 age=${age}s cooldown=${cd}s — 保留失败戳，继续原维护与终检闸"
+      return 0
+    fi
     echo "DRAIN_COOLDOWN 上次 drain 超时在 ${age}s 前，冷却 ${cd}s 未满（剩 $((cd - age))s）→ 拒发，未开维护。等低峰再发，或经暴君同意加 --force"
     exit 4
   fi
@@ -222,12 +257,13 @@ drain_cooldown_check() {
 # 两段 drain：软 drain（不开维护）→ 开维护 → 终检 drain（短上界）。$1 维护库，其余同 drain_gate。
 drain_then_maintenance() {
   local mdb="$1"; shift
-  drain_cooldown_check "$1"
+  drain_cooldown_check "$@"
   if [ "$1" = "1" ]; then
     maintenance_begin "$mdb"
     DRAIN_PHASE=force drain_gate "$@"
     return 0
   fi
+  step_drain_begin "$mdb" "${2:-180}"
   DRAIN_PHASE=soft drain_gate "$@"
   maintenance_begin "$mdb"
   DRAIN_PHASE=final drain_gate "$1" "${DRAIN_FINAL_SECS:-30}" "${@:3}"
@@ -236,7 +272,31 @@ drain_then_maintenance() {
 emit_drain_lib() {
   printf 'DRAIN_FINAL_SECS=%q\nDRAIN_COOLDOWN_SECS=%q\nDRAIN_COOLDOWN_MAX_SECS=%q\nDRAIN_STAMP=%q\n' \
     "$DRAIN_FINAL_SECS_DEFAULT" "$DRAIN_COOLDOWN_SECS_DEFAULT" "$DRAIN_COOLDOWN_MAX_DEFAULT" "$DRAIN_STAMP_DEFAULT"
-  declare -f drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end
+  declare -f drain_inflight_count drain_runtime_inflight_count drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end step_drain_begin step_drain_end
+}
+
+# 软drain只请求在步骤边界停，不开启公开503；复用生成账本control表与现有activation锁。
+step_drain_begin() {
+  STEP_DRAIN_DB="$1"
+  python3 - "$1" "$ACTIVATION_LOCK" "${2:-180}" <<'STEP_DRAIN'
+import json,sqlite3,sys,time
+c=sqlite3.connect(sys.argv[1],timeout=5)
+value=json.dumps({'owner':sys.argv[2],'expires_at':int(time.time()*1000)+(int(sys.argv[3])+120)*1000})
+c.execute("INSERT INTO generation_runtime_control(name,value) VALUES('step-drain',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",(value,))
+c.commit()
+STEP_DRAIN
+}
+step_drain_end() {
+  if [ -z "${STEP_DRAIN_DB:-}" ]; then return 0; fi
+  python3 - "$STEP_DRAIN_DB" "$ACTIVATION_LOCK" <<'STEP_DRAIN'
+import json,sqlite3,sys
+c=sqlite3.connect(sys.argv[1],timeout=5)
+row=c.execute("SELECT value FROM generation_runtime_control WHERE name='step-drain'").fetchone()
+if row and json.loads(row[0]).get('owner')==sys.argv[2]:
+ c.execute("DELETE FROM generation_runtime_control WHERE name='step-drain'")
+c.commit()
+STEP_DRAIN
+  STEP_DRAIN_DB=""
 }
 
 # 复用既有 maintenance 布尔；同表所有权记录只用于 finally 与下次激活恢复原值。
@@ -283,6 +343,7 @@ maintenance_end() {
     maintenance_control "$MAINT_DB" end "$MAINT_TOKEN" || return 1
     MAINT_TOKEN=""
   fi
+  step_drain_end
 }
 
 gateway_prepare() {
@@ -299,20 +360,13 @@ gateway_prepare() {
   # 维护/共享锁已持有；recent 时间窗不能替代执行端真实空闲。
   # --force（暴君 2026-10-31「给我强行发布」）：跳过执行端空闲检查，在途回合由耐久续接处理。
   if [ "$8" = "1" ]; then echo "OPENCODE_IDLE_SKIPPED (--force)"; else
-  sudo python3 - <<'PY'
-import base64, json, subprocess, urllib.request
-pid = subprocess.check_output(['systemctl', 'show', 'agent-gateway', '-p', 'MainPID', '--value'], text=True).strip()
-env = dict(v.split(b'=', 1) for v in open('/proc/' + pid + '/environ', 'rb').read().split(b'\0') if b'=' in v)
-origin = env.get(b'OPENCODE_URL', b'http://127.0.0.1:4096').decode().rstrip('/')
-auth = 'Basic ' + base64.b64encode(b'opencode:' + env.get(b'OPENCODE_PASSWORD', b'')).decode()
-states = json.load(urllib.request.urlopen(urllib.request.Request(origin + '/session/status', headers={'Authorization': auth}), timeout=8))
-if not isinstance(states, dict) or any(not k.startswith('ses_') or not isinstance(v, dict) or v.get('type') not in ['idle', 'busy', 'retry'] for k, v in states.items()):
-    raise SystemExit('OPENCODE_ACTIVITY_UNKNOWN: activation refused')
-active = sum(v['type'] != 'idle' for v in states.values())
-if active:
-    raise SystemExit('OPENCODE_NOT_IDLE: activation refused count=' + str(active))
-print('OPENCODE_IDLE_CONFIRMED under maintenance and activation lock')
-PY
+  local active
+  active="$(drain_runtime_inflight_count)"
+  case "$active" in
+    0) echo "OPENCODE_IDLE_CONFIRMED under maintenance and activation lock" ;;
+    ''|*[!0-9]*) echo "OPENCODE_ACTIVITY_UNKNOWN: activation refused" >&2; exit 3 ;;
+    *) echo "OPENCODE_NOT_IDLE: activation refused count=$active" >&2; exit 3 ;;
+  esac
   fi
 }
 
@@ -331,10 +385,19 @@ capture_gateway_identity() {
 gateway_verify() {
   [ "$(readlink -f "$GATEWAY_PATH")" = "$1" ] || return 1
   (cd "$1" && md5sum -c ../manifest.md5 --quiet) || return 1
-  local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null)" || return 1
-  [ "$code" = 200 ] || { echo "HEALTH_UNEXPECTED http=$code" >&2; return 1; }
-  echo "VERIFY_OK current=$1 manifest=OK healthz=200"
+  # 逐行复用opencode-release.sh的有界ready loop；restart返回时监听口可能尚未就绪。
+  local code state attempt
+  for attempt in 1 2 3 4 5 6; do
+    state="$(systemctl is-active agent-gateway 2>/dev/null || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+    if [ "$state" = active ] && [ "$code" = 200 ]; then
+      echo "VERIFY_OK current=$1 manifest=OK healthz=200"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "HEALTH_UNEXPECTED service=$state http=$code" >&2
+  return 1
 }
 
 gateway_recover() {

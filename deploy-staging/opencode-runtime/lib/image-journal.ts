@@ -28,9 +28,18 @@ function db(): Database {
     CREATE TABLE IF NOT EXISTS tool_artifact (scope TEXT NOT NULL, task_id TEXT NOT NULL, records_json TEXT NOT NULL, PRIMARY KEY(scope,task_id));
     CREATE TABLE IF NOT EXISTS tool_project (
       scope TEXT PRIMARY KEY, cap REAL, lock_hash TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS game_project (
+      scope TEXT PRIMARY KEY, project TEXT NOT NULL, workspace TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS game_checkpoint (
+      scope TEXT NOT NULL, operation_id TEXT NOT NULL, stage TEXT NOT NULL, state TEXT NOT NULL,
+      receipt_json TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(scope,operation_id));
   `)
-  const columns=store.query("PRAGMA table_info(tool_project)").all() as any[]
-  for(const name of ["budget_version","budget_source"])if(!columns.some(c=>c.name===name))store.exec(`ALTER TABLE tool_project ADD COLUMN ${name} TEXT`)
+  // 多个首次启动进程必须串行观察并迁移；先查后ALTER会在冷启动争抢时报duplicate column。
+  store.transaction(()=>{
+    const columns=store!.query("PRAGMA table_info(tool_project)").all() as any[]
+    for(const name of ["budget_version","budget_source"])if(!columns.some(c=>c.name===name))store!.exec(`ALTER TABLE tool_project ADD COLUMN ${name} TEXT`)
+  }).immediate()
   return store
 }
 export function contentHash(value: unknown): string {
@@ -39,6 +48,7 @@ export function contentHash(value: unknown): string {
 export interface SubmissionIdentity {
   scope: string; budget_version?:string; budget_source?:string; submitted_image?:string; size?: string; input_signature?: string; submitted_references?: string[]; reference_fingerprints?: string[]; request_id: string; session_id: string; project?: string; frame?: number;
   reference_version?: string; style_version?: string; model: string; cost_coins: number;
+  pricing_source?: string; pricing_checked_at?: string; actual_cost_coins?: number | null;
 }
 export function getSubmission(scope: string, requestID: string): any {
   return db().query("SELECT * FROM tool_submission WHERE scope=? AND request_id=?").get(scope, requestID)
@@ -131,4 +141,48 @@ export function sameShotSubmissions(shotKey: string, sinceMs: number): Array<{ t
 }
 export function acceptTaskSubmission(scope:string,requestID:string,taskID:string,payload:Record<string,unknown>):void {
   db().transaction(()=>{finishSubmission(scope,requestID,"accepted",taskID);journalRegistration(taskID,String(payload.session_id),payload)}).immediate()
+}
+
+/** 与旧制作账本共用事务/硬预算；只有拿到新占位的进程能向外提交。 */
+export function claimSubmission(input: SubmissionIdentity, payload: unknown, cap: number): boolean {
+  return db().transaction(() => {
+    const existing = getSubmission(input.scope, input.request_id)
+    if (existing) {
+      if (existing.payload_hash !== contentHash(payload)) throw new Error("idempotency_key_reused: 原操作输入已改变，禁止重投。")
+      return false
+    }
+    prepareSubmission(input, payload, null, cap)
+    return true
+  }).immediate()
+}
+
+export function gameProjectRecord(scope: string, project?: string, workspace?: string): any {
+  if (project && workspace) db().query("INSERT INTO game_project(scope,project,workspace,created_at) VALUES(?,?,?,?) ON CONFLICT(scope) DO NOTHING").run(scope,project,workspace,Date.now())
+  return db().query("SELECT * FROM game_project WHERE scope=?").get(scope)
+}
+export function saveGameCheckpoint(scope: string, operationID: string, stage: string, state: string, receipt: unknown): void {
+  const json = JSON.stringify(receipt)
+  if (Buffer.byteLength(json)>128*1024) throw new Error("checkpoint_too_large: 检查点不得超过128KB，产物另存后引用路径。")
+  db().transaction(() => {
+    const existing: any=db().query("SELECT payload_hash FROM game_checkpoint WHERE scope=? AND operation_id=?").get(scope,operationID)
+    const hash=contentHash({stage,state,receipt})
+    if(existing && existing.payload_hash!==hash) throw new Error("checkpoint_identity_reused: 同一步骤操作已有不同回执，请保留原回执并使用新的操作身份。")
+    db().query("INSERT INTO game_checkpoint(scope,operation_id,stage,state,receipt_json,payload_hash,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,operation_id) DO NOTHING").run(scope,operationID,stage,state,json,hash,Date.now())
+  }).immediate()
+}
+export function gameProjectSnapshot(scope: string): any {
+  const checkpoints=(db().query("SELECT operation_id,stage,state,receipt_json,created_at FROM game_checkpoint WHERE scope=? ORDER BY created_at,rowid").all(scope) as any[]).map(row=>({...row,receipt:JSON.parse(row.receipt_json),receipt_json:undefined}))
+  const ledger=(db().query("SELECT request_id,task_id,state,reservation AS reserved_coins,metadata_json,created_at FROM tool_submission WHERE scope=? ORDER BY created_at").all(scope) as any[]).map(row=>{
+    const identity=JSON.parse(row.metadata_json)
+    return {...row,metadata_json:undefined,actual_cost_coins:identity.actual_cost_coins??null,upstream_cost:identity.upstream_cost??null,pricing_source:identity.pricing_source??null,pricing_checked_at:identity.pricing_checked_at??null}
+  })
+  return { checkpoints, latest_checkpoint:checkpoints.at(-1)??null, ledger, cap_coins:lockedProjectBudget(scope) }
+}
+export function recordSubmissionCost(scope: string, requestID: string, upstreamCost: unknown, actualCoins: number | null): void {
+  db().transaction(()=>{
+    const row=getSubmission(scope,requestID)
+    if(!row) throw new Error("submission_missing: 不允许无身份记录费用。")
+    const metadata=JSON.parse(row.metadata_json)
+    db().query("UPDATE tool_submission SET metadata_json=? WHERE scope=? AND request_id=?").run(JSON.stringify({...metadata,upstream_cost:upstreamCost??null,actual_cost_coins:typeof actualCoins==="number"&&Number.isFinite(actualCoins)&&actualCoins>=0?actualCoins:null}),scope,requestID)
+  }).immediate()
 }

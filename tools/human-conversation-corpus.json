@@ -155,6 +155,31 @@
         "给我一张极简风的咖啡馆海报",
         "给这张图配一段 10 秒的轻音乐"
       ]
+    },
+    {
+      "id": "ue-game-delivery",
+      "phase": "post",
+      "spend": false,
+      "source": {
+        "session": "ses_ue_game_gate_20261111",
+        "note": "用户2026-11-11本轮确认的游戏目标原话；该session为语料来源占位，真实验收sid由runner回执填写。"
+      },
+      "constraints": ["本轮不额外生成付费参考图或提交其他付费生成；只使用已导入资产及后续明确交付的生成回执。每步保留真实检查点，缺少资产或授权时如实说明。"],
+      "turns": [
+        "塔楼庭院：玩家能行走探索，保留现有塔楼作导入资产"
+      ]
+    },
+    {
+      "id": "ue-editor-link",
+      "phase": "post",
+      "spend": false,
+      "source": {
+        "session": "ses_e3a49c748ffefa2n1bGbCYLWjJ",
+        "note": "暴君 2026-11-10 原话，首发于该生产会话"
+      },
+      "turns": [
+        "UE5 MCP联动呢？没有这个eimu就没有做游戏的能力"
+      ]
     }
   ]
 }

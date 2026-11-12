@@ -518,7 +518,11 @@
         "workflow_update_node": true,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true,
+        "game_project": true
       }
     },
     "plan": {
@@ -695,7 +699,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": false
+        "write": false,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "compaction": {
@@ -872,7 +880,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       },
       "permission": {
         "*": "deny"
@@ -1055,7 +1067,11 @@
         "workflow_update_node": true,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true,
+        "game_project": true
       }
     },
     "orchestrator": {
@@ -1235,7 +1251,11 @@
         "workflow_update_node": false,
         "workflow_write": true,
         "world_bible_extract": false,
-        "write": false
+        "write": false,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true,
+        "game_project": true
       }
     },
     "director3d": {
@@ -1415,7 +1435,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true,
+        "game_project": true
       }
     },
     "music": {
@@ -1595,7 +1619,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "video-director": {
@@ -1775,7 +1803,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "editor": {
@@ -1955,7 +1987,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "screenwriter": {
@@ -2135,7 +2171,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": true,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "motion-director": {
@@ -2315,7 +2355,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "web3d-director": {
@@ -2495,7 +2539,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": true,
+        "model3d_generate": true,
+        "world_generate": true,
+        "game_project": true
       }
     },
     "critic": {
@@ -2675,7 +2723,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     },
     "lyricist": {
@@ -2855,7 +2907,11 @@
         "workflow_update_node": false,
         "workflow_write": false,
         "world_bible_extract": false,
-        "write": true
+        "write": true,
+        "ue_editor": false,
+        "model3d_generate": false,
+        "world_generate": false,
+        "game_project": false
       }
     }
   }

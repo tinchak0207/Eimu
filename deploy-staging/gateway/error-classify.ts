@@ -151,6 +151,15 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "图片地址无效（既不是可抓取的 URL，也不是可读的本地文件），属参数问题而非上游故障，重试无效：请传 http(s)/data URL、本地绝对路径或 media: 图片 ID。",
   },
   {
+    // 本机 UE 编辑器联动（ue_editor → 装置桥 → 127.0.0.1 MCP）：原文带 ECONNREFUSED 会被下面的
+    // conn-reset-core 译成「上游网络中断、稍后重试」——那是假话：链路是通的，是使用者本机 UE 没开 MCP。
+    name: "ue-engine-local",
+    pattern: /\bengine_(?:unreachable|timeout|rejected|bad_response|session_expired)\b/i,
+    class: "unknown",
+    retryable: false,
+    human: "本机 UE 编辑器没有接上：需要在 UE 5.8 启用 Unreal MCP 与 All Toolsets 插件，并在输出日志执行 ModelContextProtocol.StartServer",
+  },
+  {
     // http_502 机器形态：原 RETRYABLE "http_5\d\d" 命中 → 可重试。
     name: "http-502-exact",
     pattern: /\bhttp_502\b/i,

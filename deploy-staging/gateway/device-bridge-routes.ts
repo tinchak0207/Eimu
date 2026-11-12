@@ -1,6 +1,6 @@
 import { DEVICE_TICKET_TTL_MS, hashKey, issueDeviceTicket, resolveCanonicalIdentity } from "./auth-gw.ts"
 import { saveTenantPermissionMode } from "./persistence.ts"
-import { authorizationRootProblem, authorizationRuleSpecifier, expandToAbsolutePreserveCase, isDeviceBridgeMode, isToolAllowed, type DeviceBridgeMode, type DeviceBridgeTool, type PermissionRule, type PermissionTool } from "./device-bridge-policy.ts"
+import { authorizationRootProblem, authorizationRuleSpecifier, expandToAbsolutePreserveCase, isDeviceBridgeMode, isEngineBridgeTool, isToolAllowed, type DeviceBridgeMode, type DeviceBridgeTool, type PermissionRule, type PermissionTool } from "./device-bridge-policy.ts"
 import { SessionConsentStore } from "./device-bridge-session-consent.ts"
 import { DeviceBridge } from "./device-bridge-class.ts"
 import { DEVICE_GATEWAY_BASE_URL, DEVICE_ONCE_GRANT_TTL_MS, deviceBridgeEnabled, isAuthorizationScope, type DeviceBridgeErrorCode, type NeedsAuthorizationInfo } from "./device-bridge-types.ts"
@@ -264,7 +264,7 @@ export interface InternalDeviceRouteDeps {
 }
 
 /** op → 既有 `DeviceBridgeTool` 的**一对一**映射（不得新增／改名工具）。 */
-const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat"]
+const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat", "ue_mcp"]
 
 function isInternalDeviceOp(v: string): v is DeviceBridgeTool {
   return (INTERNAL_DEVICE_OPS as readonly string[]).includes(v)
@@ -335,6 +335,12 @@ function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, un
       if (body.max_bytes !== undefined) args.max_file_bytes = body.max_bytes
       return args
     }
+    case "ue_mcp": {
+      // 引擎联动：栏位原样交给 sanitizeEngineArgs（唯一夹制点），这里只挑栏位不改语义。
+      const args: Record<string, unknown> = { method: body.method }
+      for (const key of ["name", "arguments", "cursor", "port"]) if (body[key] !== undefined) args[key] = body[key]
+      return args
+    }
     default:
       return { path }
   }
@@ -372,7 +378,8 @@ export async function handleInternalDeviceInvoke(req: Request, deps: InternalDev
     return internalDeviceError(perr.code === "device_ambiguous" ? 409 : 404, perr.code, perr.message)
   }
 
-  const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args, authorizationToken: body.authorization_token })
+  const timeoutMs = tool === "ue_mcp" && typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : undefined
+  const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args, timeoutMs, authorizationToken: body.authorization_token })
   if (!out.ok) {
     const oerr = out as { ok: false; code: DeviceBridgeErrorCode; message: string; needsAuthorization?: NeedsAuthorizationInfo }
     // needs_authorization：HTTP 200（授权发生在对话里），body 形状照冻结契约。
@@ -438,7 +445,7 @@ export async function handleInternalDeviceAuthorize(req: Request, deps: Internal
   const scope = body.scope
   if (!isAuthorizationScope(scope)) return internalDeviceError(400, "bad_request", "scope must be once|session|permanent")
   const toolRaw = body.tool
-  if (toolRaw !== undefined && toolRaw !== "*" && !isToolAllowed(toolRaw)) {
+  if (toolRaw !== undefined && toolRaw !== "*" && (!isToolAllowed(toolRaw) || isEngineBridgeTool(toolRaw))) {
     return internalDeviceError(400, "bad_request", "tool must be a device-bridge tool or *")
   }
   if (typeof body.root !== "string" || body.root.trim().length === 0) {
