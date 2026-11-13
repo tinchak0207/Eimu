@@ -21,8 +21,11 @@ import { markDirty } from "./sessions-core.ts"
 /** 队列上限（条）。超出回 429，绝不静默丢弃已受理的消息。 */
 export const USER_MESSAGE_QUEUE_MAX = 8
 
-/** 投递一条排队消息：true＝已受理（下一回合已起跑），false＝投递失败（由本模组放回队首）。 */
-export type QueuedUserMessageDeliverer = (state: SessionState, body: Record<string, unknown>) => Promise<boolean>
+/** 投递结果：accepted＝已受理；retryable＝失败后值不值得重试
+ *  （5xx／网络不可达＝true，4xx＝false——确定性拒绝重试一百次也不会成功）。 */
+export type QueuedUserMessageDelivery = { accepted: boolean; retryable: boolean }
+
+export type QueuedUserMessageDeliverer = (state: SessionState, body: Record<string, unknown>) => Promise<QueuedUserMessageDelivery>
 
 let deliverQueuedUserMessage: QueuedUserMessageDeliverer | null = null
 
@@ -37,6 +40,10 @@ export function setQueuedUserMessageDeliverer(fn: QueuedUserMessageDeliverer): v
  */
 const drainingSessions = new Set<string>()
 
+/** 投递失败提示的节流（每会话最多每分钟一帧，见 requeueAfterFailedDelivery）。 */
+const failureNoticeAt = new Map<string, number>()
+const FAILURE_NOTICE_INTERVAL_MS = 60_000
+
 /** 用户排队消息是否正在投递中（子代理唤醒 flush 据此让位，见 opencode-event-handler-hooks）。 */
 export function isDrainingUserMessageQueue(state: SessionState): boolean {
   return drainingSessions.has(state.sessionId)
@@ -50,6 +57,23 @@ export function userMessageQueue(state: SessionState): QueuedUserMessage[] {
 
 export function queuedUserMessageCount(state: SessionState): number {
   return userMessageQueue(state).length
+}
+
+/** 只读判定：不清写队列容器（周期性兜底每 5 秒扫全部会话，不为空会话分配阵列）。 */
+export function hasQueuedUserMessages(state: SessionState): boolean {
+  return Array.isArray(state.pendingUserMessages) && state.pendingUserMessages.length > 0
+}
+
+/**
+ * 用户叫停（work_control=cancel）时清空排队消息，返回清掉的条数。
+ * 0 条时不动任何状态；否则 markDirty。resume 不清（停止是放弃，恢复不是）。
+ */
+export function clearQueuedUserMessages(state: SessionState): number {
+  if (!hasQueuedUserMessages(state)) return 0
+  const dropped = state.pendingUserMessages?.length ?? 0
+  if (state.pendingUserMessages) state.pendingUserMessages.length = 0
+  markDirty(state)
+  return dropped
 }
 
 /**
@@ -69,8 +93,12 @@ export function enqueueUserMessage(state: SessionState, body: Record<string, unk
  * 回合收尾时排空一条：取出队首原始 body，交给注入的投递缝（生产＝handleSendMessage）。
  * 队列还有下一条时不动——等下一个回合收尾再排，保持「一回合一条」。
  *
- * 调用点：emitTurnDone 清掉 lastTurnActiveAt 之后、子代理唤醒 flush 之前。
- * 这里有在途回合（lastTurnActiveAt > 0）就不排，避免与正在跑的回合抢同一 opencode 会话。
+ * 调用点两个：
+ *   ① emitTurnDone 清掉 lastTurnActiveAt 之后、子代理唤醒 flush 之前（主路径）；
+ *   ② timers-gw 的 5 秒兜底 tick（仓库另有多处终局出口绕过 emitTurnDone，只清打点
+ *      或手发 turn.done，本轮死在那里时排队消息否则会永久滞留）。
+ * 这里有在途回合（lastTurnActiveAt > 0）就不排，避免与正在跑的回合抢同一 opencode 会话；
+ * drainingSessions 保证两个调用点不会重入。
  */
 export function drainOneQueuedUserMessage(state: SessionState): void {
   if (!deliverQueuedUserMessage) return
@@ -85,11 +113,13 @@ export function drainOneQueuedUserMessage(state: SessionState): void {
   const deliver = deliverQueuedUserMessage
   const genBefore = state.turnGen ?? 0
   void deliver(state, next.body)
-    .then((accepted) => {
-      if (accepted) return
-      requeueAfterFailedDelivery(state, next, genBefore)
+    .then((result) => {
+      if (result.accepted) return
+      if (result.retryable) requeueAfterFailedDelivery(state, next, genBefore)
+      else dropRejectedQueuedMessage(state, next, genBefore)
     })
     .catch((e: unknown) => {
+      // 抛异常＝网络/进程层不可达，按可重试处理（放回队首等下一轮）。
       console.error(`[gateway] queued user message delivery threw: session=${state.sessionId}:`, e)
       requeueAfterFailedDelivery(state, next, genBefore)
     })
@@ -111,8 +141,31 @@ function requeueAfterFailedDelivery(state: SessionState, item: QueuedUserMessage
   queue.unshift(item)
   if ((state.lastTurnActiveAt ?? 0) > 0 && (state.turnGen ?? 0) === genBefore + 1) state.lastTurnActiveAt = 0
   markDirty(state)
-  emitToSession(state, "turn.status", {
-    text: `排队中的消息投递失败，已保留在第 1 位，下一个回合结束后自动重试`,
-  })
+  // 兜底 tick 每 5 秒会重试一次（上游长时间不可达时会连续失败），提示同一句话最多每分钟一次，
+  // 避免刷屏；失败本身照旧逐次落日志。
+  const now = Date.now()
+  if (now - (failureNoticeAt.get(state.sessionId) ?? 0) >= FAILURE_NOTICE_INTERVAL_MS) {
+    failureNoticeAt.set(state.sessionId, now)
+    emitToSession(state, "turn.status", {
+      text: `排队中的消息投递失败，已保留在第 1 位，下一个回合结束后自动重试`,
+    })
+  }
   console.warn(`[gateway] queued user message delivery failed, requeued at head: session=${state.sessionId}`)
+}
+
+/**
+ * 确定性拒绝（4xx：注入闸拦截、会话已不存在等）：重试不会改变结果，不再放回队首，
+ * 也不静默吞掉——发一帧如实说明，用户知道需要重新发送。
+ * 5xx／网络失败仍走 requeueAfterFailedDelivery（兜底 tick 会继续重试）。
+ */
+function dropRejectedQueuedMessage(state: SessionState, item: QueuedUserMessage, genBefore: number): void {
+  // 与失败重放同款：只有本次尝试确实推进过一次 turnGen、且没被别的回合接管时才清打点。
+  if ((state.lastTurnActiveAt ?? 0) > 0 && (state.turnGen ?? 0) === genBefore + 1) state.lastTurnActiveAt = 0
+  markDirty(state)
+  emitToSession(state, "turn.status", {
+    text: `排队中的消息未能投递（请求被拒绝），已从队列移除，需要时请重新发送`,
+  })
+  console.warn(
+    `[gateway] queued user message rejected (non-retryable), dropped: session=${state.sessionId} chars=${JSON.stringify(item.body).length}`,
+  )
 }

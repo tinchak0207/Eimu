@@ -18,6 +18,7 @@ import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
 import { hasInFlightTool } from "./opencode-event-handler-hooks.ts"
+import { drainOneQueuedUserMessage, hasQueuedUserMessages, isDrainingUserMessageQueue } from "./queued-user-messages.ts"
 // 2026-10-04 W：看门狗/心跳等守卫家族固定文案的书写体镜像已整体拆除——一律简体。
 // TODO(整合 Wave3)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build
 // 对未 export 的 named import 报错，已实测 2026-09-19）。依第一阶段占位符法（记忆
@@ -635,3 +636,21 @@ export function releasePendingVideoWorkflows(state: SessionState): void {
     })
   }
 }
+
+// ── 2026-11-13：排队用户消息的周期性兜底排空 ───────────────────────────────
+// 主排空挂在 emitTurnDone，但仓库里另有多处终局出口绕过它（看门狗终局、中段停滞
+// 二次收尾、nudge 重发失败、deferred 投递失败、恢复回合收尾、abort 重试腿、
+// job-delivery 收尾）——这些只清 lastTurnActiveAt 或手发 turn.done。若本轮死在其中
+// 之一，「已加入队列」的消息永远等不到下一个 emitTurnDone、就这样永久滞留。
+// 这条 tick 只补「已经没有在途回合、却还有排队消息」的状态；条件与
+// drainOneQueuedUserMessage 内部守卫一致，drainingSessions 保证不与 emitTurnDone 的
+// 排空重入。刻意不改上述任何终局出口的语义。
+const USER_QUEUE_SWEEP_MS = 5000
+setInterval(() => {
+  for (const state of sessions.values()) {
+    if (!hasQueuedUserMessages(state)) continue
+    if ((state.lastTurnActiveAt ?? 0) > 0) continue
+    if (isDrainingUserMessageQueue(state)) continue
+    drainOneQueuedUserMessage(state)
+  }
+}, USER_QUEUE_SWEEP_MS).unref?.()

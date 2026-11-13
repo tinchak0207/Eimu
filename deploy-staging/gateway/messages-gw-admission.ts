@@ -27,7 +27,7 @@ import { ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, sch
 import { buildHistoryInjection, memoryReadActive } from "./memory-history-wiring.ts"
 import { personaModel, isVisionModel } from "./model-registry.ts"
 import { buildTurnImageParts } from "./turn-image-parts.ts"
-import { enqueueUserMessage } from "./queued-user-messages.ts"
+import { clearQueuedUserMessages, enqueueUserMessage } from "./queued-user-messages.ts"
 import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSessionUsedTokens, estimateActiveContextTokens, COMPACTION_MAX_DEFER_MS } from "./messages-gw-compaction.ts"
 import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedSystemSuffix, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, type SystemPromptSection } from "./messages-gw-types.ts"
 
@@ -154,8 +154,16 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     return Response.json({ session_id: id, queued: true, position }, { status: 202 })
   }
   try {
-    if (workControl === "cancel") setGenerationWorkCancelled(state.sessionId, true, "用户消息明确停止当前工作")
-    else if (workControl === "resume") setGenerationWorkCancelled(state.sessionId, false, "用户明确恢复或开始新工作")
+    if (workControl === "cancel") {
+      setGenerationWorkCancelled(state.sessionId, true, "用户消息明确停止当前工作")
+      // 2026-11-13：停止同时清空排队消息。否则本轮收尾后 drain 会把排队的下一条
+      // 自动起跑——用户视角是「我按了停止它还在动」。resume 不清（停止是放弃，恢复不是）。
+      // 正在投递中的那条已出队、不在清理范围（它已被当成新回合受理，由取消标记拦住生成）。
+      const cancelledQueue = clearQueuedUserMessages(state)
+      if (cancelledQueue > 0) {
+        emitToSession(state, "turn.status", { text: `已停止，并取消排队中的 ${cancelledQueue} 条消息` })
+      }
+    } else if (workControl === "resume") setGenerationWorkCancelled(state.sessionId, false, "用户明确恢复或开始新工作")
     else if (clearCancelledForNewPrompt(state.sessionId)) {
       // 取消是「当前工作代」而非会话终身：停止只作用于当时那批工作；用户发新指令
       // （无停止/恢复控制词）即新工作代，清掉标记后本次派发才能继续。只读一次 DB。

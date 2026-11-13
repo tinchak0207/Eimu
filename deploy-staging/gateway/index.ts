@@ -91,7 +91,9 @@ setQueuedUserMessageDeliverer(async (state, body) => {
     body: JSON.stringify(body),
   })
   const res = await handleSendMessage(state.apiKey, state.sessionId, req)
-  return res.ok
+  // 5xx＝上游/后端暂时不可达，兜底 tick 值得重试；4xx＝确定性拒绝（注入闸拦截、
+  // 会话不存在等），重试不会变好，由排队模块如实告知并出队。
+  return { accepted: res.ok, retryable: res.status >= 500 }
 })
 
 const server = Bun.serve({
