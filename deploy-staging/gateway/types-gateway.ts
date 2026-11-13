@@ -19,6 +19,16 @@ export interface PendingConfirm {
   description?: string
 }
 
+/**
+ * 2026-11-13：回合在途时排队的用户普通消息。
+ * body 是受理收下的原始 JSON body 原样保存（保住 content／attachments／canvas_state／
+ * session_directive 等全部栏位，不是只存 content），排空时原样回放给既有受理链。
+ */
+export interface QueuedUserMessage {
+  body: Record<string, unknown>
+  enqueuedAt: number
+}
+
 export interface PendingQuestion {
   requestId: string
   callId: string
@@ -225,6 +235,11 @@ export interface SessionState {
    *  每条带 deadline（STEER_QUEUE_TTL_MS）：逾时不投递、落 failed 终态，
    *  前端以同一个 TTL 自行翻「未能送达」——重启后不得留下永久「排队中」。 */
   pendingSteers?: PendingSteer[]
+  /** 2026-11-13：回合在途时用户新投的普通消息（FIFO，上限 8，原始 body 原样保存）。
+   *  回合收尾（emitTurnDone）排空一条，经既有受理链重投；排队期间不动 turnGen、
+   *  不清任何回合状态（旧行为会让上游中止在途 assistant 消息、首条回覆归零）。
+   *  注意：本栏位未进入 persistence.ts 的 PERSISTED_DATA_KEYS 白名单，进程重启后丢失。 */
+  pendingUserMessages?: QueuedUserMessage[]
   // ── P2b（2026-09-11）：空转止损（全部 volatile，不持久化）──
   /** 本 turn 连续空 step 计数。 */
   idleSteps?: number

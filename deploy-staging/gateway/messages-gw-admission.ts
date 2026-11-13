@@ -27,6 +27,7 @@ import { ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, sch
 import { buildHistoryInjection, memoryReadActive } from "./memory-history-wiring.ts"
 import { personaModel, isVisionModel } from "./model-registry.ts"
 import { buildTurnImageParts } from "./turn-image-parts.ts"
+import { enqueueUserMessage } from "./queued-user-messages.ts"
 import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSessionUsedTokens, estimateActiveContextTokens, COMPACTION_MAX_DEFER_MS } from "./messages-gw-compaction.ts"
 import { appendSystemPayloadToTurnTail, appendDataPayloadToTurnTail, ensureGatewayNonce, systemStaticSection, systemSessionSection, authorityRule, latchSystemSection, sanitizeUserContent, enforceTurnTailBudget, preparePromptContextForDispatch, acceptPromptContextDispatch, promptContext, appendContextDelta, rememberPinnedConstraints, pinnedSystemSuffix, memoryTurnKey, pushHookInjection, takeHookCompactionContinuation, hookSessionStarted, hookSessionSource, compactTurnsSince, HOOK_PROMPT_BUDGET_MS, BEAST_STABLE_CORE, BEAST_STAGE_ORDER, BEAST_STAGE_ALL, BEAST_SKILL_LIST, selectBeastStages, buildBudgetedSkillModule, OPENUI_SYSTEM_PROMPT, OPENUI_USAGE_POLICY, EIMU_OPENUI_ENABLED, buildEnvironmentSection, buildTemplateSkeletonForPrompt, type SystemPromptSection } from "./messages-gw-types.ts"
 
@@ -126,6 +127,32 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
   const textControl = explicitControl ? null : detectTextWorkControl(instruction)
   const workControl = explicitControl ?? textControl
   const workControlSource = explicitControl ? "explicit" : textControl ? "text" : null
+  // ── 2026-11-13 回合在途受理闸 ─────────────────────────────────────────────
+  // 现场事实（真会话 2/2 复现）：本函数旧实现对在途回合没有任何受理闸，无条件
+  // turnGen++ 再 prompt_async；opencode 会中止正在生成的 assistant 消息，第一条消息
+  // 的回覆归零（historical assistant 讯息 parts=0，用户看到空白气泡），而状态已被
+  // 下一轮接管，网关不会再发任何诚实提示。
+  // 现在：普通消息在回合在途时原样入队（保存整个原始 body），立即回 202 并给一帧
+  // turn.status；回合收尾时由 emitTurnDone 排空一条，走既有受理链重投。
+  // 位置刻意在「工作控制落库」之前：本路径一个字都不写会话／工作状态，等排空时由
+  // handleSendMessage 原样处理（取消标记也留到那一刻再清，不提前放行在途生成）。
+  // 三种必须直接放行（保住既有行为）：
+  //   ① 明确工作控制（work_control 或句首文本判出 cancel/resume）——「停止」要立刻生效，
+  //      排队会把停止拖到回合结束，等于停不掉；
+  //   ② 本会话有未答 question（pendingQuestions 非空）——那是用户在回答问题，必须走下方
+  //      原有 auto-settle 流程，不能被排队截走；
+  //   ③ 没有在途回合（lastTurnActiveAt 为 0）——行为与改前逐位等价。
+  if (!workControl && state.pendingQuestions.size === 0 && (state.lastTurnActiveAt ?? 0) > 0) {
+    const position = enqueueUserMessage(state, body as unknown as Record<string, unknown>)
+    if (position === null) {
+      return jsonError(429, "排队已满（8 条），请等前面的处理完再发", "queue_full", "queue_full")
+    }
+    emitToSession(state, "turn.status", {
+      text: `已加入队列（第 ${position} 条），本轮结束后自动处理`,
+    })
+    console.log(`[gateway] user message queued (turn in flight): session=${state.sessionId} position=${position}`)
+    return Response.json({ session_id: id, queued: true, position }, { status: 202 })
+  }
   try {
     if (workControl === "cancel") setGenerationWorkCancelled(state.sessionId, true, "用户消息明确停止当前工作")
     else if (workControl === "resume") setGenerationWorkCancelled(state.sessionId, false, "用户明确恢复或开始新工作")

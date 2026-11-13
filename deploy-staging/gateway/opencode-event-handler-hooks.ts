@@ -5,6 +5,7 @@ import { clearAckTimer } from "./timers-gw.ts"
 import { flushOtherPartTails } from "./outbound-sanitize.ts"
 import { emitRunningSubagentsStatus } from "./subagent"
 import { boundMap } from "./events-translate.ts"
+import { drainOneQueuedUserMessage, isDrainingUserMessageQueue } from "./queued-user-messages.ts"
 import type { SessionState } from "./types-gateway.ts"
 // TODO(来自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
 //   —— W7 并行在建 events-translate.ts，建成后改真 import。
@@ -37,6 +38,12 @@ export function emitTurnDone(state: SessionState): void {
   state.lastTurnActiveAt = 0
   markDirty(state)
   emitToSession(state, "turn.done", {})
+  // 2026-11-13：回合真正收尾后先排空用户排队消息（一次一条，见 queued-user-messages.ts）。
+  // 刻意排在子代理唤醒 flush 之前：用户排队的是明确指令，优先级高于内部通知；
+  // 且唤醒会另起一次 prompt_async，与刚投递的用户回合抢同一 opencode 会话，
+  // 正好复现「在途消息被中止、首轮产出归零」的病灶。唤醒不会丢——留在
+  // pendingSubagentWakes 里，等下一回合收尾再 flush（见下方 flushQueuedSubagentWakes）。
+  drainOneQueuedUserMessage(state)
   // F3（2026-10-10）：turn.done 清前端 turnStatus；若仍有在途 async 子代理，立刻回填
   // 进度行，避免 await 窗真空（复用 turn.status，禁止 message.delta 污染正文）。
   emitRunningSubagentsStatus(state.sessionId)
@@ -49,6 +56,12 @@ export function setPendingSubagentWakeFlusher(fn: (sessionId: string) => void): 
 }
 
 export function flushQueuedSubagentWakes(state: SessionState): void {
+  // 2026-11-13：用户排队消息正在投递时让位（见 queued-user-messages.drainOneQueuedUserMessage）。
+  // 排空是异步的：投递缝进 handleSendMessage 后要先过闸门/注入才布 ack 计时器，此窗口内
+  // flushPendingSubagentWakes 的 ackTimer 判据还看不到在途回合，会另发一次 prompt_async
+  // 与用户回合抢同一会话（旧病灶：后到的 prompt 中止在途 assistant 消息）。唤醒不丢，
+  // 留在 pendingSubagentWakes 等下一个回合收尾。
+  if (isDrainingUserMessageQueue(state)) return
   try {
     flushPendingSubagentWakes?.(state.sessionId)
   } catch (e) {

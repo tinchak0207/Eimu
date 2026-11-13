@@ -6,6 +6,7 @@ import { loadUserSettings, sweepStaleRows } from "./persistence"
 import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection, composeNoteWakeInjection } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { setSteerTurnDeliverer } from "./steer-gw.ts"
+import { setQueuedUserMessageDeliverer } from "./queued-user-messages.ts"
 import { handleSendMessage } from "./messages-gw.ts"
 import { resolveSession, sessions, findSessionByOpenCodeId, teardownSession, deleteOpencodeSession, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
@@ -75,6 +76,19 @@ setSteerTurnDeliverer(async (state, text) => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: text }),
+  })
+  const res = await handleSendMessage(state.apiKey, state.sessionId, req)
+  return res.ok
+})
+
+// ─── 2026-11-13：回合在途排队消息的投递缝（写法同上方 setSteerTurnDeliverer）──
+// 排队时存的是原始 JSON body，这里是原样回放给**既有受理链**（记忆注入/计时/闸门/
+// 压缩让位全套语义原样生效），不另写一套投递逻辑。合成 Request 只为满足既有签名。
+setQueuedUserMessageDeliverer(async (state, body) => {
+  const req = new Request(`http://gateway.internal/agent/v1/sessions/${state.sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   })
   const res = await handleSendMessage(state.apiKey, state.sessionId, req)
   return res.ok
