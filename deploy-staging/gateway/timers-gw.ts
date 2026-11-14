@@ -393,14 +393,32 @@ export function armWatchdogTimer(state: SessionState): void {
       if (turnHasActivity(cur)) return
       const body = cur.lastPromptBody
       if (!body) return
-      // 2026-10-01 去重：清僵尸后撤零产出死尾（revertDeadTail 内部吞错，永不挡重投）。
-      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
-        method: "POST",
-        headers: opencodeHeaders(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10000),
-      }))
-        .then((res) => {
+      // 2026-10-01 去重：清僵尸后撤零产出死尾。
+      // 2026-11-14 修复（真会话 13:03:26 实锤）：此前忽略 revertDeadTail 的返回值，撤尾失败
+      // （revert HTTP 409）仍照送原始 prompt，opencode 把同一条用户消息再追加一遍——对话里
+      // 出现两条相同的 user 消息、且两轮都不出回覆。现在撤尾失败只重布一次看门狗、不重投：
+      // 上游若其实活着会自然产出；仍死则第二次哨咬走既有「如实收尾」话术。撤尾成功时行为不变。
+      void (async () => {
+        await clearZombieBusyRun(cur).catch(() => false)
+        let reverted = false
+        try {
+          reverted = await revertDeadTail(cur.opencodeSessionId)
+        } catch {
+          // 撤尾异常＝无法确认旧尾巴已撤，同样按失败处理，避免重复用户消息。
+          reverted = false
+        }
+        if (!reverted) {
+          console.warn(`[gateway] watchdog: revert dead tail failed (409/不可撤)，跳过重投以免重复用户消息 — session=${cur.sessionId} gen=${gen}`)
+          if ((cur.turnGen ?? 0) === gen && !turnHasActivity(cur)) armWatchdogTimer(cur)
+          return
+        }
+        try {
+          const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+            method: "POST",
+            headers: opencodeHeaders(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+          })
           if (!res.ok) throw new Error(`status ${res.status}`)
           console.log(`[gateway] watchdog: retry dispatched for session=${cur.sessionId} gen=${gen}`)
           // N2：重投轮开始——剥掉旧 turn 的文本帧（含 watchdog 自己的告警帧），
@@ -408,8 +426,7 @@ export function armWatchdogTimer(state: SessionState): void {
           stripStaleTurnTextFromReplay(cur)
           // 重投已出发：重新布哨等第二轮判定（cur 仍零动静才会咬）。
           if ((cur.turnGen ?? 0) === gen && !turnHasActivity(cur)) armWatchdogTimer(cur)
-        })
-        .catch((e: unknown) => {
+        } catch (e) {
           console.error(`[gateway] watchdog: retry dispatch failed for session=${cur.sessionId}:`, e)
           // 重投发不出去：这轮已无恢复手段，进入终局话术（Q3：如实三句式，
           // 不再诬陷「会话损坏」、不再建议必然失败的「新开一个」）。
@@ -433,7 +450,8 @@ export function armWatchdogTimer(state: SessionState): void {
             // 「还魂帧」，紧接著发「刚才是误判，已自动恢复」，两句互相打脸）。
             cur.deathDeclared = true
           }
-        })
+        }
+      })()
       return
     }
     // ── 第二次咬：重投也没唤醒——LLM 后端无响应，如实告知（Q3 去误导） ──
