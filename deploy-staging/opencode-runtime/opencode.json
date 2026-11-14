@@ -1451,7 +1451,7 @@
         "artifact_get": false,
         "artifact_publish": false,
         "artifact_register": true,
-        "artifact_verify": false,
+        "artifact_verify": true,
         "ask_parent": false,
         "aspect_reflow": false,
         "asset_activate": false,
