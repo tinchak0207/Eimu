@@ -830,7 +830,7 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
       appendSystemPayloadToTurnTail(
         state,
         promptBody,
-        `本轮模型能原生听音频：用户上传的音频（${aud.parts.map((p) => p.filename).join("、")}）已作为音频输入直接给你，请自己听，直接回答内容、语气、说话人、音色、音乐风格等；不要为了「听」去调 bash／ffmpeg／video_transcribe。仅当需要词级时间戳、字幕文件、整段长音频的逐字稿或批量处理时，才用 video_transcribe 等工具补充。听不清就如实说，不要编造。`,
+        `本轮模型能原生听音频：用户上传的音频（${aud.parts.map((p) => p.filename).join("、")}）已作为音频输入直接给你。你自己听，并直接给出：歌词／内容、段落结构与时间码（主歌／副歌／间奏／高潮的起止，精确到秒）、情绪起伏、速度与节奏、可剪切的句尾／小节点、说话人与音色。这些全部凭你自己的听力完成——不要为了拿结构／时间码／歌词／节奏去调 video_transcribe、bash、ffmpeg、ffprobe、RMS／波形曲线，也不要派子代理去「测算／分析这首歌」（子代理听不到音频，只有你听得到；你把听出的时间码、歌词、情绪直接写进给它们的任务书）。只有两种情况才用工具：①用户要字幕文件（srt／vtt）或超过 10 分钟音频的逐字稿；②你已凭听力给出剪点，落到成片帧级精度时，在你给的区间内用工具校准。听不清的地方如实说，不要编造。`,
         "【本轮音频附件·可直接收听】",
       )
     }
