@@ -72,7 +72,12 @@ function InlineViewer({
 
   return (
     <div
-      className={cn("relative w-full overflow-hidden rounded-2xl bg-[#0d0f14] text-white", className)}
+      className={cn(
+        "relative w-full overflow-hidden rounded-2xl",
+        // 音乐卡是浅色玻璃卡（宿主是聊天气泡的 .lg-float）；图/视频仍是黑底舞台。
+        asset.kind === "audio" ? "bg-foreground/[0.05] text-foreground ring-1 ring-black/[0.04]" : "bg-[#0d0f14] text-white",
+        className,
+      )}
       data-viewer-kind={asset.kind}
     >
       <SurfaceSlot
@@ -96,9 +101,14 @@ function InlineViewer({
           onClick={() => openFull(false)}
           aria-label="放大"
           title="放大"
-          className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur hover:bg-black/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          className={cn(
+            "absolute z-10 flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            asset.kind === "audio"
+              ? "right-2.5 top-2.5 h-8 w-8 after:absolute after:-inset-1.5 after:content-[''] text-foreground/55 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-ring"
+              : "right-2 top-2 h-11 w-11 bg-black/45 text-white backdrop-blur hover:bg-black/65 focus-visible:ring-white/60",
+          )}
         >
-          <Expand className="h-5 w-5" aria-hidden="true" />
+          <Expand className={asset.kind === "audio" ? "h-4 w-4" : "h-5 w-5"} aria-hidden="true" />
         </button>
       )}
     </div>

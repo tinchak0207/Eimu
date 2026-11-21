@@ -834,11 +834,11 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
         "【本轮音频附件·可直接收听】",
       )
     }
-    if (!audio && aud.skipped.length > 0) {
+    if ((!audio || aud.parts.length === 0) && aud.skipped.length > 0) {
       appendSystemPayloadToTurnTail(
         state,
         promptBody,
-        `本轮模型不能直接听音频：用户上传了音频，请用 video_transcribe（source 传文件名）取得转写，需要声学细节时再用 video_evidence 探测；不要假装听过。`,
+        `本轮音频无法直接收听（模型不支持或格式转换失败）：用户上传了音频，请用 video_transcribe（source 传文件名）取得转写，需要声学细节时再用 video_evidence 探测；不要假装听过。`,
         "【本轮音频附件·无法直接收听】",
       )
     }

@@ -351,7 +351,8 @@ export function AudioAttachment({
 }) {
   const url = ticket !== null && attRef.path ? buildAssetUrl(sessionId ?? "", attRef.path, ticket) : null;
   const asset = useMemo(
-    () => (url ? viewAssetFromUrl(url, "audio", { title: attRef.name, mime: attRef.mime }) : null),
+    // 系统生成的上传名（media-<时间戳>-<随机>.m4a）对人没有意义，卡片标题不拿它当曲名。
+    () => (url ? viewAssetFromUrl(url, "audio", { title: attRef.name && !/^media-\d+-[a-z0-9]+\.\w+$/i.test(attRef.name) ? attRef.name : "上传的音频", mime: attRef.mime }) : null),
     [url, attRef.name, attRef.mime],
   );
   if (minting) {

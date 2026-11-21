@@ -11,6 +11,7 @@
 // isAudioModel；不在名单＝不读档、不产 parts，只把音频列以 reason=model_no_audio 回报，
 // 由接线端注入「走 video_transcribe」的诚实提示。
 import { readFileSync, realpathSync, statSync } from "node:fs"
+import { spawn } from "node:child_process"
 import path from "node:path"
 import { UPLOADS_DIR } from "./constants-gateway.ts"
 
@@ -36,6 +37,48 @@ export function sniffAudioMime(bytes: Buffer): string | null {
   if (bytes.length >= 4 && bytes.subarray(0, 4).toString("latin1") === "fLaC") return "audio/flac"
   if (bytes.length >= 12 && bytes.subarray(4, 8).toString("latin1") === "ftyp") return "audio/mp4"
   return null
+}
+
+
+// opencode 的 AI SDK（openai-compatible）只认 wav / mp3 两种音频，其余（m4a=audio/mp4、ogg、flac、aac…）
+// 会抛 `'audio media type audio/mp4' functionality not supported`，故障转移链再一路掉到听不了音频的
+// 回退模型（2026-11-22 真会话：用户传 m4a 音乐，agent 回「不支持原生听音频」）。
+// 所以不在白名单内的格式一律先在网关用 ffmpeg 转成 mp3（立体声 44.1k 128k，听音乐够用）。
+const NATIVE_AUDIO_MIMES = new Set(["audio/wav", "audio/mpeg"])
+const TRANSCODE_TIMEOUT_MS = 90_000
+
+function transcodeToMp3(inputPath: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "ffmpeg",
+      ["-nostdin", "-v", "error", "-y", "-i", inputPath, "-vn", "-map_metadata", "-1", "-ac", "2", "-ar", "44100", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    )
+    const chunks: Buffer[] = []
+    let total = 0
+    let done = false
+    const finish = (b: Buffer | null) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(b)
+    }
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      finish(null)
+    }, TRANSCODE_TIMEOUT_MS)
+    child.stdout.on("data", (c: Buffer) => {
+      total += c.length
+      if (total > MAX_AUDIO_BYTES) {
+        child.kill("SIGKILL")
+        finish(null)
+        return
+      }
+      chunks.push(c)
+    })
+    child.on("error", () => finish(null))
+    child.on("close", (code) => finish(code === 0 && total > 0 ? Buffer.concat(chunks) : null))
+  })
 }
 
 type AudioRow = { path: string; mime: string }
@@ -130,12 +173,25 @@ export async function buildTurnAudioParts(opts: {
       skipped.push({ path: row.path, reason: "file_not_found" })
       continue
     }
-    const mime = sniffAudioMime(bytes) ?? row.mime
+    let mime = sniffAudioMime(bytes) ?? row.mime
+    if (!NATIVE_AUDIO_MIMES.has(mime)) {
+      const mp3 = await transcodeToMp3(real)
+      if (!mp3) {
+        skipped.push({ path: row.path, reason: "audio_transcode_failed" })
+        continue
+      }
+      bytes = mp3
+      mime = "audio/mpeg"
+    }
+    if (totalBytes + bytes.length > MAX_AUDIO_TOTAL_BYTES) {
+      skipped.push({ path: row.path, reason: "total_too_large" })
+      continue
+    }
     totalBytes += bytes.length
     parts.push({
       type: "file",
       mime,
-      filename: path.basename(real),
+      filename: mime === "audio/mpeg" ? path.basename(real).replace(/\.[^.]+$/, "") + ".mp3" : path.basename(real),
       url: `data:${mime};base64,${bytes.toString("base64")}`,
     })
   }

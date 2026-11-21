@@ -326,20 +326,23 @@ function Scrubber({
   dur,
   onSeek,
   compact,
+  light,
 }: {
   cur: number;
   dur: number;
   onSeek(t: number): void;
   compact?: boolean;
+  /** 浅色玻璃宿主（聊天气泡内嵌卡）：深色轨道/填充/时间字，不是深色舞台的白色。 */
+  light?: boolean;
 }) {
   const [drag, setDrag] = useState<number | null>(null);
   const shown = drag ?? cur;
   const pct = dur > 0 ? clamp((shown / dur) * 100, 0, 100) : 0;
   return (
-    <div data-no-swipe className="w-full">
+    <div data-no-swipe className={cn("w-full", light && "relative")}>
       <div className="group relative flex h-6 items-center">
-        <div className={cn("pointer-events-none absolute inset-x-0 overflow-hidden rounded-full bg-white/25 transition-[height]", compact ? "h-1" : "h-1 group-hover:h-[7px] group-active:h-[7px]")}>
-          <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
+        <div className={cn("pointer-events-none absolute inset-x-0 overflow-hidden rounded-full transition-[height]", light ? "bg-foreground/[0.12]" : "bg-white/25", compact ? "h-1" : "h-1 group-hover:h-[7px] group-active:h-[7px]")}>
+          <div className={cn("h-full rounded-full", light ? "bg-foreground/80" : "bg-white")} style={{ width: `${pct}%` }} />
         </div>
         <input
           type="range"
@@ -370,7 +373,7 @@ function Scrubber({
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
         />
       </div>
-      <div className="mt-0.5 flex justify-between text-[12px] font-medium tabular-nums text-white/55">
+      <div className={cn("flex justify-between whitespace-nowrap text-[12px] font-medium tabular-nums", light ? "pointer-events-none absolute inset-x-0 top-[26px] text-muted-foreground" : "mt-0.5 text-white/55")}>
         <span>{mmss(shown)}</span>
         <span>{dur > 0 ? `-${mmss(Math.max(0, dur - shown))}` : "--:--"}</span>
       </div>
@@ -677,15 +680,18 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
     />
   ) : null;
 
-  const playBtn = (size: "lg" | "sm") => (
+  const playBtn = (size: "lg" | "sm", light = false) => (
     <button
       type="button"
       onClick={toggle}
       disabled={!hasSource || failed}
       aria-label={playing ? "暂停" : "播放"}
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full bg-white text-[#14161c] shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40 disabled:opacity-40 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
-        size === "lg" ? "h-[72px] w-[72px]" : "h-12 w-12",
+        "flex shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 disabled:opacity-40 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+        light
+          ? "bg-foreground text-background shadow-[0_4px_14px_rgba(0,0,0,0.18)] focus-visible:ring-ring focus-visible:ring-offset-2"
+          : "bg-white text-[#14161c] shadow-[0_8px_28px_rgba(0,0,0,0.35)] focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40",
+        size === "lg" ? "h-[72px] w-[72px]" : light ? "h-11 w-11" : "h-12 w-12",
       )}
       style={{ transitionTimingFunction: SPRING }}
     >
@@ -702,8 +708,8 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
   const glassBtn =
     "flex h-11 w-11 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/12 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] disabled:opacity-40";
 
-  const downloadBtn = (
-    <button type="button" onClick={() => void onDownload()} disabled={!hasSource || dl === "loading"} aria-label={dl === "failed" ? "下载失败，点击重试" : "下载"} title={dl === "failed" ? "下载失败，点击重试" : "下载这首歌"} className={cn(glassBtn, dl === "failed" && "text-[#ff8a80]")}>
+  const downloadBtn = (light = false) => (
+    <button type="button" onClick={() => void onDownload()} disabled={!hasSource || dl === "loading"} aria-label={dl === "failed" ? "下载失败，点击重试" : "下载"} title={dl === "failed" ? "下载失败，点击重试" : "下载这首歌"} className={cn(light ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/65 transition-colors hover:bg-foreground/[0.08] hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 [touch-action:manipulation]" : glassBtn, dl === "failed" && (light ? "text-destructive" : "text-[#ff8a80]"))}>
       {dl === "loading" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <Download className="h-5 w-5" aria-hidden="true" />}
     </button>
   );
@@ -726,33 +732,42 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
     </div>
   );
 
-  /* ================= 内嵌：横条小播放器 ================= */
+  /* ================= 内嵌：聊天/历史里的音乐卡 =================
+   * 宿主是 Eimu 的浅色玻璃（.lg-float / 白 0.56），所以这里是浅色卡：深色字、深色主按钮（--primary）、
+   * 墨绿×靛蓝封面块；不再是黑底白字的「Apple Music 夜场」块嵌进白气泡。
+   * 两行：①封面＋曲名/副标题（右上留给「放大」钮）②播放键＋整宽进度条（时间同一行不折行）＋下载。 */
   if (!full) {
     const line = model.mode !== "estimated" && hasLyrics ? model.lines[curLine]?.text.trim() : "";
+    const hue = 158 + (() => { let h = 0; for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) >>> 0; return h % 70; })();
     return (
-      <div ref={rootRef} className="relative isolate overflow-hidden text-white">
-        <MusicBackdrop cover={cover} seed={title} />
+      <div ref={rootRef} className="relative isolate text-foreground">
         {audioEl}
-        <div className="relative flex items-center gap-3 p-3 pr-14">
-          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/15">
-            {cover ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={cover} alt="" className="h-full w-full object-cover" draggable={false} onError={() => setCoverOk(false)} />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Music2 className="h-7 w-7 text-white/70" strokeWidth={1.5} aria-hidden="true" />
-              </div>
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold">{title}</div>
-            <div className="truncate text-[13px] text-white/60">{failed ? "这首歌暂时放不出来" : line || subtitle || (awaiting ? "歌词对齐中…" : "Eimu 音乐")}</div>
-            <div className="mt-1.5">
-              <Scrubber cur={curSec} dur={dur} onSeek={seekTo} compact />
+        <div className="flex flex-col gap-3 p-3.5">
+          <div className="flex items-center gap-3 pr-9">
+            <div
+              className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[14px] ring-1 ring-black/5"
+              style={cover ? undefined : { background: `linear-gradient(135deg, hsl(${hue} 30% 42%), hsl(${hue + 62} 34% 36%))` }}
+            >
+              {cover ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={cover} alt="" className="h-full w-full object-cover" draggable={false} onError={() => setCoverOk(false)} />
+              ) : (
+                <Music2 className="h-6 w-6 text-white/90" strokeWidth={1.5} aria-hidden="true" />
+              )}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-ios-subhead font-semibold text-foreground" title={title}>{title}</div>
+              <div className="truncate text-ios-footnote text-muted-foreground">{failed ? "这首歌暂时放不出来" : line || subtitle || (awaiting ? "歌词对齐中…" : "Eimu 音乐")}</div>
             </div>
           </div>
-          {playBtn("sm")}
-          {downloadBtn}
+          <div className="flex items-center gap-3">
+            {playBtn("sm", true)}
+            <div className="min-w-0 flex-1">
+              <Scrubber cur={curSec} dur={dur} onSeek={seekTo} compact light />
+            </div>
+            {downloadBtn(true)}
+          </div>
         </div>
       </div>
     );
@@ -815,7 +830,7 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
                 <TextQuote className="h-5 w-5" aria-hidden="true" />
               </button>
             )}
-            {downloadBtn}
+            {downloadBtn()}
           </div>
         </div>
 
