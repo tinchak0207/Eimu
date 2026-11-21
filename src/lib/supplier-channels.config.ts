@@ -64,6 +64,29 @@ export interface RegistryChannel {
 export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // REGISTRY-ENTRIES-START（脚本插入点，此注释与结束标记之间的条目由工具维护，手改会被覆盖）
 {
+    // v6k（https://www.v6k.top，2026-11-21 暴君指定）：**seedance 2.5 720p 默认渠道**。
+    // new-api 上游（openai-video 端点：POST {base}/videos 创建、GET {base}/videos/{id} 轮询，
+    // 与 miaowuai 同型，adapter 零改动）。上游模型名 `SD2.5`（GET /api/pricing 2026-11-21
+    // 免 key 唯读实查：billing_mode=tiered_expr、**按秒计价**，USD/s × 7.3：
+    // 480p 0.023287671233→¥0.17/s、720p 0.034246575342→¥0.25/s、1080p 0.109589041096→¥0.80/s(表内标 ¥0.6)；
+    // 参考视频另计 reference_video_seconds 同价；4–30 秒、30 图 10 音、比例含 21:9）。
+    // 只认领 480p/720p 两档（≤720p，符合成本闸红线）；同站其余 seedance 变体（TT／BB／稳
+    // 系列等）为不同货源，未核价不认领。key 只在 VPS env（V6K_API_KEY），不入仓库。
+    label: "v6k",
+    baseUrlEnv: "V6K_BASE_URL",
+    apiKeyEnv: "V6K_API_KEY",
+    enabledEnv: "V6K_ENABLED",
+    tier: "managed_pool",
+    sitePriority: 0,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      { modelId: "seedance-2.5-720p", supplierModelId: "SD2.5", kinds: ["video_generate"], unitPriceCnyPerSecond: { "480p": 0.17, "720p": 0.25 }, resolutions: ["720p"], priceSource: "GET https://www.v6k.top/api/pricing 2026-11-21 (SD2.5 tiered_expr per video_seconds: 480p 0.023287671233 USD/s, 720p 0.034246575342 USD/s; 站点描述 480-0.17/720-0.25 ¥/s)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "SD2.5", kinds: ["video_generate"], unitPriceCnyPerSecond: { "480p": 0.17, "720p": 0.25 }, resolutions: ["480p"], priceSource: "GET https://www.v6k.top/api/pricing 2026-11-21 (SD2.5 tiered_expr per video_seconds: 480p 0.023287671233 USD/s, 720p 0.034246575342 USD/s; 站点描述 480-0.17/720-0.25 ¥/s)" },
+    ],
+  },
+
+{
     // xiaoyxiao（api.xiaoyxiao.xyz，2026-09-27 暴君裁定）：**视频唯一权威渠道**。
     // 上游协议与我方既有 openai_video 轮子同型（禁造新轮子）：POST {base}/videos
     // 创建、GET {base}/videos/{id} 轮询；成品 URL 在**顶层 `url`**（extractOutputUrl

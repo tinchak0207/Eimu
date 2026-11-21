@@ -105,7 +105,9 @@ const NAPI_MODEL_NAMES = new Set(["seed-2.0", "seed-2.5"]);
 // 2026-10-13：seedance-2.0-mini 亦由 miaowu 承接，同一 new-api 实例同一 strict schema
 // （video_api：sizes 480p/720p、seconds 4–15、images_max 9、ratios 1:1/16:9/9:16/4:3/3:4）
 // ⇒ 归入本族（分辨率走 resolution、参考图走 image_urls）。
-const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max", "seedance-2.0-mini"]);
+// 2026-11-21：v6k 的 SD2.5 同属 new-api 官方 openai-video 形状（seconds/ratio/resolution/
+// image_urls），参考图上限 30（站点描述「30图10音」）。
+const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max", "seedance-2.0-mini", "SD2.5"]);
 
 // agnes 免费档（apihub.agnes-ai.com，2026-10-13 免费兜底）：协议骨架与 sd4/xiaoyxiao 同型
 //（POST {base}/videos 创建、GET {base}/videos/{id} 轮询），但**请求体严格 schema**——
@@ -288,8 +290,9 @@ export async function generateWithOpenaiVideo(
     }
     if (isSecondsFamily) {
       // miaowu 族参考图走 image_urls（上游 video_api.images_max=9）。
-      if (references.length > 9) {
-        throw new SupplierRequestError("miaowu video family accepts at most 9 reference images.", 400);
+      const maxSecondsFamilyRefs = upstreamModel === "SD2.5" ? 30 : 9;
+      if (references.length > maxSecondsFamilyRefs) {
+        throw new SupplierRequestError(`seconds-family video upstream accepts at most ${maxSecondsFamilyRefs} reference images.`, 400);
       }
       body.image_urls = references.map((ref) => ref.url);
     } else if (isNapi) {

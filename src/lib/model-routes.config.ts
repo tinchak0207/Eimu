@@ -72,8 +72,10 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
 
   // ── 视频（唯一权威 xiaoyxiao，gway 次之）──
   "seedance-2.0": ["xiaoyxiao", "gway"],
-  "seedance-2.5-480p": ["xiaoyxiao", "gway"],
-  "seedance-2.5-720p": ["xiaoyxiao", "gway"],
+  // 2026-11-21 暴君指定：v6k（上游 SD2.5，按秒 ¥0.17/¥0.25）为 seedance 2.5 首发上游，
+  // xiaoyxiao／gway 退为备援。
+  "seedance-2.5-480p": ["v6k", "xiaoyxiao", "gway"],
+  "seedance-2.5-720p": ["v6k", "xiaoyxiao", "gway"],
   // 2026-10-13 暴君裁定：影片生成首发上游改 dmc（dmc.cc，MiniMax 官方协议，
   // 按秒 ¥0.10/s，实弹 2×5s 对帐一致）；miaowuai（¥2.00/次）与 xiaoyxiao 退为备援。
   "minimax-h3": ["dmc", "miaowuai", "xiaoyxiao"],

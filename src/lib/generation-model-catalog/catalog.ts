@@ -655,7 +655,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     id: SEEDANCE_25_720P_MODEL_ID,
     displayName: "Dreamina Seedance 2.5 720p",
     kind: "video",
-    popularity: 93,
+    // 2026-11-21 暴君裁定：全站默认影片模型，popularity 置顶（高于一切影片档）。
+    popularity: 101,
     vendor: "Dreamina",
     aspectRatios: SEEDANCE_VIDEO_RATIOS,
     resolutions: ["720p"],

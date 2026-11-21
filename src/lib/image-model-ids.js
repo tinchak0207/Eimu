@@ -119,11 +119,14 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
 // 已进付费视频白名单）⇒ 重新上架；fast / 30s 仍无供货，维持下架。
 // 2026-10-13：agnes-video-2.5-flash 上架——平台自有**免费兜底**视频档（免费额度渠道，
 // agnes 上游成本 ¥0），付费渠道（miaowu/xiaoyxiao）全断时仍有供货；免费档队列/限速较慢。
+// 2026-11-21 暴君裁定：全站默认影片模型＝seedance-2.5-720p（上游 v6k SD2.5）⇒ 排首位。
+export const DEFAULT_VIDEO_MODEL_ID = SEEDANCE_25_720P_MODEL_ID;
+
 export const SUPPORTED_VIDEO_MODEL_IDS = [
+  SEEDANCE_25_720P_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
   SEEDANCE_20_MINI_MODEL_ID,
   SEEDANCE_25_480P_MODEL_ID,
-  SEEDANCE_25_720P_MODEL_ID,
   MINIMAX_H3_MODEL_ID,
   AGNES_VIDEO_25_FLASH_MODEL_ID,
 ];

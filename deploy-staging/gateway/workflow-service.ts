@@ -269,7 +269,7 @@ export class WorkflowService {
     for (const n of graph.nodes) {
       if (n.kind === "config") {
         const isVideo = n.metadata.kind === "video"
-        if (!n.metadata.model) n.metadata.model = isVideo ? defaultVideoModel || "minimax-h3" : "pixai-tsubaki2"
+        if (!n.metadata.model) n.metadata.model = isVideo ? defaultVideoModel || "seedance-2.5-720p" : "pixai-tsubaki2"
         if (!n.metadata.size) n.metadata.size = isVideo ? "16:9" : "1024x1024"
       }
     }
