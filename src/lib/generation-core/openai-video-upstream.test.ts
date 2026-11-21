@@ -602,6 +602,45 @@ test("drama sd25-30s：completed 无 URL 时走 /content 鉴权下载回 base64"
   }
 });
 
+test("v6k SD2.5：seconds 族 body（无 aspect_ratio/duration/generate_audio）＋自站 /content 鉴权 URL 下载回 base64", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: Record<string, unknown> = {};
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith("/videos") && init?.method === "POST") {
+      captured = JSON.parse(String(init.body));
+      return jsonResponse(200, { id: TASK_ID, model: "SD2.5", status: "queued" });
+    }
+    if (u.endsWith(`/videos/${TASK_ID}`)) {
+      // 2026-11-21 实弹形状：顶层 url 指回本站鉴权下载口
+      return jsonResponse(200, { id: TASK_ID, status: "completed", progress: 100, url: `https://www.v6k.top/v1/videos/${TASK_ID}/content` });
+    }
+    if (u.endsWith(`/videos/${TASK_ID}/content`)) {
+      const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
+      assert.equal(auth, "Bearer sk-v6k-test", "content 下载必须带 Bearer 鉴权");
+      return new Response(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), { status: 200, headers: { "Content-Type": "video/mp4" } });
+    }
+    return jsonResponse(404, { error: { message: "not found" } });
+  }) as typeof fetch;
+
+  try {
+    process.env.V6K_API_KEY = "sk-v6k-test";
+    const output = await generateWithOpenaiVideo(
+      supplier({ id: "env:v6k", label: "v6k", baseUrl: "https://www.v6k.top/v1", credentialRef: "V6K_API_KEY", supplierModelId: "SD2.5" }),
+      videoInput({ modelId: "seedance-2.5-720p", workflow: { references: [], metadata: {}, durationSeconds: 10, generateAudio: true } }),
+    );
+    assert.equal(captured.model, "SD2.5");
+    assert.equal(captured.seconds, 10);
+    assert.equal(captured.resolution, "720p");
+    assert.ok(!("aspect_ratio" in captured) && !("duration" in captured) && !("generate_audio" in captured));
+    assert.equal(output.url, null);
+    assert.ok(output.base64 && output.base64.length > 0, "应回传 base64 成品");
+  } finally {
+    delete process.env.V6K_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("openaiVideoMaxWaitMs：预设 20 分钟，可 OPENAI_VIDEO_MAX_WAIT_MS 覆写（下限 60s）", () => {
   // INC-VIDEO-0927：旧值 540s 会误杀慢而健康的影片上游（实录 timeout after 540s,
   // last status in_progress；napi 实测单次 attempt 最长 993.9s）。
