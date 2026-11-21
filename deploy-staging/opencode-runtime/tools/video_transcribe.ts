@@ -6,6 +6,7 @@ import { transcribe } from "../lib/asr"
 // 客户端只抽 16kHz mono WAV，推论由 loopback 的本机 ASR 服务（services/asr/）做，零上游零付费。
 export default tool({
   description:
+    "【若回合尾标注「本轮音频附件·可直接收听」，用户音频已直接进你的上下文，只为听懂内容/语气就别调本工具；本工具用于要词级时间戳、字幕、超长逐字稿、批量时】" +
     "把一段影片或音讯转成**词级时间轴**：抽出 16kHz 单声道语音后交给本机 ASR 服务，回传**每个词的 start/end 秒**" +
     "（passages[].words[{text,start_seconds?,end_seconds?,score?}]）＋ audio_seconds ＋ language ＋ word_count。" +
     "source 收本机绝对路径（mp4/mov/mkv/mp3/wav/m4a…）或 http(s) URL（URL 走既有下载轮子，单档 25MB 上限）。" +

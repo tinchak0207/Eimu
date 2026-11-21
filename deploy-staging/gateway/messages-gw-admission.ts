@@ -25,7 +25,8 @@ import { settleQuestion } from "./questions-gw.ts"
 import { clearQuestionHeartbeat, armAckTimer, armHeartbeatTimer, armWatchdogTimer, clearErrorStallTimer } from "./timers-gw.ts"
 import { ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, scheduleMemoryRecallPrefetch, isFreshCreativeRequest, FRESH_CREATIVE_TURN_DIRECTIVE, buildFirstTurnContinuityLines } from "./memory-wiring.ts"
 import { buildHistoryInjection, memoryReadActive } from "./memory-history-wiring.ts"
-import { personaModel, isVisionModel } from "./model-registry.ts"
+import { personaModel, isVisionModel, isAudioModel } from "./model-registry.ts"
+import { buildTurnAudioParts } from "./turn-audio-parts.ts"
 import { buildTurnImageParts } from "./turn-image-parts.ts"
 import { clearQueuedUserMessages, enqueueUserMessage } from "./queued-user-messages.ts"
 import { compactionJobs, maybeCompactSession, knownSessionUsedTokens, rememberSessionUsedTokens, estimateActiveContextTokens, COMPACTION_MAX_DEFER_MS } from "./messages-gw-compaction.ts"
@@ -816,6 +817,37 @@ async function handleAdmittedUserMessage(key: string, id: string, req: Request):
     // 异常路径一定要有日志（2026-10-02 steer 教训：没有日志的分支＝盲修）。组装失败
     // 绝不能静默，也不能挡本轮发送——图进不去就退回纯文字路径（附件清单仍在正文里）。
     console.warn(`[gateway] turn image parts failed — session=${state.sessionId}:`, e instanceof Error ? e.message : e)
+  }
+  // ── 2026-11-22：本轮音频附件按模型能力分流（与上面图片同构）──
+  // 原生能听的模型（registry audio:true）：音频读成 data: URL 的 file part 直接送模型，并在回合尾
+  // 注入一行能力说明，让它自己听，不再被「音频→bash／video_transcribe」的旧配方牵走；
+  // 不能听的模型：不附音频，注入诚实提示指向 video_transcribe（旧路径原样保留）。
+  try {
+    const audio = isAudioModel(promptBody.model)
+    const aud = await buildTurnAudioParts({ sessionId: state.sessionId, content, audio })
+    if (audio && aud.parts.length > 0) {
+      promptBody.parts.push(...aud.parts)
+      appendSystemPayloadToTurnTail(
+        state,
+        promptBody,
+        `本轮模型能原生听音频：用户上传的音频（${aud.parts.map((p) => p.filename).join("、")}）已作为音频输入直接给你，请自己听，直接回答内容、语气、说话人、音色、音乐风格等；不要为了「听」去调 bash／ffmpeg／video_transcribe。仅当需要词级时间戳、字幕文件、整段长音频的逐字稿或批量处理时，才用 video_transcribe 等工具补充。听不清就如实说，不要编造。`,
+        "【本轮音频附件·可直接收听】",
+      )
+    }
+    if (!audio && aud.skipped.length > 0) {
+      appendSystemPayloadToTurnTail(
+        state,
+        promptBody,
+        `本轮模型不能直接听音频：用户上传了音频，请用 video_transcribe（source 传文件名）取得转写，需要声学细节时再用 video_evidence 探测；不要假装听过。`,
+        "【本轮音频附件·无法直接收听】",
+      )
+    }
+    if (aud.parts.length > 0 || aud.skipped.length > 0) {
+      const reasons = [...new Set(aud.skipped.map((s) => s.reason))].join(",") || "-"
+      console.log(`[gateway] turn audio parts: attached=${aud.parts.length} skipped=${aud.skipped.length} reason=${reasons} model=${promptBody.model?.providerID ?? "?"}/${promptBody.model?.modelID ?? "?"}`)
+    }
+  } catch (e) {
+    console.warn(`[gateway] turn audio parts failed — session=${state.sessionId}:`, e instanceof Error ? e.message : e)
   }
   // 尾端硬预算：system + 所有注入 part 共享 PROMPT_TOTAL_BUDGET_CHARS；超限从
   // 最低优先级（最后追加）开始截断并记账。放在所有 append 之后、落 lastPromptBody 之前。

@@ -175,3 +175,17 @@ export function isVisionModel(ref: { providerID: string; modelID: string } | nul
   const flagged = providers?.[ref.providerID]?.models?.[ref.modelID]?.vision
   return flagged === true
 }
+
+// ---- 2026-11-22 原生音频能力判定：音频能不能直接进模型上下文 ----
+// 与视觉同构、但没有硬编码白名单：只认 registry（agent-models.json）
+// `providers[providerID].models[modelID].audio === true`（产品负责人确认该模型原生能听音频，
+// 例：gemini-4-hydrogen 实测听出合成三音 A4/E5/C4）。读不到 registry ＝ 当不能听，走 ASR 工具。
+// 为何要这个旗标：提示词里「音频→video_transcribe／bash」是原生音频读入之前的配方，
+// 模型能自己听时还把它按在工具上＝浪费且更差（听不出语气/音色/音乐性）。按模型能力切换，不按提示词写死。
+export function isAudioModel(ref: { providerID: string; modelID: string } | null | undefined): boolean {
+  if (!ref || typeof ref.modelID !== "string" || ref.modelID.length === 0) return false
+  const providers = loadAgentModelRegistry()?.providers as
+    | Record<string, { models?: Record<string, { audio?: unknown }> } | undefined>
+    | undefined
+  return providers?.[ref.providerID]?.models?.[ref.modelID]?.audio === true
+}

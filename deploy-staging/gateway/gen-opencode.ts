@@ -109,6 +109,8 @@ try {
 // 故：有 `vision: true` 就补 attachment/modalities，并把 registry 专用的 vision 键剥掉
 // （不把自家栏位塞进 opencode 设定）。
 const VISION_MODALITIES_INPUT = ["text", "image"]
+// 2026-11-22：registry 可写 `"audio": true`（模型原生能听音频）→ modalities.input 追加 "audio"，
+// 否则 opencode 在送上游前把 audio file part 替换成「不支持音频」错误文字（与 vision 同一坑）。
 
 function withVisionCapabilities(providers: unknown): unknown {
   if (!providers || typeof providers !== "object") return providers
@@ -122,13 +124,13 @@ function withVisionCapabilities(providers: unknown): unknown {
     const models: Record<string, unknown> = {}
     for (const [modelId, modelValue] of Object.entries(provider.models)) {
       const model = modelValue as Record<string, unknown> | null
-      if (!model || typeof model !== "object" || model.vision !== true) {
+      if (!model || typeof model !== "object" || (model.vision !== true && model.audio !== true)) {
         models[modelId] = modelValue
         continue
       }
-      const { vision: _visionFlag, ...rest } = model
+      const { vision: _visionFlag, audio: _audioFlag, ...rest } = model
       const modalities = { ...((rest.modalities as Record<string, unknown> | undefined) ?? {}) }
-      modalities.input = VISION_MODALITIES_INPUT
+      modalities.input = [...(model.vision === true ? VISION_MODALITIES_INPUT : ["text"]), ...(model.audio === true ? ["audio"] : [])]
       if (!modalities.output) modalities.output = ["text"]
       models[modelId] = { ...rest, attachment: true, modalities }
     }
