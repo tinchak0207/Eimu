@@ -1,6 +1,10 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, platformFetch, ok, fail } from "../lib/client"
 
+// 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p）。真源是 src/lib/image-model-ids.js 的 DEFAULT_VIDEO_MODEL_ID；
+// 本工具随 opencode-runtime 单独发布、不能 import src/，故在此镜像一份——改默认时两处同改（网关侧见 video-model-select.ts）。
+const PLATFORM_DEFAULT_VIDEO_MODEL = "seedance-2.5-720p"
+
 export default tool({
   description:
     "免费查询当前视频模型、可用性、能力与币值单价。报价用available_models，近期真实交付证据另看proven_models；状态可用不等于本次已成功出片。视频价格以x_billing完整提交档位金额为准，per_video是固定次价，不按时长放大；无目录价标未知。提交前检查prompt_char_limit、duration_slots与参考图能力。生成用workflow或image_generate kind=video；图片报价用image_quote。",
@@ -95,10 +99,14 @@ export default tool({
         })
         // 可用优先排序：available 在前，unavailable/unknown 沉底——但保留在列表里
         // 并带明确死因，让 agent 知道模型存在但当下不可荐。
+        .map((m: any) => ({ ...m, is_default: m.id === PLATFORM_DEFAULT_VIDEO_MODEL }))
         .sort((a: any, b: any) => {
           const rank = (x: any) => (x.availability === "available" ? 0 : 1)
           const delivered = (x: any) => Number(x.last_24h?.delivered ?? 0)
-          return rank(a) - rank(b) || delivered(b) - delivered(a) || a.id.localeCompare(b.id)
+          // 平台默认模型在「可用」组内永远排第一（不按交付样本数让位）：agent 常按列表首位选模，
+          // 样本多的旧模型排第一会让「默认」形同虚设（2026-11-22 真会话：MV 选了 h3 而不是默认 2.5）。
+          const dflt = (x: any) => (x.is_default ? 0 : 1)
+          return rank(a) - rank(b) || (rank(a) === 0 ? dflt(a) - dflt(b) : 0) || delivered(b) - delivered(a) || a.id.localeCompare(b.id)
         })
 
       const available = models.filter((m: any) => m.availability === "available").map((m: any) => m.id)
@@ -108,6 +116,12 @@ export default tool({
       const unavailable = models
         .filter((m: any) => m.availability === "unavailable")
         .map((m: any) => `${m.id}（${m.note ?? "不可用"}）`)
+      const dm = models.find((m: any) => m.is_default)
+      const defaultNote = !dm
+        ? `平台默认视频模型 ${PLATFORM_DEFAULT_VIDEO_MODEL} 不在本次列表（未上架或被过滤）。`
+        : dm.availability === "available"
+          ? `平台默认视频模型是 ${PLATFORM_DEFAULT_VIDEO_MODEL}（is_default=true，已排第一）：用户没点名模型、也没有它做不到的硬需求（档位/时长/参考图/价格上限）时，就用它，不要因为别的模型样本更多或更便宜就换；换模须在回复里说明具体原因。`
+          : `平台默认视频模型 ${PLATFORM_DEFAULT_VIDEO_MODEL} 当前 ${dm.availability}（${dm.note ?? "无说明"}），本次才可退到 available_models 里的其他模型，并向用户说明。`
       // 降级警示：有 available 但近 24h 零交付＝只有探测、无真实交付证据，不得作承诺依据。
       const zeroDelivery24h = available.length > 0 && proven.length === 0
       const evidence_warning = !statusKnown
@@ -118,6 +132,8 @@ export default tool({
       return ok({
         title: "影片模型报价",
         models,
+        default_model: PLATFORM_DEFAULT_VIDEO_MODEL,
+        default_model_note: defaultNote,
         available_models: available,
         proven_models: proven,
         unavailable_models: unavailable,
