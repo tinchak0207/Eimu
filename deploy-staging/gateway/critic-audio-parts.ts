@@ -11,7 +11,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { extractMediaTargets } from "./media-quality.ts"
 import { MAX_AUDIO_BYTES, MAX_AUDIO_TOTAL_BYTES, MAX_TURN_AUDIOS, encodeAudioFile, type TurnAudioPart } from "./turn-audio-parts.ts"
 
 const AUDIO_URL_RE = /\.(m4a|mp3|wav|aac|ogg|flac|opus)(?:[?#]|$)/i
@@ -38,8 +37,18 @@ export function isBlockedHost(hostname: string): boolean {
   return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
 }
 
+// 不复用 media-quality 的 URL_RE：任务书是 orchestrator 手写的 markdown，URL 常被反引号/全角竖线包着
+// （2026-11-22 真会话：`https://…m4a` ｜ 本地 WAV），那条正则会把反引号吞进 URL，扩展名对不上 → 漏附音频。
+const WRAPPED_URL_RE = /https?:\/\/[^\s"'<>)\]`，。、;；｜|]+/gi
+
 export function extractAudioTargets(text: string): string[] {
-  return extractMediaTargets(text, Infinity).filter((u) => AUDIO_URL_RE.test(u))
+  if (typeof text !== "string" || text.length === 0) return []
+  const seen = new Set<string>()
+  for (const m of text.matchAll(WRAPPED_URL_RE)) {
+    const url = m[0].replace(/[.,;:!?]+$/, "")
+    if (AUDIO_URL_RE.test(url)) seen.add(url)
+  }
+  return [...seen]
 }
 
 export async function buildCriticAudioParts(opts: {
