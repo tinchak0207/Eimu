@@ -172,7 +172,7 @@ export function buildCriticPassSpec(
 export const VIDEO_MOTION_RECEIPT_POLICY = "video-sequence-perception-v1"
 
 /** Independent perception, with source-bound temporal coverage; sampling never decides camera quality. */
-export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknown): {
+export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknown, audioReceipts: ReadonlyArray<{ artifact: string; sha256: string }> = []): {
   ok: boolean; checked: Array<{ runId: string; artifact: string; callId: string; tool: string; motion?: { policy: string; duration: number; frameRate: number; times: number[]; callIds: string[]; probeCallId: string; derivationCallIds: string[] } }>; missing: string[]
 } {
   const checked: ReturnType<typeof checkCriticReceipt>["checked"] = []
@@ -229,6 +229,12 @@ export function checkCriticReceipt(targets: CriticPassTarget[], messages: unknow
       if (input.action === "frames") for (const frame of out.frames ?? []) register(frame.path, [frame])
       if (input.action === "tile") register(out.path, out.frames ?? [])
       if (input.action === "tiles") for (const grid of out.grids ?? []) register(grid.path, grid.frames ?? [])
+    }
+    // 音频：模型原生听（audio file part 真送进了能听的模型）是本通路唯一的感知回执；
+    // 回执由 dispatchAttempt 按「本 attempt 实际模型」写入，换到不能听的模型就是空的 → 仍 missing。
+    if (!proof && /\.(m4a|mp3|wav|aac|ogg|flac|opus)(?:[?#]|$)/i.test(artifact)) {
+      const r = audioReceipts.find((x) => x.artifact === artifact)
+      if (r) proof = { callId: `native-audio:${r.sha256.slice(0, 12)}`, tool: "native_audio_part" }
     }
     const times = [...viewed].sort((a, b) => a - b)
     const epsilon = 0.002

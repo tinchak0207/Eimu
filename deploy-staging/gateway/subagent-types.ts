@@ -387,6 +387,9 @@ export interface SubagentRun {
   // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
   // 正文抽取可量测媒体 URL）。只在 maybeRunMachineCriticPass 建立 run 时赋值一次。
   criticReviewed?: CriticPassTarget[]
+  // 2026-11-22：critic 评审席原生听音频的回执（本次 attempt 真把音频 file part 送进了能听的模型才有；
+  // 换到不能听的模型/没抽到音频则为空）。checkCriticReceipt 用它当音频「实际感知」证据。
+  criticAudioReceipts?: Array<{ artifact: string; sha256: string; bytes: number; mime: string; model: string }>
   // 0920 暴君裁定（停止闸）：用户／orchestrator 主动停止。置位后：
   //   ① killSwitch 已 abort+DELETE 子会话；② 所有事件与重投路径一律早退
   //   （stopCheck 见 stopped 即 return），含换模重试与交付闸门重派；

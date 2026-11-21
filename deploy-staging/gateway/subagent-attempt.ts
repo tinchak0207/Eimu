@@ -9,6 +9,8 @@ import type { SubagentRun, ForkContext } from "./subagent-types.ts"
 import { isOpenCodeSessionId } from "./subagent-types.ts"
 import { deps, byChildOc, rememberChildParent } from "./subagent-runs.ts"
 import { finishRun } from "./subagent-finish.ts"
+import { isAudioModel } from "./model-registry.ts"
+import { buildCriticAudioParts, extractAudioTargets } from "./critic-audio-parts.ts"
 
 /**
  * 建子会话并投递任务书（attempt = run.attempt 对应 modelChain 里的模型）。
@@ -227,10 +229,45 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
     : "\n\n【当前授权】没有网关核实的持续授权；只按委托单已有任务与预算范围继续，范围外的付费交回父代理合并请求授权，用户沉默不算同意。"
   // 委托任务保持首个独立user part；规则与唯一机器交付格式位于system，资料不混入任务正文。
   // fork：父历史已在会话内（fork 端点复制），这里只投 d7e 指令原文；不重投 spec/模板/宪法。
-  const parts: Array<{ type: "text"; text: string }> = run.isFork
+  const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; filename: string; url: string }> = run.isFork
     ? [{ type: "text", text: buildForkDirective(run.prompt) }]
     : [{ type: "text", text: run.prompt }]
   if (!run.isFork && templateSlotsNote) parts.push({ type: "text", text: templateSlotsNote })
+  // 2026-11-22：评审席原生听被审音频（机器 critic 与 orchestrator 派的 critic 都走本函数）。
+  // 能力来源只有 registry 旗标（isAudioModel）；本 attempt 的模型不能听 → 不附音频、如实告知只能判 PARTIAL，
+  // 回执留空（换模重试再进本函数时按新模型重新判定）。
+  run.criticAudioReceipts = []
+  if (!run.isFork && run.agent === "critic" && extractAudioTargets(run.prompt).length > 0) {
+    try {
+      const canListen = isAudioModel(model)
+      const aud = canListen && model ? await buildCriticAudioParts({ prompt: run.prompt, model }) : null
+      if (aud && aud.parts.length > 0) {
+        for (const p of aud.parts) parts.push(p)
+        run.criticAudioReceipts = aud.receipts
+        parts.push({
+          type: "text",
+          text:
+            "【本轮音频附件·可直接收听】被审的音频已作为音频输入附在本消息（" +
+            aud.receipts.map((r) => r.artifact).join("、") +
+            "）。请自己听，qc 里写你真实听到的：音色/配器、节奏与速度、情绪走向、人声清晰度与咬字、段落结构、与交付契约（风格/情绪/歌词）是否相符、有无爆音/截断/静音。" +
+            "转写文字、ffprobe 时长只能证明文字和格式，不是听感，不要拿它们当听感证据；没听出的维度标 PARTIAL。" +
+            (aud.skipped.length > 0 ? `未能附上的音频：${aud.skipped.map((x) => `${x.artifact}（${x.reason}）`).join("、")}，这些标 PARTIAL。` : ""),
+        })
+      } else {
+        parts.push({
+          type: "text",
+          text:
+            "【本轮音频附件·无法直接收听】本轮没有把被审音频送进模型（" +
+            (canListen ? "音频抓取/转码失败" : "当前审核模型不支持音频输入") +
+            "）。音频听感一栏只能标 PARTIAL，不得写出任何「听起来…」式结论；只能就文字、契约栏位、时长等可核对事实下判。",
+        })
+        if (aud && aud.skipped.length > 0) console.warn(`[gateway] critic audio skipped: run=${run.id} ${aud.skipped.map((x) => `${x.artifact}:${x.reason}`).join(",")}`)
+      }
+      console.log(`[gateway] critic audio parts: run=${run.id} attached=${run.criticAudioReceipts.length} model=${model?.providerID ?? "?"}/${model?.modelID ?? "?"} canListen=${canListen}`)
+    } catch (e) {
+      console.warn(`[gateway] critic audio parts failed — run=${run.id}:`, e instanceof Error ? e.message : e)
+    }
+  }
   const system = run.isFork
     // D7/D8：fork 的授权段每次重新求值（剥掉父快照里的旧【当前授权】），末尾再压
     // fork 专用硬规则（禁止再派／禁止报告 .md／交付物落盘豁免），recency 最高。

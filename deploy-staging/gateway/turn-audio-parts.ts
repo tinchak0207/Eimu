@@ -12,6 +12,7 @@
 // 由接线端注入「走 video_transcribe」的诚实提示。
 import { readFileSync, realpathSync, statSync } from "node:fs"
 import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import { UPLOADS_DIR } from "./constants-gateway.ts"
 
@@ -79,6 +80,41 @@ function transcodeToMp3(inputPath: string): Promise<Buffer | null> {
     child.on("error", () => finish(null))
     child.on("close", (code) => finish(code === 0 && total > 0 ? Buffer.concat(chunks) : null))
   })
+}
+
+
+/**
+ * 读一个已通过路径/大小闸的本地音频档 → 模型可吃的 file part（非 wav/mp3 先转 mp3）。
+ * 用户上传（buildTurnAudioParts）与 critic 评审（critic-audio-parts）共用，转码/上限只有一份。
+ */
+export async function encodeAudioFile(
+  real: string,
+  totalBytesSoFar: number,
+): Promise<{ part: TurnAudioPart; bytes: number; sha256: string } | { reason: string }> {
+  let bytes: Buffer
+  try {
+    bytes = readFileSync(real)
+  } catch {
+    return { reason: "file_not_found" }
+  }
+  let mime = sniffAudioMime(bytes) ?? "" // 认不出容器＝不是确认的 wav/mp3，一律转码（ffmpeg 认得就能转）
+  if (!NATIVE_AUDIO_MIMES.has(mime)) {
+    const mp3 = await transcodeToMp3(real)
+    if (!mp3) return { reason: "audio_transcode_failed" }
+    bytes = mp3
+    mime = "audio/mpeg"
+  }
+  if (totalBytesSoFar + bytes.length > MAX_AUDIO_TOTAL_BYTES) return { reason: "total_too_large" }
+  return {
+    part: {
+      type: "file",
+      mime,
+      filename: mime === "audio/mpeg" ? path.basename(real).replace(/\.[^.]+$/, "") + ".mp3" : path.basename(real),
+      url: `data:${mime};base64,${bytes.toString("base64")}`,
+    },
+    bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  }
 }
 
 type AudioRow = { path: string; mime: string }
@@ -166,34 +202,13 @@ export async function buildTurnAudioParts(opts: {
       skipped.push({ path: row.path, reason: "total_too_large" })
       continue
     }
-    let bytes: Buffer
-    try {
-      bytes = readFileSync(real)
-    } catch {
-      skipped.push({ path: row.path, reason: "file_not_found" })
+    const enc = await encodeAudioFile(real, totalBytes)
+    if ("reason" in enc) {
+      skipped.push({ path: row.path, reason: enc.reason })
       continue
     }
-    let mime = sniffAudioMime(bytes) ?? row.mime
-    if (!NATIVE_AUDIO_MIMES.has(mime)) {
-      const mp3 = await transcodeToMp3(real)
-      if (!mp3) {
-        skipped.push({ path: row.path, reason: "audio_transcode_failed" })
-        continue
-      }
-      bytes = mp3
-      mime = "audio/mpeg"
-    }
-    if (totalBytes + bytes.length > MAX_AUDIO_TOTAL_BYTES) {
-      skipped.push({ path: row.path, reason: "total_too_large" })
-      continue
-    }
-    totalBytes += bytes.length
-    parts.push({
-      type: "file",
-      mime,
-      filename: mime === "audio/mpeg" ? path.basename(real).replace(/\.[^.]+$/, "") + ".mp3" : path.basename(real),
-      url: `data:${mime};base64,${bytes.toString("base64")}`,
-    })
+    totalBytes += enc.bytes
+    parts.push(enc.part)
   }
   return { parts, skipped }
 }

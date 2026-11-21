@@ -294,7 +294,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       })
       if (response.ok) criticMessages = await response.json()
     } catch { /* missing perception remains PARTIAL */ }
-    const receipt = checkCriticReceipt(run.criticReviewed ?? [], criticMessages)
+    const receipt = checkCriticReceipt(run.criticReviewed ?? [], criticMessages, run.criticAudioReceipts ?? [])
     const reviewPartial = run.agent !== "critic" || !receipt.ok
     qualityReviewPartial = reviewPartial
     const missingTypes: string[] = []
