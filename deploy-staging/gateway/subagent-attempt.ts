@@ -10,6 +10,7 @@ import { isOpenCodeSessionId } from "./subagent-types.ts"
 import { deps, byChildOc, rememberChildParent } from "./subagent-runs.ts"
 import { finishRun } from "./subagent-finish.ts"
 import { isAudioModel } from "./model-registry.ts"
+import { MARK_CAN_LISTEN, MARK_CANNOT_LISTEN, criticCanListenNote, criticCannotListenNote } from "./audio-capability-notes.ts"
 import { buildCriticAudioParts, extractAudioTargets } from "./critic-audio-parts.ts"
 
 /**
@@ -244,23 +245,9 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
       if (aud && aud.parts.length > 0) {
         for (const p of aud.parts) parts.push(p)
         run.criticAudioReceipts = aud.receipts
-        parts.push({
-          type: "text",
-          text:
-            "【本轮音频附件·可直接收听】被审的音频已作为音频输入附在本消息（" +
-            aud.receipts.map((r) => r.artifact).join("、") +
-            "）。请自己听，qc 里写你真实听到的：音色/配器、节奏与速度、情绪走向、人声清晰度与咬字、段落结构、与交付契约（风格/情绪/歌词）是否相符、有无爆音/截断/静音。" +
-            "转写文字、ffprobe 时长只能证明文字和格式，不是听感，不要拿它们当听感证据；没听出的维度标 PARTIAL。" +
-            (aud.skipped.length > 0 ? `未能附上的音频：${aud.skipped.map((x) => `${x.artifact}（${x.reason}）`).join("、")}，这些标 PARTIAL。` : ""),
-        })
+        parts.push({ type: "text", text: `${MARK_CAN_LISTEN}${criticCanListenNote(aud.receipts.map((r) => r.artifact), aud.skipped)}` })
       } else {
-        parts.push({
-          type: "text",
-          text:
-            "【本轮音频附件·无法直接收听】本轮没有把被审音频送进模型（" +
-            (canListen ? "音频抓取/转码失败" : "当前审核模型不支持音频输入") +
-            "）。音频听感一栏只能标 PARTIAL，不得写出任何「听起来…」式结论；只能就文字、契约栏位、时长等可核对事实下判。",
-        })
+        parts.push({ type: "text", text: `${MARK_CANNOT_LISTEN}${criticCannotListenNote(canListen)}` })
         if (aud && aud.skipped.length > 0) console.warn(`[gateway] critic audio skipped: run=${run.id} ${aud.skipped.map((x) => `${x.artifact}:${x.reason}`).join(",")}`)
       }
       console.log(`[gateway] critic audio parts: run=${run.id} attached=${run.criticAudioReceipts.length} model=${model?.providerID ?? "?"}/${model?.modelID ?? "?"} canListen=${canListen}`)
