@@ -47,7 +47,7 @@ function useDirectorRevision(sessionId: string): { revision: number; status: "lo
 export function DirectorStageClient({ sessionId }: { sessionId: string }) {
   const { revision, status } = useDirectorRevision(sessionId);
   return (
-    <main className="flex h-[100dvh] w-full flex-col bg-[#0b0f14] text-white">
+    <main className="fixed inset-0 z-[200] flex w-full flex-col bg-[#0b0f14] text-white">
       <header className="flex min-h-[52px] items-center gap-3 border-b border-white/10 px-3">
         <Link
           href="/"
