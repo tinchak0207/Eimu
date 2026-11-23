@@ -46,7 +46,7 @@ const DRAWING_EXPLICIT_RATIO_MAP: Record<string, string> = {
   "9:21": "9:16",
 };
 const VIDEO_ALLOWED_RATIOS = new Set(["16:9", "9:16", "3:4", "4:3", "1:1"]);
-const SUCCESS_CODES = new Set(["0", "200", "00000", "ok", "success"]);
+const SUCCESS_CODES = new Set(["0", "200", "0000", "00000", "ok", "success"]);
 
 export interface LinkiiDeploymentSpec {
   deploymentId: number;

@@ -12,7 +12,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_POLL_TIMEOUT_MS = 12 * 60 * 1000
 const DEFAULT_POLL_INTERVAL_MS = 5_000
 
-const SUCCESS_CODES = new Set<string | number>([200, "200", 0, "0", "00000", "OK", "ok", "SUCCESS", "success"])
+const SUCCESS_CODES = new Set<string | number>([200, "200", 0, "0", "0000", "00000", "OK", "ok", "SUCCESS", "success"])
 
 export class LinkiiClientError extends Error {
   code: string
