@@ -25,7 +25,7 @@ function db(): Database {
     CREATE INDEX IF NOT EXISTS generation_receipts_parent ON generation_receipts(parent_gw);
     CREATE INDEX IF NOT EXISTS generation_receipts_pending ON generation_receipts(status,observed_at);`)
   if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "consumer_agent")) next.exec("ALTER TABLE generation_consumers ADD COLUMN consumer_agent TEXT")
-  // intent_version：当前无业务读者（generationProducerVersion 已删），保留列不保留读者——既有库兼容。
+  // intent_version 只用于子产物交付证据的工作代归属；新提交许可仍不比较版本。
   if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "intent_version")) next.exec("ALTER TABLE generation_consumers ADD COLUMN intent_version INTEGER NOT NULL DEFAULT 0")
   if (!(next.query("PRAGMA table_info(generation_receipts)").all() as any[]).some((c) => c.name === "notify_count")) next.exec("ALTER TABLE generation_receipts ADD COLUMN notify_count INTEGER NOT NULL DEFAULT 0")
   connection = next
@@ -33,7 +33,7 @@ function db(): Database {
 }
 
 export function bindGenerationConsumer(child: string, parentGw: string, parentOc: string, agent?: string): void {
-  // intent_version：当前无业务读者，保留列不保留读者（既有库兼容）。
+  // 捕获已存在的工作代，防已撤销旧产物被算进新工作的交付证据。
   db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent,intent_version) VALUES (?,?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")
     .run(child, parentGw, parentOc, Date.now(), agent || null, generationWorkControl(parentGw).version)
   const binding = generationParent(child)
@@ -48,8 +48,8 @@ export function queueLegacyGenerationWake(session: string, content: string, pare
   if (row.status === "queued") return completeGenerationReceipt(task_id, "succeeded", [], { content })
   return row
 }
-export function generationParent(child: string): { parent_gw: string; parent_oc: string; consumer_agent?: string } | undefined {
-  return db().query("SELECT parent_gw,parent_oc,consumer_agent FROM generation_consumers WHERE child_oc=?").get(child) as any ?? undefined
+export function generationParent(child: string): { parent_gw: string; parent_oc: string; consumer_agent?: string; intent_version: number } | undefined {
+  return db().query("SELECT parent_gw,parent_oc,consumer_agent,intent_version FROM generation_consumers WHERE child_oc=?").get(child) as any ?? undefined
 }
 
 // 工作控制与既有生成回执共用一个耐久数据库。停止模型不等于撤销外部副作用。

@@ -3,7 +3,8 @@ import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
 import { toolOutputMusicRef } from "./events-translate-emit.ts"
 import { isAcceptedLinkiiMusicPending } from "./events-translate-canvas.ts"
-import { saveDurableSubagentRun } from "./job-store"
+import { saveDurableSubagentRun, generationParent, generationWorkControl } from "./job-store"
+import { recordDeliveryEvidence } from "./claim-gate.ts"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
 import type { SubagentModelRef, SubagentRun } from "./subagent-types.ts"
@@ -231,6 +232,18 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
             attachCanvasTask(parentState, childCallId, parsedOut.task_id)
           }
           const media = collectToolOutputMediaUrls(parsedOut)
+          // Expert 真出曲的回执属于父会话当前工作，不能只出音频卡却漏掉完成主张的凭据。
+          // 身份取自耐久父子绑定与当前工作代；旧代、已撤销、失败、pending、shell/读档均不计。
+          if (part.tool === "music_gen" && parsedOut?.ok === true && media.audio.length > 0 &&
+              run.opencodeSessionId === opencodeSessionId && part.sessionID === opencodeSessionId &&
+              run.parentGatewaySessionId === parentState.sessionId && run.parentOpencodeSessionId === parentState.opencodeSessionId) {
+            const binding = generationParent(opencodeSessionId)
+            const work = generationWorkControl(parentState.sessionId)
+            if (binding?.parent_gw === parentState.sessionId && binding.parent_oc === parentState.opencodeSessionId &&
+                binding.intent_version === work.version && !work.cancelled) {
+              for (const audio of media.audio) recordDeliveryEvidence(parentState, "music_gen", { url: audio.url })
+            }
+          }
           for (const c of media.video) {
             if (!run.artifacts.some((a) => a.url === c.url)) {
               run.artifacts.push({ kind: "video", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
