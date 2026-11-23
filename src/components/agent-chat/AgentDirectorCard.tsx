@@ -5,7 +5,7 @@
 // rounded-[18px] + bg-[rgba(120,120,128,0.06)]，无边框无阴影，骨架照抄
 // AgentToolCard/AgentImageCard 既有语汇。SVG 走 data:image/svg+xml;base64 img
 //（src/lib/svg-data-url.ts），禁 dangerouslySetInnerHTML。
-// 「全屏开启」二期 C6 才开通：disabled + 「即将上线」标注，绝不伪造行为。
+// 「在新分页开启导演台」→ /director/<sessionId>（P2 全屏导演台，同一份场景文档）。
 
 import { memo, type ComponentType } from "react";
 import { Clapperboard, MonitorPlay, TriangleAlert, CircleCheck } from "lucide-react";
@@ -109,22 +109,21 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
           : "暂无活跃镜头"}
       </p>
 
-      {/* 底部操作行：全屏二期 C6 才开通，disabled + 标注；revision 小字留痕 */}
+      {/* 底部操作行：新分页全屏导演台；revision 小字留痕 */}
       <div className="flex items-center gap-2 pt-0.5">
-        <button
-          type="button"
-          disabled
-          title="全屏导演台即将上线"
+        <a
+          href={`/director/${encodeURIComponent(item.directorSessionId)}`}
+          target="_blank"
+          rel="noopener noreferrer"
           className={cn(
             "flex h-11 items-center gap-1.5 rounded-full px-3.5 text-ios-subhead font-medium transition-all duration-200",
-            "lg-float text-muted-foreground",
-            "disabled:cursor-not-allowed disabled:text-foreground/45",
+            "lg-float text-foreground/80 hover:text-foreground",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
         >
           <MonitorPlay className="h-4 w-4" aria-hidden="true" />
-          在新分页开启导演台 · 即将上线
-        </button>
+          在新分页开启导演台
+        </a>
         <span className="ml-auto shrink-0 text-ios-caption2 tabular-nums text-foreground/40">
           rev {item.revision}
         </span>
