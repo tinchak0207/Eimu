@@ -23,6 +23,7 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { mkdir, mkdtemp, writeFile, rm, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { createHash } from "node:crypto"
+import { storeAsset } from "./asset3d"
 import {
   blenderExecTool,
   blenderRenderTool,
@@ -123,6 +124,17 @@ async function publishArtifacts(result: { title: string; output: string }, conte
       } finally { reader.releaseLock() }
       const buf = Buffer.concat(chunks, bytes)
       if (!buf.length || buf.length > MAX_PUBLISH_BYTES) throw new Error("产物为空或超过发布大小上限")
+      // 3D 预览通道（P1）：GLB 另转存成公开 uploads 地址（glb_url），网关据此发 model3d.done，
+      // 聊天里出可旋转 3D 卡；不依赖桥主机（本机笔记本）在线，也不需要鉴权头。失败不挡原发布。
+      if (ext === "glb") {
+        try {
+          const stored = await storeAsset(new Uint8Array(buf), `blender_${createHash("sha256").update(a.path).digest("hex").slice(0, 16)}.glb`, context.sessionID)
+          a.glb_url = stored.url
+          if (!data.glb_url) data.glb_url = stored.url
+        } catch (e) {
+          a.glb_store_error = (e as Error).message
+        }
+      }
       const root = join(process.env.AGENT_WORKSPACE || "/opt/agent-harness/workspace", "out", "blender-delivery")
       await mkdir(root, { recursive: true, mode: 0o750 })
       temporary = await mkdtemp(join(root, "delivery-"))
