@@ -38,8 +38,8 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // 2026-10-31 暴君裁定：gpt image 系列（gpt-image-2 / 2.5-flare / 2.5-sunburst）
   // 出图渠道 yyds 优先，a6api 兜底（两者均直连 images/generations，实测真出图）。
   "gpt-image-2": ["yyds", "a6api"],
-  "gpt-image-2.5-flare": ["yyds", "a6api"],
-  "gpt-image-2.5-sunburst": ["yyds", "a6api"],
+  "gpt-image-2.5-flare": ["yyds", "a6api", "linkii"],
+  "gpt-image-2.5-sunburst": ["yyds", "a6api", "linkii"],
   "gpt-image-1.5": ["adobe2api", "newapi"],
   "gpt-image": ["adobe2api"],
 
@@ -62,6 +62,9 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   "agnes-image-2.5-flash": ["agnes"],
   "blender-render-eevee": ["blender-local"],
   "blender-render-cycles": ["blender-local"],
+  "kling-2.1": ["linkii"],
+  "vidu-q2": ["linkii"],
+  "si-4.5": ["linkii"],
 
   // ── 图片：PixAI（new-api pixai-bridge 渠道）──
   "pixai-tsubaki2": ["newapi"],
@@ -85,6 +88,7 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // 2026-10-13 免费兜底：agnes 免费额度渠道（上游成本 ¥0）。付费视频渠道（miaowu
   // 余额断/xiaoyxiao 502）全断时的兜底供货；免费档队列/限速较慢，非默认路径。
   "agnes-video-2.5-flash": ["agnes-video"],
+  "vidu-q3-turbo": ["linkii"],
 
   // ── 语音 ──
   "tts-1": ["harness-tts"],

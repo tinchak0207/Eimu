@@ -1,5 +1,6 @@
 import * as fsp from "node:fs/promises"
 import { classifyFlowMusicFailure, flowMusic2ApiUrl } from "./music_flowmusic"
+import { probeLinkiiMusic } from "./music_linkii"
 import { LYRIA_MODELS, LYRIA_VERTEX_URL, LYRIA_VERTEX_MODEL, isVertexExpressKey, hasGeminiStudioApiKey } from "./music_lyria"
 import { YUE2_HMAC_SECRET_ENV, isYue2ModalEnabled, yue2ModalUrl } from "./music_yue2"
 
@@ -23,7 +24,7 @@ export type MusicChannelProbeStatus =
   | "unreachable"
 
 export interface MusicChannelProbe {
-  channel: "yue2_modal" | "flowmusic2api" | "lyria_gemini"
+  channel: "yue2_modal" | "flowmusic2api" | "lyria_gemini" | "linkii_music"
   status: MusicChannelProbeStatus
   /** 人话结论（简体，给 agent/用户看）。 */
   label: string
@@ -283,7 +284,7 @@ export async function probeMusicChannels(): Promise<{
   vocal_generation_ready: boolean
   blocking_reason: string | null
 }> {
-  const channels = await Promise.all([probeYue2(), probeFlowMusic(), probeLyria()])
+  const channels = await Promise.all([probeYue2(), probeFlowMusic(), probeLinkiiMusic(), probeLyria()])
   const firstReady = channels.find((c) => c.status === "ready")?.channel ?? null
   const humanActions = channels
     .filter((c) => c.status === "needs_human_login" || c.status === "config_disabled")

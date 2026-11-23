@@ -2,6 +2,7 @@ import * as fsp from "node:fs/promises"
 import * as nodePath from "node:path"
 import { createHash } from "node:crypto"
 import { FlowMusicServiceError } from "./music_flowmusic"
+import { LinkiiClientError } from "./linkii-client"
 import { YUE2_HMAC_SECRET_ENV, generateYue2Track, isYue2TransientFailure, yue2TransientCode, type GenerateYue2TrackOptions, type GenerateYue2TrackResult } from "./music_yue2"
 
 // ── plumbing（ok/fail/resolveKey 同构 director-common.ts） ───────────────────
@@ -55,6 +56,7 @@ export class MusicToolError extends Error {
 export function toFail(e: unknown): MusicToolResult {
   if (e instanceof MusicToolError) return fail(e.code, e.message)
   if (e instanceof FlowMusicServiceError) return fail(e.code, e.message)
+  if (e instanceof LinkiiClientError) return fail(e.code, e.message)
   return fail("music_tool_error", `music_gen 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 

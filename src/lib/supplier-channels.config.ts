@@ -13,6 +13,7 @@
 // 对帐协议映射都查 registry，不需改其他档。同协议供给只动本档（N=1）。
 
 import type { SupplyAdapter } from "./generation-core/supply-registry";
+import { linkiiAdapter } from "./generation-core/linkii-upstream";
 
 export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate" | "tts";
 
@@ -63,6 +64,36 @@ export interface RegistryChannel {
 
 export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // REGISTRY-ENTRIES-START（脚本插入点，此注释与结束标记之间的条目由工具维护，手改会被覆盖）
+{
+    // linkii（https://www.linkii.tech，2026-11-23 接入）：
+    // AI 绘画（前 5 个模型：gpt-image-2.5-sunburst/543, gpt-image-2.5-flare/549,
+    // kling-2.1/515, vidu-q2/519, si-4.5/511）与 AI 视频（vidu-q3-turbo/603）。
+    label: "linkii",
+    baseUrlEnv: "LINKII_BASE_URL",
+    apiKeyEnv: "LINKII_PASSWORD",
+    enabledEnv: "LINKII_ENABLED",
+    tier: "managed_pool",
+    sitePriority: 5,
+    chatImageModels: [],
+    adapterType: "linkii",
+    adapter: linkiiAdapter,
+    claims: [
+      { modelId: "gpt-image-2.5-sunburst", supplierModelId: "543", kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-flare", supplierModelId: "549", kinds: ["image_generate", "image_edit"] },
+      { modelId: "kling-2.1", supplierModelId: "515", kinds: ["image_generate", "image_edit"] },
+      { modelId: "vidu-q2", supplierModelId: "519", kinds: ["image_generate", "image_edit"] },
+      { modelId: "si-4.5", supplierModelId: "511", kinds: ["image_generate", "image_edit"] },
+      {
+        modelId: "vidu-q3-turbo",
+        supplierModelId: "603",
+        kinds: ["video_generate"],
+        unitPriceCny: 0,
+        resolutions: ["720p", "1080p"],
+        priceSource: "linkii school/personal quota 2026-11-23",
+      },
+    ],
+  },
+
 {
     // v6k（https://www.v6k.top，2026-11-21 暴君指定）：**seedance 2.5 720p 默认渠道**。
     // new-api 上游（openai-video 端点：POST {base}/videos 创建、GET {base}/videos/{id} 轮询，

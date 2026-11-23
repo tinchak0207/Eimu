@@ -41,6 +41,10 @@ export const PIXAI_TSUBAKI_V11_MODEL_ID = /** @type {const} */ ("pixai-tsubaki-1
 export const PIXAI_HOSHINO_V2_MODEL_ID = /** @type {const} */ ("pixai-hoshino-v2");
 // agnes 渠道（apihub.agnes-ai.com，2026-09-19 接入）
 export const AGNES_IMAGE_25_FLASH_MODEL_ID = /** @type {const} */ ("agnes-image-2.5-flash");
+// Linkii 渠道（www.linkii.tech，2026-11-23 接入）
+export const KLING_21_IMAGE_MODEL_ID = /** @type {const} */ ("kling-2.1");
+export const VIDU_Q2_IMAGE_MODEL_ID = /** @type {const} */ ("vidu-q2");
+export const SI_45_IMAGE_MODEL_ID = /** @type {const} */ ("si-4.5");
 
 export const VEO_31_FAST_MODEL_ID = /** @type {const} */ ("veo-3.1-fast");
 export const KLING_30_MODEL_ID = /** @type {const} */ ("kling-3.0");
@@ -67,6 +71,8 @@ export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
 // agnes 免费视频（apihub.agnes-ai.com，2026-10-13 暴君指定）：平台自有免费额度渠道，
 // 作为**免费兜底**——付费视频渠道（miaowu / xiaoyxiao）全断时仍有可用供货。上游名同名直传。
 export const AGNES_VIDEO_25_FLASH_MODEL_ID = /** @type {const} */ ("agnes-video-2.5-flash");
+// Linkii 视频模型（2026-11-23 接入）
+export const VIDU_Q3_TURBO_VIDEO_MODEL_ID = /** @type {const} */ ("vidu-q3-turbo");
 
 // blender 节点能力标签（片Y/片AA，2026-09-06）：capability model_id 即能力标签
 // （NODES-PLAN §3.1，零路由栏位扩散）。不入 SUPPORTED_* 列表（同 TTS/AV 先例）：
@@ -102,6 +108,9 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   PIXAI_TSUBAKI_V11_MODEL_ID,
   PIXAI_HOSHINO_V2_MODEL_ID,
   AGNES_IMAGE_25_FLASH_MODEL_ID,
+  KLING_21_IMAGE_MODEL_ID,
+  VIDU_Q2_IMAGE_MODEL_ID,
+  SI_45_IMAGE_MODEL_ID,
 ];
 
 // 2026-09-27 暴君裁定「无供货即下架」：以下 14 条视频 model 全层零供货（无任何
@@ -129,6 +138,7 @@ export const SUPPORTED_VIDEO_MODEL_IDS = [
   SEEDANCE_25_480P_MODEL_ID,
   MINIMAX_H3_MODEL_ID,
   AGNES_VIDEO_25_FLASH_MODEL_ID,
+  VIDU_Q3_TURBO_VIDEO_MODEL_ID,
 ];
 
 export const SUPPORTED_GENERATION_MODEL_IDS = [

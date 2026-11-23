@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { FLOWMUSIC_MODELS, generateFlowMusicTrack, isFlowMusic2ApiEnabled, type GenerateFlowMusicTrackResult } from "./music_flowmusic"
+import { generateLinkiiMusicTrack, isLinkiiMusicEnabled, isLinkiiMusicModelId, type GenerateLinkiiMusicTrackResult, type LinkiiMusicModelId } from "./music_linkii"
 import { LYRIA_MODELS, generateLyriaTrack, hasGeminiStudioApiKey, type GenerateLyriaTrackResult } from "./music_lyria"
 import { YUE2_MODEL_ID, YUE2_TRANSCRIBE_ABC_MISSING_CODE, Yue2TranscribeError, isYue2ModalEnabled, transcribeYue2Score, type GenerateYue2TrackResult, type Yue2CotMode } from "./music_yue2"
 import { describeRetainedParts, directMusicPrompt, stripLyricsTimestamps } from "./music_prompt_director"
@@ -24,7 +25,7 @@ export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
     // <harness-only>
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2 style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 vocal_generation_ready 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。YuE2 失败时自动按优先序回落下一通路（带歌词＝下一通路照样出人声整歌）：繁忙（HTTP 429）先退避重试同一通路（间隔 5s/15s），服务不可达／请求超时不重试、直接交给下一通路；回落成功的回执 channel 是实际通路，并带 fallback_from／fallback_reason 与 notes 人话，须如实转告用户换了通路。带 abc 或 source_audio 的委托不回落（如实报错）。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。【时长】三条通路都没有秒数控制，成品固定约 160-180 秒整歌。用户指定了时长（「10 秒」「半分钟」「1 分钟」）就必须传 target_seconds（秒数），工具会在内部用 ffmpeg 裁到该秒数并加约 0.4 秒淡出，回执 duration_seconds 为 ffprobe 实测、duration_request 如实回报；不要自己去找文件、写脚本或再起子代理裁剪。未传 target_seconds 则交付模型原长。一次调用只交付一个成品（多备选 take 默认不交付，不要为凑版本重复调用）。",
+    "调用 Lyria／FlowMusic2API／Linkii／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。可选 model 参数：auto（默认，按优先序自动选择与回落）、minimax-music-3.0（Linkii 通路，仅支持人声演唱且必须提供歌词，不支持纯器乐）、gl-3.0-pro（Linkii 通路，人声演唱与纯器乐均支持）；显式指定 Linkii 模型时直连 Linkii 通路且不回落，也不支持 abc/source_audio。风格 prompt 按六层公式写全（顺序即优先级）：GENRE（流派/年代或场景，放最前）→ 决定性参数（BPM／调性 key／和弦进行／段落结构，写在最前 1/3，如 96 BPM, key of C major, Am7-Dm7-G7-Cmaj7, verse-chorus-bridge；上游摘要只逐字保留前段，写在尾部会被丢）→ MOOD（最多两个相容情绪词）→ INSTRUMENTATION（2-3 件主导乐器＋演奏法）→ VOCAL（谁唱、怎么唱）→ PRODUCTION（年代/混音/空间等修饰性描述，放最后、可被裁）。提示词会先过规则层（补缺层/剥死时间码/前置决定性参数/整句裁长度），结果在回执 prompt_director 如实回报。长度硬上限（runes）：FlowMusic2API 无歌词单行分支 220、带歌词/段落标签保版面分支 3000；YuE2/Linkii style 600；Lyria 不设上限。无歌词器乐分支最紧——超 220 时规则层整句丢弃低优先的描述性修饰子句（混音／空间／年代感），保住 GENRE 与前置的决定性参数（BPM／调性／和弦进行／段落结构），绝不切半句，被丢的层在回执 prompt_director.truncated 列出；想保住完整描述就压进 220，或给歌词走 3000 分支。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 vocal_generation_ready 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Linkii > Gemini Lyria 直连），各通路能力有差异，见各参数说明。YuE2/FlowMusic 失败时自动按优先序回落下一通路（带歌词＝下一通路照样出人声整歌；回落到 Linkii 时纯器乐自动选 gl-3.0-pro，人声优先 minimax-music-3.0）：繁忙（HTTP 429）先退避重试同一通路（间隔 5s/15s），服务不可达／请求超时不重试、直接交给下一通路；回落成功的回执 channel 是实际通路，并带 fallback_from／fallback_reason 与 notes 人话，须如实转告用户换了通路。带 abc 或 source_audio 的委托不回落（如实报错）。音乐生成按次统一计价：1 币/次（不分通路、不分 take 数——每次成功的 music_gen 调用各计 1 币，probe=true 免费不扣，未产出音频不扣）；生成前先用 quote_bundle（kind:\"music\"）报价，报价与实扣同源（平台目录 x_coins_per_music），最终以回执 cost_coins 为准。【时长】各通路都没有秒数控制，成品固定约 160-180 秒整歌。用户指定了时长（「10 秒」「半分钟」「1 分钟」）就必须传 target_seconds（秒数），工具会在内部用 ffmpeg 裁到该秒数并加约 0.4 秒淡出，回执 duration_seconds 为 ffprobe 实测、duration_request 如实回报；不要自己去找文件、写脚本或再起子代理裁剪。未传 target_seconds 则交付模型原长。一次调用只交付一个成品（多备选 take 默认不交付，不要为凑版本重复调用）。",
     // </harness-only>
   args: {
     probe: {
@@ -52,6 +53,13 @@ export const musicGenTool: MusicToolDef = {
       enum: ["full", "clip30"],
       description:
         "full=整歌（约 2.5 分钟），clip30=快速生成（上游无 30 秒片段模式，实际为快速整歌）。默认 full。YuE2 通路无时长控制（成品长度由模型决定，回执 duration_seconds 为上游自报实测值）且不支持 clip30——传 clip30 会直接报错，请改传 full。",
+    },
+    model: {
+      type: "string",
+      required: false,
+      enum: ["auto", "minimax-music-3.0", "gl-3.0-pro"],
+      description:
+        "指定音乐模型（可选，默认 auto）。auto=按环境配置自动路由（YuE2 > FlowMusic2API > Linkii > Gemini Lyria；进入 Linkii 时纯器乐自动选 gl-3.0-pro，人声优先 minimax-music-3.0）；显式传 minimax-music-3.0 或 gl-3.0-pro 时直连 Linkii 通路（不回落其他通路）：minimax-music-3.0 仅支持人声演唱（必须提供歌词，不支持纯器乐）；gl-3.0-pro 支持人声演唱与纯器乐。Linkii 模型不支持 abc 乐谱重渲染与 source_audio 翻唱。",
     },
     // <harness-only>
     target_seconds: {
@@ -130,12 +138,21 @@ export const musicGenTool: MusicToolDef = {
       // 与 style prompt 同一政策（段落标签保留、文字不动）。
       const rawLyrics = lyrics ?? ""
       const strippedLyrics = stripLyricsTimestamps(rawLyrics)
-      const lyricsForChannel = (channel: "yue2" | "flowmusic" | "lyria") =>
+      const lyricsForChannel = (channel: "yue2" | "flowmusic" | "linkii" | "lyria") =>
         channel === "lyria" ? rawLyrics : strippedLyrics.lyrics
       const durationHintRaw = asString(rawArgs.duration_hint) ?? "full"
       if (durationHintRaw !== "full" && durationHintRaw !== "clip30") {
         return fail("invalid_args", `duration_hint 只接受 "full" 或 "clip30"，收到 "${durationHintRaw}"。`)
       }
+      const requestedModelRaw = asString(rawArgs.model) ?? "auto"
+      if (requestedModelRaw !== "auto" && !isLinkiiMusicModelId(requestedModelRaw)) {
+        return fail(
+          "invalid_args",
+          `model 只接受 "auto"、"minimax-music-3.0" 或 "gl-3.0-pro"，收到 "${requestedModelRaw}"。`,
+        )
+      }
+      const explicitLinkiiModel: LinkiiMusicModelId | null =
+        requestedModelRaw === "auto" ? null : requestedModelRaw
       const toolPrompt = buildToolPrompt(prompt, Boolean(lyrics))
       // <harness-only>
       // 用户指定时长（2026-11-04）：模型端无秒数控制，生成后在工具层 ffmpeg 裁剪。非法值在上游前拒（未扣费、未生成）。
@@ -169,6 +186,32 @@ export const musicGenTool: MusicToolDef = {
           "invalid_args",
           "source_audio 与 abc 互斥：source_audio＝现场扒谱（从源音频提取旋律骨干），abc＝已自备/已编辑的乐谱，两者同传语义冲突。请只传其一。",
         )
+      }
+      if (explicitLinkiiModel !== null) {
+        if (abc) {
+          return fail(
+            "unsupported_channel_for_abc",
+            `abc（ABC 乐谱重渲染）仅 YuE2 通路支持，指定的模型 "${explicitLinkiiModel}" 不支持乐谱重渲染。请去掉 abc 或将 model 设为 "auto"。`,
+          )
+        }
+        if (sourceAudioRaw) {
+          return fail(
+            "unsupported_channel_for_source_audio",
+            `source_audio（翻唱：扒谱＋重演绎）仅 YuE2 通路支持，指定的模型 "${explicitLinkiiModel}" 不支持翻唱。请去掉 source_audio 或将 model 设为 "auto"。`,
+          )
+        }
+        if (explicitLinkiiModel === "minimax-music-3.0" && !lyrics) {
+          return fail(
+            "unsupported_instrumental",
+            "MiniMax-Music 3.0 不支持纯器乐，请提供歌词或改用 gl-3.0-pro。",
+          )
+        }
+        if (!isLinkiiMusicEnabled()) {
+          return fail(
+            "config_disabled",
+            `Linkii 音乐通路未配置（缺少 LINKII_USERNAME／LINKII_PASSWORD 或 LINKII_AUTH_TOKEN），无法调用指定模型 "${explicitLinkiiModel}"。`,
+          )
+        }
       }
       // <harness-only>
       // 本地参考音档接线（2026-10-04）：base64／data:／工作区档案路径统一解析成纯 base64。
@@ -216,12 +259,16 @@ export const musicGenTool: MusicToolDef = {
       // YuE2 是「歌词→整歌」：纯器乐（无歌词）或 30 秒短档它兑现不了（上游 400「lyrics must be
       // a non-empty string」／无时长栏位）。有别的通路在场就让位给它们，而不是先撞 YuE2 再报错
       //（2026-09-29 e2e：「咖啡店背景音乐 30 秒」两种都撞墙）。abc／翻唱委托仍必走 YuE2。
-      const otherMusicChannel = isFlowMusic2ApiEnabled() || hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
+      const linkiiEnabled = isLinkiiMusicEnabled()
+      const otherMusicChannel =
+        isFlowMusic2ApiEnabled() || linkiiEnabled || hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
       const yue2Enabled =
+        explicitLinkiiModel === null &&
         isYue2ModalEnabled() &&
         (abc !== undefined || sourceAudioRaw !== undefined || !otherMusicChannel || (Boolean(lyrics) && durationHintRaw !== "clip30"))
-      const flowMusicEnabled = isFlowMusic2ApiEnabled()
+      const flowMusicEnabled = explicitLinkiiModel === null && isFlowMusic2ApiEnabled()
       const flowMusicModel = FLOWMUSIC_MODELS[durationHintRaw === "clip30" ? "clip30" : "full"]
+      const linkiiModel: LinkiiMusicModelId = explicitLinkiiModel ?? (lyrics ? "minimax-music-3.0" : "gl-3.0-pro")
       const lyriaModel = durationHintRaw === "clip30" ? LYRIA_MODELS.clip30 : LYRIA_MODELS.full
 
       // YuE2 无 30 秒短档模式（冻结合约根本没有时长栏位）：如实报错，绝不静默生成整歌再
@@ -260,12 +307,21 @@ export const musicGenTool: MusicToolDef = {
       // 先让 buildToolPrompt 组出含器乐声明的完整文本，再过 director 做伪标签/时间戳
       // 剥除、六层补齐与长度上限——220 runes 上限必须把器乐声明等所有字元算进去，
       // 提前过 director 会让后加的声明把长度顶爆（且 strip-timestamps 只认 flowmusic/yue2）。
-      let directorChannel: "yue2" | "flowmusic" | "lyria" = yue2Enabled
-        ? "yue2"
-        : flowMusicEnabled
-          ? "flowmusic"
-          : "lyria"
-      const initialLyriaInstrumental = directorChannel === "lyria" && !hasGeminiStudioApiKey()
+      const lyriaEnabled =
+        explicitLinkiiModel === null && (hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim()))
+      const channelChain: Array<"yue2" | "flowmusic" | "linkii" | "lyria"> = []
+      if (explicitLinkiiModel !== null) {
+        channelChain.push("linkii")
+      } else {
+        if (yue2Enabled) channelChain.push("yue2")
+        if (flowMusicEnabled) channelChain.push("flowmusic")
+        if (linkiiEnabled) channelChain.push("linkii")
+        if (lyriaEnabled || channelChain.length === 0) channelChain.push("lyria")
+      }
+      const toDirectorChannel = (ch: "yue2" | "flowmusic" | "linkii" | "lyria"): "yue2" | "flowmusic" | "lyria" =>
+        ch === "flowmusic" ? "flowmusic" : ch === "lyria" ? "lyria" : "yue2"
+      let directorChannel: "yue2" | "flowmusic" | "lyria" = toDirectorChannel(channelChain[0])
+      const initialLyriaInstrumental = channelChain[0] === "lyria" && !hasGeminiStudioApiKey()
       let directed = directMusicPrompt(initialLyriaInstrumental ? buildToolPrompt(prompt, false) : toolPrompt, {
         channel: directorChannel,
         hasLyrics: initialLyriaInstrumental ? false : Boolean(lyrics),
@@ -336,14 +392,19 @@ export const musicGenTool: MusicToolDef = {
       //（fallback_from／fallback_reason／channel＋notes 人话），带歌词的委托由下一通路出人声整歌。
       // 重试口径见 core 的 generateYue2TrackResilient（只有 busy 退避，不可达／超时首败即交棒）。
       const hasScoreSemantics = abc !== undefined || sourceAudioRaw !== undefined
-      const lyriaEnabled = hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
-      const channelChain: Array<"yue2" | "flowmusic" | "lyria"> = []
-      if (yue2Enabled) channelChain.push("yue2")
-      if (flowMusicEnabled) channelChain.push("flowmusic")
-      if (lyriaEnabled || channelChain.length === 0) channelChain.push("lyria")
-      const channelLabel = { yue2: "yue2_modal", flowmusic: "flowmusic2api", lyria: "lyria_gemini" } as const
-      let activeChannel: "yue2" | "flowmusic" | "lyria" = channelChain[0]
-      let generated: GenerateYue2TrackResult | GenerateFlowMusicTrackResult | GenerateLyriaTrackResult | undefined
+      const channelLabel = {
+        yue2: "yue2_modal",
+        flowmusic: "flowmusic2api",
+        linkii: "linkii_music",
+        lyria: "lyria_gemini",
+      } as const
+      let activeChannel: "yue2" | "flowmusic" | "linkii" | "lyria" = channelChain[0]
+      let generated:
+        | GenerateYue2TrackResult
+        | GenerateFlowMusicTrackResult
+        | GenerateLinkiiMusicTrackResult
+        | GenerateLyriaTrackResult
+        | undefined
       let fallbackFrom: string | null = null
       let fallbackReason: string | null = null
       const channelFailures: string[] = []
@@ -351,14 +412,15 @@ export const musicGenTool: MusicToolDef = {
       for (let i = 0; i < channelChain.length; i += 1) {
         const channel = channelChain[i]
         activeChannel = channel
-        if (channel !== directorChannel) {
+        const nextDirectorChannel = toDirectorChannel(channel)
+        if (nextDirectorChannel !== directorChannel) {
           // 换通路必须用该通路**重新过 director**（各通路规则层不同），director 是纯函数可重复呼叫。
-          directorChannel = channel
+          directorChannel = nextDirectorChannel
           // Vertex lyria-002 纯器乐：含人声/歌词措辞的 prompt 会被上游 500「Could not generate audio」，
           // 故落到它时按纯器乐重组 prompt（歌词丢弃会在回执 degraded/ignored_inputs 明说）。
           const lyriaInstrumentalOnly = channel === "lyria" && !hasGeminiStudioApiKey()
           directed = directMusicPrompt(lyriaInstrumentalOnly ? buildToolPrompt(prompt, false) : toolPrompt, {
-            channel,
+            channel: nextDirectorChannel,
             hasLyrics: lyriaInstrumentalOnly ? false : Boolean(lyrics),
             durationSeconds: durationHintRaw === "clip30" ? 30 : undefined,
           })
@@ -375,7 +437,14 @@ export const musicGenTool: MusicToolDef = {
                 })
               : channel === "flowmusic"
                 ? await generateFlowMusicTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("flowmusic"), model: flowMusicModel })
-                : await generateLyriaTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
+                : channel === "linkii"
+                  ? await generateLinkiiMusicTrack({
+                      prompt: finalPrompt,
+                      lyrics: lyricsForChannel("linkii"),
+                      model: linkiiModel,
+                      signal: context?.abort,
+                    })
+                  : await generateLyriaTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
           break
         } catch (e) {
           // YuE2 瞬时失败：带乐谱语义（abc／翻唱）或已无下一通路 → 如实 fail（未扣费）；
@@ -423,7 +492,9 @@ export const musicGenTool: MusicToolDef = {
           ? YUE2_MODEL_ID
           : activeChannel === "flowmusic"
             ? flowMusicModel
-            : ((generated as GenerateLyriaTrackResult).effectiveModel ?? lyriaModel)
+            : activeChannel === "linkii"
+              ? ((generated as GenerateLinkiiMusicTrackResult).effectiveModel ?? linkiiModel)
+              : ((generated as GenerateLyriaTrackResult).effectiveModel ?? lyriaModel)
       const lyriaVertex = activeChannel === "lyria" && (generated as GenerateLyriaTrackResult).backend === "vertex_express"
       const lyriaIgnored = lyriaVertex ? ((generated as GenerateLyriaTrackResult).ignoredInputs ?? []) : []
       // 诚实降级：要人声(有歌词)或要整歌(full)却落到 Vertex lyria-002（纯器乐 30s）＝降级交付，必须明说。
@@ -434,7 +505,9 @@ export const musicGenTool: MusicToolDef = {
       // 裁过的成品不再带 upstream_url（那是上游未裁的 ~3 分钟原档，会让 agent/用户拿错文件）。
       // </harness-only>
       const upstreamUrl =
-        activeChannel === "flowmusic" && !trimmed ? (generated as unknown as { upstreamUrl: string }).upstreamUrl : null
+        (activeChannel === "flowmusic" || activeChannel === "linkii") && !trimmed
+          ? ((generated as { upstreamUrl?: string }).upstreamUrl ?? null)
+          : null
 
       // 音频落盘：复用 gateway 会话上传存储（与 TTS/附件同域）。无 sessionId 时
       // 跳过上传、result 如实带 audio_base64（不伪造 URL）。
@@ -474,6 +547,8 @@ export const musicGenTool: MusicToolDef = {
       const yue2Track = activeChannel === "yue2" ? (generated as GenerateYue2TrackResult) : null
       // 上游自报时长（YuE2 duration_s，>0 才是可用量测值；契约保证有，缺了照样标 model_hint）。
       const yue2Duration = yue2Track?.durationSeconds ?? 0
+      const linkiiDuration =
+        activeChannel === "linkii" ? ((generated as GenerateLinkiiMusicTrackResult).durationSeconds ?? 0) : 0
       const measured = await measureAudioDuration(generated.audioBase64)
       const hintSeconds =
         activeChannel === "yue2"
@@ -482,14 +557,18 @@ export const musicGenTool: MusicToolDef = {
             : 180
           : activeChannel === "flowmusic"
             ? ((generated as { upstreamDurationHint?: number }).upstreamDurationHint ?? 170)
-            : durationHintRaw === "clip30" || lyriaVertex
-              ? 30
-              : 180
+            : activeChannel === "linkii"
+              ? linkiiDuration > 0
+                ? linkiiDuration
+                : 180
+              : durationHintRaw === "clip30" || lyriaVertex
+                ? 30
+                : 180
       const durationSeconds = measured ?? hintSeconds
       const durationSource =
         measured !== null
           ? "ffprobe"
-          : activeChannel === "yue2" && yue2Duration > 0
+          : (activeChannel === "yue2" && yue2Duration > 0) || (activeChannel === "linkii" && linkiiDuration > 0)
             ? "upstream_reported"
             : "model_hint"
 
@@ -590,6 +669,8 @@ export const musicGenTool: MusicToolDef = {
                 ? "连不上"
                 : "出错"
         notes.push(`人声主通路暂时${why}，这首已换另一条通路做成带人声的整歌。`)
+      } else if (fallbackFrom !== null && degradedReasons.length === 0) {
+        notes.push(`主通路（${fallbackFrom}）暂时不可用，这首已自动切换另一条通路生成。`)
       }
       // <harness-only>
       if (trim?.status === "trimmed") {
@@ -623,9 +704,17 @@ export const musicGenTool: MusicToolDef = {
       // workspace 既有 outputs/music-prompt-chain.jsonl，使链在回执 part 未必落库时仍可复算。
       const lyricsForLog = lyricsForChannel(activeChannel)
       const lyricsEchoForLog = (generated as { lyricsEcho?: string }).lyricsEcho
+      const outputChannel =
+        activeChannel === "yue2"
+          ? "yue2_modal"
+          : activeChannel === "flowmusic"
+            ? "flowmusic2api"
+            : activeChannel === "linkii"
+              ? "linkii"
+              : "lyria_gemini"
       const promptChainRef = await appendMusicPromptChain({
         session_id: context?.sessionId ?? null,
-        channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",
+        channel: outputChannel,
         model,
         duration_hint: durationHintRaw,
         // 站 1：agent 自己交给 music_gen 的原始 style prompt（director 前）。
@@ -670,8 +759,8 @@ export const musicGenTool: MusicToolDef = {
         ...(preferenceQuestion !== undefined ? { preference_question: preferenceQuestion } : {}),
         ...(candidateErrors.length > 0 ? { candidate_errors: candidateErrors } : {}),
         ...(notes.length > 0 ? { notes } : {}),
-        // 通路如实回报实际生成通路（回落时 flowmusic2api＝真的走 flowmusic，不虚报 yue2）。
-        channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",
+        // 通路如实回报实际生成通路（回落时如实回报实际通道，不虚报 yue2）。
+        channel: outputChannel,
         // 回落事实 additive 回报（只在真的发生回落时在场；既有键零改动）。
         ...(degradedReasons.length > 0 ? { degraded: true, degraded_reason: degradedReasons.join("；") } : {}),
         ...(lyriaIgnored.length > 0 ? { ignored_inputs: lyriaIgnored } : {}),
@@ -740,9 +829,11 @@ export const musicGenTool: MusicToolDef = {
               reference_images_note:
                 activeChannel === "yue2"
                   ? "YuE2 通路不支持参考图（图生乐），本次已忽略"
-                  : activeChannel === "lyria"
-                    ? "Vertex lyria-002 通路不支持参考图（图生乐），本次已忽略"
-                    : "FlowMusic2API 通路暂不支持参考图（图生乐），本次已忽略",
+                  : activeChannel === "linkii"
+                    ? "Linkii 音乐通路暂不支持参考图（图生乐），本次已忽略"
+                    : activeChannel === "lyria"
+                      ? "Vertex lyria-002 通路不支持参考图（图生乐），本次已忽略"
+                      : "FlowMusic2API 通路暂不支持参考图（图生乐），本次已忽略",
             }
           : {}),
       })

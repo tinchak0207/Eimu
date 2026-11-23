@@ -138,6 +138,41 @@ export function annotateModelFunctions(modelId: string, mediaType: MediaKind): M
 export async function probeEndpointModels(endpoint: ProbeEndpointInput): Promise<ProbeEndpointResult> {
   const startedAt = Date.now();
   try {
+    if (endpoint.label === "linkii") {
+      let probeUrl = "https://www.linkii.tech/";
+      try {
+        probeUrl = `${new URL(endpoint.baseURL).origin}/`;
+      } catch {
+        probeUrl = "https://www.linkii.tech/";
+      }
+      const response = await fetch(probeUrl, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      const ms = Date.now() - startedAt;
+      if (!response.ok) {
+        return { ok: false, status: response.status, ms, note: `上游返回 HTTP ${response.status}` };
+      }
+      return {
+        ok: true,
+        status: response.status,
+        ms,
+        modelIds: [
+          "gpt-image-2.5-sunburst",
+          "gpt-image-2.5-flare",
+          "kling-2.1",
+          "vidu-q2",
+          "si-4.5",
+          "vidu-q3-turbo",
+          "543",
+          "549",
+          "515",
+          "519",
+          "511",
+          "603",
+        ],
+      };
+    }
     const response = await fetch(`${endpoint.baseURL}/models`, {
       headers: { Authorization: `Bearer ${endpoint.apiKey}` },
       cache: "no-store",
