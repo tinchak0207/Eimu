@@ -8,7 +8,7 @@ export default tool({
     "对 artifact 的 url 做真实探测并与落库 sha256 比对。",
     "何时用：发布后、交付前，需要证明链接真的可访问时；没有 url 或还没发布时不要调用。",
     "关键约束：只有 state=verified 才算通过；blocked 如实回报并带 reason；no_row 不得当作干净；sha256_match 必须为 true。",
-    "失败处置：verify_no_row 表示没有探测结果（artifact 无 url），补 url 后重试；verify_blocked 回传 reason/status，不要宣称通过；artifact_verify_failed 按 gateway 文本修正。",
+    "失败处置：verify_no_row = no_public_url（artifact 无 url，不能宣称干净）；verify_blocked 回传 reason/status，不要宣称通过；artifact_verify_failed 按 gateway 文本修正。短码给模型，勿向用户复述探针全文。",
     "互指：读元数据用 artifact_get；发布用 artifact_publish；不得用已登记代替已验证。",
     "示例：artifact_verify({name:film_final_cut, version:3})",
   ].join("\n"),
@@ -33,6 +33,13 @@ export default tool({
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || !data?.ok) {
+        if (data?.reason === "auth_required") {
+          return fail(
+            "verify_auth_required",
+            data?.error || "交付链接是账号鉴权下载，未带凭证探测一定会 401（不是参数错误）。要核对内容请用 artifact_get 看 sha256 并与工作区文件比对；不要重复调用 artifact_verify。",
+            { title: "需要账号鉴权，无法匿名探测", http_status: resp.status },
+          )
+        }
         return fail(
           typeof data?.code === "string" && data.code ? data.code : "artifact_verify_failed",
           data?.error || `HTTP ${resp.status}`,
@@ -57,7 +64,7 @@ export default tool({
         verified_at: data.verified_at,
       }
       if (data.state === "no_row") {
-        return fail("verify_no_row", "没有探测结果（artifact 无 url），不能宣称干净；请补 url 后重试", {
+        return fail("verify_no_row", "no_public_url：artifact 无 url，不能宣称干净", {
           title: "未验证（no_row）",
           probe,
         })

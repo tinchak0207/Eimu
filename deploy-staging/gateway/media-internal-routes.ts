@@ -1,12 +1,14 @@
 // 从 index.ts 无损抽取（2026-09-19 第一阶段）
 // media-internal-routes.ts — Media 上传/Canvas 内部 HTTP 处理器＋TTS＋confirm＋internal emit
 // 涵盖 index.ts 原行区：7636–7908（canvas/media handlers）、7910–8036（TTS）、
-// 8165–8285（confirm）、8410–8483（emitImageFailed＋handleInternalEmit）。
+// 8165–8285（confirm）、8410–8483（emitImageFailed/emitVideoFailed/emitAudioFailed＋handleInternalEmit）。
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { jsonError } from "./gw-lib.ts"
 import { subagentParentState } from "./subagent"
 import { estimateTtsCoins } from "./pricing-and-validation"
+import { byChildOc } from "./subagent-runs.ts"
+import { pushParentNote } from "./subagent-live.ts"
 import { billingAutoApprovalEnabled, billingPermissionTenant } from "./charge-approval-policy.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
@@ -16,12 +18,14 @@ import { emitToSession } from "./sse-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 import { flushPendingCompact } from "./messages-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
-import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
+import { emitQuotaChanged, appendLedgerFor, claimLedgerRefunded, ledgerHasRefunded } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 import { notify } from "./internal-waiters.ts"
+import { generationReceipt } from "./job-store.ts"
+import { humanProtectedTargets, humanProtectedBlockMessage } from "./canvas-human-guard.ts"
 
 // POST /internal/media/upload — agent 素材入库：服务端下载外部影片/音频/图片 URL，
 // 或接收 path_b64 位元组（含文档 md/txt/json/csv/pdf）→
@@ -38,6 +42,8 @@ function isAllowedMediaUploadContentType(contentType: string): boolean {
   if (ct.startsWith("video/") || ct.startsWith("audio/") || ct.startsWith("image/")) return true
   if (ct.startsWith("text/")) return true
   if (ct === "application/json" || ct === "application/pdf") return true
+  // 3D 资产：GLB/glTF 网格、SPZ/PLY splat（扩展名由 contentTypeForExt 定，只认这四种）。
+  if (ct === "model/gltf-binary" || ct === "model/gltf+json" || ct === "application/x-spz" || ct === "application/x-ply") return true
   return false
 }
 
@@ -93,7 +99,7 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
     const srcExt = path.extname(fname).toLowerCase() || ".mp4"
     contentType = contentTypeForExt(srcExt)
     if (!isAllowedMediaUploadContentType(contentType)) {
-      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片/文稿 md·txt·json·csv·pdf）` }, { status: 415 })
+      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片/文稿 md·txt·json·csv·pdf/3D glb·gltf·spz·ply）` }, { status: 415 })
     }
     outExt = srcExt.replace(/^\./, "")
   } else if (typeof body.url === "string" && body.url.trim()) {
@@ -180,6 +186,15 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   if (tplBlock) {
     return Response.json({ ok: false, code: "TEMPLATE_SLOT_OPEN", error: tplBlock }, { status: 409 })
   }
+  // 整卡守门（2026-11-03）：人改/锁定卡的删除与回退在下发前拦（补 delete→add 绕过）。
+  {
+    const snapNodes = (getCanvasState(state.sessionId)?.state as { nodes?: unknown } | null | undefined)?.nodes
+    const hit = humanProtectedTargets(Array.isArray(snapNodes) ? (snapNodes as Record<string, unknown>[]) : [], v.ops)
+    if (hit.deletes.length || hit.reverts.length) {
+      console.log(`[gateway] canvas_ops: HUMAN_EDITED_PROTECTED session=${state.sessionId} deletes=${hit.deletes.join(",")} reverts=${hit.reverts.join(",")}`)
+      return Response.json({ ok: false, code: "HUMAN_EDITED_PROTECTED", error: humanProtectedBlockMessage(hit), blocked: hit }, { status: 409 })
+    }
+  }
   const label = typeof body.label === "string" && body.label ? body.label.slice(0, 200) : undefined
   const rawTimeout = typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : CANVAS_OPS_TIMEOUT_MS
   const timeoutMs = Math.max(1_000, Math.min(CANVAS_OPS_TIMEOUT_MS, rawTimeout))
@@ -255,6 +270,7 @@ export async function handleCanvasStatePublicGet(key: string, id: string): Promi
     has_state: snap !== null,
     state: snap?.state ?? null,
     updated_at: snap?.updatedAt ?? null,
+    rev: snap?.state && typeof snap.state === "object" ? (snap.state as Record<string, unknown>).rev ?? 0 : 0,
   })
 }
 
@@ -500,6 +516,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   state.pendingConfirms.set(request_id, {
     timer,
     ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
+    ...(description ? { description } : {}),
   })
 
   // Surface the billing request to the frontend, then return immediately.
@@ -507,6 +524,18 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   // exceeds both Bun's idleTimeout ceiling (255s) and the caller's abort, so
   // the tool polls /internal/confirm-status instead.
   emitToSession(state, "confirm.request", { request_id, amount_coins: amount, description })
+
+  // 子代理在等钱时，确认卡只发前端，父代理那一侧完全看不到：2026-10-30 实测，用户在父会话里
+  // 干等 30 分钟，父代理一路报「正在生成／已经超时」，直到确认请求过期才问到「放行 1 币」。
+  // 这里给发起该笔扣费的子 run 推一条回报，父代理下一拍就能把真实卡点说给用户。
+  const childRun = byChildOc.get(session_id)
+  if (childRun) {
+    pushParentNote(
+      childRun,
+      "charge_confirm",
+      `子代理在等你放行 ${amount} 币（${description || "扣费确认"}）。确认卡只在页面上的卡片，聊天里说「放行」不算授权：请在卡片上选放行，或把互动模式切到自动。`,
+    )
+  }
 
   return Response.json({ status: "pending", request_id }, { status: 202 })
 }
@@ -543,7 +572,11 @@ export function settleConfirm(
   clearTimeout(pending.timer)
   state.pendingConfirms.delete(requestId)
 
-  state.resolvedConfirms.set(requestId, { outcome, resolvedAt: Date.now() })
+  state.resolvedConfirms.set(requestId, {
+    outcome,
+    resolvedAt: Date.now(),
+    ...(pending.ledger && typeof pending.ledger.amount_coins === "number" ? { amount_coins: pending.ledger.amount_coins } : {}),
+  })
   if (state.resolvedConfirms.size > CONFIRM_RESOLVED_CAP) {
     const oldest = state.resolvedConfirms.keys().next()
     if (!oldest.done) state.resolvedConfirms.delete(oldest.value)
@@ -566,6 +599,9 @@ export function settleConfirm(
         cost_coins: pending.ledger.amount_coins,
         task_id: pending.ledger.task_id,
         model: pending.ledger.model,
+        // H20：确认⇄平台 job 逐笔对账键（＝工具提交时的 Idempotency-Key）。只加栏位，金额/次数不变。
+        request_id: requestId,
+        ...(pending.ledger.workflow_id ? { workflow_id: pending.ledger.workflow_id } : {}),
       })
     }
     void emitQuotaChanged(state)
@@ -591,6 +627,28 @@ export function settleConfirm(
     resumeWorkflowGate(requestId, false)
   }
   return true
+}
+
+// H22（2026-11-04）：ledger 的 refunded 只在平台账证实时写。证据＝该 task 的持久回执终态为 refunded——
+// 回执状态只经 /internal/job-completion 写入且须为权威终态，来源是 poller/image_get_result 读到的平台
+// generation_job.status；平台仅在全额 refund operation applied 后才把 job 置 refunded（billing-ledger/write.ts）。
+// 调用方 /internal/emit 自带的 refunded:true 无此证据时记 failed＋refund_claim="caller"/refund_status="unconfirmed"。
+// 只改日志语义：SSE 帧的 refunded 字段、退款/扣费路径一律不动。
+// H31：refunded 行经 claimLedgerRefunded 幂等——该 task 已记过 refunded（job-completion 补记、先前渲染或重启前旧行）
+// 时返回 null＝本次不写 ledger（SSE/画布照发）。
+// H47：ledger 终态单调——refunded 之后不再写 failed。生产 285 个 task 先 refunded 后 failed（平台 refunded 274：
+// image 173／旧 generation 车道 42／video 59），failed 行全落在回执终态守卫缺位窗口（4af310238 整树还原撤下 b3c825d92，
+// 886514909 H17 拣回前）：poller 两小时硬停把 refunded 回执改回 failed、清 rendered_at，drain 重渲染以 refunded=false 记 failed。
+// 守卫已回，这里在 ledger 层再闸一次，不依赖回执守卫与调用方旗标：回执已 refunded（平台证实）一律按 refunded 处理
+//（未记过才记），ledger 已有该 task 的 refunded 行一律不写 failed。billing-recon 对 refunded 取「任一行即算」的集合语义，
+// failed（无 refund_claim）不入金额类别，故不写后到 failed 与对账口径一致；SSE/画布/扣费/退款不动，历史行不改。
+function failureLedgerFields(task_id: string, refunded: boolean): { event: string; refund_source?: string; refund_claim?: string; refund_status?: string } | null {
+  let platformRefunded = false
+  try { platformRefunded = !!task_id && generationReceipt(task_id)?.status === "refunded" } catch {}
+  if (platformRefunded) return claimLedgerRefunded(task_id) ? { event: "refunded", refund_source: "platform_job" } : null
+  if (ledgerHasRefunded(task_id)) return null
+  if (!refunded) return { event: "failed" }
+  return { event: "failed", refund_claim: "caller", refund_status: "unconfirmed" }
 }
 
 // 用 task_id（或按序）把 loading 节点置 error，resume 的 agent 文案讲人话。
@@ -621,9 +679,80 @@ export function emitImageFailed(
     // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
     applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
-  void appendLedgerFor(state, {
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
     kind: "image",
-    event: refunded ? "refunded" : "failed",
+    ...ledgerFields,
+    task_id,
+  })
+}
+
+export function emitVideoFailed(
+  state: SessionState,
+  task_id: string,
+  reason: string,
+  refunded: boolean,
+): void {
+  // 0831：任务终态登记（失败）。task 可能不在登记表（重启丢内存态），不可假设存在。
+  const t = state.sessionTasks.get(task_id)
+  if (t) {
+    t.status = "failed"
+  }
+  // 2026-10-18 止血：失败也是终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
+  // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
+  const human = humanMessageFor(reason)
+  emitToSession(state, "video.failed", { task_id, reason, refunded, human_message: human })
+  const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
+  if (unitId) {
+    const failPatch = { status: "error", errorDetails: reason, human_message: human }
+    emitToSession(state, "canvas.node.updated", {
+      unit_id: unitId,
+      node_id: canvasResultNodeId(state.sessionId, unitId),
+      patch: failPatch,
+    })
+    // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
+  }
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
+    kind: "video",
+    ...ledgerFields,
+    task_id,
+  })
+}
+
+export function emitAudioFailed(
+  state: SessionState,
+  task_id: string,
+  reason: string,
+  refunded: boolean,
+): void {
+  // 0831：任务终态登记（失败）。task 可能不在登记表（重启丢内存态），不可假设存在。
+  const t = state.sessionTasks.get(task_id)
+  if (t) {
+    t.status = "failed"
+  }
+  // 2026-10-18 止血：失败也是终态，冲刷 pendingCompact。
+  flushPendingCompact(state)
+  // S5a：失败原因人话化（原文保留），SSE 帧与画布 errorDetails 补 human_message。
+  const human = humanMessageFor(reason)
+  emitToSession(state, "audio.failed", { task_id, reason, refunded, human_message: human })
+  const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
+  if (unitId) {
+    const failPatch = { status: "error", errorDetails: reason, human_message: human }
+    emitToSession(state, "canvas.node.updated", {
+      unit_id: unitId,
+      node_id: canvasResultNodeId(state.sessionId, unitId),
+      patch: failPatch,
+    })
+    // 2026-09-20 写穿：失败 patch 同步落 canvasStates（快照无该节点时静默跳过）。
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
+  }
+  const ledgerFields = failureLedgerFields(task_id, refunded)
+  if (ledgerFields) void appendLedgerFor(state, {
+    kind: "audio",
+    ...ledgerFields,
     task_id,
   })
 }
@@ -661,11 +790,20 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
     await emitVideoDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "audio.done") {
     // 同 video.done：放行却静默丢帧。共用 emitAudioDone，语义与前端 audio.done 卡对齐。
-    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio"; title?: string; cover?: string; lyric_status?: string }
-    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind, { title: d.title, cover: d.cover, lyric_status: d.lyric_status })
+    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio"; title?: string; cover?: string; lyric_status?: string; music_ref?: string }
+    // H34：调用方带 music_ref 才写进账本行（audioLedgerLinkFields 校验形状）；SSE 帧不变。
+    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind, { title: d.title, cover: d.cover, lyric_status: d.lyric_status }, { music_ref: d.music_ref })
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
     if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
+  } else if (event === "video.failed") {
+    // 与 image.failed 同构：白名单已放行，if 链必须有分支，否则静默丢帧假成功。
+    const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
+    if (d.task_id) emitVideoFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
+  } else if (event === "audio.failed") {
+    // 与 image.failed 同构：白名单已放行，if 链必须有分支，否则静默丢帧假成功。
+    const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
+    if (d.task_id) emitAudioFailed(state, d.task_id, d.reason ?? "生成失败", d.refunded === true)
   } else if (event === "session.error") {
     const d = (data ?? {}) as { code?: string; message?: string }
     emitSessionError(state, d.code ?? "backend_error", d.message ?? "session error")

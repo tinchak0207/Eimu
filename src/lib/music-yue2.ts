@@ -86,6 +86,7 @@ export function isYue2ModalEnabled(): boolean {
 }
 
 export interface GenerateYue2TrackOptions {
+  beforeSubmit?: () => Promise<void>
   /** 风格散文描述（本通路的 style 栏；允许换行，上游无公开字数上限）。 */
   style: string
   /**
@@ -312,6 +313,7 @@ export async function generateYue2Track(
 
   let response: Response
   try {
+    await opts.beforeSubmit?.()
     response = await fetch(`${baseUrl}${YUE2_GENERATE_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Yue2-Signature": signature },
@@ -319,6 +321,7 @@ export async function generateYue2Track(
       signal: AbortSignal.timeout(YUE2_TIMEOUT_MS),
     })
   } catch (e) {
+    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
     if (isYue2Timeout(e)) {
       const recovered = await readLandedYue2Audio(body.id)
       if (recovered) return recovered
@@ -454,6 +457,7 @@ export async function transcribeYue2Score(
       signal: AbortSignal.timeout(YUE2_TRANSCRIBE_TIMEOUT_MS),
     })
   } catch (e) {
+    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
     // 网路层／超时：与生成共用端点与隧道，带人话抛出（仍归 yue2_transcribe_failed）。
     throw new Yue2TranscribeError(
       YUE2_TRANSCRIBE_FAILED_CODE,

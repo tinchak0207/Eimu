@@ -105,7 +105,7 @@ const KIND_TINT: Record<CharacterCardKind, string> = {
   scene: "bg-ios-teal/20 text-[#1F86B8]",
   style: "bg-ios-indigo/15 text-ios-indigo",
   prop: "bg-ios-orange/15 text-[#B26A00]",
-  audio: "bg-ios-green/15 text-[#248A3D]",
+  audio: "bg-ios-green/15 text-ios-green",
 };
 
 /**

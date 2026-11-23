@@ -382,3 +382,78 @@ test("validateWorkflowDsl：steps 空清单、坏 workflow 名、id 不合规均
   assert.ok(idErr);
   assert.ok(idErr.message.includes("keyframe_01"), "message 给正确 id 示例");
 });
+
+// ─────────────────────────── 重编译保留人手/产物状态（P0）
+// 独立期望来自用户原始要求：「重编译同一 workflow，已完成节点不回 idle、人手锁定节点内容不被 DSL 覆盖、
+// 非锁定节点正常更新、新增 step 才是 idle」；期望值写死，不取自 compile 输出。
+
+test("compileWorkflow 重编译：done 节点保留 status/产物，locked 节点 prompt 不被覆盖，非 locked 更新，新增步 idle", () => {
+  const first = compileWorkflow(SOURCE, EMPTY);
+  assert.equal(first.ok, true);
+  if (!first.ok) throw new Error("unreachable");
+  let canvas = applyOps(EMPTY, first.ops);
+
+  // 人手/运行期改画布：brief 已完成并带产物；shot_a 已完成 + 人手锁定且手改了 prompt；shot_b 仍 idle。
+  const briefId = workflowNodeId("demo_wf", "brief");
+  const shotAId = workflowNodeId("demo_wf", "shot_a");
+  canvas = {
+    ...canvas,
+    nodes: canvas.nodes.map((n) => {
+      if (n.id === briefId) return { ...n, metadata: { ...n.metadata, status: "success" as const, storageKey: "k/brief.txt" } };
+      if (n.id === shotAId) {
+        return {
+          ...n,
+          title: "人手改过的标题",
+          metadata: { ...n.metadata, status: "success" as const, locked: true, prompt: "人手精修后的 prompt", storageKey: "k/a.png" },
+        };
+      }
+      return n;
+    }),
+  };
+
+  // 同一 DSL：brief 与 shot_a、shot_b 的 prompt 都改；新增 shot_c。
+  const edited: WorkflowDslSource = {
+    ...SOURCE,
+    steps: [
+      { ...SOURCE.steps[0], prompt: "新简报" },
+      { ...SOURCE.steps[1], prompt: "DSL 想改的第一幕", title: "DSL 新标题" },
+      { ...SOURCE.steps[2], prompt: "新第二幕" },
+      { id: "shot_c", title: "镜头C", kind: "image", prompt: "第三幕", needs: ["shot_b"] },
+    ],
+  };
+  const r = compileWorkflow(edited, canvas);
+  assert.equal(r.ok, true);
+  if (!r.ok) throw new Error("unreachable");
+  assert.equal(r.summary.added, 1);
+  assert.equal(r.summary.updated, 3);
+  assert.ok(r.summary.warnings.some((w) => w.includes("shot_a") && w.includes("锁定")), "locked 节点被拦的改动要有 warning");
+
+  const after = applyOps(canvas, r.ops);
+  const byId = (id: string) => after.nodes.find((n) => n.id === id)!;
+
+  // done 节点：status 与产物保留，非锁定 prompt 更新。
+  const brief = byId(briefId).metadata as WorkflowNodeMetadata;
+  assert.equal(brief.status, "success");
+  assert.equal(brief.storageKey, "k/brief.txt");
+  assert.equal(brief.prompt, "新简报");
+
+  // locked 节点：prompt/标题不变，status/产物保留，身份键仍在。
+  const shotA = byId(shotAId);
+  const shotAMd = shotA.metadata as WorkflowNodeMetadata;
+  assert.equal(shotAMd.prompt, "人手精修后的 prompt");
+  assert.equal(shotA.title, "人手改过的标题");
+  assert.equal(shotAMd.status, "success");
+  assert.equal(shotAMd.storageKey, "k/a.png");
+  assert.equal(shotAMd.locked, true);
+  assert.equal(shotAMd.stepId, "shot_a");
+
+  // 非 locked 且从未生成的节点：prompt 更新，status 仍 idle。
+  const shotBMd = byId(workflowNodeId("demo_wf", "shot_b")).metadata as WorkflowNodeMetadata;
+  assert.equal(shotBMd.prompt, "新第二幕");
+  assert.equal(shotBMd.status, "idle");
+
+  // 新增步：idle。
+  const shotCMd = byId(workflowNodeId("demo_wf", "shot_c")).metadata as WorkflowNodeMetadata;
+  assert.equal(shotCMd.status, "idle");
+  assert.equal(shotCMd.stepIndex, 4);
+});

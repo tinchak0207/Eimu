@@ -157,10 +157,10 @@ function pythonOpenTargets(args: string[]): string[] {
 function shellWriteTargetsIn(segment: string): string[] {
   const targets = new Set<string>()
   // 覆盖 `>|`、`>>|`（noclobber override 不能绕过写路径闸）。
-  for (const match of segment.matchAll(/(?:^|[^&>])(?:>>?\|?)\s*("?)([^\s;&|>]+)\1/g)) {
+  for (const match of segment.matchAll(/(?:^|[^&>])(?:>>?\|?)\s*("?)([^\s;&|<>]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
-  for (const match of segment.matchAll(/(?:^|\s)&(?:\|?)>>?\|?\s*("?)([^\s;&|>]+)\1/g)) {
+  for (const match of segment.matchAll(/(?:^|\s)&(?:\|?)>>?\|?\s*("?)([^\s;&|<>]+)\1/g)) {
     if (match[2]) targets.add(match[2])
   }
   for (const match of segment.matchAll(/\bdd\s+[^;&|]*\bof=("?)([^\s;&|]+)\1/g)) {
@@ -265,6 +265,139 @@ function safetyDecision(
   }
 }
 
+/** 命令词是 shell 解释器时，其 `-c` 参数的内容才是 shell 代码。 */
+const SHELL_INTERPRETER_WORDS = new Set([
+  "bash",
+  "sh",
+  "zsh",
+  "dash",
+  "ksh",
+  "ksh93",
+  "ash",
+  "mksh",
+  "oksh",
+  "posh",
+  "rbash",
+  "yash",
+])
+
+/** `-c`／`-lc` 这类带 c 的旗标：其后的词是命令串。 */
+function isCommandFlagWord(word: string): boolean {
+  return /^-[A-Za-z]*c[A-Za-z]*$/.test(word)
+}
+
+/** 引号参数是否为 shell 的 `-c` 命令串（`bash -c "…"`）；python/perl 的 `-c` 是数据。 */
+function isShellCommandArgument(completed: string[], current: string): boolean {
+  const previous = current !== "" ? current : (completed[completed.length - 1] ?? "")
+  if (!isCommandFlagWord(previous)) return false
+  let index = current !== "" ? completed.length - 1 : completed.length - 2
+  while (index >= 0 && completed[index].startsWith("-")) index--
+  const command = (completed[index] ?? "").split("/").pop()?.toLowerCase() ?? ""
+  return SHELL_INTERPRETER_WORDS.has(command)
+}
+
+/** heredoc 词法扫描：引号内与 `$(( … ))` 内是移位，不是 heredoc。 */
+function heredocInShellText(text: string): boolean {
+  let arithmeticDepth = 0
+  let completed: string[] = []
+  let current = ""
+  let index = 0
+
+  const flushWord = () => {
+    if (current !== "") {
+      completed.push(current)
+      current = ""
+    }
+  }
+
+  while (index < text.length) {
+    const char = text[index]
+
+    // 单引号：内部不认任何元字符；只有 shell 的 `-c` 参数才递归当代码看。
+    if (char === "'") {
+      const close = text.indexOf("'", index + 1)
+      const end = close === -1 ? text.length : close
+      if (isShellCommandArgument(completed, current) && heredocInShellText(text.slice(index + 1, end))) return true
+      current += "x"
+      index = close === -1 ? text.length : close + 1
+      continue
+    }
+    // 双引号：`\"` 转义后跳过；引号内的 `<<` 是数据（python/perl/awk 代码都在引号里）。
+    if (char === '"') {
+      let inner = ""
+      let cursor = index + 1
+      while (cursor < text.length && text[cursor] !== '"') {
+        if (text[cursor] === "\\" && cursor + 1 < text.length) {
+          inner += text[cursor + 1]
+          cursor += 2
+          continue
+        }
+        inner += text[cursor]
+        cursor++
+      }
+      if (isShellCommandArgument(completed, current) && heredocInShellText(inner)) return true
+      current += "x"
+      index = cursor + 1
+      continue
+    }
+
+    // `$(( … ))`／`(( … ))`：算术上下文里的 `<<` 是移位。
+    if (char === "$" && text[index + 1] === "(" && text[index + 2] === "(") {
+      arithmeticDepth++
+      index += 3
+      continue
+    }
+    if (char === "(" && text[index + 1] === "(") {
+      arithmeticDepth++
+      index += 2
+      continue
+    }
+    if (char === ")" && text[index + 1] === ")" && arithmeticDepth > 0) {
+      arithmeticDepth--
+      index += 2
+      continue
+    }
+
+    // 引号外且算术深度 0 的 `<<` 才是 heredoc 候选。
+    if (char === "<" && text[index + 1] === "<" && arithmeticDepth === 0) {
+      if (text[index + 2] === "<") {
+        // herestring `<<<`，不是 heredoc。
+        flushWord()
+        index += 3
+        continue
+      }
+      let cursor = index + 2
+      if (text[cursor] === "-") cursor++
+      while (cursor < text.length && /\s/.test(text[cursor])) cursor++
+      const delimiter = text[cursor]
+      // 引号定界符可含空格（`<< 'E O F'`）。
+      if (delimiter === "'" || delimiter === '"') return true
+      let word = cursor
+      if (text[word] === "\\") word++
+      // 裸词定界符不分大小写：`cat<<eof`、`echo 1<<N` 都是真 heredoc。
+      if (word < text.length && /[A-Za-z0-9_-]/.test(text[word])) return true
+      flushWord()
+      index = cursor
+      continue
+    }
+
+    if (/\s/.test(char) || ";|&()<>`".includes(char)) {
+      flushWord()
+      index++
+      continue
+    }
+
+    current += char
+    index++
+  }
+  return false
+}
+
+/** heredoc 判定：单次左到右词法扫描，不靠正则补丁。 */
+function isHeredocCommand(command: string): boolean {
+  return heredocInShellText(command)
+}
+
 export function safetyCheck(
   tool: string,
   input: Record<string, unknown>,
@@ -297,16 +430,6 @@ export function safetyCheck(
           : ""
     if (!command) return null
 
-    // heredoc 的落点无法静态判定：保守回 ask。
-    if (/<<-?\s*['"]?[A-Za-z_\\]/.test(command)) {
-      return safetyDecision(
-        "heredocTarget",
-        "heredoc write target cannot be statically determined; confirm before running",
-        "ask",
-        { mode },
-      )
-    }
-
     for (const target of bashWriteTargets(command, cwd, home)) {
       if (target.dynamic) {
         const sensitive = isSensitiveWriteText(target.path)
@@ -336,6 +459,15 @@ export function safetyCheck(
           })
         }
       }
+    }
+    // 敏感写目标已先被 deny；剩余 heredoc 的落点无法静态判定，保守回 ask。
+    if (isHeredocCommand(command)) {
+      return safetyDecision(
+        "heredocTarget",
+        "heredoc write target cannot be statically determined; confirm before running",
+        "ask",
+        { mode },
+      )
     }
     return null
   }

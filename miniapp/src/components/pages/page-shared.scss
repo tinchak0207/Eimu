@@ -1,0 +1,100 @@
+/**
+ * 直接生成 / 生成历史两页共享的样式。
+ *
+ * 两段都逐行复制自网页版真源（小程序只改平台差异，不改视觉）：
+ *   .style-chip / .lg-tint-*  ← src/app/globals.css:593-625、233-264
+ *   .hist-*                   ← src/components/history/history.css
+ *
+ * 落点说明：网页版这些类在 globals.css／history.css；小程序侧 app.scss 由别的
+ * agent 持有（本任务文件所有权只有 pages/**），因此按「共享组件放
+ * src/components/pages/」的约定落在本档，两页各自 import，视觉与网页同源。
+ */
+
+/* ── 胶囊（globals.css:593-625） ───────────────────────── */
+.style-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+  height: 2.25rem;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: rgba(0, 0, 0, 0.62);
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.style-chip.active {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+
+/* ── iOS tint 材质（globals.css:233-264，对应 lg-tint-blue / lg-tint-red） ── */
+.lg-tint-blue {
+  background: rgba(0, 122, 255, 0.10);
+  border-top: 1px solid rgba(0, 122, 255, 0.22);
+  border-left: 1px solid rgba(0, 122, 255, 0.10);
+  border-right: 1px solid rgba(0, 122, 255, 0.10);
+  border-bottom: 1px solid rgba(0, 122, 255, 0.06);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+.lg-tint-red {
+  background: rgba(255, 59, 48, 0.10);
+  border-top: 1px solid rgba(255, 59, 48, 0.22);
+  border-left: 1px solid rgba(255, 59, 48, 0.10);
+  border-right: 1px solid rgba(255, 59, 48, 0.10);
+  border-bottom: 1px solid rgba(255, 59, 48, 0.06);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ── 生成历史卡片（history.css.hist-card / .hist-card-media / .hist-skeleton） ── */
+.hist-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  background: rgba(0, 0, 0, 0.028);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.hist-masonry-item {
+  margin-bottom: 0.875rem;
+}
+
+.hist-card-media {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+/* 悬停才浮出的操作条；触摸设备（小程序）上始终可见 —— 与 history.css 的
+   @media (hover: hover) 分支等价：不落进那个媒体查询，opacity 恒为 1。 */
+.hist-card-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hist-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+  background-color: rgba(0, 0, 0, 0.04);
+  background-size: 200% 100%;
+  animation: hist-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes hist-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

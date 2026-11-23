@@ -321,18 +321,45 @@ describe("D2 派工硬化：失败必带 code 与缺栏", () => {
     expect(body.code).toBe("session_not_found")
   })
 
-  test("并发上限 → code=concurrency_limit 且附在跑清单", async () => {
-    const p = makeParent("gw-d2-cap")
-    await dispatch(p, "塞满甲")
-    await dispatch(p, "塞满乙")
-    await dispatch(p, "塞满丙")
-    const res = await handleSubagentDispatch(
-      req("http://gw.test/internal/subagent/dispatch", { sessionId: p.sessionId, label: "第四个", prompt: "任务（预期 5 分钟）" }),
-    )
-    const body = (await res.json()) as { code: string; running: unknown[] }
-    expect(body.code).toBe("concurrency_limit")
-    expect(Array.isArray(body.running)).toBe(true)
-    expect(body.running.length).toBe(3)
+  test("并发上限（env=3）→ code=concurrency_limit 且附在跑清单", async () => {
+    const prev = process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+    process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT = "3"
+    try {
+      const p = makeParent("gw-d2-cap")
+      await dispatch(p, "塞满甲")
+      await dispatch(p, "塞满乙")
+      await dispatch(p, "塞满丙")
+      const res = await handleSubagentDispatch(
+        req("http://gw.test/internal/subagent/dispatch", { sessionId: p.sessionId, label: "第四个", prompt: "任务（预期 5 分钟）" }),
+      )
+      const body = (await res.json()) as { code: string; running: unknown[] }
+      expect(body.code).toBe("concurrency_limit")
+      expect(Array.isArray(body.running)).toBe(true)
+      expect(body.running.length).toBe(3)
+    } finally {
+      if (prev === undefined) delete process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+      else process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT = prev
+    }
+  })
+
+  test("默认不限并发：第 4 路不得 concurrency_limit", async () => {
+    const prev = process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+    delete process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+    try {
+      const p = makeParent("gw-d2-uncapped")
+      await dispatch(p, "甲")
+      await dispatch(p, "乙")
+      await dispatch(p, "丙")
+      const res = await handleSubagentDispatch(
+        req("http://gw.test/internal/subagent/dispatch", { sessionId: p.sessionId, label: "第四个", prompt: "任务（预期 5 分钟）" }),
+      )
+      const body = (await res.json()) as { code?: string; ok?: boolean }
+      expect(body.code).not.toBe("concurrency_limit")
+      expect(res.status).not.toBe(409)
+    } finally {
+      if (prev === undefined) delete process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT
+      else process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT = prev
+    }
   })
 })
 

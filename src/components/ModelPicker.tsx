@@ -344,7 +344,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
               {modelPickerName(model, stripVendorPrefix ?? false)}
             </span>
             {!stripVendorPrefix && tag ? (
-              <span className="rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+              <span className="rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-ios-green">
                 {tag}
               </span>
             ) : null}
@@ -422,7 +422,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
             <VendorIcon vendor={group.vendor} />
             <span className="font-medium text-[rgba(0,0,0,0.85)]">{group.vendor}</span>
             {!stripVendorPrefix && VENDOR_TAGS[group.vendor] ? (
-              <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+              <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-ios-green">
                 {VENDOR_TAGS[group.vendor]}
               </span>
             ) : null}
@@ -491,7 +491,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
           <VendorIcon vendor={group.vendor} className="h-6 w-6 rounded-[0.45rem]" innerClassName="h-4 w-4" />
           <span className="min-w-0 flex-1 truncate text-left">{group.vendor}</span>
           {!stripVendorPrefix && VENDOR_TAGS[group.vendor] ? (
-            <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+            <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-ios-green">
               {VENDOR_TAGS[group.vendor]}
             </span>
           ) : null}
@@ -543,7 +543,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
       >
         <span className="min-w-0 truncate">{modelPickerName(value, stripVendorPrefix ?? false)}</span>
         {!stripVendorPrefix && promotionTag ? (
-          <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+          <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-ios-green">
             {promotionTag}
           </span>
         ) : null}

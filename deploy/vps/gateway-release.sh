@@ -4,7 +4,8 @@
 #
 # 用法：
 #   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force] [--fast]
+#   bash deploy/vps/gateway-release.sh guard --sha <commit>   # 唯读：只跑发版祖先闸（对真线上）
+#   bash deploy/vps/gateway-release.sh release --sha <commit> [--skip-recon] [--dry-run] [--force] [--fast] [--override-ancestry "<理由>"]
 #   bash deploy/vps/gateway-release.sh rollback [--dry-run] [--force]
 #   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
 #
@@ -14,8 +15,24 @@
 #   opencode-release.sh 完全同套（gateway sessions.db lastTurnActiveAt / subagent_reworks
 #   ＋ opencode.db 未 completed 的流式 assistant 讯息）。
 #
+# H07（2026-11-03「更新中」反复 503 事故后）防重入 / 两段 drain / 退避：
+#   · 两段 drain：先「软 drain」（不开维护，上界 180s）→ 清零才开 maintenance → 再「终检 drain」
+#     （上界 GW_DRAIN_FINAL_SECS，默认 30s）→ 重启。软 drain 超时直接退出，用户全程看不到
+#     「服务更新中」503；维护窗口从「drain 全程 ≤180s」缩到「终检＋重启」秒级。
+#   · 防重入：本机 flock（git common dir/gateway-release.lock）＋ 远端激活锁预检，持锁即
+#     ACTIVATION_LOCKED 立刻 exit 75，不等待、不循环。
+#   · 退避：drain 超时写远端戳 $HARNESS_ROOT/.drain-timeout.stamp（时间 连续次数）；冷却期内
+#     （600s×2^(n-1)，上限 3600s）再发直接 DRAIN_COOLDOWN exit 4，不开维护、不探测。
+#     --force 或 GW_DRAIN_COOLDOWN_SECS=0 跳过。drain 清零即清戳。
+#   · 退出码：0 成功｜1 一般失败｜2 用法｜3 drain 超时/探测失败｜4 drain 冷却中｜
+#     75 另一发版持锁｜76 激活身份冲突（有人并行发版）｜129/130/143 信号中断（trap 恢复维护位）
+#
 # --fast（2026-10-19）：等价 --skip-recon --force，跳过 recon 与 drain，立即 build+重启。
 #   用于提示词/文案这类短改：目标 <60s，不再为在途回合等 180s。中断的回合由耐久续接处理。
+#
+# 发版祖先闸（2026-10-30，见 release-ancestry-guard.sh）：release 必须显式 --sha；候选必须包含
+#   线上 meta.env GIT_SHA 及该 release 目录 HOTPATCH.log 里热装过的 commit，否则拒发并列出缺的
+#   commit。--fast/--skip-recon/--force 均不跳过；唯一覆盖 --override-ancestry "<理由>"（写审计）。
 #
 # 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
 #   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
@@ -65,10 +82,18 @@ OWNER="${GW_OWNER:-ubuntu:ubuntu}"
 # 执行时状态（SQLite 会话库、记忆游标/批次）不属于任何 commit，必须与代码目录分离。
 # release 目录只放 symlink 指向此处，否则每次发布都会把 41MB 的 sessions.db 换掉。
 STATE_DIR="${GW_STATE_DIR:-$HARNESS_ROOT/state}"
+ACTIVATION_LOCK="${HARNESS_ACTIVATION_LOCK:-$HARNESS_ROOT/.harness-activation.lock}"
+# H07：两段 drain 的终检上界、drain 超时退避（远端戳）。opencode-release.sh 经 __emit-drain 共用。
+DRAIN_FINAL_SECS_DEFAULT="${GW_DRAIN_FINAL_SECS:-30}"
+DRAIN_COOLDOWN_SECS_DEFAULT="${GW_DRAIN_COOLDOWN_SECS:-600}"
+DRAIN_COOLDOWN_MAX_DEFAULT="${GW_DRAIN_COOLDOWN_MAX_SECS:-3600}"
+DRAIN_STAMP_DEFAULT="${GW_DRAIN_STAMP:-$HARNESS_ROOT/.drain-timeout.stamp}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC_SUBDIR="deploy-staging/gateway"
+# shellcheck source=release-ancestry-guard.sh
+. "$SCRIPT_DIR/release-ancestry-guard.sh"
 RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-gateway-recon.sh"
 
 DRY_RUN=0
@@ -76,7 +101,6 @@ SKIP_RECON=0
 SKIP_MEDIA_WF_COVERAGE=0
 FORCE=0
 SHA=""
-EXPLICIT_FILES=()
 
 log() { printf '%s\n' "$*" >&2; }
 die() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
@@ -88,7 +112,7 @@ remote_args() { printf '%s\n' "$HARNESS_ROOT" "$GATEWAY_PATH" "$RELEASES_DIR" "$
 
 run_remote() {
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN ssh: $*"; return 0; fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$@"
 }
 
 # 带 stdin 的远端执行。--dry-run 时把远端脚本原样印出（可另存后 bash -n 检查），不连线。
@@ -105,7 +129,9 @@ run_remote_stdin() {
     rm -f "$tmp"
     return 0
   fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  local command
+  if [ "$#" -gt 1 ]; then printf -v command '%q ' "$@"; else command="$1"; fi
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$command"
 }
 
 # 二进位 tar 上传。--dry-run 只吞掉 stdin 并报位元组数（不把 tar 二进位印到终端）。
@@ -116,7 +142,7 @@ run_remote_binary() {
     log "DRY-RUN ssh(binary): $* (stdin $n bytes)"
     return 0
   fi
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "$@"
 }
 
 # ── F8（2026-10-04）断面 A：agent-gateway 重启前的 drain（只读）─────────────
@@ -124,49 +150,343 @@ run_remote_binary() {
 # gateway 重启虽由会话 N1 自动重投主 turn（sessions-core.ts），但会杀掉 async 子代理
 # watcher（孤儿化，需断面 B 兜底），故同样在 deploy.sh 闸门前先 drain。
 # 命中在途 → 轮询到清空；上界后仍非空 → 回传码 3（呼叫端中止；--force 跳过）。
-run_drain_gate() {
-  if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN drain gate（跳过远端只读探测）"; return 0; fi
-  run_remote_stdin bash -s -- "$FORCE" \
-    "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
-    "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
-    "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" <<'REMOTE'
-set -euo pipefail
+# 一份 drain 实现；OpenCode 发布通过内部 __emit-drain 入口复用。
+drain_inflight_count() {
+  local DRAIN_SESSIONS_DB="${1:-/opt/agent-harness/state/sessions.db}"
+  local DRAIN_OPENCODE_DB="${2:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
+  local DRAIN_WINDOW_MS="${3:-180000}"
+  local now a b c v
+  now=$(( $(date +%s) * 1000 ))
+  a="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
+    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  b="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
+  c="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
+    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
+  echo $(( a + b + c ))
+}
+drain_runtime_inflight_count() {
+  sudo python3 - <<'PY' || echo ERR
+import base64, json, subprocess, urllib.request
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result: raise ValueError('ambiguous duplicate status key')
+        result[key] = value
+    return result
+try:
+    pid = subprocess.check_output(['systemctl', 'show', 'agent-gateway', '-p', 'MainPID', '--value'], text=True).strip()
+    env = dict(v.split(b'=', 1) for v in open('/proc/' + pid + '/environ', 'rb').read().split(b'\0') if b'=' in v)
+    origin = env.get(b'OPENCODE_URL', b'http://127.0.0.1:4096').decode().rstrip('/')
+    auth = 'Basic ' + base64.b64encode(b'opencode:' + env.get(b'OPENCODE_PASSWORD', b'')).decode()
+    states = json.load(urllib.request.urlopen(urllib.request.Request(origin + '/session/status', headers={'Authorization': auth}), timeout=8), object_pairs_hook=unique_object)
+    if not isinstance(states, dict) or any(not k.startswith('ses_') or not isinstance(v, dict) or v.get('type') not in ['idle', 'busy', 'retry'] for k, v in states.items()):
+        raise ValueError('activity unknown')
+    print(sum(v['type'] != 'idle' for v in states.values()))
+except Exception:
+    print('ERR')
+PY
+}
+drain_gate() {
 DRAIN_FORCE="${1:-0}"
 DRAIN_MAX_SECS="${2:-180}"
 DRAIN_POLL_SECS="${3:-5}"
 DRAIN_WINDOW_MS="${4:-180000}"
 DRAIN_SESSIONS_DB="${5:-/opt/agent-harness/state/sessions.db}"
 DRAIN_OPENCODE_DB="${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
-drain_inflight_count() {
-  local now a b c v
-  now=$(( $(date +%s) * 1000 ))
-  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
-    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
-  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
-    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
-  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
-  echo $(( a + b + c ))
-}
+local phase="${DRAIN_PHASE:-drain}"
 if [ "$DRAIN_FORCE" = "1" ]; then
-  echo "DRAIN_SKIPPED (--force)"
+  echo "DRAIN_SKIPPED (--force) phase=$phase"
 else
   drain_waited=0
   while :; do
-    drain_n="$(drain_inflight_count)"
+    drain_n="$(drain_inflight_count "$DRAIN_SESSIONS_DB" "$DRAIN_OPENCODE_DB" "$DRAIN_WINDOW_MS")"
     if [ "$drain_n" = "ERR" ]; then
-      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
+      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 中止部署；明确跳过请加 --force"; exit 3
     fi
-    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
+    if [ "$drain_n" = "0" ]; then
+      echo "DRAIN_CLEAR phase=$phase waited=${drain_waited}s"
+      if [ "${DRAIN_PRESERVE_STAMP:-0}" != "1" ]; then
+        rm -f "${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" 2>/dev/null || true
+      fi
+      break
+    fi
     if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
-      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；确需立即重启请加 --force"
+      drain_stamp_timeout
+      echo "DRAIN_TIMEOUT phase=$phase inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；不要写 sleep 重试循环（冷却期内重发会 DRAIN_COOLDOWN exit 4）；确需立即重启请加 --force"
       exit 3
     fi
-    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
+    echo "DRAIN_WAIT phase=$phase inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
     sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
   done
 fi
-REMOTE
+}
+
+# H07 退避：drain 超时记戳「epoch 连续次数」；冷却 = base×2^(n-1)，封顶 max。
+drain_stamp_timeout() {
+  local f="${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}" n=0 _t
+  if [ -f "$f" ]; then read -r _t n < "$f" 2>/dev/null || n=0; fi
+  case "$n" in ''|*[!0-9]*) n=0;; esac
+  printf '%s %s\n' "$(date +%s)" "$((n + 1))" > "$f" 2>/dev/null || true
+}
+# 冷却期仍拒绝busy/unknown；仅在既有激活锁内完整证明当前为零时允许继续，保留失败历史。
+drain_cooldown_check() {
+  local force="${1:-0}" f="${DRAIN_STAMP:-/opt/agent-harness/.drain-timeout.stamp}"
+  local base="${DRAIN_COOLDOWN_SECS:-600}" cap="${DRAIN_COOLDOWN_MAX_SECS:-3600}" t n cd age
+  [ "$force" = "1" ] && return 0
+  [ "$base" -gt 0 ] 2>/dev/null || return 0
+  [ -f "$f" ] || return 0
+  read -r t n < "$f" 2>/dev/null || return 0
+  case "$t$n" in ''|*[!0-9]*) return 0;; esac
+  cd="$base"; while [ "$n" -gt 1 ] && [ "$cd" -lt "$cap" ]; do cd=$((cd * 2)); n=$((n - 1)); done
+  [ "$cd" -le "$cap" ] || cd="$cap"
+  age=$(( $(date +%s) - t ))
+  if [ "$age" -lt "$cd" ]; then
+    local current runtime_current=ERR
+    current="$(drain_inflight_count "${5:-/opt/agent-harness/state/sessions.db}" "${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "${4:-180000}")"
+    if [ "$current" = "0" ]; then runtime_current="$(drain_runtime_inflight_count)"; fi
+    if [ "$current" = "0" ] && [ "$runtime_current" = "0" ]; then
+      DRAIN_PRESERVE_STAMP=1
+      echo "DRAIN_COOLDOWN_IDLE_CONFIRMED inflight=0 runtime=0 age=${age}s cooldown=${cd}s — 保留失败戳，继续原维护与终检闸"
+      return 0
+    fi
+    echo "DRAIN_COOLDOWN 上次 drain 超时在 ${age}s 前，冷却 ${cd}s 未满（剩 $((cd - age))s）→ 拒发，未开维护。等低峰再发，或经暴君同意加 --force"
+    exit 4
+  fi
+}
+# 两段 drain：软 drain（不开维护）→ 开维护 → 终检 drain（短上界）。$1 维护库，其余同 drain_gate。
+drain_then_maintenance() {
+  local mdb="$1"; shift
+  drain_cooldown_check "$@"
+  if [ "$1" = "1" ]; then
+    maintenance_begin "$mdb"
+    DRAIN_PHASE=force drain_gate "$@"
+    return 0
+  fi
+  step_drain_begin "$mdb" "${2:-180}"
+  DRAIN_PHASE=soft drain_gate "$@"
+  maintenance_begin "$mdb"
+  DRAIN_PHASE=final drain_gate "$1" "${DRAIN_FINAL_SECS:-30}" "${@:3}"
+}
+# 远端共用库：参数默认值 + 函数体。gateway 激活与 opencode-release（__emit-drain）同一份。
+emit_drain_lib() {
+  printf 'DRAIN_FINAL_SECS=%q\nDRAIN_COOLDOWN_SECS=%q\nDRAIN_COOLDOWN_MAX_SECS=%q\nDRAIN_STAMP=%q\n' \
+    "$DRAIN_FINAL_SECS_DEFAULT" "$DRAIN_COOLDOWN_SECS_DEFAULT" "$DRAIN_COOLDOWN_MAX_DEFAULT" "$DRAIN_STAMP_DEFAULT"
+  declare -f drain_inflight_count drain_runtime_inflight_count drain_gate drain_stamp_timeout drain_cooldown_check drain_then_maintenance maintenance_control maintenance_begin maintenance_end step_drain_begin step_drain_end
+}
+
+# 软drain只请求在步骤边界停，不开启公开503；复用生成账本control表与现有activation锁。
+step_drain_begin() {
+  STEP_DRAIN_DB="$1"
+  python3 - "$1" "$ACTIVATION_LOCK" "${2:-180}" <<'STEP_DRAIN'
+import json,sqlite3,sys,time
+c=sqlite3.connect(sys.argv[1],timeout=5)
+value=json.dumps({'owner':sys.argv[2],'expires_at':int(time.time()*1000)+(int(sys.argv[3])+120)*1000})
+c.execute("INSERT INTO generation_runtime_control(name,value) VALUES('step-drain',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",(value,))
+c.commit()
+STEP_DRAIN
+}
+step_drain_end() {
+  if [ -z "${STEP_DRAIN_DB:-}" ]; then return 0; fi
+  python3 - "$STEP_DRAIN_DB" "$ACTIVATION_LOCK" <<'STEP_DRAIN'
+import json,sqlite3,sys
+c=sqlite3.connect(sys.argv[1],timeout=5)
+row=c.execute("SELECT value FROM generation_runtime_control WHERE name='step-drain'").fetchone()
+if row and json.loads(row[0]).get('owner')==sys.argv[2]:
+ c.execute("DELETE FROM generation_runtime_control WHERE name='step-drain'")
+c.commit()
+STEP_DRAIN
+  STEP_DRAIN_DB=""
+}
+
+# 复用既有 maintenance 布尔；同表所有权记录只用于 finally 与下次激活恢复原值。
+maintenance_control() {
+  python3 - "$1" "$2" "${3:-}" "$ACTIVATION_LOCK" <<'MAINTENANCE'
+import json, sqlite3, sys, uuid
+from urllib.parse import quote
+path, action, token, lock = sys.argv[1:]
+c=sqlite3.connect('file:'+quote(path)+'?mode=rw',uri=True,isolation_level=None,timeout=5)
+c.execute('BEGIN IMMEDIATE')
+try:
+    row=c.execute("SELECT value FROM generation_runtime_control WHERE name='deployment-maintenance'").fetchone()
+    if action=='begin':
+        current=c.execute("SELECT value FROM generation_runtime_control WHERE name='maintenance'").fetchone()
+        if row:
+            lease=json.loads(row[0])
+            if lease['lock']!=lock: raise RuntimeError('maintenance owner uses another activation lock')
+            original=lease['original']
+            print('MAINTENANCE_RECLAIMED previous interrupted activation',file=sys.stderr)
+        else: original=None if current is None else current[0]
+        if original not in (None,'0','1'): raise RuntimeError('invalid original maintenance value')
+        token=uuid.uuid4().hex
+        c.execute("INSERT INTO generation_runtime_control(name,value) VALUES('deployment-maintenance',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",(json.dumps({'owner':token,'original':original,'lock':lock}),))
+        c.execute("INSERT INTO generation_runtime_control(name,value) VALUES('maintenance','1') ON CONFLICT(name) DO UPDATE SET value='1'")
+    else:
+        if not row: raise RuntimeError('maintenance owner missing')
+        lease=json.loads(row[0])
+        if lease['owner']!=token or lease['lock']!=lock: raise RuntimeError('maintenance ownership changed')
+        if lease['original'] is None: c.execute("DELETE FROM generation_runtime_control WHERE name='maintenance'")
+        else: c.execute("UPDATE generation_runtime_control SET value=? WHERE name='maintenance'",(lease['original'],))
+        c.execute("DELETE FROM generation_runtime_control WHERE name='deployment-maintenance'")
+    c.execute('COMMIT')
+except:
+    c.execute('ROLLBACK'); raise
+if action=='begin': print(token)
+MAINTENANCE
+}
+maintenance_begin() {
+  MAINT_DB="$1"
+  MAINT_TOKEN="$(maintenance_control "$MAINT_DB" begin)"
+}
+maintenance_end() {
+  if [ -n "${MAINT_TOKEN:-}" ]; then
+    maintenance_control "$MAINT_DB" end "$MAINT_TOKEN" || return 1
+    MAINT_TOKEN=""
+  fi
+  step_drain_end
+}
+
+gateway_prepare() {
+  HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
+  local expected="$6" actual
+  DEPLOY_GATE="$7"
+  actual="$(gateway_identity "$GATEWAY_PATH")"
+  [ "$actual" = "$expected" ] || { echo "ACTIVATION_CONFLICT expected=$expected actual=$actual" >&2; exit 76; }
+  trap 'gateway_recover $?' EXIT
+  trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  # H07：旧序「先 maintenance_begin 再 drain ≤180s」= 每次 drain 都让用户吃 ≤3 分钟 503，
+  # 外层再 sleep 重试就是 11-03「更新中」反复弹。现序：软 drain 不开维护 → 清零才开维护 → 短终检。
+  drain_then_maintenance "${12}" "${@:8:6}"
+  # 维护/共享锁已持有；recent 时间窗不能替代执行端真实空闲。
+  # --force（暴君 2026-10-31「给我强行发布」）：跳过执行端空闲检查，在途回合由耐久续接处理。
+  if [ "$8" = "1" ]; then echo "OPENCODE_IDLE_SKIPPED (--force)"; else
+  local active
+  active="$(drain_runtime_inflight_count)"
+  case "$active" in
+    0) echo "OPENCODE_IDLE_CONFIRMED under maintenance and activation lock" ;;
+    ''|*[!0-9]*) echo "OPENCODE_ACTIVITY_UNKNOWN: activation refused" >&2; exit 3 ;;
+    *) echo "OPENCODE_NOT_IDLE: activation refused count=$active" >&2; exit 3 ;;
+  esac
+  fi
+}
+
+gateway_identity() {
+  if [ -L "$1" ]; then printf 'link:%s\n' "$(readlink -f "$1")";
+  elif [ -d "$1" ]; then stat -c 'directory:%d:%i' "$1";
+  else echo "MISSING_GATEWAY" >&2; return 1; fi
+}
+
+capture_gateway_identity() {
+  if [ "$DRY_RUN" -eq 1 ]; then echo dry-run; return; fi
+  { declare -f gateway_identity; printf 'gateway_identity "$1"\n'; } \
+    | run_remote_stdin bash -s -- "$GATEWAY_PATH"
+}
+
+gateway_verify() {
+  [ "$(readlink -f "$GATEWAY_PATH")" = "$1" ] || return 1
+  (cd "$1" && md5sum -c ../manifest.md5 --quiet) || return 1
+  # 逐行复用opencode-release.sh的有界ready loop；restart返回时监听口可能尚未就绪。
+  local code state attempt
+  for attempt in 1 2 3 4 5 6; do
+    state="$(systemctl is-active agent-gateway 2>/dev/null || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
+    if [ "$state" = active ] && [ "$code" = 200 ]; then
+      echo "VERIFY_OK current=$1 manifest=OK healthz=200"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "HEALTH_UNEXPECTED service=$state http=$code" >&2
+  return 1
+}
+
+gateway_recover() {
+  local rc="$1"
+  trap - EXIT
+  if [ "$rc" -ne 0 ] && [ "${GW_CHANGED:-0}" -eq 1 ]; then
+    set +e
+    if ln -sfn "$GW_OLD" "$HARNESS_ROOT/.gateway-link.next" \
+      && mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH" \
+      && bash -c "$DEPLOY_GATE" && gateway_verify "$GW_OLD"; then
+      echo "RECOVERY_OK gateway=$GW_OLD original_exit=$rc" >&2
+    else
+      echo "RECOVERY_FAILED gateway=$GW_OLD original_exit=$rc — 服务恢复未证实" >&2
+    fi
+  fi
+  if ! maintenance_end; then
+    echo "MAINTENANCE_RESTORE_FAILED — 原维护状态未恢复，下次同锁激活可接续" >&2
+    [ "$rc" -ne 0 ] || rc=1
+  fi
+  exit "$rc"
+}
+
+gateway_activate() {
+  local target="$1" old="$2" record="$3" action="$4"
+  GW_OLD="$old"; GW_CHANGED=0
+  ln -sfn "$target" "$HARNESS_ROOT/.gateway-link.next"
+  GW_CHANGED=1
+  mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
+  bash -c "$DEPLOY_GATE"
+  gateway_verify "$target"
+  maintenance_end
+  printf '%s %s %s\n' "$record" "$(date -u +%s)" "$action" >> "$RELEASES_DIR/history.log"
+  GW_CHANGED=0
+  trap - EXIT
+}
+
+# 锁与 deploy.sh 的内部构建锁分离，且覆盖整个远端激活与失败恢复。
+run_gateway_activation() {
+  local -a RA
+  mapfile -t RA < <(remote_args)
+  local rc=0
+  { printf 'ACTIVATION_LOCK=%q\n' "$ACTIVATION_LOCK"; emit_drain_lib;
+    declare -f gateway_identity gateway_prepare gateway_verify gateway_recover gateway_activate; cat; } \
+    | run_remote_stdin sudo flock -n -E 75 "$ACTIVATION_LOCK" bash -s -- \
+      "${RA[@]}" "$GW_EXPECTED" "$DEPLOY_GATE" "$FORCE" \
+      "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
+      "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
+      "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" "$@" || rc=$?
+  explain_exit "$rc"
+  return "$rc"
+}
+
+# 退出码 → 一句人话（不重试，由人决定下一步）。
+explain_exit() {
+  case "$1" in
+    0) ;;
+    3) log "EXIT 3 drain 超时/探测失败：未重启。别写 sleep 重试循环；低峰再发一次，或经暴君同意 --force。" ;;
+    4) log "EXIT 4 drain 冷却中：上次 drain 刚超时，本次未开维护、未探测。" ;;
+    75) log "EXIT 75 ACTIVATION_LOCKED：另一发版正持有激活锁（$ACTIVATION_LOCK 或本机锁）→ 立即退出，不等待不重试。" ;;
+    76) log "EXIT 76 ACTIVATION_CONFLICT：线上身份已被别的发版改动 → 重新 status / guard 后再决定。" ;;
+    129|130|143) log "EXIT $1 信号中断：远端 trap 已尝试恢复维护位与旧 release（见 RECOVERY_*/MAINTENANCE_* 行），用 status 核对 maintenance=0。" ;;
+  esac
+}
+
+# H07 防重入（本机）：同一仓库（含所有 worktree）同时只许一个 gateway release/rollback/adopt。
+# 持锁即退 75，不排队。fd 9 随进程退出释放（含被 kill），无残留锁要清。
+acquire_local_lock() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  command -v flock >/dev/null 2>&1 || { log "WARN 本机无 flock，跳过本机防重入锁（远端激活锁仍生效）"; return 0; }
+  local d
+  d="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "${TMPDIR:-/tmp}")"
+  LOCAL_LOCK="${GW_LOCAL_LOCK:-$d/gateway-release.lock}"
+  exec 9>>"$LOCAL_LOCK" || die "无法打开本机锁 $LOCAL_LOCK"
+  if ! flock -n 9; then
+    log "ACTIVATION_LOCKED 本机已有 gateway-release 在跑（$LOCAL_LOCK）→ exit 75，不等待不重试"
+    exit 75
+  fi
+}
+
+# H07 远端激活锁预检：在打包/上传/祖先闸之前就发现「别人正在发」，立即 75 退出。
+assert_remote_lock_free() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  local rc=0
+  run_remote "sudo flock -n -E 75 '$ACTIVATION_LOCK' true" || rc=$?
+  case "$rc" in
+    0) ;;
+    75) log "ACTIVATION_LOCKED 远端激活锁被占（$ACTIVATION_LOCK：另一 gateway/opencode 发版进行中）→ exit 75，不等待不重试"; exit 75 ;;
+    *) die "远端激活锁预检失败 rc=$rc（SSH/sudo）→ 不发" ;;
+  esac
 }
 
 usage() {
@@ -175,20 +495,27 @@ usage() {
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--files F...] [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
+  guard --sha C           唯读：只跑发版祖先闸（候选是否包含线上全部 commit），不发
+  release --sha C [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
+          [--override-ancestry "<理由>"]
+                          --sha 必填；候选不含线上 commit 时拒发，覆盖须带理由并写审计
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
-                          → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
-                          ⚠️ --files 不可用于本 gateway：release 目录必须是完整档案集，
-                             只放改动档会让目录缺 index.ts（切换前会被起跑闸拦下）。
+                          → drain 闸门 → md5 manifest → 原子切 symlink → deploy.sh 闸门 → 验证
+                          必须发布完整的已提交 commit 快照；--files 在本地立即拒绝。
                           --force：跳过重启前 drain（仍有在途会话时也立即重启）
   rollback [--dry-run] [--force]
-                          回滚：切 symlink 回上一个 release → drain + 同一道 deploy.sh 闸门 → 验证
+                          回滚：drain → 切 symlink 回上一个 release → deploy.sh 闸门 → 验证
   adopt [--dry-run]       一次性：把实体 /opt/agent-harness/gateway 封存成 baseline release
                           并换成受管 symlink（此后 release/rollback 才可用）
 
 环境可覆写：GW_SSH_KEY GW_SSH_TARGET GW_SSH_PORT GW_HARNESS_ROOT GW_GATEWAY_PATH
             GW_RELEASES_DIR GW_DEPLOY_GATE GW_HEALTH_URL GW_OWNER
             GW_DRY_REMOTE_LOG（--dry-run 时把远端脚本另存到该档，供 bash -n 检查）
+            GW_DRAIN_FINAL_SECS（开维护后终检 drain 上界，默认 30）
+            GW_DRAIN_COOLDOWN_SECS / GW_DRAIN_COOLDOWN_MAX_SECS（drain 超时退避，默认 600 / 3600；0 关闭）
+            GW_DRAIN_STAMP（远端退避戳，默认 $HARNESS_ROOT/.drain-timeout.stamp）
+            GW_LOCAL_LOCK（本机防重入锁，默认 <git common dir>/gateway-release.lock）
+退出码：0 成功 1 失败 2 用法 3 drain 超时 4 drain 冷却 75 持锁 76 身份冲突 129/130/143 信号
 EOF
 }
 
@@ -201,10 +528,8 @@ parse_flags() {
       --force) FORCE=1 ;;
       --fast) SKIP_RECON=1; FORCE=1; SKIP_MEDIA_WF_COVERAGE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
-      --files)
-        shift
-        while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do EXPLICIT_FILES+=("$1"); shift; done
-        continue ;;
+      --override-ancestry) shift; guard_set_override "${1:-}" ;;
+      --files) die "--files 已禁用：gateway 必须发布完整的已提交 commit 快照，请使用 release --sha <commit>" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
     esac
@@ -238,10 +563,56 @@ assert_gateway_tree_clean() {
 # 落到呼叫端本来就写好的 `case "$base" in ""|unknown-baseline) base="HEAD"` 分支。
 current_release_sha() {
   [ "$DRY_RUN" -eq 1 ] && return 0
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" \
     "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null || true" 2>/dev/null | head -1 || true
 }
 
+
+# 发版祖先闸的线上读取（只读 SSH；--dry-run 照样读真线上）。输出：
+#   LINK link:<当前 release files 绝对路径>   SHA <meta.env GIT_SHA>   HOT <HOTPATCH.log 热装 commit>…
+gateway_online_state() {
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" bash -s -- "$GATEWAY_PATH" <<'REMOTE'
+set -u
+cur="$(readlink -f "$1" 2>/dev/null || true)"
+[ -n "$cur" ] || exit 0
+echo "LINK link:$cur"
+d="$(dirname "$cur")"
+sed -n 's/^GIT_SHA=//p' "$d/meta.env" 2>/dev/null | head -1 | sed 's/^/SHA /'
+[ -f "$d/HOTPATCH.log" ] && grep -o 'hot-install [0-9a-f]\{7,40\}' "$d/HOTPATCH.log" | awk '{print "HOT " $2}'
+exit 0
+REMOTE
+}
+
+guard_remote_append() {
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_TARGET" "sudo tee -a '$1' >/dev/null"
+}
+
+# $1=候选完整 sha。须在 GW_EXPECTED 抓取之后调用（见 release-ancestry-guard.sh 竞态说明）。
+gateway_ancestry_gate() {
+  local cand="$1" state link="" k v
+  local -a online=()
+  state="$(gateway_online_state)" || die "读线上 gateway 版本失败（SSH）→ 不发"
+  while read -r k v; do
+    case "$k" in
+      LINK) link="$v" ;;
+      SHA|HOT) case "$v" in *[!0-9a-f]*|'') online=(); link="BAD:$v"; break ;; *) online+=("$v") ;; esac ;;
+    esac
+  done <<< "$state"
+  case "$link" in BAD:*) log "线上 meta.env GIT_SHA=${link#BAD:} 不是 commit"; online=() ;; esac
+  if [ "$DRY_RUN" -eq 0 ] && [ -n "${GW_EXPECTED:-}" ] && [ "$link" != "$GW_EXPECTED" ]; then
+    die "祖先闸读到的线上（$link）与激活身份（$GW_EXPECTED）不一致：有人正在并行发版 → 不发"
+  fi
+  guard_check_ancestry gateway "$cand" "$REPO_ROOT" "$DRY_RUN" guard_remote_append "${online[@]}"
+}
+
+cmd_guard() {
+  preflight_local
+  guard_require_explicit_sha "$SHA" "gateway-release.sh guard"
+  DRY_RUN=1
+  local sha_full
+  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  gateway_ancestry_gate "$sha_full"
+}
 
 # 2026-10-11 修画布：近 N 天媒体会话 workflow_write 覆盖率发版门（默认 7 天 ≥15%）。
 # 只读查 VPS ledger + opencode.db；样本不足（<5）跳过不挡。可用 --skip-media-wf-coverage 跳过。
@@ -311,117 +682,77 @@ fi
 if command -v curl >/dev/null 2>&1; then
   echo "healthz=$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
 fi
+# H07：「更新中」排障三件——维护位/租约、激活锁、drain 冷却戳（全唯读）
+SDB="$HARNESS_ROOT/state/sessions.db"
+if [ -f "$SDB" ]; then
+  m="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$SDB" "SELECT value FROM generation_runtime_control WHERE name='maintenance';" 2>/dev/null || echo ERR)"
+  l="$(sudo sqlite3 -readonly -cmd '.timeout 3000' "$SDB" "SELECT COUNT(*) FROM generation_runtime_control WHERE name='deployment-maintenance';" 2>/dev/null || echo ERR)"
+  echo "maintenance=${m:-unset} deployment_lease=${l}"
+fi
+LK="$HARNESS_ROOT/.harness-activation.lock"
+if [ -e "$LK" ]; then
+  if sudo flock -n "$LK" true 2>/dev/null; then echo "activation_lock=free"; else echo "activation_lock=HELD"; fi
+fi
+ST="$HARNESS_ROOT/.drain-timeout.stamp"
+if [ -f "$ST" ]; then echo "drain_timeout_stamp=$(cat "$ST") now=$(date +%s)"; else echo "drain_timeout_stamp=none"; fi
 REMOTE
 }
 
 # ── adopt（一次性）──────────────────────────────────────────────────────
 cmd_adopt() {
   preflight_local
-  local ts rel
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  rel="baseline-$ts"
-  log "== adopt：$GATEWAY_PATH（实体目录）→ symlink → $RELEASES_DIR/$rel/files =="
-  log "⚠️ 一次性、对生产有实质影响的操作；本脚本从未对生产验证过，请人工确认后再跑。"
-  local -a RA
-  mapfile -t RA < <(remote_args)
-  run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$STATE_DIR" <<'REMOTE'
+  acquire_local_lock
+  assert_remote_lock_free
+  local GW_EXPECTED rel
+  GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
+  rel="baseline-$(date -u +%Y%m%dT%H%M%SZ)"
+  run_gateway_activation "$rel" "$STATE_DIR" <<'REMOTE'
 set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"; rel="$6"; STATE_DIR="$7"
-STATE_ITEMS=(sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches)
+gateway_prepare "$@"
+rel="${14}"; STATE_DIR="${15}"
 if [ -L "$GATEWAY_PATH" ]; then echo "ALREADY_ADOPTED"; exit 0; fi
-[ -d "$GATEWAY_PATH" ] || { echo "NO_GATEWAY_DIR: $GATEWAY_PATH"; exit 1; }
-sudo mkdir -p "$RELEASES_DIR/$rel"
-sudo mv "$GATEWAY_PATH" "$RELEASES_DIR/$rel/files"
-sudo ln -s "$RELEASES_DIR/$rel/files" "$GATEWAY_PATH"
-sudo chown -h "$OWNER" "$GATEWAY_PATH" 2>/dev/null || true
-sudo chown -R "$OWNER" "$RELEASES_DIR/$rel" 2>/dev/null || true
-
-# 状态与代码分离：把执行时状态集中到 $STATE_DIR，release 目录只留 symlink。
-# 首次（此处）＝迁移；之后每次 release 只是重建同一组 symlink，资料不随版本搬移，
-# 因此回滚到 baseline 也仍读到同一份会话库，不会回退成空库。
-sudo mkdir -p "$STATE_DIR"
-for it in "${STATE_ITEMS[@]}"; do
-  if [ -e "$RELEASES_DIR/$rel/files/$it" ] && [ ! -e "$STATE_DIR/$it" ]; then
-    sudo mv "$RELEASES_DIR/$rel/files/$it" "$STATE_DIR/$it"
-  fi
-  if [ -e "$STATE_DIR/$it" ]; then
-    sudo ln -sfn "$STATE_DIR/$it" "$RELEASES_DIR/$rel/files/$it"
-  fi
+[ -d "$GATEWAY_PATH" ] || { echo "NO_GATEWAY_DIR"; exit 1; }
+mkdir -p "$RELEASES_DIR/$rel" "$STATE_DIR"
+mv "$GATEWAY_PATH" "$RELEASES_DIR/$rel/files"
+# 立即建立旧内容链接；失败恢复仍指向同一份原有代码，不回滚运行状态。
+ln -s "$RELEASES_DIR/$rel/files" "$GATEWAY_PATH"
+for it in sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches; do
+  if [ -e "$RELEASES_DIR/$rel/files/$it" ] && [ ! -e "$STATE_DIR/$it" ]; then mv "$RELEASES_DIR/$rel/files/$it" "$STATE_DIR/$it"; fi
+  if [ -e "$STATE_DIR/$it" ]; then ln -sfn "$STATE_DIR/$it" "$RELEASES_DIR/$rel/files/$it"; fi
 done
-sudo chown -R "$OWNER" "$STATE_DIR" 2>/dev/null || true
-
-cd "$RELEASES_DIR/$rel/files"
-find . -type f -print0 | sort -z | xargs -0 md5sum > "../manifest.md5"
-{
-  echo "RELEASE_ID=$rel"
-  echo "GIT_SHA=unknown-baseline"
-  echo "CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "FILE_COUNT=$(wc -l < ../manifest.md5)"
-  echo "NOTE=adopted-baseline（非 commit 快照；内容为 adopt 当下的生产目录，可能含漂移）"
-} > "../meta.env"
-echo "$rel unknown-baseline $(date -u +%s) adopt" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
-echo "ADOPTED current=$(readlink -f "$GATEWAY_PATH")"
+chown -R "$OWNER" "$RELEASES_DIR/$rel" "$STATE_DIR"
+(cd "$RELEASES_DIR/$rel/files" && find . -type f -print0 | sort -z | xargs -0 md5sum > ../manifest.md5)
+printf 'GIT_SHA=unknown-baseline\nRELEASE_ID=%s\n' "$rel" > "$RELEASES_DIR/$rel/meta.env"
+gateway_activate "$RELEASES_DIR/$rel/files" "$RELEASES_DIR/$rel/files" "$rel unknown-baseline" adopt
 REMOTE
-  if [ "$DRY_RUN" -eq 0 ]; then
-    log "== adopt 后跑既有服务闸门（确认 symlink 路径仍可服务）=="
-    run_remote "$DEPLOY_GATE"
-    verify_release "$RELEASES_DIR/$rel/files"
-  fi
+  log "adopt 完成：$rel"
 }
 
-# ── release ─────────────────────────────────────────────────────────────
 cmd_release() {
   preflight_local
+  guard_require_explicit_sha "$SHA" "gateway-release.sh release"
   assert_gateway_tree_clean
-
+  acquire_local_lock
+  assert_remote_lock_free
   local sha_full sha_short ts rel
-  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" \
-    || die "无法解析 commit：${SHA:-HEAD}"
+  sha_full="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
+  # 先抓激活身份再跑祖先闸：此后若有人并行发版，激活阶段 ACTIVATION_CONFLICT 会拦下。
+  local GW_EXPECTED
+  GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
+  gateway_ancestry_gate "$sha_full"
+  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha_full" --repo "$REPO_ROOT"; fi
   sha_short="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha_full")"
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  rel="$sha_short-$ts"
-
-  if [ "${#EXPLICIT_FILES[@]}" -gt 0 ]; then
-    for f in "${EXPLICIT_FILES[@]}"; do
-      case "$f" in "$SRC_SUBDIR"/*) ;; *) die "--files 必须是 $SRC_SUBDIR/ 下的路径：$f" ;; esac
-      git -C "$REPO_ROOT" cat-file -e "$sha_full:$f" 2>/dev/null || die "该 commit 不含此档：$f"
-    done
-    log "== 精准发布（--files，${#EXPLICIT_FILES[@]} 档）：$sha_short → $rel =="
-  else
-    log "== 完整快照发布：$SRC_SUBDIR @ $sha_short → $rel =="
-    log "   （git archive 该 commit 的完整档案集：不含工作区未 commit 改动，也不会有旧档残留）"
-  fi
-
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"; rel="$sha_short-$ts-$$"
   run_recon
-  run_media_wf_coverage
-
-  local stage_tar="/tmp/gw-release-$rel.tar"
-  local stage_dir="/tmp/gw-release-$rel"
-
-  if [ "${#EXPLICIT_FILES[@]}" -gt 0 ]; then
-    local tmp_tar
-    tmp_tar="$(mktemp -t gw-partial.XXXXXX.tar)"
-    tar -C "$REPO_ROOT" -cf "$tmp_tar" "${EXPLICIT_FILES[@]}"
-    run_remote_binary "cat > $stage_tar" < "$tmp_tar"
-    rm -f "$tmp_tar"
-  else
-    git -C "$REPO_ROOT" archive --format=tar "$sha_full" "$SRC_SUBDIR" \
-      | run_remote_binary "cat > $stage_tar"
-  fi
-
-  local -a RA
-  mapfile -t RA < <(remote_args)
-  run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$sha_full" "$sha_short" "$stage_tar" "$stage_dir" "$STATE_DIR" <<'REMOTE'
+  # 2026-10-28 用户裁定：媒体会话 workflow_write 覆盖率不再作为发版门（run_media_wf_coverage 保留但不调用，见根因 note）。
+  local stage_tar="/tmp/gw-release-$rel.tar" stage_dir="/tmp/gw-release-$rel"
+  git -C "$REPO_ROOT" archive --format=tar "$sha_full" "$SRC_SUBDIR" | run_remote_binary "cat > $stage_tar"
+  run_gateway_activation "$rel" "$sha_full" "$sha_short" "$stage_tar" "$stage_dir" "$STATE_DIR" <<'REMOTE'
 set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
-rel="$6"; sha_full="$7"; sha_short="$8"; stage_tar="$9"; stage_dir="${10}"; STATE_DIR="${11}"
+gateway_prepare "$@"
+rel="${14}"; sha_full="${15}"; sha_short="${16}"; stage_tar="${17}"; stage_dir="${18}"; STATE_DIR="${19}"
 STATE_ITEMS=(sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches)
-
-if [ ! -L "$GATEWAY_PATH" ]; then
-  echo "NOT_ADOPTED: $GATEWAY_PATH 不是 symlink → 先跑 adopt（见脚本头部假设 A）"
-  exit 1
-fi
-
+[ -L "$GATEWAY_PATH" ] || { echo "NOT_ADOPTED"; exit 1; }
 REL_DIR="$RELEASES_DIR/$rel"
 sudo mkdir -p "$REL_DIR/files" "$stage_dir"
 # $REL_DIR 由 sudo mkdir 建立＝root 所有，但 manifest.md5／meta.env 是后续「非 sudo」写入
@@ -447,6 +778,7 @@ sudo mkdir -p "$STATE_DIR"
 for it in "${STATE_ITEMS[@]}"; do
   if [ ! -e "$STATE_DIR/$it" ] && [ -n "$CUR_DIR" ] && [ -e "$CUR_DIR/$it" ]; then
     sudo mv "$CUR_DIR/$it" "$STATE_DIR/$it"
+    sudo ln -sfn "$STATE_DIR/$it" "$CUR_DIR/$it"
   fi
   if [ -e "$STATE_DIR/$it" ]; then
     sudo ln -sfn "$STATE_DIR/$it" "$REL_DIR/files/$it"
@@ -480,92 +812,36 @@ if [ ! -f "$REL_DIR/files/index.ts" ]; then
   exit 1
 fi
 
-# 原子切换：先建 next symlink，再 mv -T 一次性 rename 覆盖（同档案系统）
-sudo ln -sfn "$REL_DIR/files" "$HARNESS_ROOT/.gateway-link.next"
-sudo mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
 
-echo "$rel $sha_full $(date -u +%s) release" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
-echo "SWITCHED current=$(readlink -f "$GATEWAY_PATH") files=$FILE_COUNT"
+old="$(readlink -f "$GATEWAY_PATH")"
+gateway_activate "$REL_DIR/files" "$old" "$rel $sha_full" release
 REMOTE
-
-  if [ "$DRY_RUN" -eq 0 ]; then
-    log "== 既有服务闸门：$DEPLOY_GATE =="
-    if ! run_drain_gate; then die "部署前 drain 未通过：仍有在途会话（等它收束后重试，或加 --force 立即重启）"; fi
-    run_remote "$DEPLOY_GATE"
-    verify_release "$RELEASES_DIR/$rel/files"
-  fi
   log "release 完成：$rel"
 }
 
-# ── rollback ────────────────────────────────────────────────────────────
 cmd_rollback() {
   preflight_local
-  log "== rollback：切回上一个 release =="
-  local -a RA
-  mapfile -t RA < <(remote_args)
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY-RUN：略过「解析上一个 release」（需连线读 releases 目录）"
-    run_remote_stdin bash -s -- "${RA[@]}" <<'REMOTE'
+  acquire_local_lock
+  assert_remote_lock_free
+  local GW_EXPECTED
+  GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
+  run_gateway_activation <<'REMOTE'
 set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
-if [ ! -L "$GATEWAY_PATH" ]; then echo "NOT_ADOPTED"; exit 1; fi
-CUR="$(basename "$(dirname "$(readlink -f "$GATEWAY_PATH")")")"
+gateway_prepare "$@"
+[ -L "$GATEWAY_PATH" ] || { echo "NOT_ADOPTED"; exit 1; }
+old="$(readlink -f "$GATEWAY_PATH")"
+CUR="$(basename "$(dirname "$old")")"
 mapfile -t RELS < <(ls -1dt "$RELEASES_DIR"/*/ 2>/dev/null | sed 's:/$::' | xargs -n1 basename)
 idx=-1
 for i in "${!RELS[@]}"; do [ "${RELS[$i]}" = "$CUR" ] && { idx=$i; break; }; done
-[ "$idx" -ge 0 ] || { echo "CURRENT_NOT_IN_RELEASES:$CUR" >&2; exit 1; }
+[ "$idx" -ge 0 ] || { echo "CURRENT_NOT_IN_RELEASES"; exit 1; }
 next=$((idx+1))
-[ "$next" -lt "${#RELS[@]}" ] || { echo "NO_PREVIOUS_RELEASE (current=$CUR)" >&2; exit 1; }
-echo "PREV=${RELS[$next]}"
-PREV_DIR="$RELEASES_DIR/${RELS[$next]}/files"
-[ -d "$PREV_DIR" ] || { echo "MISSING_PREV_DIR"; exit 1; }
-( cd "$PREV_DIR" && md5sum -c "$RELEASES_DIR/${RELS[$next]}/manifest.md5" --quiet ) || { echo "PREV_MANIFEST_FAIL"; exit 1; }
-sudo ln -sfn "$PREV_DIR" "$HARNESS_ROOT/.gateway-link.next"
-sudo mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
-echo "${RELS[$next]} rollback $(date -u +%s) rollback" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
-echo "ROLLED_BACK current=$(readlink -f "$GATEWAY_PATH")"
+[ "$next" -lt "${#RELS[@]}" ] || { echo "NO_PREVIOUS_RELEASE"; exit 1; }
+prev="${RELS[$next]}"; PREV_DIR="$RELEASES_DIR/$prev/files"
+(cd "$PREV_DIR" && md5sum -c ../manifest.md5 --quiet) || { echo "PREV_MANIFEST_FAIL"; exit 1; }
+gateway_activate "$PREV_DIR" "$old" "$prev rollback" rollback
 REMOTE
-    log "rollback dry-run 结束（未连线、未切换）"
-    return 0
-  fi
-
-  local prev
-  prev="$(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" bash -s -- "${RA[@]}" <<'REMOTE'
-set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
-[ -L "$GATEWAY_PATH" ] || { echo "NOT_ADOPTED" >&2; exit 1; }
-CUR="$(basename "$(dirname "$(readlink -f "$GATEWAY_PATH")")")"
-mapfile -t RELS < <(ls -1dt "$RELEASES_DIR"/*/ 2>/dev/null | sed 's:/$::' | xargs -n1 basename)
-idx=-1
-for i in "${!RELS[@]}"; do [ "${RELS[$i]}" = "$CUR" ] && { idx=$i; break; }; done
-[ "$idx" -ge 0 ] || { echo "CURRENT_NOT_IN_RELEASES:$CUR" >&2; exit 1; }
-next=$((idx+1))
-[ "$next" -lt "${#RELS[@]}" ] || { echo "NO_PREVIOUS_RELEASE (current=$CUR)" >&2; exit 1; }
-echo "${RELS[$next]}"
-REMOTE
-)"
-  [ -n "$prev" ] || die "取不到上一个 release（rollback 目标为空）"
-  log "rollback 目标：$prev"
-
-  run_remote_stdin bash -s -- "${RA[@]}" "$prev" <<'REMOTE'
-set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"; prev="$6"
-PREV_DIR="$RELEASES_DIR/$prev/files"
-[ -d "$PREV_DIR" ] || { echo "MISSING_PREV_DIR: $PREV_DIR"; exit 1; }
-[ -f "$RELEASES_DIR/$prev/manifest.md5" ] || { echo "MISSING_PREV_MANIFEST"; exit 1; }
-( cd "$PREV_DIR" && md5sum -c "$RELEASES_DIR/$prev/manifest.md5" --quiet ) || { echo "PREV_MANIFEST_FAIL"; exit 1; }
-sudo ln -sfn "$PREV_DIR" "$HARNESS_ROOT/.gateway-link.next"
-sudo mv -T "$HARNESS_ROOT/.gateway-link.next" "$GATEWAY_PATH"
-echo "$prev rollback $(date -u +%s) rollback" | sudo tee -a "$RELEASES_DIR/history.log" >/dev/null
-echo "ROLLED_BACK current=$(readlink -f "$GATEWAY_PATH")"
-REMOTE
-
-  log "== 既有服务闸门：$DEPLOY_GATE =="
-  if ! run_drain_gate; then die "回滚前 drain 未通过：仍有在途会话（等它收束后重试，或加 --force 立即重启）"; fi
-  run_remote "$DEPLOY_GATE"
-  verify_release "$RELEASES_DIR/$prev/files"
-  log "rollback 完成：$prev"
+  log "rollback 完成"
 }
 
 # ── 收尾验证（symlink 指向 + manifest + healthz）─────────────────────────
@@ -590,7 +866,9 @@ main() {
   [ -n "$cmd" ] || { usage; exit 2; }
   shift || true
   case "$cmd" in
+    __emit-drain) emit_drain_lib ;;
     status) parse_flags "$@"; cmd_status ;;
+    guard) parse_flags "$@"; cmd_guard ;;
     release) parse_flags "$@"; cmd_release ;;
     rollback) parse_flags "$@"; cmd_rollback ;;
     adopt) parse_flags "$@"; cmd_adopt ;;

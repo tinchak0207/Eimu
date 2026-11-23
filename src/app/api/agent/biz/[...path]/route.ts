@@ -115,6 +115,70 @@ async function proxy(req: NextRequest, context: RouteContext, method: "GET" | "P
   // SSE 特判：GET 且末段是 events（/agent/v1/sessions/:id/events）。
   // 不带超时（事件流可以合法地静默数分钟），流式透传。
   const segments = subPath.split("/");
+  // Reuse the owned-session attachment handler for local files. Only this exact
+  // route accepts multipart; other POSTs keep their JSON contract.
+  if (method === "POST" && /^sessions\/[^/]+\/attachments$/.test(subPath)) {
+    const contentType = req.headers.get("content-type") ?? "";
+    if (!/^multipart\/form-data\s*;/i.test(contentType)) return fail(400, "请用 multipart/form-data 的 file 字段上传文件。", "invalid_upload_type");
+    const maxBytes = 4 * 1024 * 1024 + 64 * 1024;
+    const declaredLength = req.headers.get("content-length");
+    if (declaredLength && (!/^\d+$/.test(declaredLength) || Number(declaredLength) > maxBytes)) return fail(413, "上传请求过大，单文件上限4MiB。", "payload_too_large");
+    const reader = req.body?.getReader();
+    if (!reader) return fail(400, "上传内容为空。", "empty_upload");
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > maxBytes) {
+          await reader.cancel();
+          return fail(413, "上传请求过大，单文件上限4MiB。", "payload_too_large");
+        }
+        chunks.push(chunk.value);
+      }
+      const upload = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${resolved.key}`, "Content-Type": contentType },
+        body: Buffer.concat(chunks),
+        cache: "no-store",
+        signal: AbortSignal.timeout(BIZ_PROXY_JSON_TIMEOUT_MS),
+      });
+      const text = await upload.text();
+      return new Response(upload.ok ? text : sanitizeUpstreamBody(text), { status: upload.status, headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" } });
+    } catch {
+      return fail(502, "附件上传失败，请核对会话状态后重试。", "attachment_upload_unavailable");
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  // Published artifact downloads are binary; never decode/sanitize a successful body as text.
+  if (method === "GET" && /^sessions\/[^/]+\/artifacts\/[1-9]\d*\/versions\/[1-9]\d*\/download$/.test(subPath)) {
+    let download: Response;
+    // Bound connection/headers, then let the authenticated file stream finish.
+    // AbortSignal.timeout would also abort an otherwise healthy large body.
+    const connection = new AbortController();
+    const connectionTimeout = setTimeout(() => connection.abort(), BIZ_PROXY_JSON_TIMEOUT_MS);
+    try {
+      download = await fetch(upstreamUrl, {
+        headers: { Authorization: `Bearer ${resolved.key}` },
+        cache: "no-store",
+        signal: connection.signal,
+      });
+    } catch {
+      return fail(502, "产物下载服务暂不可用。", "artifact_download_unavailable");
+    } finally {
+      clearTimeout(connectionTimeout);
+    }
+    if (!download.ok) return new Response(sanitizeUpstreamBody(await download.text()), { status: download.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    const headers = new Headers({ "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
+    for (const name of ["content-type", "content-length", "content-disposition", "x-artifact-sha256"]) {
+      const value = download.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+    return new Response(download.body, { status: download.status, headers });
+  }
   if (method === "GET" && segments[segments.length - 1] === "events") {
     let events: Response;
     try {

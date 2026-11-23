@@ -3,15 +3,17 @@ import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import path from "node:path"
 import { loadUserSettings, sweepStaleRows } from "./persistence"
-import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection } from "./subagent"
+import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection, composeNoteWakeInjection } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { setSteerTurnDeliverer } from "./steer-gw.ts"
+import { setQueuedUserMessageDeliverer } from "./queued-user-messages.ts"
 import { handleSendMessage } from "./messages-gw.ts"
 import { resolveSession, sessions, findSessionByOpenCodeId, teardownSession, deleteOpencodeSession, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { corsOriginFor, corsHeaders, encoder, sseTickets, uploadTickets } from "./auth-gw.ts"
 import { handleRequest } from "./router.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { opencodeHeaders, connectOpencode } from "./opencode-client.ts"
 import { opencodeErrorMessage } from "./emit-helpers.ts"
@@ -77,6 +79,21 @@ setSteerTurnDeliverer(async (state, text) => {
   })
   const res = await handleSendMessage(state.apiKey, state.sessionId, req)
   return res.ok
+})
+
+// ─── 2026-11-13：回合在途排队消息的投递缝（写法同上方 setSteerTurnDeliverer）──
+// 排队时存的是原始 JSON body，这里是原样回放给**既有受理链**（记忆注入/计时/闸门/
+// 压缩让位全套语义原样生效），不另写一套投递逻辑。合成 Request 只为满足既有签名。
+setQueuedUserMessageDeliverer(async (state, body) => {
+  const req = new Request(`http://gateway.internal/agent/v1/sessions/${state.sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const res = await handleSendMessage(state.apiKey, state.sessionId, req)
+  // 5xx＝上游/后端暂时不可达，兜底 tick 值得重试；4xx＝确定性拒绝（注入闸拦截、
+  // 会话不存在等），重试不会变好，由排队模块如实告知并出队。
+  return { accepted: res.ok, retryable: res.status >= 500 }
 })
 
 const server = Bun.serve({
@@ -198,7 +215,7 @@ setInterval(() => {
 // ── R6（2026-09-10）subagent async 完成唤醒 ─────────────────────────────
 // async dispatch 的子代理终态（成功/失败皆唤）时，把结果摘要以系统消息投进
 // 父会话并续 turn。轮子 = workflow 唤醒扫描器的 prompt_async 段（2026-09-01 修 3）：
-// beastAgentField 带 agent 栏＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
+// beastAgentField 带 agent 栏（野兽 orchestrator／否则 creator，H43）＋lastPromptBody 落盘＋turn 计数重置＋watchdog 布哨。
 // 幂等：finishRun 的 status 守卫保每 run 只唤一次；父回合 ackTimer 仍在时
 // 推进 session.pendingSubagentWakes（上限 32，丢最旧），回合结束再注入，不丢弃。
 //
@@ -244,11 +261,12 @@ async function wakeSessionForSubagentNote(parentState: any, note: { id: string; 
   // 旧版此处直接 `${note.text}` 未过 scrub＝红线 4 的旁路，已堵）。
   // FIX-G4（U1）：唤醒时把「未送达回报队列」一并送达（此前该队列只写不读＝黑洞）。队列块空则
   // 逐字＝既有文案（零回归）；送达成功即清空队列，失败（非 2xx）不清空以便下次重试。
-  const content = composeSubagentWakeInjection(
+  const content = composeNoteWakeInjection(
     renderSubagentNoteQueueBlock(parentState.subagentNotes),
     renderSubagentNoteWakeContent(note),
   )
-  const body = { ...beastAgentField(parentState), parts: [{ type: "text", text: content }] }
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(parentState, { ...beastAgentField(parentState), parts: [{ type: "text", text: content }] })
   try {
     const res = await fetch(`${OPENCODE_URL}/session/${parentState.opencodeSessionId}/prompt_async`, {
       method: "POST",
@@ -308,7 +326,8 @@ async function deliverSubagentWakes(state: any, runs: SubagentWakeRun[]): Promis
     runs.map(subagentWakeBlock).join("\n\n"),
   )
   state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
-  const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  // H19：唤醒回合挂原始需求钉（只进 body.system，不进 parts）。
+  const body = withPinnedWakeSystem(state, { ...beastAgentField(state), parts: [{ type: "text", text: content }] })
   const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     headers: opencodeHeaders(),

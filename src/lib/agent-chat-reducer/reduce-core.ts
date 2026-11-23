@@ -91,7 +91,7 @@ export function lastNonEmptyLine(text: string): string {
  *
  * `pending`（2026-09-18 中继态）**不在这里判死**：turn 结束只代表这一轮助手文本
  * 说完了，不代表成品到了 —— 提交型生图/生片工具的任务此刻仍在上游跑，成品
- * （image/video/audio.done）或失败（image.failed）事件可能落在下一轮里。判死它
+ * （image/video/audio.done）或失败（image/video/audio.failed）事件可能落在下一轮里。判死它
  * 就是谎报失败，所以 pending 必须留着等那两类事件结算。
  */
 export function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {

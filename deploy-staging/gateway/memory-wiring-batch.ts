@@ -4,6 +4,8 @@ import { hashKey } from "./auth-gw"
 import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL } from "./constants-gateway"
 import { MEMORY_SIGNATURE_HEADER, signMemoryBytes, type MemorySessionRecord } from "./memory-batch"
 import { bindingRef } from "./model-registry"
+import { memoryPrefs } from "./memory-history-wiring"
+import { redactSecrets } from "./memory-redact"
 // ── 批次接线（契约 §3.5/§8；轮子表 §10）──────────────────────────────────
 
 // PRD §5.2 条件③：知识型（外部信息摄入）工具集，排序加权用。
@@ -28,7 +30,8 @@ export async function memoryTranscriptOf(opencodeSessionId: string): Promise<str
       }
     }
   }
-  const transcript = lines.join("\n")
+  // 记忆 v2：送 curator LLM 前脱敏（对标 Codex：送模型前＋入库前各一道）。
+  const transcript = redactSecrets(lines.join("\n"))
   // 上限比照轮子 100k 量级再收敛（curator 输入面）；超长取尾——最近回合最有价值。
   return transcript.length > 60_000 ? transcript.slice(-60_000) : transcript
 }
@@ -81,6 +84,8 @@ export async function memoryListSessions(): Promise<MemorySessionRecord[]> {
     const rec: MemorySessionRecord = { id, parentId, updatedAt }
     try {
       const row = loadSessionByOpencodeId(id) // 只读 DB row，不走 findSessionByOpenCodeId（那会把会话僵尸复活进内存）
+      // 记忆 v2（2026-11-06）：临时对话、或账号已关闭「自动记录新记忆」→ 不进批次候选（不抽取、不写）。
+      if (row && (row.data?.memoryTemporary === true || (row.apiKey && !memoryPrefs(row.apiKey).generate))) continue
       if (row?.apiKey) rec.ownerKey = await hashKey(row.apiKey)
     } catch {
       /* ownerKey 缺失 → private 无处安放（批次按 g4_no_owner 记帐） */

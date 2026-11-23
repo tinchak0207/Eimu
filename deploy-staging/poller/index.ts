@@ -23,6 +23,20 @@ const MAX_WAITING_BUDGET_EXCEEDED = parseInt(
   process.env.POLLER_MAX_WAITING_BUDGET_EXCEEDED ?? "4",
   10,
 );
+// H17 卡死回收（2026-11-04）：超时按回执登记时刻 created_at（网关耐久）算，poller 重启不再清零重计。
+// 阈值取自平台近 30 天真实成功耗时：图片 p99≈51–64min（最慢 697min）、视频 p99≈193min（最慢 245min）。
+// 到点只把回执收尾为 failed（不重提、本层不碰钱）；之后每 10min 继续对账原 ID，晚到成功照样补交付，
+// 直到 created_at+24h（与平台 provider 对账窗口一致）才彻底停查。
+const IMAGE_REAP_MIN = parseInt(process.env.POLLER_IMAGE_REAP_MIN ?? "180", 10);
+const VIDEO_REAP_MIN = parseInt(process.env.POLLER_VIDEO_REAP_MIN ?? "360", 10);
+const LATE_RECONCILE_HOURS = parseInt(process.env.POLLER_LATE_RECONCILE_HOURS ?? "24", 10);
+const LATE_RECONCILE_INTERVAL_MS = parseInt(process.env.POLLER_LATE_RECONCILE_INTERVAL_MS ?? "600000", 10);
+// 存量保护：上线前登记的回执（含 11-03 poller 停机期间卡住的 queued）一律不接管、不改状态、不唤醒会话，
+// 只记数，等暴君拍板。截止时刻写死在代码里，后续重启不会把它挪后；env 只用于拍板后放行。
+const STOCK_CUTOFF_MS = Date.parse(process.env.POLLER_STOCK_CUTOFF ?? "2026-11-04T05:00:00+08:00");
+function reapAfterMs(kind: TaskKind): number {
+  return (kind === "video" ? VIDEO_REAP_MIN : IMAGE_REAP_MIN) * 60_000;
+}
 
 try {
   new URL(GATEWAY_URL);
@@ -57,6 +71,11 @@ interface PendingTask {
   waiting_budget_exceeded_count: number;
   // 硬终止后停 poll（可保留 map 防 recover 重置计数）；绝不 resubmit。
   tracking_exhausted?: boolean;
+  // 回执已是终态（failed/refunded/cancelled 或超时收尾）；之后只做低频晚到成功对账，不再投 failed。
+  terminal_reported?: boolean;
+  last_polled_at?: number;
+  // 平台最后一次回的 status（queued/running/submit_unknown…），写进超时原因给人看。
+  last_platform_status?: string;
 }
 
 interface PlatformResponse {
@@ -291,6 +310,7 @@ async function pollTask(task: PendingTask): Promise<PollResult> {
   }
 
   const status = body.status;
+  if (typeof status === "string") task.last_platform_status = status;
   const costCoins =
     typeof body.cost_coins === "number"
       ? body.cost_coins
@@ -380,23 +400,33 @@ async function gatewayReceipt(path: string, body: unknown): Promise<any> {
   return result;
 }
 let recoveredAt = 0;
+let lastStockSkipped = -1;
 async function recoverPending(): Promise<void> {
   // SQLite on the gateway is the authoritative registry; this Map is only a polling cache.
   const snapshot = await gatewayReceipt("/internal/job-pending", {});
   const active = new Set<string>();
+  let stockSkipped = 0;
   for (const receipt of snapshot.tasks || []) {
     active.add(receipt.task_id);
     if (pendingTasks.has(receipt.task_id)) continue;
+    if (!(receipt.created_at >= STOCK_CUTOFF_MS)) { stockSkipped++; continue; }
     try {
       const credentialSession = receipt.credential_session_id || receipt.producer_oc;
       const api_key = await resolveKey(credentialSession);
       registerTask({ task_id: receipt.task_id, session_id: receipt.producer_oc, kind: receipt.kind,
         api_key, model: receipt.model, cost_coins: receipt.cost_coins, created_at: receipt.created_at });
       pendingTasks.get(receipt.task_id)!.deadline_at = receipt.created_at + (receipt.kind === "video" ? 30 : 12) * 60000;
-      if (["failed", "refunded", "cancelled"].includes(receipt.status)) pendingTasks.get(receipt.task_id)!.next_attempt_at = Date.now() + 10 * 60000;
+      if (["failed", "refunded", "cancelled"].includes(receipt.status)) {
+        pendingTasks.get(receipt.task_id)!.next_attempt_at = Date.now() + LATE_RECONCILE_INTERVAL_MS;
+        pendingTasks.get(receipt.task_id)!.terminal_reported = true;
+      }
     } catch { console.warn(`[poller] task ${receipt.task_id} owner resolution deferred; durable receipt retained`); }
   }
   for (const id of pendingTasks.keys()) if (!active.has(id)) pendingTasks.delete(id);
+  if (stockSkipped !== lastStockSkipped) {
+    console.warn(`[poller] stock receipts before ${new Date(STOCK_CUTOFF_MS).toISOString()} left untouched: ${stockSkipped} (awaiting owner decision)`);
+    lastStockSkipped = stockSkipped;
+  }
   recoveredAt = Date.now();
 }
 async function tick(): Promise<void> {
@@ -410,58 +440,55 @@ async function tick(): Promise<void> {
       const now = Date.now();
       // 硬终止后停 poll：已投递失败收据；禁止 resubmit；不因 recover 再开无限 tracking。
       if (task.tracking_exhausted) continue;
-      // Waiting budget 仍是进度边界（可有限次延期继续 authoritative tracking），
-      // 但不再无限 +30min；累计超限或 retry 触顶 → 硬终止。
-      if (
-        now >= task.deadline_at &&
-        task.waiting_budget_exceeded_count < MAX_WAITING_BUDGET_EXCEEDED
-      ) {
-        task.waiting_budget_exceeded_count++;
-        if (task.waiting_budget_exceeded_count < MAX_WAITING_BUDGET_EXCEEDED) {
-          console.warn(
-            `[poller] task ${id} exceeded waiting budget ` +
-              `(${task.waiting_budget_exceeded_count}/${MAX_WAITING_BUDGET_EXCEEDED}); ` +
-              `continuing authoritative tracking (progress boundary only; not infinite)`,
-          );
-          task.deadline_at = now + 30 * 60000;
-        }
-        // else: 计数已达上限，不延期；下方 hardStop 投递失败收据并停 poll。
+      const age = now - task.created_at;
+      // 对账窗口耗尽（created_at+24h）：彻底停查，保留 map 条目防 recover 重开。
+      if (age >= LATE_RECONCILE_HOURS * 3600_000) {
+        console.warn(`[poller] task ${id} late-reconcile window exhausted (${LATE_RECONCILE_HOURS}h); stop poll; no resubmit; billing unchanged`);
+        task.tracking_exhausted = true;
+        task.next_attempt_at = Number.MAX_SAFE_INTEGER;
+        continue;
       }
-      const hardStop =
-        task.retry_count >= MAX_RETRY_COUNT ||
-        task.waiting_budget_exceeded_count >= MAX_WAITING_BUDGET_EXCEEDED;
-      if (hardStop) {
+      // 卡死回收：按耐久 created_at 判超时，只投一次 failed（幂等：terminal_reported 后不再投）。
+      // 本层不退款、不扣费、不重提；钱只走平台既有路径（排队上限退款／对账确认失败退款／冻结待对账）。
+      // 收尾前先向平台问一次真相（本进程还没 poll 过就先 poll）：平台已终态就照实镜像，不冒充超时。
+      if (!task.terminal_reported && age >= reapAfterMs(task.kind) && task.last_polled_at !== undefined) {
+        const minutes = Math.round(age / 60_000);
+        const platformState = task.last_platform_status ?? "未知";
         const reason =
-          `poller hard stop: retry_count=${task.retry_count}/${MAX_RETRY_COUNT}, ` +
-          `waiting_budget_exceeded=${task.waiting_budget_exceeded_count}/${MAX_WAITING_BUDGET_EXCEEDED} ` +
-          `(stop poll; no resubmit; billing unchanged)`;
-        console.warn(`[poller] task ${id} ${reason}`);
+          `生成超时：已等待 ${minutes} 分钟仍未拿到平台结果（平台最后状态：${platformState}），已停止等待。` +
+          `未重新提交；本层不扣费也不退费，费用以平台账为准（未扣、已退或冻结待对账）。若平台稍后出结果，会自动补交付。` +
+          ` [stuck_reaper age_min=${minutes} retry=${task.retry_count}]`;
+        console.warn(`[poller] task ${id} reaped: age=${minutes}min platform=${platformState}`);
         try {
-          await gatewayReceipt("/internal/job-completion", {
-            task_id: id,
-            status: "failed",
-            artifacts: [],
-            reason,
-          });
-          // 停 poll；保留 map 条目避免 recover 把计数清零后重开无限跟踪。禁止重新提交生成。
-          task.tracking_exhausted = true;
-          task.next_attempt_at = Number.MAX_SAFE_INTEGER;
+          await gatewayReceipt("/internal/job-completion", { task_id: id, status: "failed", artifacts: [], reason });
+          task.terminal_reported = true;
+          task.next_attempt_at = now + LATE_RECONCILE_INTERVAL_MS;
         } catch (error) {
           applyBackoff(task);
-          console.warn(`[poller] task ${id} hard-stop handoff deferred:`, (error as Error).message);
+          console.warn(`[poller] task ${id} reap handoff deferred:`, (error as Error).message);
         }
         continue;
       }
+      // retry 触顶不再硬停（计数随重启清零、不耐久）；改为 10min 低频，硬上限由上面的耐久时长负责。
+      if (task.retry_count >= MAX_RETRY_COUNT && now - (task.last_polled_at ?? 0) < LATE_RECONCILE_INTERVAL_MS) continue;
       if (task.next_attempt_at > now || !bucket.consume()) continue;
       console.log(`[poller] polling ${task.kind} ${id} (retry #${task.retry_count})`);
+      task.last_polled_at = now;
       const result = await pollTask(task);
-      if (!result.done) continue;
+      // 已终态（含超时收尾）的回执只做低频晚到对账，不跟平台排队态高频轮询。
+      if (!result.done) {
+        if (task.terminal_reported) task.next_attempt_at = Math.max(task.next_attempt_at, now + LATE_RECONCILE_INTERVAL_MS);
+        continue;
+      }
       try {
         await gatewayReceipt("/internal/job-completion", { task_id: id, status: result.status,
           artifacts: result.artifacts || [], reason: result.reason, cost_coins: result.costCoins ?? task.cost_coins });
         // Delete cache only AFTER terminal result and its unread consumer inbox are durably handed off.
         if (result.status === "succeeded") pendingTasks.delete(id);
-        else task.next_attempt_at = Date.now() + 10 * 60000; // Reconcile original ID for late success; never resubmit generation.
+        else {
+          task.terminal_reported = true;
+          task.next_attempt_at = Date.now() + LATE_RECONCILE_INTERVAL_MS; // Reconcile original ID for late success; never resubmit generation.
+        }
       } catch (error) {
         applyBackoff(task);
         console.warn(`[poller] task ${id} durable handoff deferred:`, (error as Error).message);
@@ -557,7 +584,7 @@ const server = serve({
 // Startup
 // ============================================================
 console.log(`[poller] register server on :${POLLER_REGISTER_PORT}`);
-console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms, fast probe window ${FAST_PROBE_WINDOW_MS}ms @ ${FAST_PROBE_TICK_MS}ms, api ${PLATFORM_API_BASE}, max_retry=${MAX_RETRY_COUNT}, max_waiting_budget_exceeded=${MAX_WAITING_BUDGET_EXCEEDED}`);
+console.log(`[poller] gateway ${GATEWAY_URL}, tick ${POLLER_TICK_MS}ms, fast probe window ${FAST_PROBE_WINDOW_MS}ms @ ${FAST_PROBE_TICK_MS}ms, api ${PLATFORM_API_BASE}, max_retry=${MAX_RETRY_COUNT}, max_waiting_budget_exceeded=${MAX_WAITING_BUDGET_EXCEEDED}, reap image=${IMAGE_REAP_MIN}min video=${VIDEO_REAP_MIN}min late_window=${LATE_RECONCILE_HOURS}h stock_cutoff=${new Date(STOCK_CUTOFF_MS).toISOString()}`);
 
 setInterval(tick, Math.min(POLLER_TICK_MS, FAST_PROBE_TICK_MS)).unref?.();
 void tick(); // run immediately at startup

@@ -1,10 +1,13 @@
 ---
 name: agent-pixai
-description: 生图首选（免费池，优先于 image-gen）。用户要「画一张…/生成图片/让 AI 画/生图/图像创作」时**首选**此 skill：走 PixAI Agent（kotone）免费池，不扣平台币。需要带推理的对话式画图、或平台付费渠道不可用时的替代时也用它。与 image-gen 的区别：agent-pixai 免费、Agent 自己构思 prompt；image-gen 走平台付费渠道、精确控制模型。
+description: PixAI Agent（kotone）免费池——**默认不选**：chat cookie 池自 2026-08-11 断粮，子代理沙箱也连不到外网，调用必失败。用户要「画一张…/生成图片/生图」时一律直接用 image_generate（先 image_quote），不要为它派子代理。只有用户明确点名「免费池／PixAI Agent」才试一次；任何失败（无 key、401/403/502、域名解析失败）立即转 image_generate，禁重试。
 license: internal
 metadata:
   audience: coding-agent
 ---
+
+## ⛔ 池健康铁律（先读）
+免费池长期不可用（chat cookie 断粮；子代理沙箱无外网、无 KOTONE_BRIDGE_API_KEY）。生图默认走 `image_generate`。本 skill 只在用户点名免费池时试**一次**，任何一次失败立即转 `image_generate`，禁重试第二账号、禁播报重试过程、禁把失败甩给用户二选一。
 
 ## 我负责什么
 呼叫 kotone-bridge（PixAI Agent OpenAI 相容端点）生图。**生图免费**（不扣平台币），走 PixAI Agent 免费池（多帐轮换）。

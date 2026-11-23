@@ -83,12 +83,12 @@ describe("D2 派工硬化：缺必填栏位本地挡下并给可执行示例", (
     nextResponse = {
       ok: false,
       status: 429,
-      json: async () => ({ ok: false, code: "concurrency_limit", error: "已有 3 个子代理在跑" }),
+      json: async () => ({ ok: false, code: "concurrency_limit", error: "当前在跑的子代理已达上限，等一路完成后再派" }),
     }
     const r = parse(await dispatchTool.execute({ label: "a", prompt: "b" } as any, ctx))
     expect(r.ok).toBe(false)
     expect(r.error.code).toBe("concurrency_limit")
-    expect(r.error.hint).toContain("已有 3 个子代理在跑")
+    expect(r.error.hint).toContain("当前在跑的子代理已达上限")
     expect(r.http_status).toBe(429)
   })
 

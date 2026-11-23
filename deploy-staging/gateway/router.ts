@@ -6,13 +6,16 @@
 // memory-trace/memory-recall）全部路由分派。逐行机械抽取（python），仅加 export 前缀＋
 // 本档头＋单行 import，其余一字未动；handleRequest 内逻辑一行未动。
 import path from "node:path"
+import { downloadArtifactVersion } from "./artifact-delivery.ts"
+import { handleSessionGeneration, handleSessionGenerations } from "./session-generation-http.ts"
+import { ArtifactError } from "./artifact-store-types.ts"
 import { mkdir } from "node:fs/promises"
 import type { MemoryDocLite } from "./types-gateway.ts"
 import { WORKSPACE_DIR, TTS_AUDIO_DIR, UPLOADS_DIR, VIDEO_UPLOAD_MAX_BYTES, VIDEO_UPLOAD_EXTS } from "./constants-gateway.ts"
 import { jsonError, getBearer } from "./gw-lib.ts"
 import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS, DEVICE_TICKET_PREFIX, redeemDeviceTicket } from "./auth-gw.ts"
 import { sessions, markDirty, getOwnedSession, resolveSession, issueSseTicket, redeemSseTicket, handleDeleteSession } from "./sessions-core.ts"
-import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
+import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionStatus, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
 import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle, persistenceStatus } from "./persistence.ts"
 import { fetchOpencodeTitle } from "./opencode-client.ts"
 import { openEventStream } from "./sse-core.ts"
@@ -50,6 +53,7 @@ import { handleArtifact } from "./artifact-http.ts"
 import { handleCron } from "./cron-http.ts"
 import { handlePlan } from "./plan-http.ts"
 import { handleMemory } from "./memory-http.ts"
+import { handleMemoryV2, handleHistoryStatus, handleHistoryClear, handleMemoryChanged } from "./memory-history-wiring.ts"
 // 2026-10-18：harness hook 总线的 loopback HTTP 面（plugin 的 Pre/PostToolUse 跨进程入口）。
 import { handleHooks, runHooksWithBudget } from "./hooks-http.ts"
 // 2026-10-18：工具前置检查合并端点复用 hook 运行器；预算由本端点控制，沿用同一 fail-open 语义。
@@ -329,7 +333,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
         return handlePermission(req, pathname)
       }
       if (req.method === "POST" && pathname.startsWith("/internal/artifact/")) {
-        return handleArtifact(req, pathname)
+        return handleArtifact(req, pathname, (id) => (resolveSession(id) ?? subagentParentState(id))?.sessionId)
       }
       if (req.method === "POST" && pathname.startsWith("/internal/cron/")) {
         return handleCron(req, pathname)
@@ -345,6 +349,13 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           pathname === "/internal/memory/note")
       ) {
         return handleMemory(req, pathname)
+      }
+      // 记忆 v2（2026-11-06）：历史对话检索／私有记忆召回／按 id 遗忘（loopback 工具后端）。
+      if (
+        req.method === "POST" &&
+        (pathname === "/internal/memory/history-search" || pathname === "/internal/memory/recall" || pathname === "/internal/memory/forget")
+      ) {
+        return handleMemoryV2(req, pathname.slice("/internal/memory/".length))
       }
       // CC 2.1.302 hook 总线：opencode plugin 的工具生命周期 hook 唯一入口。
       // 精确路径匹配，放在 memory 家族旁，不遮蔽下方任何 startsWith 路由。
@@ -684,10 +695,11 @@ if (req.method === "GET" && pathname === "/agent/v1/sessions") {
 }
 
 // S7（2026-08-29）：用户级 settings（key 维度，持久化 sessions.db，重启不丢）。
-// GET 无记录回默认值 steer/efficient/balanced；POST 同 shape 部分更新，
+// GET 无记录回默认值 steer/efficient/balanced；POST 同 shape 部分更新（读旧值合并，缺栏保持旧值），
 // 未知栏位/非法值一律 400，不静默吞。
 if (req.method === "GET" && pathname === "/agent/v1/settings") {
-  return Response.json({ ...normalizeUserSettings(loadUserSettings(key)), beast_mode: loadUserSettings(key)?.beast_mode === true })
+  const stored = loadUserSettings(key)
+  return Response.json({ ...normalizeUserSettings(stored), beast_mode: stored?.beast_mode === true, memory_use: stored?.memory_use !== false, memory_generate: stored?.memory_generate !== false })
 }
 if (req.method === "POST" && pathname === "/agent/v1/settings") {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -695,7 +707,7 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
   for (const k of Object.keys(body)) {
-    if (k === "beast_mode") {
+    if (k === "beast_mode" || k === "memory_use" || k === "memory_generate") {
       if (typeof body[k] !== "boolean") {
         return jsonError(400, `invalid settings field: ${k}`, "bad_request", "bad_request")
       }
@@ -707,12 +719,23 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
       return jsonError(400, `invalid settings field: ${k}`, "bad_request", "bad_request")
     }
   }
-  const next: UserSettingsShape = { ...normalizeUserSettings(loadUserSettings(key)), ...(body as Partial<UserSettingsShape>) }
-  // beast_mode sanitize：显式栏位放行（显式列出、缺栏=保持现值；枚举白名单会剥布林栏）。
+  const prev = loadUserSettings(key)
+  const next: UserSettingsShape = { ...normalizeUserSettings(prev), ...(body as Partial<UserSettingsShape>) }
+  // beast_mode：显式布尔放行；缺栏＝保持旧值（2026-10-31 修复：normalizeUserSettings 会剥布尔栏，
+  // 旧码缺栏走 delete ⇒ 任何不带 beast_mode 的部分保存都把已开启的野兽模式抹成 OFF）。
   if (typeof body.beast_mode === "boolean") next.beast_mode = body.beast_mode
+  else if (prev?.beast_mode === true) next.beast_mode = true
   else delete next.beast_mode
+  // 记忆开关：只有显式 false 才落盘；缺栏＝保持旧值（部分保存不得把已关闭的开关抹回开启）。
+  for (const f of ["memory_use", "memory_generate"] as const) {
+    if (typeof body[f] === "boolean") {
+      if (body[f] === false) next[f] = false
+      else delete next[f]
+    } else if (prev?.[f] === false) next[f] = false
+    else delete next[f]
+  }
   saveUserSettings(key, next)
-  return Response.json(next)
+  return Response.json({ ...next, memory_use: next.memory_use !== false, memory_generate: next.memory_generate !== false })
 }
 
 
@@ -748,6 +771,31 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
 
     if (req.method === "POST" && pathname === "/agent/v1/extract-lessons") {
       return handleExtractLessons(key, req)
+    }
+
+    const sessionGenerationList = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/generations$/)
+    if (req.method === "GET" && sessionGenerationList) {
+      return handleSessionGenerations(key, sessionGenerationList[1])
+    }
+
+    const sessionGeneration = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/generations\/([a-f0-9-]{36})$/i)
+    if (req.method === "GET" && sessionGeneration) {
+      return handleSessionGeneration(key, sessionGeneration[1], sessionGeneration[2])
+    }
+
+    const artifactDownload = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/artifacts\/([1-9]\d*)\/versions\/([1-9]\d*)\/download$/)
+    if (req.method === "GET" && artifactDownload) {
+      const state = getOwnedSession(key, artifactDownload[1])
+      if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+      const artifactId = Number(artifactDownload[2])
+      const version = Number(artifactDownload[3])
+      if (!Number.isSafeInteger(artifactId) || !Number.isSafeInteger(version)) return jsonError(404, "artifact not found", "not_found", "not_found")
+      try {
+        return downloadArtifactVersion(state.sessionId, artifactId, version)
+      } catch (error) {
+        if (error instanceof ArtifactError) return jsonError(error.status, error.message, error.code, error.code)
+        return jsonError(503, "artifact unavailable", "artifact_unavailable", "artifact_unavailable")
+      }
     }
 
     const tm = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/transcript$/)
@@ -807,6 +855,11 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
       return handleSteer(key, m[1], req)
     }
 
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/status$/)
+    if (req.method === "GET" && m) {
+      return handleGetSessionStatus(key, m[1])
+    }
+
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)$/)
     if (req.method === "GET" && m) {
       return handleGetSession(key, m[1])
@@ -844,6 +897,16 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     // 从共享语料跑 §7 召回。契约 §3 未列此路由，属本片新增（已在回报中标明）。
     if (req.method === "POST" && pathname === "/agent/v1/memory/recall") {
       return handleMemoryRecallSearch(key, req)
+    }
+    // 记忆 v2：历史对话索引状态／清空（站点 /api/agent/memory/mine/history 薄壳转发）。
+    if (req.method === "GET" && pathname === "/agent/v1/memory/history/status") {
+      return handleHistoryStatus(key)
+    }
+    if (req.method === "DELETE" && pathname === "/agent/v1/memory/history") {
+      return handleHistoryClear(key)
+    }
+    if (req.method === "POST" && pathname === "/agent/v1/memory/changed") {
+      return handleMemoryChanged(key, req)
     }
 
     // 用户面 peek 子代理：停止 → 单 run 转录增量 → 本会话子代理列表（顺序不可颠倒）。

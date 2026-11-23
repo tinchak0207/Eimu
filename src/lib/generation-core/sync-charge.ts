@@ -22,7 +22,7 @@
 // 退款失败 console.error。这是既有行为的保留，不是帐本化；见回报的阻塞点。
 
 import { createHash, randomUUID } from "node:crypto";
-import { configuredGenerationBillingAdapter, type GenerationBillingAdapter } from "./billing-relay";
+import { BillingRelayUnavailableError, configuredGenerationBillingAdapter, type GenerationBillingAdapter } from "./billing-relay";
 import {
   commitGenerationBilling,
   recordPendingGenerationRefund,
@@ -81,7 +81,7 @@ export interface SyncCharge {
 
 export type SyncChargeResult =
   | { ok: true; charge: SyncCharge }
-  | { ok: false; status: 402; message: string; body: unknown };
+  | { ok: false; status: 402 | 503; message: string; body: unknown };
 
 export interface SyncChargeDeps {
   sql?: GenerationSql;
@@ -111,6 +111,23 @@ function insufficientQuota(message: string): SyncChargeResult {
     message,
     body: { error: { message, type: "insufficient_quota", code: "insufficient_quota" } },
   };
+}
+
+/**
+ * 预扣失败的对外回应：计费通道故障（BillingRelayUnavailableError）回 503
+ * billing_relay_unavailable（可重试、非用户问题）；其余维持 402 insufficient_quota。
+ */
+function reserveFailure(error: unknown): SyncChargeResult {
+  if (error instanceof BillingRelayUnavailableError) {
+    const message = messageOf(error);
+    return {
+      ok: false,
+      status: 503,
+      message,
+      body: { error: { message, type: "billing_relay_unavailable", code: "billing_relay_unavailable", retryable: true } },
+    };
+  }
+  return insufficientQuota(messageOf(error));
 }
 
 function messageOf(error: unknown): string {
@@ -202,10 +219,10 @@ export async function reserveSyncCharge(input: SyncChargeInput, deps: SyncCharge
         if (outcome.status === "applied") {
           return { ok: true, charge: { jobId: job.id, userId: input.userId, reservedQuota: input.quota, requestedCount, action: input.action, ledger: true } };
         }
-        return insufficientQuota(messageOf(outcome.error));
+        return reserveFailure(outcome.error);
       } catch (error) {
         console.error(`[sync-charge] ledger reserve failed action=${input.action} job=${job.id}`, error);
-        return insufficientQuota(messageOf(error));
+        return reserveFailure(error);
       }
     }
   } else {
@@ -218,7 +235,7 @@ export async function reserveSyncCharge(input: SyncChargeInput, deps: SyncCharge
     await adapter.reserve({ jobId, operation: "reserve", userId: input.userId, amount: input.quota });
     return { ok: true, charge: { jobId, userId: input.userId, reservedQuota: input.quota, requestedCount, action: input.action, ledger: false } };
   } catch (error) {
-    return insufficientQuota(messageOf(error));
+    return reserveFailure(error);
   }
 }
 

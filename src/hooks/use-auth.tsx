@@ -63,7 +63,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const epoch = ++authEpochRef.current;
     if (!t) { setUser(null); setToken(null); setWelcomeGift(null); setIsLoading(false); return; }
 
-    const result = await fetchMe(t);
+    // Explicit refresh follows writes too; never reuse a read started before that write.
+    const result = await fetchMe(t, { forceFresh: true });
     if (epoch !== authEpochRef.current || getStoredToken() !== t) return;
     if (result.ok && result.user) {
       const validToken = result.token ?? t;

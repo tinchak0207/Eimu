@@ -108,6 +108,15 @@ export const PAID_VIDEO_MODEL_WHITELIST = [
   // 单价由 dmc 供给 claim 的 `unitPriceCnyPerSecond`（720p/1080p/2k/4k 分档，
   // H3 ¥0.05/s ＋ auto-hd 超分 2026-10-20 实测价）提供，不进兜底表。
   "MiniMax-H3",
+  // 2026-11-21：v6k（www.v6k.top）认领的 seedance 2.5 上游模型名。**按秒计价**
+  //（480p ¥0.17/s、720p ¥0.25/s，GET /api/pricing tiered_expr 实查），单价由 v6k 供给 claim 的
+  // `unitPriceCnyPerSecond` 提供，不进兜底表；只认 480p/720p（claim 缺价档位＝拒收）。
+  "SD2.5",
+  // 2026-11-23：linkii（www.linkii.tech）认领的 vidu-q3-turbo 上游 deploymentId（"603"，
+  // 个人/校园配额渠道，平台侧上游成本 ¥0）；进白名单继续走 fail-closed 审
+  //（约束在 720p/1080p、seconds ≤ 30），单价由 linkii 供给 claim 的 unitPriceCny: 0 提供
+  //（不进兜底表 PAID_VIDEO_UNIT_PRICE_CNY）。
+  "603",
 ] as const;
 
 export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];

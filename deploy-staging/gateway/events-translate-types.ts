@@ -4,6 +4,18 @@ export interface AudioDoneMeta {
   title?: string
   cover?: string
   lyric_status?: string
+  /** 成品真实时长（秒，工具 ffprobe 实测）；工具回执没带就不带键。 */
+  duration_s?: number
+}
+// H34（2026-11-04）：audio done 账本行的关联键——只进 ledger.jsonl，不进 SSE 帧/画布。
+// tool_session＝实际跑工具的 opencode 会话（子代理产出时是子会话，≠ 行上的 opencode_session_id）；
+// tool_call_id＝该工具调用 callID（多 take 同一调用共享）；music_ref＝music_gen 送平台
+// /v1/music/charges 的 ref（平台 music_charge.charge_ref＝music:<keyId>:<music_ref>），工具回执带了才写。
+// 拿不到的键不写（不编造）。
+export interface AudioLedgerLink {
+  tool_session?: string
+  tool_call_id?: string
+  music_ref?: string
 }
 export type DenySource = "deny_glob" | "path_gate" | "sandbox_unavailable" | "unknown"
 

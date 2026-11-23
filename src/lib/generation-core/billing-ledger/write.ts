@@ -6,9 +6,50 @@ import { getGenerationSql, type GenerationSql } from "../database";
 import { getGenerationJob, mapGenerationJob } from "../job-repository";
 import { JOB_EVENT, emitJobEvent } from "../job-events";
 import { claimBillingOperation, committedAmount, dueReservationJobs, ensureRefundOperation, freshJob, markExpiredBillingOperationsUnknown, markFullyRefunded, markOperationRetry, markOperationUnknown, markReservationRejected, moveJobToQueued, terminalReservedJobs } from "./schema";
-import { billingRetryAt, classifyBillingFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
+import { billingRetryAt, classifyBillingFailure, classifyRefundFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
 import { DEFAULT_RECONCILE_BATCH, ZOMBIE_RECLAIM_BATCH, ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT } from "./types";
 import type { FailureClass, GenerationJob } from "../types";
+import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { ImageBillingGatewayError } from "@/lib/image-billing";
+
+/**
+ * 降档交付（2026-10-25）：该 job 的成片实际档位低于请求档位时，返回实际档位。
+ *
+ * 上游两段链路（H3 出 768P → auto-hd 超分）中第二段没跑成时，我们交付 H3 那一版
+ * 并在 attempt 的 provider_result_json.downgraded 里如实记下实际档位。结算必须认它，
+ * 否则会按原档全额扣费而只给低一档的成片。
+ */
+async function downgradedResolutionOfJob(jobId: string, sql: GenerationSql): Promise<string | null> {
+  const rows = await sql<{ provider_result_json: { downgraded?: { actualResolution?: string } } | null }[]>`
+    SELECT provider_result_json FROM generation_attempt
+    WHERE job_id = ${jobId} AND provider_result_json IS NOT NULL
+  `;
+  for (const row of rows) {
+    const actual = row.provider_result_json?.downgraded?.actualResolution;
+    if (typeof actual === "string" && actual.trim()) return actual.trim();
+  }
+  return null;
+}
+
+/** 按实际档位重算金额；目录里没有该档或算不出来时回 null（宁可不退也不乱退）。 */
+function downgradedAmount(job: GenerationJob, actualResolution: string): number | null {
+  const durationSeconds = Number(job.workflow?.durationSeconds ?? 0);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const count = Math.max(1, Number(job.requestedCount ?? 1));
+  const coins = generationCoins(job.modelId, {
+    resolution: actualResolution as never,
+    durationSeconds,
+    generateAudio: job.workflow?.generateAudio === true,
+  });
+  // 目录没有该档时 generationCoins 回落到最小币步长（PRICING_COIN_STEP），那不是真价：
+  // 按它结算会把整单几乎全退。且账本单位是配额（币 × QUOTA_PER_COIN 的整数 bigint），
+  // 币值直接入账会写出 "0.00001" 这类小数 → bigint 报错，卡死整个 worker 迭代（2026-11-07 事故）。
+  if (!Number.isFinite(coins) || coins <= PRICING_COIN_STEP) return null;
+  const amount = Math.round(coins * count * QUOTA_PER_COIN);
+  return amount > 0 ? amount : null;
+}
 
 /**
  * Claims a durable reserve record before the external debit. An ambiguous result
@@ -123,7 +164,11 @@ export async function commitGenerationBilling(
   amount = job.billingAmount,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<void> {
-  if (!amount) return;
+  // amount=0 must still write an applied commit row. terminalReservedJobs excludes a
+  // job once ANY commit row exists (aeb72119f); without the zero row it would forever re-select old failed/cancelled
+  // zero-settle jobs, starving succeeded jobs that truly need a commit backfill
+  // (cost_coins null while reserve already deducted — 2026-11-02, 110+ succeeded).
+  if (!Number.isFinite(amount)) return;
   if (amount < 0 || amount > job.billingAmount) {
     throw new Error(`Invalid committed amount for generation job ${job.id}.`);
   }
@@ -231,15 +276,18 @@ export async function refundGenerationBilling(input: {
     return "applied";
   } catch (error) {
     const detail = detailOf(error);
-    const disposition = classifyBillingFailure(error);
+    // H21：refund 用 classifyRefundFailure（中继未接到请求的 4xx → 有上限退避重试）。
+    const disposition = classifyRefundFailure(error);
+    const httpStatus = error instanceof ImageBillingGatewayError ? error.status ?? null : null;
     if (disposition === "retry") {
+      const nextAttemptAt = billingRetryAt(error, operationAttempts(claimed));
       await markOperationRetry({
         id: String(claimed.id),
         detail,
-        nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)),
+        nextAttemptAt,
         sql,
       });
-      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund", nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)).toISOString() } }, sql);
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund", nextAttemptAt: nextAttemptAt.toISOString(), attempt: operationAttempts(claimed), http_status: httpStatus } }, sql);
       return "pending";
     }
     if (disposition === "rejected") {
@@ -248,7 +296,10 @@ export async function refundGenerationBilling(input: {
         SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
         WHERE id = ${String(claimed.id)} AND status = 'executing'
       `;
-      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefundFailed, actor: input.executorId, upstreamRaw: detail, detail: { amount, operation: "refund" } }, sql);
+      // failed＝人工队列：admin GET /api/admin/billing-operations?status=failed 可查，
+      // POST action=retry（预算归零重排）/mark_applied/mark_failed 处置；probe 的 refund_failed 名单同源。
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefundFailed, actor: input.executorId, upstreamRaw: detail, detail: { amount, operation: "refund", manual_review: true, http_status: httpStatus } }, sql);
+      console.error(`[billing-ledger] refund_manual_review job ${input.job.id} amount ${amount} http ${String(httpStatus)}：确定性拒绝，已入人工队列（status=failed）`);
       return "failed";
     }
     await markOperationUnknown({
@@ -292,6 +343,22 @@ export async function reconcileGenerationBilling(input: {
 
   for (const job of await terminalReservedJobs(limit, sql)) {
     if (job.status === "succeeded") {
+      // 降档交付（2026-10-25）：对帐路径落库的成片如果没到请求档位（H3 出 768P、
+      // auto-hd 段没跑成），不能按原档全额 commit——按实际档重算并退差价。
+      // 否则「低清冒充高清」会从这条对帐通道漏出去。
+      const actualResolution = await downgradedResolutionOfJob(job.id, sql);
+      const settled = actualResolution ? downgradedAmount(job, actualResolution) : null;
+      if (settled !== null && settled < job.billingAmount) {
+        await commitGenerationBilling(job, settled, sql);
+        await refundGenerationBilling({
+          job,
+          amount: Math.round(job.billingAmount - settled),
+          executorId: input.executorId,
+          adapter: input.adapter,
+        }, sql);
+        summary.settlementAttempts += 1;
+        continue;
+      }
       await commitGenerationBilling(job, job.billingAmount, sql);
       summary.settlementAttempts += 1;
       continue;
@@ -442,9 +509,12 @@ async function reclaimOneZombie(input: {
     }
 
     if (reserveStatus === "unknown") {
+      // DB check constraint only allows pending|executing|applied|unknown|failed —
+      // writing needs_review aborts the tx (2026-11-02 prod spam) and never settles.
+      // Keep status=unknown, stamp last_error for human review.
       await tx`
         UPDATE billing_operation
-        SET status = 'needs_review', last_error = ${detail}, updated_at = now()
+        SET last_error = ${detail}, updated_at = now()
         WHERE job_id = ${input.jobId} AND operation = 'reserve' AND sequence = 1 AND status = 'unknown'
       `;
       await tx`
@@ -516,6 +586,11 @@ async function reclaimOneZombie(input: {
  * probe terminal_unsettled(refund_failed) 如实可见、需人工对帐，不再自动重试。
  * 过期的 executing op 已由 markExpiredBillingOperationsUnknown 在同轮冻结为 unknown，
  * 走人工对帐通道，这里不再重扫。
+ *
+ * 2026-11-04 H21：保留上面 08-30 的「只捞 pending、不捞 failed」（不复活刷日志）。变化只在上游：
+ * refund 遇「中继没接到请求」的 4xx 不再直接 failed，而是 markOperationRetry 回 pending＋退避，
+ * 由本函数按 next_attempt_at 重跑；attempt_count>0 的这类 op 免 6h 门槛。存量 failed 不自动复活，
+ * 仍走人工队列（admin action=retry 会把它重排回 pending、再由这里执行一次）。
  */
 export async function retryStrandedRefundOperations(input: {
   executorId: string;
@@ -534,7 +609,12 @@ export async function retryStrandedRefundOperations(input: {
       AND refund_op.next_attempt_at <= now()
       AND refund_op.amount > 0
       AND job.status IN ('succeeded', 'failed', 'cancelled')
-      AND job.finished_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+      AND (
+        job.finished_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+        -- H21：已尝试过、被排了退避的 refund（attempt_count>0）不必再等 6h 僵尸门槛——
+        -- commit 已落、terminalReservedJobs 不会再碰它；claim 仍是并发边界，next_attempt_at 仍是退避。
+        OR refund_op.attempt_count > 0
+      )
     ORDER BY job.finished_at NULLS LAST
     LIMIT ${ZOMBIE_RECLAIM_BATCH}
   `;

@@ -171,7 +171,7 @@ test("阴性④：未核价／未生成三元组拒收（含 catalog 最长时�
     assert.equal(verdict.allowed === false && verdict.reason, "triple_not_priced");
     assert.equal(PAID_VIDEO_PRICED_TRIPLES.some((triple) => triple.supplierModelId === unmapped), false);
   }
-  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, 8, "当前 8 条 registry 映射生成三元组（按上游 model 去重）");
+  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, 10, "当前 10 条 registry 映射生成三元组（按上游 model＋平台 id 去重；v6k SD2.5 占 2 条）");
 
   // (d) seconds 硬上限 30 之外或非整数／缺省
   for (const seconds of [31, 45, 10.5, 0, -1, Number.NaN, undefined, "abc", ""]) {
@@ -353,6 +353,7 @@ test("白名单与已核价三元组＝生产当前真实集合（防再次删�
     "seedance-2.0-mini",
     "agnes-video-2.5-flash",
     "MiniMax-H3",
+    "SD2.5",
   ]);
   // 白名单内未映射/无 claim 的 3 条（minimax-h3-933-2k-支持真人、seedance-2.0-933-特惠、
   // grok-video-1.5）不生成三元组；其余 8 条按上游 model 去重后各一条。
@@ -360,6 +361,7 @@ test("白名单与已核价三元组＝生产当前真实集合（防再次删�
     [...new Set(PAID_VIDEO_PRICED_TRIPLES.map((triple) => triple.supplierModelId))].sort(),
     [
       "MiniMax-H3",
+      "SD2.5",
       "agnes-video-2.5-flash",
       "minimax-h3-a",
       "minimax-h3-max",

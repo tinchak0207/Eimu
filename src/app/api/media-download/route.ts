@@ -39,11 +39,17 @@ export async function GET(req: NextRequest) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  const headers = new Headers({ "Accept-Encoding": "identity" });
+  // 播放器拖动和断点续传只请求所需区间，不能退化成重新下载整个文件。
+  for (const name of ["range", "if-range"]) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   let upstream: Response;
   try {
     // redirect:"manual"：不跟随重定向。白名单主机若回 3xx，就当上游失败——
     // 跟随等于把 SSRF 白名单交给上游的 Location 决定。
-    upstream = await fetch(target, { signal: controller.signal, redirect: "manual", cache: "no-store" });
+    upstream = await fetch(target, { headers, signal: controller.signal, redirect: "manual", cache: "no-store" });
   } catch {
     return fail(504, "上游媒体读取超时或不可达", "upstream_timeout");
   } finally {
@@ -51,23 +57,44 @@ export async function GET(req: NextRequest) {
     clearTimeout(timer);
   }
 
+  if (upstream.status === 416) {
+    await upstream.body?.cancel();
+    return new NextResponse(null, {
+      status: 416,
+      headers: {
+        "Cache-Control": "no-store",
+        ...(upstream.headers.has("content-range")
+          ? { "Content-Range": upstream.headers.get("content-range")! } : {}),
+      },
+    });
+  }
   if (!upstream.ok || !upstream.body) {
+    await upstream.body?.cancel();
     return fail(502, `上游媒体读取失败（${upstream.status}）`, "upstream_error");
   }
 
-  const contentLength = Number(upstream.headers.get("content-length"));
+  const rawContentLength = upstream.headers.get("content-length");
+  const contentLength = rawContentLength === null ? NaN : Number(rawContentLength);
   if (Number.isFinite(contentLength) && contentLength > MAX_MEDIA_BYTES) {
+    await upstream.body.cancel();
     return fail(413, "媒体文件超过大小上限", "too_large");
   }
 
   const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
   return new NextResponse(upstream.body, {
-    status: 200,
+    status: upstream.status,
     headers: {
       "Content-Type": contentType,
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
-      ...(Number.isFinite(contentLength) ? { "Content-Length": String(contentLength) } : {}),
+      ...Object.fromEntries(["accept-ranges", "content-range", "etag", "last-modified"]
+        .flatMap((name) => {
+          const value = upstream.headers.get(name);
+          return value === null ? [] : [[name, value]];
+        })),
+      ...((!upstream.headers.get("content-encoding") || upstream.headers.get("content-encoding") === "identity")
+        && Number.isFinite(contentLength) && contentLength >= 0
+        ? { "Content-Length": String(contentLength) } : {}),
     },
   });
 }

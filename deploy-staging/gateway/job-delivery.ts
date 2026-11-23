@@ -1,11 +1,13 @@
 import { bindGenerationConsumer, generationParent, generationReceipt, generationReceipts, registerGenerationReceipt,
+  assertGenerationWorkActive, generationStepDrainRequested, generationWorkControl,
   completeGenerationReceipt, acknowledgeGeneration, notifyGeneration, claimGenerationMessages, renderedGeneration, transferGeneration, reclassifyGenerationKind, generationUserAdmissions, generationMaintenanceEnabled, setGenerationMaintenance, generationProjectAuthorization, knownGenerationOwner } from "./job-store"
 import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { beastAgentField } from "./session-lifecycle"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
 import { armWatchdogTimer } from "./timers-gw"
 import { emitImageDone, emitVideoDone } from "./events-translate"
-import { emitImageFailed } from "./media-internal-routes"
+import { emitImageFailed, emitVideoFailed, emitAudioFailed } from "./media-internal-routes"
 import { realpath, stat } from "node:fs/promises"
 import { createReadStream } from "node:fs"
 import { createHash } from "node:crypto"
@@ -13,6 +15,7 @@ import path from "node:path"
 import { probeMedia } from "./media-quality"
 import { PLATFORM_BASE } from "./constants-gateway"
 import { resolveCanonicalIdentity } from "./auth-gw"
+import { appendLedger, appendLedgerFor, claimLedgerRefunded } from "./quota-ledger.ts"
 
 function parentOf(session: string): any {
   return resolveSession(session) ?? (generationParent(session) ? resolveSession(generationParent(session)!.parent_gw) : undefined)
@@ -54,7 +57,8 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const info: any = child.ok ? await child.json() : null
       if (!existing && info?.parentID !== parent.opencodeSessionId && info?.parent_id !== parent.opencodeSessionId)
         return Response.json({ ok: false, error: "unproven child ownership; import existing jobs via tenant-scoped lookup instead" }, { status: 409 })
-      bindGenerationConsumer(input.child_oc, parent.sessionId, parent.opencodeSessionId)
+      // H62：兼容绑定也登记子会话自身 agent（opencode session.agent），收件箱唤醒沿用，不再缺 agent 落内建 build。
+      bindGenerationConsumer(input.child_oc, parent.sessionId, parent.opencodeSessionId, typeof info?.agent === "string" && info.agent ? info.agent : undefined)
       return Response.json({ ok: true, durable: true, consumer_available: child.ok, collector_transfer_required: !child.ok })
     }
     if (route === "/internal/job-pending") return Response.json({ ok: true, durable: true, tasks: generationReceipts(undefined, true) })
@@ -84,6 +88,18 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const consumer = input.consumer_session_id || producer
       if (consumer !== producer && consumer !== parent.opencodeSessionId && generationParent(consumer)?.parent_gw !== parent.sessionId)
         return Response.json({ ok: false, error: "consumer owner mismatch" }, { status: 403 })
+      // 2026-10-21：用户取消后不得再登记新生成。已提交任务的责任链不得因取消而断——
+      // task_id 已有 receipt 时跳过工作控制闸，直接走 registerGenerationReceipt 的幂等返回；
+      // 只有真正的新 task 才 assert。取消错误回 409，其他异常照旧交给外层 503（不吞成成功）。
+      if (!generationReceipt(input.task_id)) {
+        try {
+          assertGenerationWorkActive(parent.sessionId, producer)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (message.startsWith("generation_work_cancelled")) return Response.json({ ok: false, error: message }, { status: 409 })
+          throw error
+        }
+      }
       const receipt = registerGenerationReceipt({ task_id: input.task_id, parent_gw: parent.sessionId,
         producer_oc: producer, consumer_oc: consumer, kind: input.kind,
         model: input.model, cost_coins: input.cost_coins, frame: input.frame, project: input.project, request_id: input.request_id,
@@ -97,7 +113,22 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
       const artifacts = Array.isArray(input.artifacts) ? input.artifacts : []
       if ((input.status === "succeeded" && !artifacts.length) || artifacts.some((a: any) => typeof a.url !== "string" || !/^https?:\/\//.test(a.url)))
         return Response.json({ ok: false, error: "success requires all public artifact URLs" }, { status: 400 })
+      const priorStatus = receipt.status
       const completed = completeGenerationReceipt(input.task_id, input.status, artifacts, { reason: input.reason, cost_coins: input.cost_coins })
+      // H31（2026-11-04）：平台事后退款补记。回执先落 failed/cancelled（ledger 已/将记 failed）、后经 poller 晚对账或
+      // image_get_result 读到平台 generation_job.status=refunded（平台仅在全额 refund applied 后置此态）→ 当场补记一行
+      // refunded＋refund_source=platform_job＋refund_backfill_of=<原终态>。不依赖 drain/父会话可解析/opencode 在线。
+      // 幂等：回执 refunded 是终态只转换一次；claimLedgerRefunded 再挡已有 refunded 行（重启从 ledger 尾部种子）与随后
+      // drain 重渲染的同 task refunded 行。只写日志：回执、SSE、扣费、退款路径一律不动；写失败不影响本路由回包。
+      if (completed.status === "refunded" && (priorStatus === "failed" || priorStatus === "cancelled") && completed.kind !== "message"
+        && claimLedgerRefunded(completed.task_id)) {
+        const fields = { kind: completed.kind, event: "refunded", refund_source: "platform_job", refund_backfill_of: priorStatus, task_id: completed.task_id }
+        try {
+          const owner = resolveSession(completed.parent_gw)
+          void (owner ? appendLedgerFor(owner, fields)
+            : appendLedger({ ts: new Date().toISOString(), user_id: "", session_id: completed.parent_gw, opencode_session_id: completed.consumer_oc, ...fields }))
+        } catch (e) { console.error(`[gateway] ledger refund backfill failed: ${e}`) }
+      }
       // 只有全部 artifact 的 mimeType 一致时才用介质证据纠正登记 kind；混合类型保留原登记。
       if (input.status === "succeeded" && completed.kind !== "message" && artifacts.length) {
         const mimes = artifacts.map((a: any) => typeof a?.mimeType === "string" ? a.mimeType : "")
@@ -170,12 +201,36 @@ export async function handleGenerationDelivery(req: Request, route: string): Pro
   }
 }
 
+// H62：子会话自身当前 agent——先看 opencode session info 的 agent；没有再取最近一条消息的 agent（user.agent／assistant.agent|mode）。
+// 只在 consumer_agent 为 NULL 时调用；读不到返回 undefined（由调用方回退 creator），不抛。
+async function consumerSelfAgent(consumer: string, info: any): Promise<string | undefined> {
+  if (typeof info?.agent === "string" && info.agent) return info.agent
+  try {
+    const res = await opencodeFetch(`/session/${consumer}/message`, { timeoutMs: 5000 })
+    if (!res.ok) return undefined
+    const msgs: any = await res.json()
+    if (!Array.isArray(msgs)) return undefined
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]?.info
+      const a = m?.agent || (m?.role === "assistant" ? m?.mode : undefined)
+      if (typeof a === "string" && a && a !== "compaction") return a
+    }
+  } catch { /* 读不到即回退 */ }
+  return undefined
+}
 let draining = false
 export async function drainGenerationInbox(): Promise<void> {
   if (draining) return
   draining = true
   try {
-    const receipts = generationReceipts().filter((r) => !["queued", "running", "unknown"].includes(r.status) && (r.kind === "image" && r.artifacts.length ? !r.downloaded_at : !r.observed_at))
+    // 2026-11-04 出图不交付根因：此前过滤把「已 ACK」的收据整条挡在渲染循环外——子代理/主模型
+    // image_get_result（自己 POST job-completion）→ image_result_download（ACK downloaded）几秒内走完，
+    // 早于 10s 的 drain tick ⇒ 收据永远进不了渲染分支 ⇒ 整条 SSE 无 image.done（扣了钱、图在 task 里、聊天无图）。
+    // 渲染（SSE 展示副作用）与 ACK（模型已取件）是两件事：终态且 !rendered_at 一律进循环渲染；
+    // 唤醒通知仍只给「未 ACK」的（见循环内 acked 判定）。
+    const receipts = generationReceipts().filter((r) => !["queued", "running", "unknown"].includes(r.status) &&
+      ((!r.rendered_at && Date.now() - Math.max(r.created_at || 0, r.updated_at || 0) < 3600_000 && !!resolveSession(r.parent_gw)) ||
+        (r.kind === "image" && r.artifacts.length ? !r.downloaded_at : !r.observed_at)))
     if (!receipts.length) return
     const statusesResponse = await opencodeFetch("/session/status", { timeoutMs: 5000 })
     if (!statusesResponse.ok) return
@@ -184,6 +239,10 @@ export async function drainGenerationInbox(): Promise<void> {
     for (const receipt of receipts) {
       // SSE is a display side effect; the durable inbox remains unread until tool ACK.
       const parent = resolveSession(receipt.parent_gw)
+      if(receipt.resume_intent_version!==undefined) {
+        const intent=generationWorkControl(receipt.parent_gw)
+        if(intent.cancelled || intent.version!==receipt.resume_intent_version) continue
+      }
       if (parent && !receipt.rendered_at) {
         if (receipt.artifacts.length) {
           for (const [index, artifact] of receipt.artifacts.entries()) {
@@ -192,11 +251,17 @@ export async function drainGenerationInbox(): Promise<void> {
             else await emitImageDone(parent, artifact.url, cost, receipt.task_id)
           }
         } else if (receipt.kind !== "message") {
-          emitImageFailed(parent, receipt.task_id, receipt.reason || receipt.status, receipt.status === "refunded")
+          const refunded = receipt.status === "refunded"
+          const reason = receipt.reason || receipt.status
+          if (receipt.kind === "video") emitVideoFailed(parent, receipt.task_id, reason, refunded)
+          else if (receipt.kind === "audio") emitAudioFailed(parent, receipt.task_id, reason, refunded)
+          else emitImageFailed(parent, receipt.task_id, reason, refunded)
         }
         renderedGeneration(receipt.task_id)
       }
-      if (generationMaintenanceEnabled()) continue
+      // 已被模型取件 ACK 的收据只补渲染，不再唤醒（避免对已处理结果重复投递收件箱）。
+      if (receipt.kind === "image" && receipt.artifacts.length ? receipt.downloaded_at : receipt.observed_at) continue
+      if (generationMaintenanceEnabled() || generationStepDrainRequested()) continue
       // 消息通知不是待下载媒体：已提交或结果未知的通知永不定时重投，保留真实 ACK 状态。
       if (receipt.kind === "message" && receipt.notified_at !== null) continue
       // 2026-10-23：过时通知硬闸——notify 次数封顶后不再唤醒（避免用户走后 12h 地板无限烧 token）。
@@ -213,6 +278,9 @@ export async function drainGenerationInbox(): Promise<void> {
       if (receipt.notified_at && Date.now() - receipt.notified_at < backoff) continue
       if (statuses[receipt.consumer_oc]?.type && statuses[receipt.consumer_oc].type !== "idle") continue
       if (parent?.opencodeSessionId === receipt.consumer_oc && (parent.lastTurnActiveAt || 0) > 0) continue
+      // H46：主会话 consumer（非子代理绑定）但父网关会话解析不到（parent_gw 空 / 网关行已删）时，收件箱请求体既拿不到
+      // beastAgentField 也没有 consumer_agent，会落 opencode 内建 build（无 Eimu 人设、84 工具）。不唤醒，收据保持未读，待父会话可解析再投。
+      if (!parent && !generationParent(receipt.consumer_oc)) continue
       const group = groups.get(receipt.consumer_oc) || []
       group.push(receipt); groups.set(receipt.consumer_oc, group)
     }
@@ -235,8 +303,16 @@ export async function drainGenerationInbox(): Promise<void> {
         continue
       }
       const parent = resolveSession(group[0].parent_gw)
+      // H62：非主会话 consumer 的 agent 回退链：consumer_agent → 子会话自身当前 agent（session info／最近消息）→ creator。
+      // 修前 consumer_agent 为 NULL 时请求体无 agent ⇒ opencode 1.18 落 defaultInfo()＝内建 build（而不是会话当前 agent）。
+      // 不回退父会话 beastAgentField：生产 NULL 行 400/585 的父会话是 orchestrator，而子会话本身是 build——给子会话塞 orchestrator 会换人设并嵌套派工。
+      // 必须在 admission 检查之前算完（下面「admission→claim→send 之间不 await」不变量）。不带 model。
+      const childAgent = parent?.opencodeSessionId === consumer ? undefined
+        : (generationParent(consumer)?.consumer_agent || await consumerSelfAgent(consumer, consumerInfo) || "creator")
       // No await between admission, the durable claim and sending: an accepted user turn wins.
-      if (generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
+      if (generationStepDrainRequested() || generationMaintenanceEnabled() || generationUserAdmissions.has(consumer) || (parent?.opencodeSessionId === consumer && (parent.lastTurnActiveAt || 0) > 0)) continue
+      const currentIntent=generationWorkControl(group[0].parent_gw)
+      if(group.some(receipt=>receipt.resume_intent_version!==undefined&&(currentIntent.cancelled||currentIntent.version!==receipt.resume_intent_version))) continue
       const claimed = new Set(claimGenerationMessages(group.filter((r) => r.kind === "message").map((r) => r.task_id), consumer))
       const pending = group.filter((r) => r.kind !== "message" || claimed.has(r.task_id))
       if (!pending.length) continue
@@ -244,9 +320,15 @@ export async function drainGenerationInbox(): Promise<void> {
         kind: r.kind, artifacts: r.artifacts, ...(r.kind === "message" ? { content: r.content } : {}),
         download_tool: r.artifacts.some((a) => typeof a?.mimeType === "string" && a.mimeType.startsWith("video/")) ? "video_fetch" : "image_result_download",
         delivery_id: `generation:${r.task_id}` }))
-      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${JSON.stringify(jobs)}`
-      const agent = generationParent(consumer)?.consumer_agent
-      const promptBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : agent ? { agent } : {}), parts: [{ type: "text", text }] }
+      // P3-A1：完整 jobs 仍供 claim/notify 逻辑字段来源；wake 正文只给短列表，禁止 JSON.stringify(jobs) 进模型上下文。
+      const jobLines = jobs
+        .map((j) => `- task_id=${j.task_id} delivery_id=${j.delivery_id} kind=${j.kind} status=${j.status} download_tool=${j.download_tool}`)
+        .join("\n")
+      const text = `【生成结果耐久收件箱】收到 ${jobs.length} 个终态结果。image 任务用 image_get_result 读取确认，有 artifact 的图（含取消前已有产物）用 image_result_download 下载全部 artifact 后确认 downloaded；video 任务用 video_result_fetch 读取确认，再用 video_fetch {task_id} 下载全部 artifact 后确认 downloaded（直链不需要 yt-dlp；不要用 image_result_download 下载视频）。回收工具以 artifact 的真实 mimeType 为准，不以 kind 字面为准；jobs[].download_tool 已标注。kind=message 是耐久兼容通知，直接处理 content 并向 /internal/job-ack 提交 observed，wake: ID 不是平台生成任务。按 task_id/delivery_id 幂等处理，已处理结果不重生成、不重复扣费；失败依真实终态处理，不将等待预算当失败。\n${jobLines}`
+      // 主会话 consumer 照旧 beastAgentField（H43）；子会话用上面算好的 childAgent（H62）。H46 孤儿主会话已在分组前跳过。
+      const inboxBody = { ...(parent?.opencodeSessionId === consumer ? beastAgentField(parent) : { agent: childAgent }), parts: [{ type: "text", text }] }
+      // H19：仅主会话 consumer 挂原始需求钉（子代理 consumer 不挂，与 beastAgentField 同口径）。
+      const promptBody = parent?.opencodeSessionId === consumer ? withPinnedWakeSystem(parent, inboxBody) : inboxBody
       let ownTurnGen: number | undefined
       if (parent?.opencodeSessionId === consumer) {
         parent.lastPromptBody = promptBody

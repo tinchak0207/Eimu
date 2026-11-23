@@ -242,6 +242,11 @@ export async function terminalReservedJobs(limit: number, sql: GenerationSql): P
       AND reserve.sequence = 1
       AND reserve.status = 'applied'
     WHERE job.status IN ('succeeded', 'failed', 'cancelled')
+      AND NOT EXISTS (
+        SELECT 1 FROM billing_operation settled
+        WHERE settled.job_id = job.id
+          AND settled.operation = 'commit'
+      )
     ORDER BY job.finished_at NULLS LAST, job.created_at
     LIMIT ${limit}
   `;

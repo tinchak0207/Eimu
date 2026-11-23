@@ -15,12 +15,14 @@ import {
   publicImageUrl,
   authorizedProjectBudget,
   uploadImageBytes,
+  gatewayRequest,
   ok,
   fail,
 } from "../lib/client"
+import { fitImageSize, type ImageSizeFit } from "../lib/image-size-fit"
 import { WORKSPACE, checkAgentPath, looksLikeAgentPath, safeFetch } from "../lib/sandbox"
 import { VIDEO_MOTION_FALLBACK, hasMotionContract } from "../lib/video-prompt-schema"
-import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash } from "../lib/image-journal"
+import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSubmission, getSubmission, contentHash, sameShotSubmissions } from "../lib/image-journal"
 
 /**
  * 生图尺寸白名单（R9-C, 2026-09-30）：真源＝站点 GET /v1/openapi.json 的
@@ -32,6 +34,8 @@ import { acceptTaskSubmission, lockedProjectBudget, prepareSubmission, finishSub
  */
 let sizeWhitelistCache: { at: number; sizes: string[] } | null = null
 const SIZE_WHITELIST_TTL_MS = 10 * 60 * 1000
+/** 仅在 openapi 真源不可达、且需要把比例/档位映射成像素尺寸时兜底（= src/lib/generation-core/durable-image-sizes.ts DURABLE_IMAGE_SIZES，改那边时同步）。 */
+const FALLBACK_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]
 
 async function supportedImageSizes(sessionID: string, signal?: AbortSignal): Promise<string[] | null> {
   if (sizeWhitelistCache && Date.now() - sizeWhitelistCache.at < SIZE_WHITELIST_TTL_MS) return sizeWhitelistCache.sizes
@@ -56,23 +60,32 @@ const CHANNEL_NOT_VERIFIED =
 /** 参考图上限（与站点 /api/canvas/generate 的 5 张同尺，上游自尾部截断）。 */
 const MAX_REFERENCE_IMAGES = 5
 
-/** 视频确认金额直接取站点计费函数导出的完整档位，未知时不提交。 */
+/**
+ * 视频确认金额直接取站点计费函数导出的完整档位，未知时不提交。
+ * 给了 targetResolution 就按该档计价（模型 resolutions 里没有该档则回 null ⇒ 不提交，
+ * 绝不静默降到默认档扣一笔别的钱）；没给才落到模型默认档。
+ */
 async function videoCostFromCatalog(
-  model: string, secs: number, generateAudio: boolean | undefined, sessionID: string, signal?: AbortSignal,
-): Promise<{ coins: number; billing_unit: string; resolution: string } | null> {
+  model: string, secs: number, generateAudio: boolean | undefined, sessionID: string,
+  targetResolution?: string, signal?: AbortSignal,
+): Promise<{ coins: number; billing_unit: string; resolution: string; resolutions: string[] } | null> {
   try {
     const res = await platformFetch("/models", { method: "GET" }, sessionID, signal)
     if (!res.ok) return null
     const body = (await res.json()) as { data?: Array<Record<string, any>> }
     const m = (body.data ?? []).find((x) => x?.id === model)
     const billing = m?.x_billing
-    const resolution = m?.x_capabilities?.defaultResolution
+    const supported: string[] = Array.isArray(m?.x_capabilities?.resolutions)
+      ? m.x_capabilities.resolutions.filter((r: unknown): r is string => typeof r === "string")
+      : []
+    const resolution = targetResolution ?? m?.x_capabilities?.defaultResolution
+    if (targetResolution && !supported.includes(targetResolution)) return null
     const audio = generateAudio ?? m?.x_capabilities?.defaultAudio === true
     if (audio && m?.x_capabilities?.audio !== true) return null
     const table = audio ? billing?.prices_with_audio ?? billing?.prices : billing?.prices
     const coins = typeof resolution === "string" ? table?.[resolution]?.[String(secs)] : undefined
     if (billing?.currency !== "coins" || !["per_second", "per_video"].includes(billing.unit) || typeof coins !== "number" || !Number.isFinite(coins) || coins < 0) return null
-    return { coins, billing_unit: billing.unit, resolution }
+    return { coins, billing_unit: billing.unit, resolution, resolutions: supported }
   } catch { return null }
 }
 
@@ -285,7 +298,13 @@ export default tool({
       .string()
       .optional()
       .describe(
-        "图片写像素尺寸（如 1024x1536）；视频写画面比例（9:16/16:9/1:1/4:3/3:4/21:9）或像素写法（如 1920x1080），会原样作为视频契约的 size，不自动改写比例。",
+        "图片写像素尺寸（如 1024x1536）；非白名单尺寸/比例（3:4、1536x2048、2k 等）会被自动落到最接近的合法尺寸并告知，不会报错；视频写画面比例（9:16/16:9/1:1/4:3/3:4/21:9）或像素写法（如 1920x1080），会原样作为视频契约的 size，不自动改写比例。",
+      ),
+    aspect_ratio: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "仅图片用：画面比例（如 3:4、9:16、4:3）。上游只认少数几档像素尺寸，工具会自动落到最接近的合法尺寸（3:4/竖版海报→1024x1536）并在回执 size_adjusted 里告知；不要为凑比例反复试 size，也不要自己再方形出图后裁切。",
       ),
     n: tool.schema.number().int().min(1).max(4).optional().describe("生成张数，预设 1"),
     kind: tool.schema.enum(["image", "video"]).optional().describe("image 或 video，预设 image"),
@@ -300,7 +319,14 @@ export default tool({
       .describe(
         "视频时长（秒），minimax-h3 支持 5–15 秒，默认推荐 15 秒；其他模型以 video_quote 为准。",
       ),
+    resolution: tool.schema
+      .enum(["480p", "540p", "720p", "1080p", "2k", "4k"])
+      .optional()
+      .describe(
+        "video：成片分辨率档；image：仅作档位提示（2k/4k），按比例就近落到合法尺寸。以下为 video 说明：成片分辨率档。用户要高清/2K/4K/电影级时填对应档，一次填对直接出成片——minimax-h3 的高清档由平台自动完成（768P 出片后 auto-hd 超分），不要自己分两步超分，视频也没有独立超分工具。可选档以 video_quote 的 resolutions 为准；模型到不了该档会在提交前被拒，不静默降档。省略则用模型默认档。",
+      ),
     generate_audio: tool.schema.boolean().optional().describe("是否生成音讯，仅 video 用"),
+    rework_reason: tool.schema.string().max(300).optional().describe("同一镜头（同prompt同帧）已有在途或已成功任务时，确需再付费重出（换模、返工、多候选）才填，写明原因；不填会被同镜头去重闸拦下且不扣费。多候选优先用n。"),
     reference_images: tool.schema
       .array(tool.schema.string())
       .max(9)
@@ -315,7 +341,18 @@ export default tool({
     const kind = args.kind ?? "image"
     // 视频默认比例档 16:9：平台 VideoGenerationRequest.size 接受 "16:9" 或 "1920x1080"，
     // 归一成 catalog aspectRatio；「1024x1024」这类图片像素尺寸不是合法视频比例，会被平台回落到默认档。
-    const size = args.size ?? (kind === "video" ? "16:9" : "1024x1024")
+    let size = args.size ?? (kind === "video" ? "16:9" : "1024x1024")
+    // 图片尺寸就近落档（2026-11-04）：非白名单尺寸/比例不报错，映射到最接近的合法尺寸并告知。
+    // 病灶：3:4 竖版海报 → 1536x2048 被白名单挡下 → 子代理反复试错烧步骤。必须在 input_signature／
+    // 去重键／报价之前定稿，保证同一请求同一 size。白名单仍以站点 openapi 真源为准；取不到时才用兜底 5 档。
+    let size_fit: ImageSizeFit | undefined
+    if (kind === "image" && (args.size || args.aspect_ratio || (args.resolution && /^(1k|2k|4k)$/i.test(args.resolution)))) {
+      const allowedSizes = (await supportedImageSizes(context.sessionID, context.abort)) ?? FALLBACK_IMAGE_SIZES
+      const fit = fitImageSize({ size: args.size, aspect_ratio: args.aspect_ratio, resolution: args.resolution }, allowedSizes)
+      size = fit.size
+      if (fit.adjusted) size_fit = fit
+    }
+    const sizeAdjustedNote = size_fit?.note ? `【尺寸已自动调整】请求「${size_fit.requested}」→ 实际提交 ${size_fit.size}。${size_fit.note}` : ""
     const n = args.n ?? 1
     if (args.frame != null && (!args.project || kind !== "image" || n !== 1)) return fail("invalid_frame_contract", "逐帧生成必须提供project，kind=image且n=1；不允许以拼图或多候选冒充多帧。")
     if (args.project && (args.project.length > 200 || !args.project.trim())) return fail("invalid_project", "project必须为非空稳定ID，最多200字。")
@@ -341,7 +378,7 @@ export default tool({
         return ok({ task_id:args.retry_task_id, request_id, status:body.status ?? "unknown", resumed:true, new_generation:false, artifacts:body.data ?? [], registration, note:"只恢复原job；未创建新付费请求。终态失败需按原job与明确返工授权交中控恢复。" })
       } catch { return fail("result_unknown", "原job状态暂不可确认；保留原task_id，不能创建无关联替代任务。", {task_id:args.retry_task_id,request_id,recoverable:true}) }
     }
-    const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
+    const input_signature=contentHash({prompt:args.prompt,model,size,n,kind,quality:args.quality ?? "standard",resolution:args.resolution,duration_seconds:args.duration_seconds,generate_audio:args.generate_audio,project:args.project,frame:args.frame,reference_images:args.reference_images??[],reference_version:args.reference_version,style_version:args.style_version,style_lock:args.style_lock??""})
     let prior:any
     try {prior=getSubmission(scope,request_id)} catch {return fail("submission_journal_unavailable","当前席位不能写耐久提交/预算收据；未生成，请交具备制作能力的席位。",{request_id,recoverable:true,new_generation:false})}
     const priorIdentity = prior ? JSON.parse(prior.metadata_json) : null
@@ -390,10 +427,15 @@ export default tool({
     // 影片：目录秒价 × 时长（与实扣同源，R9-A2）；目录查不到才粗估并在确认卡标「粗估待确认」。
     const video_price =
       kind === "video"
-        ? await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, context.abort)
+        ? await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, args.resolution, context.abort)
         : null
+    if (kind === "video" && args.resolution && !video_price) {
+      // 目录里没有该档位（或该档没价）：这是「模型到不了」，不是价格查不到。不当成通用缺价报。
+      const supported = await videoCostFromCatalog(model, duration_seconds ?? 10, generate_audio, context.sessionID, undefined, context.abort)
+      const list = supported?.resolutions?.join("/") || "未知"
+      return fail("unsupported_resolution", `${model} 没有 ${args.resolution} 档（可取档位：${list}）；未提交，也没有降档扣费。要这个规格请换原生支持的模型。`)
+    }
     if (kind === "video" && !video_price) return fail("video_price_unknown", "目录没有本次完整提交档位的币值报价；尚未提交生成，不以未知价格开跑。")
-    if (kind === "video" && args.quality === "hd" && video_price?.resolution !== "1080p") return fail("unsupported_resolution", "当前视频API不接受显式1080p品质；模型默认档不同，未提交且未降规格。")
     let cost_coins =
       kind === "video"
         ? video_price!.coins
@@ -407,6 +449,35 @@ export default tool({
       catch(e:any){return fail(e.code??"project_budget_unknown",e.message,{request_id,new_generation:false,recoverable:true})}
     }
 
+    // H15 同镜头去重闸（2026-11-04，02-847 回放：换模重出把在途/已成的同镜头再付费一遍，实扣浪费 14 币）。
+    // 只拦「新付费提交 + 同会话(含子代理)已有同 prompt 同帧、未失败/未退款的任务 + 未写 rework_reason」；
+    // 原任务失败/退款/取消即放行；首次生成、同 request_id 续接、retry_task_id 恢复都不经过这里。
+    // 不新增确认卡（full/auto 不重复确认）；查询失败一律放行（fail-open），不误拦正常生成。
+    const shot_key = contentHash({ kind, prompt: args.prompt.split(/\s+/).filter(Boolean).join(" "), frame: args.frame ?? null })
+    const rework_reason = args.rework_reason?.trim() || undefined
+    if (cost_coins > 0.1 && (!prior || prior.state==="rejected") && !rework_reason) {
+      let live: any[] = []
+      try {
+        const candidates = sameShotSubmissions(shot_key, Date.now() - 24 * 3600_000)
+        if (candidates.length) {
+          const listing = await gatewayRequest("/internal/session-tasks", { session_id: context.sessionID }, context.abort)
+          const byId = new Map((Array.isArray(listing?.tasks) ? listing.tasks : []).map((task: any) => [task.task_id, task]))
+          live = candidates.flatMap(({ task_id, identity }) => {
+            const task: any = byId.get(task_id)
+            if (!task || ["failed", "refunded", "cancelled"].includes(String(task.status))) return []
+            return [{ task_id, status: task.status ?? "unknown", model: task.model ?? identity.model, project: task.project ?? identity.project, frame: task.frame ?? identity.frame, request_id: identity.request_id }]
+          })
+        }
+      } catch { live = [] }
+      if (live.length) {
+        const succeeded = live.some((task) => task.status === "succeeded")
+        return fail("duplicate_shot",
+          `同一镜头（同prompt${args.frame != null ? "同帧" : ""}）本会话已有${succeeded ? "已成功" : "在途"}任务 ${live.slice(0, 5).map((task) => `${task.task_id}(${task.model}/${task.status})`).join("、")}；本次未提交、未扣费。` +
+          `${succeeded ? "直接用已成功结果" : "用 image_get_result 等它终态；失败/退款后同参数重提会自动放行"}。确需再付费重出（换模/返工/多候选）请带 rework_reason 写明原因${succeeded ? "" : "——原任务若之后成功，两份都会扣费"}，本次预估 ${cost_coins} 币。`,
+          { existing: live, shot_key, new_generation: false, charged: false, request_id })
+      }
+    }
+
     // 扣费闸门：≤0.1 币的草稿直接放行，其余需用户确认
     if (cost_coins > 0.1 && (!prior || prior.state==="rejected")) {
       const description =
@@ -415,8 +486,9 @@ export default tool({
             ? `生成 ${duration_seconds ?? 10} 秒视频（${model}，${video_price.resolution}、${video_price.billing_unit}），预估花费 ${cost_coins} 币`
             : `生成 ${duration_seconds ?? 10} 秒视频（${model}），预估花费 ${cost_coins} 币（目录查无秒价，粗估待确认，实扣可能更高）`
           : `生成 ${n} 张图（${model}），预估花费 ${cost_coins} 币`
+      const spend_description = rework_reason ? `${description}（同镜头重出：${rework_reason}）` : description
       const approved = await confirmSpend(
-        { sessionID: context.sessionID, amount_coins: cost_coins, description, model, request_id },
+        { sessionID: context.sessionID, amount_coins: cost_coins, description: spend_description, model, request_id },
         context.abort,
       )
       if (!approved) {
@@ -473,8 +545,8 @@ export default tool({
       // 在平台上会被 H3 当成静态画面＋运镜；这里补一条物理变化合同再提交。
       if (kind === "video" && !hasMotionContract(final_prompt)) final_prompt = `${final_prompt} ${VIDEO_MOTION_FALLBACK}`
       const payload: any =
-        kind === "video"
-          ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(reference_images.length > 0 ? { reference_images } : {}) }
+      kind === "video"
+        ? { prompt: final_prompt, model, size, duration_seconds, generate_audio, ...(video_price?.resolution ? { resolution: video_price.resolution } : {}), ...(reference_images.length > 0 ? { reference_images } : {}) }
           : {
               prompt: final_prompt,
               model,
@@ -486,7 +558,7 @@ export default tool({
               ...(reference_images.length > 0 ? { reference_images } : {}),
             }
 
-      const identity = { scope, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
+      const identity = { scope, shot_key, rework_reason, budget_version:budget?.version, budget_source:budget?.source, size, input_signature, submitted_references:reference_images, reference_fingerprints:fingerprints, request_id, session_id:context.sessionID, project:args.project, frame:args.frame, model, cost_coins, reference_version:args.reference_version ?? contentHash(fingerprints), style_version:args.style_version ?? contentHash(args.style_lock ?? "") }
       payload.workflow = { metadata: { budget_version:budget?.version, session_id:context.sessionID,project:args.project,frame:args.frame,request_id,size,reference_version:identity.reference_version,style_version:identity.style_version,style_lock:args.style_lock ?? "" } }
       payload.cap_coins = Math.min(args.cap_coins ?? cost_coins, cost_coins)
       // 单次权威实扣不得高于本地原子保留；目录变价应拒绝而非穿透项目上限。
@@ -529,8 +601,11 @@ export default tool({
             request_id,project:args.project,frame:args.frame,reference_version:identity.reference_version,style_version:identity.style_version,
             kind,
             model,
+            size,
+            ...(size_fit ? { size_adjusted: { requested: size_fit.requested, used: size_fit.size, note: size_fit.note } } : {}),
             estimated_cost_coins: cost_coins,
             note:
+              (sizeAdjustedNote ? sizeAdjustedNote + "\n" : "") +
               "已提交并耐久登记。queued不等于上游失败；完整task_id/request_id必须保留。" +
               (kind === "video"
                 ? "视频完成后用video_result_fetch读取，再video_fetch {task_id} 下载全部artifact、验证落盘并提交downloaded ACK；"
@@ -551,7 +626,7 @@ export default tool({
           const extra={model,cost_coins,project:args.project,frame:args.frame,request_id,reference_version:identity.reference_version,style_version:identity.style_version,requested_count:n,size,result_source:"synchronous_receipt",completion:{status,artifacts,cost_coins:data.cost_coins??cost_coins}}
           acceptTaskSubmission(scope,request_id,receiptID,{task_id:receiptID,session_id:context.sessionID,kind,...extra})
           const receipt=await registerTask(receiptID,context.sessionID,kind,context.abort,extra)
-          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),...(card_note?{note:card_note}:{})})
+          return ok({task_id:receiptID,source:"synchronous_receipt",upstream_task_id:null,request_id,status,partial_result:artifacts.length<n,artifacts,url:artifacts[0].url,kind,model,estimated_cost_coins:cost_coins,registration_durable:receipt.durable,recoverable:!receipt.durable,download_tool:kind==="image"?"image_result_download":"video_fetch",...(kind==="video"?{download_args:{task_id:receiptID}}:{}),size,...(size_fit?{size_adjusted:{requested:size_fit.requested,used:size_fit.size,note:size_fit.note}}:{}),...((card_note||sizeAdjustedNote)?{note:[sizeAdjustedNote,card_note].filter(Boolean).join("\n")}:{})})
         }
       }
 

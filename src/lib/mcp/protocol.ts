@@ -138,6 +138,14 @@ export function negotiateProtocolVersion(clientVersion: unknown): string {
     : MCP_PROTOCOL_VERSION;
 }
 
+/** 工具注解（MCP 2025-06-18 可选栏；旧客户端忽略即可）。 */
+export interface McpToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 /** 工具宣告。`inputSchema` = JSON Schema（object），由 `./tools.ts` 提供。 */
 export interface McpToolDescriptor {
   /** snake_case，对模型稳定；改名等于破坏性变更。 */
@@ -147,6 +155,10 @@ export interface McpToolDescriptor {
   /** 简体中文描述；英文版接在同一个字串内（见 tools.ts 的 `bilingual()`）。 */
   description: string;
   inputSchema: Record<string, unknown>;
+  /** 可选：只读／破坏性／幂等／开放世界提示（不影响 2025-06-18 客户端）。 */
+  annotations?: McpToolAnnotations;
+  /** 可选：结构化输出 schema（有则建议同时回 structuredContent）。 */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface McpToolsListResult {
@@ -242,11 +254,40 @@ export interface McpToolCallResult {
   content: McpTextContent[];
   /** 工具层失败（未知工具 / 上游 4xx / 网路中断）走这里，**不是** JSON-RPC error。 */
   isError?: boolean;
+  /**
+   * 结构化结果（MCP tools 规范的 structuredContent）。文本 content 仍保留向后兼容摘要；
+   * 旧客户端只读 content，新客户端可读本栏。截断纪律只约束 content 文字，不裁本物件。
+   */
+  structuredContent?: Record<string, unknown>;
 }
 
 /** 单一文字区块的工具结果。`isError` 只在 true 时挂上（形状与官方 SDK 一致）。 */
 export function textResult(text: string, isError = false): McpToolCallResult {
   return isError ? { content: [{ type: "text", text }], isError: true } : { content: [{ type: "text", text }] };
+}
+
+/** 文本摘要 + structuredContent；isError 时两边都带可读／机读错误。 */
+export function structuredResult(
+  text: string,
+  structured: Record<string, unknown>,
+  isError = false,
+): McpToolCallResult {
+  return isError
+    ? { content: [{ type: "text", text }], structuredContent: structured, isError: true }
+    : { content: [{ type: "text", text }], structuredContent: structured };
+}
+
+/** 统一机器可读错误：{ code, message, retryable, next_action } + 可选扩展栏。 */
+export function machineError(input: {
+  code: string;
+  message: string;
+  retryable: boolean;
+  next_action: string;
+  [key: string]: unknown;
+}): McpToolCallResult {
+  const { code, message, retryable, next_action, ...rest } = input;
+  const body: Record<string, unknown> = { code, message, retryable, next_action, ...rest };
+  return structuredResult(JSON.stringify(body, null, 2), body, true);
 }
 
 // ─────────────────────────────────────────── 输出消毒

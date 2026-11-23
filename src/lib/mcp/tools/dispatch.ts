@@ -40,8 +40,10 @@ export function createHttpDispatcher(
       accept: "application/json",
     });
 
-    let payload: string | undefined;
-    if (request.method === "POST") {
+    let payload: string | FormData | undefined;
+    if (request.method === "POST" && request.form) {
+      payload = request.form;
+    } else if (request.method === "POST") {
       headers["Content-Type"] = "application/json";
       payload = JSON.stringify(request.body ?? {});
     }

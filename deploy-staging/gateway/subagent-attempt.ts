@@ -3,12 +3,15 @@ import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascad
 import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { currentKernelFingerprint } from "./agent-kernel.ts"
-import { renderContractDirective, DELIVERY_CONTRACTS } from "./delivery-gate"
+import { renderContractDirective, contractAgentFor, DELIVERY_CONTRACTS } from "./delivery-gate"
 import { WORKER_HARD_RULES, FORK_HARD_RULES, buildForkDirective, effortVariant, stripAuthorizationSection, shouldRetryWithoutVariant } from "./subagent-policy.ts"
 import type { SubagentRun, ForkContext } from "./subagent-types.ts"
 import { isOpenCodeSessionId } from "./subagent-types.ts"
 import { deps, byChildOc, rememberChildParent } from "./subagent-runs.ts"
 import { finishRun } from "./subagent-finish.ts"
+import { isAudioModel } from "./model-registry.ts"
+import { MARK_CAN_LISTEN, MARK_CANNOT_LISTEN, criticCanListenNote, criticCannotListenNote } from "./audio-capability-notes.ts"
+import { buildCriticAudioParts, extractAudioTargets } from "./critic-audio-parts.ts"
 
 /**
  * 建子会话并投递任务书（attempt = run.attempt 对应 modelChain 里的模型）。
@@ -134,6 +137,8 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
     if (ctx.ok === false) return `fork 上下文不可用，已拒绝 fork：${ctx.error}`
     forkModel = ctx.model
     forkAgent = ctx.agent
+    // H62：fork 的 run.agent 为空，记下实际继承的 agent，供 rememberChildParent 登记 consumer_agent（收件箱唤醒沿用）。
+    run.forkAgent = ctx.agent
     forkVariant = ctx.variant
     try {
       const res = await fetch(`${deps!.openCodeUrl}/session/${source}/fork`, {
@@ -213,7 +218,7 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
   // 子代理 prompt **尾部**（recency 最高）。真源=已载入的 DELIVERY_CONTRACTS（禁手抄）。
   // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回归。重派链的
   // run.prompt 已含 buildReworkDirective（自我标注「自动重派」），此段与之共存于尾部不冲突。
-  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
+  const contractDirective = (run.beastMode === true || run.agent === "lyricist" || run.agent === "music") ? renderContractDirective(contractAgentFor(run), DELIVERY_CONTRACTS) : ""
   // 2026-10-02：模板空位事实注入。父 sessionId 用 run.parentGatewaySessionId（派工发起端
   // 的 gateway 会话 id，= canvasStates 的 key；**禁用子会话 opencodeSessionId**，那会指到
   // 子会话画布桶）。有值才插，无值时输出与注入前逐字元等价。
@@ -225,10 +230,31 @@ export async function dispatchAttempt(run: SubagentRun): Promise<string | undefi
     : "\n\n【当前授权】没有网关核实的持续授权；只按委托单已有任务与预算范围继续，范围外的付费交回父代理合并请求授权，用户沉默不算同意。"
   // 委托任务保持首个独立user part；规则与唯一机器交付格式位于system，资料不混入任务正文。
   // fork：父历史已在会话内（fork 端点复制），这里只投 d7e 指令原文；不重投 spec/模板/宪法。
-  const parts: Array<{ type: "text"; text: string }> = run.isFork
+  const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; filename: string; url: string }> = run.isFork
     ? [{ type: "text", text: buildForkDirective(run.prompt) }]
     : [{ type: "text", text: run.prompt }]
   if (!run.isFork && templateSlotsNote) parts.push({ type: "text", text: templateSlotsNote })
+  // 2026-11-22：评审席原生听被审音频（机器 critic 与 orchestrator 派的 critic 都走本函数）。
+  // 能力来源只有 registry 旗标（isAudioModel）；本 attempt 的模型不能听 → 不附音频、如实告知只能判 PARTIAL，
+  // 回执留空（换模重试再进本函数时按新模型重新判定）。
+  run.criticAudioReceipts = []
+  if (!run.isFork && run.agent === "critic" && extractAudioTargets(run.prompt).length > 0) {
+    try {
+      const canListen = isAudioModel(model)
+      const aud = canListen && model ? await buildCriticAudioParts({ prompt: run.prompt, model }) : null
+      if (aud && aud.parts.length > 0) {
+        for (const p of aud.parts) parts.push(p)
+        run.criticAudioReceipts = aud.receipts
+        parts.push({ type: "text", text: `${MARK_CAN_LISTEN}${criticCanListenNote(aud.receipts.map((r) => r.artifact), aud.skipped)}` })
+      } else {
+        parts.push({ type: "text", text: `${MARK_CANNOT_LISTEN}${criticCannotListenNote(canListen)}` })
+        if (aud && aud.skipped.length > 0) console.warn(`[gateway] critic audio skipped: run=${run.id} ${aud.skipped.map((x) => `${x.artifact}:${x.reason}`).join(",")}`)
+      }
+      console.log(`[gateway] critic audio parts: run=${run.id} attached=${run.criticAudioReceipts.length} model=${model?.providerID ?? "?"}/${model?.modelID ?? "?"} canListen=${canListen}`)
+    } catch (e) {
+      console.warn(`[gateway] critic audio parts failed — run=${run.id}:`, e instanceof Error ? e.message : e)
+    }
+  }
   const system = run.isFork
     // D7/D8：fork 的授权段每次重新求值（剥掉父快照里的旧【当前授权】），末尾再压
     // fork 专用硬规则（禁止再派／禁止报告 .md／交付物落盘豁免），recency 最高。

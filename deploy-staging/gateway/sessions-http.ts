@@ -15,11 +15,16 @@ import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { MergedReplayFrame } from "./replay-frame.ts"
-import { isSystemWakeText, isInternalMechanismText, stripSystemReminders } from "./system-wake.ts"
-import { getOwnedSession } from "./sessions-core.ts"
+import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders, isCompactionSummaryInfo, COMPACTION_PART_TYPE } from "./system-wake.ts"
+import { getOwnedSession, resolveSessionRuntimeStatus } from "./sessions-core.ts"
+import { liveChildCount } from "./session-activity.ts"
 import { TAIL_DATA_MARKER, TAIL_PAYLOAD_MARKER, GW_TOKEN_RE } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
-import { t2sVisibleText } from "./outbound-sanitize.ts"
+import { t2sVisibleText, stripOutboundFeed, stripOutboundFlush, type PartStripState } from "./outbound-sanitize.ts"
+import { scrubVisibleFrame, OPT_HARNESS_PATH_RE } from "./delivery-gate-scrub.ts"
+import { isModelSelfFixError, visibleToolError } from "./user-facing-error.ts"
+import { parseToolOutput } from "./events-translate-core.ts"
+import { visibleToolArgs } from "./humanize-gw.ts"
 
 // L0 画像 onboarding：账户还没有任何确认过的画像时，引导 agent 用 question 工具
 // 以选择题采集画像（PM 原则：别让用户动脑写表单）。答案存 pendingProfile，
@@ -45,8 +50,11 @@ const DEFAULT_USER_SETTINGS: UserSettingsShape = { interrupt_mode: "steer", pers
 // 野兽模式开关（MOE 改革，2026-09-08）：settings 布林栏，缺省=false（零回归）。
 // 不入 USER_SETTINGS_ENUMS（那是枚举字串栏白名单）；POST 专门放行本栏（仅接受
 // 真布林），sanitize 显式列出栏位、缺栏=保持现值。
-export type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean }
-export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode">, readonly string[]> = {
+// 记忆开关（2026-11-06，对标 ChatGPT「引用保存的记忆／参考聊天记录」与 Codex use_memories／generate_memories 分离）：
+// memory_use=false → 不注入／不召回该账号的私有记忆、历史对话；memory_generate=false → 不写新私有记忆、
+// 不入历史索引、批次跳过。缺省（未存）一律视为 true；只有显式 false 才落盘。
+export type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean; memory_use?: boolean; memory_generate?: boolean }
+export const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode" | "memory_use" | "memory_generate">, readonly string[]> = {
   interrupt_mode: ["steer", "queue"],
   persona: ["efficient", "thoughtful"],
   cost_mode: ["economy", "balanced", "premium"],
@@ -58,7 +66,7 @@ export function normalizeUserSettings(raw: unknown): UserSettingsShape {
   const s: UserSettingsShape = { ...DEFAULT_USER_SETTINGS }
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const r = raw as Record<string, unknown>
-    for (const k of Object.keys(USER_SETTINGS_ENUMS) as Exclude<keyof UserSettingsShape, "beast_mode">[]) {
+    for (const k of Object.keys(USER_SETTINGS_ENUMS) as Exclude<keyof UserSettingsShape, "beast_mode" | "memory_use" | "memory_generate">[]) {
       const v = r[k]
       if (typeof v === "string" && USER_SETTINGS_ENUMS[k].includes(v)) s[k] = v
     }
@@ -120,6 +128,76 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
   }
 }
 
+/** 最小只读会话运行态（MCP 导演完成判定用）。白名单字段，不含内部凭证。 */
+export async function handleGetSessionStatus(key: string, id: string): Promise<Response> {
+  const state = getOwnedSession(key, id)
+  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+  const status = resolveSessionRuntimeStatus(state)
+  const pending_questions = state.pendingQuestions?.size ?? 0
+  const pending_confirms = state.pendingConfirms?.size ?? 0
+  // 2026-11-01 MCP 假完成修复：主回合 idle ≠ 任务完成——异步子代理／生成任务仍在跑时，
+  // 只读投影既有 sessions-core 数据（不改 status 三态口径，与 GET /sessions 列表一致）。
+  const active_children = liveChildCount(state.sessionId)
+  const inflight_generations = state.sessionTasks
+    ? [...state.sessionTasks.values()].filter((t) => t.status === "queued" || t.status === "running").length
+    : 0
+  // 确认卡明细：与 SSE confirm.request 同口径（request_id / amount_coins / description），
+  // 外加 ledger 上既有 model / task_id；charge=false 为非扣费闸（协作/计划/目标），金额恒 0。
+  const pending_confirm_items = [...(state.pendingConfirms?.entries() ?? [])].map(([request_id, c]) => ({
+    request_id,
+    charge: !!c.ledger,
+    amount_coins: c.ledger?.amount_coins ?? 0,
+    model: c.ledger?.model ?? null,
+    task_id: c.ledger?.task_id ?? null,
+    description: c.description ?? null,
+  }))
+  // 2026-11-04 H11：question 卡明细（与 SSE question.request 同口径，白名单＋截断）。
+  // 外部 agent（MCP）只拿到 pending_questions 计数时看不到题面／选项，无法在 QUESTION_ASSUME_MS
+  // 超时前作答（job 8606e683：超预算四选一请示 3 分钟后 expired_without_consent）。
+  const clip = (v: unknown, n: number): string | null => (typeof v === "string" ? v.slice(0, n) : null)
+  const pending_question_items = [...(state.pendingQuestions?.values() ?? [])].slice(0, 10).map((q) => ({
+    request_id: q.requestId,
+    questions: (Array.isArray(q.questions) ? q.questions : []).slice(0, 10).map((x) => ({
+      header: clip(x?.header, 200),
+      question: clip(x?.question, 2000) ?? "",
+      options: (Array.isArray(x?.options) ? x.options : []).slice(0, 12).map((o) => ({
+        label: clip(o?.label, 300) ?? "",
+        description: clip(o?.description, 800),
+      })),
+    })),
+  }))
+  let recent_approved_coins = 0
+  for (const rec of state.resolvedConfirms?.values() ?? []) {
+    if (rec.outcome === "approved" && typeof rec.amount_coins === "number") recent_approved_coins += rec.amount_coins
+  }
+  const backgroundBusy = active_children > 0 || inflight_generations > 0
+  const phase =
+    status === "waiting"
+      ? "awaiting_input"
+      : status === "running"
+        ? "running"
+        : backgroundBusy
+          ? "background_running"
+          : "idle"
+  return Response.json({
+    session_id: id,
+    opencode_session_id: state.opencodeSessionId,
+    status,
+    phase,
+    terminal: status === "idle" && !backgroundBusy,
+    pending_questions,
+    pending_confirms,
+    active_children,
+    inflight_generations,
+    pending_confirm_items,
+    pending_question_items,
+    recent_approved_coins,
+    last_turn_active_at: state.lastTurnActiveAt ?? 0,
+    last_activity_at: state.lastActivityAt ?? null,
+    title: state.sessionTitle ?? null,
+  })
+}
+
 // P1-E1：对话 transcript 端点。真源是 opencode（gateway 不另存 messages，
 // 见 L3496 注释——那是第二份会漂移的历史副本）。返回轻量结构：每条 message
 // 只保留 role + text/tool parts，tool part 带完整 input（prompt/lora/model/
@@ -154,7 +232,7 @@ function gwTokenNoG(): RegExp {
  *  该标记之后若真有注入块（带凭证）→ 从真注入块那处截断（用户气泡不再露出内部注入正文）。
  *  2026-10-18：无凭证的资料块（模板偏好等）使用 TAIL_DATA_MARKER，恒定可从标记处剥离。
  *  找不到可剥离标记＝原样返回（零回归）。 */
-function stripTailInjectedPayload(text: string): string {
+export function stripTailInjectedPayload(text: string): string {
   // 资料块无凭证，但标记是网关专属：先按它截断。
   const dataMarker = TAIL_DATA_MARKER.trim()
   const dataAt = text.indexOf(dataMarker)
@@ -189,25 +267,23 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
         if (typeof infoSrc.role === "string") info.role = infoSrc.role
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
-      // H14 补完：user 讯息首个 text part 为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
-      if (info.role === "user" && partsSrc.some((p) => {
+      // 2026-10-31：compaction 摘要讯息（及其触发讯息）实时从不上屏 → 历史整条丢弃（同一判据）。
+      if (isCompactionSummaryInfo(infoSrc) || partsSrc.some((p) => !!p && typeof p === "object" && (p as { type?: unknown }).type === COMPACTION_PART_TYPE)) continue
+      const headText = partsSrc.map((p) => {
         const q = p as Record<string, unknown> | null
-        return !!q && q.type === "text" && isSystemWakeText(q.text)
-      })) info.role = "system"
+        return !!q && q.type === "text" && typeof q.text === "string" ? q.text : ""
+      }).find((t) => t.trim().length > 0)
+      // 进度 / 回报队列 / 阻塞 / 提问：不进客户端历史。模型上下文仍在 opencode，不经这里。
+      if ((info.role === "user" || info.role === "system") && isHiddenSubagentBusText(headText)) continue
+      // H14 补完：user 讯息为系统唤醒文本 → 历史回放呈现为 system（显示层，不改模型上下文）。
+      if (info.role === "user" && isSystemWakeText(headText)) info.role = "system"
       // 2026-10-23：客户端历史只暴露产品可见角色。developer / 非唤醒 system / 耐久收件箱等机制文一律不回传。
-      // 子代理唤醒（已改写成 system + isSystemWakeText）保留，供前端还原 subagent_result。
+      // 子代理完成/失败唤醒（已改写成 system）保留，供前端还原 subagent_result。
       if (info.role === "developer") continue
       if (info.role === "system") {
-        const wake = partsSrc.some((p) => {
-          const q = p as Record<string, unknown> | null
-          return !!q && q.type === "text" && isSystemWakeText(q.text)
-        })
-        if (!wake) continue
+        if (!isSystemWakeText(headText)) continue
       }
-      if (info.role === "user" && partsSrc.some((p) => {
-        const q = p as Record<string, unknown> | null
-        return !!q && q.type === "text" && isInternalMechanismText(q.text)
-      })) continue
+      if (info.role === "user" && isInternalMechanismText(headText)) continue
       const parts: unknown[] = []
       for (const rawPart of partsSrc) {
         try {
@@ -225,11 +301,14 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 刷新/重进会话时模型正文会从简体变回繁体）。仅对非 user 讯息转换，
               // 用户自己输入的文字逐字保留；转换在剥离之后进行。
               let text = stripSystemReminders(stripTailInjectedPayload(part.text))
+              if (info.role === "system") text = clientVisibleWakeText(text)
               // 2026-10-11 缺口C：顺序＝先剥离尾端注入块、再抹除会话凭证 ⟦gw:<nonce>⟧、
               // 最后才 T2S。真注入块与模型复述会把会话级凭证/内部提示原文写进存储文本，
               // 而历史端点是用户可见通道（SSE 干净、只有此处漏）。凭证一律抹为空串
               // （不换成「已移除」字样：不在用户正文里发明文字）。
               text = text.replace(GW_TOKEN_RE, "")
+              // 编排注入的 user 消息（子代理轮询/唤醒指令）会带工作区绝对路径；用户本人不会输入这个前缀。
+              if (info.role === "user") text = text.replace(OPT_HARNESS_PATH_RE, "（内部存档）")
               if (info.role !== "user") text = t2sVisibleText(text)
               // 剥离后为空串：该 text part 的内容全部是网关注入（无 text part 的罕见分支里，
               // nudge 以标记开头被整段截掉）——整块丢弃，避免前端渲染出空气泡。
@@ -241,7 +320,15 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               // 非上述分支的 text/reasoning（含 assistant 正文与 assistant/user 的 reasoning）：
               // 同样抹除凭证；非 user 再过 T2S，user 自己输入的文字逐字保留（凭证除外）。
               let text = stripSystemReminders(part.text).replace(GW_TOKEN_RE, "")
-              if (info.role !== "user") text = t2sVisibleText(text)
+              if (type === "text" && info.role === "assistant") {
+                // 2026-10-31：与实时同口径——实时正文经 emitSanitizedDelta 的 stripOutboundFeed/Flush
+                //（内部章节、英文内部思考、/opt/agent-harness 路径→「（内部存档）」、繁→简）再过
+                // scrubVisibleFrame("message.delta")；历史对整段正文跑同一串函数。
+                const strip: PartStripState = { pending: "", suppress: false, fence: false, sawEnglish: false }
+                text = stripOutboundFeed(strip, text) + stripOutboundFlush(strip)
+                const scrubbed = scrubVisibleFrame("message.delta", { text }) as { text?: unknown }
+                if (typeof scrubbed.text === "string") text = scrubbed.text
+              } else if (info.role !== "user") text = t2sVisibleText(text)
               if (text.length === 0) continue
               parts.push(text === part.text ? part : { ...part, text })
               continue
@@ -262,27 +349,38 @@ export function slimHistoryMessages(msgs: unknown[]): unknown[] {
               ? (part.state as Record<string, unknown>)
               : null
             const st: Record<string, unknown> = {}
+            const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
+            // 2026-10-31：模型自修类（未提交、改参数再调）整个 part 丢弃——与实时 model_self_fix 同一判定。
+            // error 态看 state.error；completed 态看 state.output 的 {ok:false, error}。
+            if (stSrc) {
+              const rawErr = stSrc.status === "error"
+                ? stSrc.error
+                : stSrc.status === "completed" && typeof stSrc.output === "string" && stSrc.output.includes('"ok"')
+                  ? parseToolOutput(stSrc.output)
+                  : null
+              const failedOutput = stSrc.status !== "completed" || (rawErr !== null && (rawErr as { ok?: unknown }).ok === false)
+              if (rawErr != null && failedOutput && isModelSelfFixError(rawErr)) continue
+            }
             if (stSrc) {
               if (stSrc.status !== undefined) st.status = stSrc.status
+              // 与实时 tool.invoke 同一出口 visibleToolArgs：挽具内部 → 省略；服务端绝对路径 → 文件名。
               if (stSrc.input !== undefined) {
-                let s: string
-                try {
-                  s = typeof stSrc.input === "string" ? stSrc.input : JSON.stringify(stSrc.input)
-                } catch {
-                  s = ""
-                }
-                if (s.length > 500) s = s.slice(0, 500)
-                st.input = s
+                const s = visibleToolArgs(name ?? "", stSrc.input)
+                if (s) st.input = s
               }
-              if (typeof stSrc.error === "string") {
-                if (stSrc.error.length > 0) st.error = stSrc.error
-              } else if (stSrc.error !== null && typeof stSrc.error === "object" && !Array.isArray(stSrc.error)) {
-                const em = (stSrc.error as Record<string, unknown>).message
-                if (typeof em === "string") st.error = { message: em }
+              // 2026-10-31：失败原文与实时 SSE 同一权威 visibleToolError；自修类（""）不写 st.error＝不出红字。
+              const rawErr =
+                typeof stSrc.error === "string"
+                  ? stSrc.error
+                  : stSrc.error !== null && typeof stSrc.error === "object" && !Array.isArray(stSrc.error)
+                    ? (stSrc.error as Record<string, unknown>).message
+                    : undefined
+              if (typeof rawErr === "string" && rawErr.length > 0) {
+                const visible = visibleToolError(name ?? "?", rawErr, "history")
+                if (visible) st.error = typeof stSrc.error === "string" ? visible : { message: visible }
               }
             }
             const tool: Record<string, unknown> = { type: "tool", state: st }
-            const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
             if (name !== undefined) tool.tool = name
             parts.push(tool)
             continue

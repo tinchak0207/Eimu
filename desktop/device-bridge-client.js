@@ -21,6 +21,9 @@
 // session，**没有** biz key，也**不**在此硬编任何 key。改以 credentialProvider
 // 注入点接受凭证；回 null/空 → bridge 不启动并回报 credentials_unavailable。
 // 补法见 desktop/DEVICE-BRIDGE.md。
+// 401/凭证失效 → 主动向页面要新票，不得无限重试死票：闸道只把设备票放在进程内存
+// （auth-gw.ts deviceTickets，TTL 600s），闸道一重启旧票即刻作废；此时必须走
+// onCredentialRequired 让页面重铸票，而不是拿同一张死票退避重连到天荒地老。
 //
 // ── 安全边界（能力宁可少；执行器抽到 lib/bridge-executor.js，可测）────────
 //  1. 工具白名单＝list_dir/read_file/grep/stat（无写/删/执行）。
@@ -42,6 +45,7 @@ const os = require("node:os");
 
 const proto = require("./lib/bridge-protocol.js");
 const { createBridgeExecutor, BridgeError } = require("./lib/bridge-executor.js");
+const { createUeMcpRelay } = require("./lib/ue-mcp-relay.js");
 const { PERMISSION_MODES, allowRuleForRoot } = require("./lib/permission-rules.js");
 const localWorker = require("./local-worker.js");
 
@@ -161,6 +165,9 @@ function withConsentAllowRules(base, consentRoots) {
 // 不另造第二套授权机制；空集 ⇒ bridge 拒绝服务（见 startDeviceBridge）。
 // W6c：mode/rules 为第二道防线的输入，即时读 runtime（由 startDeviceBridge 注入，
 // 未注入＝null/undefined，执行器回退 "auto" 以维持既有呼叫端行为）。
+// 引擎联动（UE 5.8 Unreal MCP）：全域串行的本机回环中继。
+const ueRelay = createUeMcpRelay({ clientVersion: (() => { try { return require("./package.json").version; } catch { return "0"; } })() });
+
 const executor = createBridgeExecutor({
   roots: () => Array.from(localWorker.authorizedRoots),
   mode: () => (runtime.mode === undefined ? undefined : runtime.mode),
@@ -202,8 +209,10 @@ const runtime = {
   //   persistConsentRoots — 收到 permanent 时落盘（由 main.js 并入 settings 并写回）。
   //   auditConsent        — 每接受一个**新的**同意根追加一行本机稽核（无 token/apiKey）。
   //   consentRootsProvider— 启动时读取已落盘的永久同意根（供 register 与放行）。
+  //   onCredentialRequired— 凭证缺失/失效（401/403）时主动向页面要新票的注入点。
   persistConsentRoots: null,
   auditConsent: null,
+  onCredentialRequired: null,
 };
 
 function snapshot() {
@@ -234,6 +243,29 @@ function setStatus(status, detail) {
 function errorCodeOf(status, json) {
   if (json && json.error && typeof json.error.code === "string") return json.error.code;
   return `http_${status}`;
+}
+
+/**
+ * 凭证类错误判定（纯函式，大小写不敏感）。
+ * 401/403 与闸道/上游会用的凭证错误码一律视为「票已死」：此时重试同一张票没有意义，
+ * 必须回头向页面要新票（见 connect 的 catch）。
+ * @param {unknown} code
+ * @returns {boolean}
+ */
+function isCredentialError(code) {
+  if (typeof code !== "string" || !code) return false;
+  const c = code.toLowerCase();
+  return (
+    c === "http_401" ||
+    c === "http_403" ||
+    c === "unauthorized" ||
+    c === "forbidden" ||
+    c === "invalid device ticket" ||
+    c === "invalid_ticket" ||
+    c === "invalid_credential" ||
+    c === "invalid_token" ||
+    c === "device_ticket"
+  );
 }
 
 async function post(pathname, body, transport = runtime) {
@@ -299,6 +331,28 @@ async function handleRequest(request) {
   if (!proto.isToolAllowed(request.tool)) return submitError(requestId, consentToken, `tool_not_allowed: ${String(request.tool)}`);
   const clean = proto.sanitizeToolArgs(request.tool, request.args);
   if (!clean.ok) return submitError(requestId, consentToken, `${clean.code}: ${clean.message}`);
+
+  // 引擎联动：改的是使用者的 UE 工程 ⇒ 本机也只认「完全访问」（闸道已验一次，这里是本机第一道）。
+  if (proto.isEngineTool(request.tool)) {
+    if (runtime.mode !== "full") return submitError(requestId, consentToken, "permission_denied: UE 编辑器联动需要开启「完全访问」");
+    const remainingMs = Number.isFinite(request.expires_at) ? request.expires_at - Date.now() - 2000 : undefined;
+    let engineResult;
+    try {
+      engineResult = await ueRelay.relay(clean.args, { timeoutMs: remainingMs });
+    } catch (err) {
+      const code = err && err.code ? err.code : "engine_failed";
+      return submitError(requestId, consentToken, `${code}: ${err && err.message ? err.message : "UE MCP 调用失败"}`);
+    }
+    const clampedEngine = proto.clampResult(engineResult, proto.MAX_RESULT_BYTES);
+    await postOk(`${PREFIX}/result`, {
+      device_id: runtime.deviceId,
+      connection_id: runtime.connectionId,
+      request_id: requestId,
+      consent_token: consentToken,
+      result: clampedEngine.result,
+    });
+    return;
+  }
 
   // 对话内就地授权：解析本请求的 consent（形状不合／未知 scope ＝ 当没有，不得抛）。
   // session/permanent 的根累积进记忆体（去重）；permanent 另呼叫 persistConsentRoots 落盘。
@@ -479,7 +533,22 @@ async function connect() {
     startHeartbeat();
     startPoll();
   } catch (err) {
-    scheduleReconnect(err && err.code ? err.code : "network_error");
+    const code = err && err.code ? err.code : "network_error";
+    // 401/凭证失效 → 主动向页面要新票，不得无限重试死票：闸道重启会让所有设备票
+    // 立刻失效（票在进程内存），此时保留退避重连只是空转；清掉死票并回调页面，
+    // 页面重新铸票后经 IPC setCredential → syncCurrentMode 重注册。
+    // 不停 runtime.running（桥仍在等票），退避重连照旧。
+    if (isCredentialError(code)) {
+      runtime.credential = null;
+      if (typeof runtime.onCredentialRequired === "function") {
+        try {
+          runtime.onCredentialRequired({ reason: code });
+        } catch {
+          /* 索取票失败不得影响重连排程 */
+        }
+      }
+    }
+    scheduleReconnect(code);
   }
 }
 
@@ -521,6 +590,8 @@ async function startDeviceBridge(opts = {}) {
   if (runtime.running) return snapshot();
   if (opts.gatewayBaseUrl) runtime.gatewayBaseUrl = String(opts.gatewayBaseUrl).replace(/\/+$/, "");
   if (typeof opts.onStatus === "function") runtime.onStatus = opts.onStatus;
+  runtime.onCredentialRequired =
+    typeof opts.onCredentialRequired === "function" ? opts.onCredentialRequired : null;
   runtime.enabled = opts.enabled === true;
 
   // W6c：注入点一律验型别（教训：跨界传错型别会被下游守卫静默降级）。
@@ -577,12 +648,13 @@ async function startDeviceBridge(opts = {}) {
     return snapshot();
   }
 
-  // H1：allowlist 必填。无授权根（使用者尚未 pickFiles 挑过任何根）⇒ 整条 bridge
-  // 拒绝服务并回明确状态，**不得**退回「只验 denylist」。这是正确且刻意的结果。
+  // H1：allowlist 必填（mode !== "full"）。无授权根（使用者尚未 pickFiles 挑过任何根）
+  // ⇒ 整条 bridge 拒绝服务并回明确状态，**不得**退回「只验 denylist」。这是正确且刻意的
+  // 结果。full 模式以家目录为隐式范围，空根照常启动（runtime.roots = [] 照实下发）。
   // 有效根 ＝ rootsProvider() ∪ 已落盘的同意根（永久授权在重启后仍能服务）。
   const baseRoots = typeof opts.rootsProvider === "function" ? opts.rootsProvider() : Array.from(localWorker.authorizedRoots);
   const roots = unionRoots(Array.isArray(baseRoots) ? baseRoots : [], runtime.consentRoots);
-  if (roots.length === 0) {
+  if (roots.length === 0 && runtime.mode !== "full") {
     runtime.credential = null;
     setStatus("no_authorized_roots", "no_authorized_roots");
     return snapshot();

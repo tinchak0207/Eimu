@@ -8,7 +8,7 @@
     {
       "name": "eimu",
       "source": "./eimu",
-      "description": "在 coding agent 里直接调用 Eimu：按提示词生成图片与视频、编辑图片、文字转语音、放大图像，查询余额与任务结果，并检索 Eimu 的公开技能库。"
+      "description": "Eimu Vibe Directing：远端 MCP 默认导演工具面，一句话到成片；原子工具见 toolset=expert。"
     }
   ]
 }

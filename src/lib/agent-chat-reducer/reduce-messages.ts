@@ -110,6 +110,17 @@ export function reduceToolProgress(state: AgentChatState, event: AgentSseEvent &
 
 export function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
   const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
+  // 2026-10-31：模型自修类（未提交、未扣费，agent 改参数重试）整行不显示：删掉对应 running 条目，
+  // 找不到就不补条目——它重试时会有自己的那一行。
+  if (!ok && error?.code === "model_self_fix") {
+    for (let i = state.items.length - 1; i >= 0; i -= 1) {
+      const it = state.items[i];
+      if (it.kind === "tool" && it.tool === tool && it.status === "running") {
+        return { ...state, items: [...state.items.slice(0, i), ...state.items.slice(i + 1)], turnActive: true };
+      }
+    }
+    return { ...state, turnActive: true };
+  }
   // 缺陷 C（2026-10-04）：本机档案读取未授权 ＝ needs_authorization。这**不是**
   // 成功，也不是一般失败——是等使用者在卡片上选授权范围的 action 态。判定同时看
   // error.code 与 action_required，避免上游只带其一时语义写反成「完成」。
@@ -341,6 +352,40 @@ export function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & 
   };
   return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
 }
+export function reduceVideoFailed(state: AgentChatState, event: AgentSseEvent & { name: "video.failed" }): AgentChatState {  // 失败也进对话流（与 video.done 对称）：用户在聊天里直接看到「没排上队，
+  // 费用已退回」，不依赖画布节点才知道发生了什么。
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
+  const text = refunded ? `这条视频没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这条视频生成失败${reason ? `（${reason}）` : ""}。`;
+  const notice: AgentNoticeItem = {
+    kind: "notice",
+    id: eventItemId("notice", event.event_id),
+    seq: event.event_id,
+    tone: "error",
+    text,
+  };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
+}
+export function reduceAudioFailed(state: AgentChatState, event: AgentSseEvent & { name: "audio.failed" }): AgentChatState {  // 失败也进对话流（与 audio.done 对称）：用户在聊天里直接看到「没排上队，
+  // 费用已退回」，不依赖画布节点才知道发生了什么。
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
+  const text = refunded ? `这段音频没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这段音频生成失败${reason ? `（${reason}）` : ""}。`;
+  const notice: AgentNoticeItem = {
+    kind: "notice",
+    id: eventItemId("notice", event.event_id),
+    seq: event.event_id,
+    tone: "error",
+    text,
+  };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
+}
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
 // 2026-09-21 暴君裁定：异步子代理跨回合在跑，回合收尾只转存**已定态**条目，
 // running 卡原样保留（见 retireSubagentItems），wakeParent 后的回合收到
@@ -438,6 +483,19 @@ export function reduceQuestionReplied(state: AgentChatState, event: AgentSseEven
   return { ...state, pendingQuestions, items: [...state.items, notice] };
 }
 
+/** question.rejected 的机器可读 reason 码 → 简体中文文案（未知英文码不透出原文）。 */
+const QUESTION_REJECT_REASON_TEXT: Record<string, string> = {
+  expired_without_consent: "长时间未确认，已按未同意处理",
+  question_expired: "该问题已失效",
+};
+
+function questionRejectReasonText(reason: unknown): string {
+  const raw = typeof reason === "string" ? reason.trim() : "";
+  if (!raw) return "该问题已取消。";
+  if (/^[a-z_]+$/.test(raw)) return QUESTION_REJECT_REASON_TEXT[raw] ?? "该问题已取消。";
+  return raw;
+}
+
 export function reduceQuestionRejected(state: AgentChatState, event: AgentSseEvent & { name: "question.rejected" }): AgentChatState {
   const { request_id, reason } = event.data;
   const pendingQuestions = state.pendingQuestions.filter((q) => q.requestId !== request_id);
@@ -446,7 +504,7 @@ export function reduceQuestionRejected(state: AgentChatState, event: AgentSseEve
     id: eventItemId("notice", event.event_id),
     seq: event.event_id,
     tone: "info",
-    text: reason || "该问题已取消。",
+    text: questionRejectReasonText(reason),
   };
   return { ...state, pendingQuestions, items: [...state.items, notice] };
 }

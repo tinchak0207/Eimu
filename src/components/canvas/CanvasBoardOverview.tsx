@@ -33,6 +33,7 @@ import {
   type HudRect,
 } from "@/lib/canvas/lod";
 import type { ChatCanvasEntry } from "@/hooks/canvas/canvas-chat-types";
+import { OpenInViewerButton, viewAssetsFromPreviews } from "@/components/viewer/OpenInViewerButton";
 
 export interface CanvasBoardOverviewProps {
   /** 画布清单（P2-A 冻结接口 canvas.canvasList）。空＝不渲染。 */
@@ -370,11 +371,17 @@ function BoardCard({ board, stat, active, clickable, picked, dimmed, onPick, cla
 /** 真实产出缩图的 1/2/3/4 网格（与鸟瞰封面同款写法）。 */
 function BoardMosaic({ previews }: { previews: CanvasStagePreview[] }) {
   const n = previews.length;
+  const assets = viewAssetsFromPreviews(previews);
   const grid = n === 1 ? "grid-cols-1" : n === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2";
   return (
     <div className={cn("grid h-full w-full gap-px bg-white/60", grid)}>
       {previews.map((p, i) => (
-        <div key={`${p.url}-${i}`} className={cn("relative overflow-hidden", n === 3 && i === 0 && "row-span-2")}>
+        <div key={`${p.url}-${i}`} className={cn("group/tile relative overflow-hidden", n === 3 && i === 0 && "row-span-2")}>
+          <OpenInViewerButton
+            asset={assets}
+            index={i}
+            className="absolute right-1 top-1 z-10 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100"
+          />
           {p.kind === "video" ? (
             <video src={p.url} muted playsInline preload="metadata" className="lod-stage-thumb h-full w-full object-cover" />
           ) : (

@@ -111,7 +111,7 @@ async function readBody(req: Request): Promise<Body> {
   return parsed as Body
 }
 
-export async function handleArtifact(req: Request, pathname: string): Promise<Response> {
+export async function handleArtifact(req: Request, pathname: string, deliverySession?: (sessionId: string) => string | undefined): Promise<Response> {
   try {
     assertInternalToken(req)
     const body = await readBody(req)
@@ -130,6 +130,7 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
       }
       const result = publishArtifact({
         sessionId,
+        deliverySessionId: deliverySession?.(sessionId),
         name,
         path: filePath,
         url: text(body, "url"),
@@ -186,8 +187,11 @@ export async function handleArtifact(req: Request, pathname: string): Promise<Re
         const error =
           result.state === "no_row"
             ? "没有探测结果（artifact 无 url），不能宣称干净"
-            : `探测未通过：${result.reason ?? "unknown"}（status=${result.status ?? "none"}）`
-        return Response.json({ ok: false, code, error, ...result, verify: result }, { status: result.state === "no_row" ? 409 : 422 })
+            : result.reason === "auth_required"
+              ? "交付链接是账号鉴权下载，未带凭证探测一定会 401（不是参数错误）。要核对内容请用 artifact_get 看 sha256 并与工作区文件比对；不要重复调用 artifact_verify。"
+              : `探测未通过：${result.reason ?? "unknown"}（status=${result.status ?? "none"}）`
+        // error 必须放在 ...result 之后：result 自带 error:null，若先写 error 再展开，会被覆盖成 null，工具层只能退回 422「参数没有被接受」。
+        return Response.json({ ok: false, code, ...result, error, verify: result }, { status: result.state === "no_row" ? 409 : 422 })
       }
       return Response.json({ ok: true, ...result, verify: result })
     }

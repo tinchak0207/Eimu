@@ -403,7 +403,7 @@ export function ShotReviewPanel({
                       className={cn(
                         "shrink-0 rounded-full px-1.5 py-0.5 text-ios-caption2",
                         status === "approved"
-                          ? "bg-ios-green/10 text-[#248A3D]"
+                          ? "bg-ios-green/10 text-ios-green"
                           : status === "rejected"
                             ? "bg-destructive/10 text-destructive"
                             : "bg-[rgba(255,149,0,0.12)] text-[#B25E00]",

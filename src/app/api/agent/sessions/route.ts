@@ -91,7 +91,11 @@ export async function POST(req: NextRequest) {
   // 与 user_profile/lessons 同载并入 payload。ownerKey 与 gateway 同演算法且
   // 同正典化（B key 先收敛到属主派生 key 再 hash；非 B key 恒等 raw）；
   // blob 不可达时两栏给空值，不阻塞开新会话。
-  const memoryLibrary = await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
+  // 临时对话（body.temporary===true）：gateway 会丢弃整套 L0，这里连读取都省掉。
+  const isTemporary = typeof body === "object" && body !== null && (body as { temporary?: unknown }).temporary === true;
+  const memoryLibrary = isTemporary
+    ? { memory_docs: [], memory_index_md: "" }
+    : await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
 
   const payload: Record<string, unknown> =
     typeof body === "object" && body !== null ? { ...(body as Record<string, unknown>) } : {};

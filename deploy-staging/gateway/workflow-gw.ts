@@ -415,7 +415,8 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
       }, CONFIRM_TIMEOUT_MS)
       state.pendingConfirms.set(requestId, {
         timer,
-        ledger: { amount_coins: estimatedTotal, model: `workflow:${wf.templateId}` },
+        ledger: { amount_coins: estimatedTotal, model: `workflow:${wf.templateId}`, workflow_id: wfid },
+        description,
       })
       wfGenerateContinuations.set(requestId, { state, wfid, nodes: executableNodes.length, amount: estimatedTotal })
       // 互动模式=auto：批量扣费确认自动批准。wfGenerateContinuations.set 必须先于

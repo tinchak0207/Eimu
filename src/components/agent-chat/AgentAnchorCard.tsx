@@ -68,7 +68,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
           {/* 上游截断过就说出来：锚定可能锚不全，不让使用者以为万无一失。 */}
           {anchor.truncated && (
             <p className="mt-1.5 text-sm text-foreground/45">
-              上游只回传了参数摘要，可能有参数锚不住
+              参数较长，这里只显示了一部分，个别设置可能没有沿用
             </p>
           )}
         </div>

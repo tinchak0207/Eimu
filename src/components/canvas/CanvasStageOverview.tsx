@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronRight, Clapperboard, Film, ScrollText, Users, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CanvasViewport } from "@/lib/canvas/types";
+import { OpenInViewerButton, viewAssetsFromPreviews } from "@/components/viewer/OpenInViewerButton";
 import {
   clamp01,
   easeOutCubic,
@@ -375,11 +376,17 @@ function StageCard({ stage, clickable, onPick, onReview, className }: StageCardP
 /** 1/2/3/4 张各自的网格：1＝满版、2＝对开、3＝左大右二、4＝田字。 */
 function PreviewMosaic({ previews }: { previews: CanvasStagePreview[] }) {
   const n = previews.length;
+  const assets = viewAssetsFromPreviews(previews);
   const grid = n === 1 ? "grid-cols-1" : n === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2";
   return (
     <div className={cn("grid h-full w-full gap-px bg-white/60", grid)}>
       {previews.map((p, i) => (
-        <div key={`${p.url}-${i}`} className={cn("relative overflow-hidden", n === 3 && i === 0 && "row-span-2")}>
+        <div key={`${p.url}-${i}`} className={cn("group/tile relative overflow-hidden", n === 3 && i === 0 && "row-span-2")}>
+          <OpenInViewerButton
+            asset={assets}
+            index={i}
+            className="absolute right-1 top-1 z-10 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100"
+          />
           {p.kind === "video" ? (
             <video src={p.url} muted playsInline preload="metadata" className="lod-stage-thumb h-full w-full object-cover" />
           ) : (

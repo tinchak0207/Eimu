@@ -77,6 +77,8 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set(
     "director_get_state",
     "quota",
     "memory_recall",
+    "chat_history_search",
+    "user_memory_recall",
     "asset_search",
     "asset_get",
     "character_card_list",

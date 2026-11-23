@@ -113,7 +113,7 @@ export function emitToSession(state: SessionState, name: string, data: unknown, 
   // 2026-10-04 F6：用户可见帧的单一咽喉点——按帧名剥离内审/契约内部文字（subagent.done 摘要、
   // subagent.delta 正文）。同类剥离已在源头（subagent.ts run.summary）与唤醒路径（index.ts）做过，
   // 此处是任何漏网帧的最后一道收口；非目标帧原样返回（零误伤、零额外分配）。
-  const outData = scrubVisibleFrame(name, sanitized)
+  const outData = scrubVisibleFrame(name, sanitized, `session=${state.sessionId}`)
   const frame = encoder.encode(serializeSse(name, outData, state.eventCounter))
   // 2026-10-02：只有模型产生的文字帧可被 N2 strip 剥除（见 stripStaleTurnTextFromReplay）。
   // 网关主动发出的 message.delta（工作流终态通报、进度汇报、诚实收尾等）默认耐久，

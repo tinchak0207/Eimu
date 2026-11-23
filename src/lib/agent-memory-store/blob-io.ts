@@ -1,4 +1,4 @@
-import { get, put } from "@/lib/blob-backend";
+import { del, get, put } from "@/lib/blob-backend";
 
 /** 兼容两条 blob 后端读文本：Vercel 返回 { blob }，VPS 返回 { stream }。 */
 async function readBlobText(
@@ -61,4 +61,15 @@ async function writeBlobText(key: string, text: string): Promise<boolean> {
   }
 }
 
-export { readBlobTextAt, readBlobJson, writeBlobText };
+/** 删 blob；不存在也算成功，其余失败回 false（硬删除调用方据此如实上报）。 */
+async function deleteBlobAt(key: string): Promise<boolean> {
+  try {
+    await del([key]);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    return /HTTP 404|not.?found/i.test(message);
+  }
+}
+
+export { readBlobTextAt, readBlobJson, writeBlobText, deleteBlobAt };

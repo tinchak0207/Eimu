@@ -29,6 +29,16 @@ const ENV = {
   TESTCHANNEL_ENABLED: "true",
 };
 
+test("A6API保留现役runtime-delta已启用的三款编辑供给", () => {
+  const channel=REGISTRY_CHANNELS.find(item=>item.label==="a6api");
+  assert.ok(channel);
+  for(const id of ["gpt-image-2","gpt-image-2.5-flare","gpt-image-2.5-sunburst"]) {
+    const claim=channel.claims.find(item=>item.modelId===id);
+    assert.ok(claim,`现役模型${id}不能在离机构建丢失`);
+    assert.deepEqual(claim.kinds,["image_generate","image_edit"]);
+  }
+});
+
 function baseAsserts(descriptor: EnvChannelDescriptor) {
   assert.equal(descriptor.id, "env:testchannel");
   assert.equal(descriptor.label, "testchannel");

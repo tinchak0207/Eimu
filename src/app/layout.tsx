@@ -7,6 +7,7 @@ import PricingSync from "@/components/PricingSync";
 import PwaInstaller from "@/components/PwaInstaller";
 import AttributionCapture from "@/components/AttributionCapture";
 import Toaster from "@/components/ui/toaster";
+import { ViewerProvider } from "@/components/viewer/ViewerHost";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
   SITE_DESCRIPTION,
@@ -191,6 +192,8 @@ setTimeout(function(){heal(false)},6000);
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />
         <AuthProvider>
+          {/* 赏阅（Viewer）全站 Provider：任意处 useViewer().open(...) 即全屏赏阅成品。 */}
+          <ViewerProvider>
           <PricingSync />
           <Navbar />
           {/* 首页应用式满屏（2026-09-10 F6）：body 是 flex 纵向壳（Navbar 自然高
@@ -204,6 +207,7 @@ setTimeout(function(){heal(false)},6000);
           {/* 首次触达归因采集（utm/referrer host/落地路径 → eimu_first_touch cookie，90 天，
               首触不覆盖）。渲染 null，不参与布局。 */}
           <AttributionCapture />
+          </ViewerProvider>
         </AuthProvider>
         <Analytics />
       </body>

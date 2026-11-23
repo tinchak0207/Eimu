@@ -32,7 +32,8 @@ interface ActionRowProps {
 /**
  * 底部动作列（Task 9 自 PromptInput 抽出）：改图/放大/AI 助理三颗同语法 toggle、
  * 已套用风格 pill、CTA。agent 面无底行：收起/返回由聊天面
- * Header 的 onExit 按钮承担。
+ * Header 的 onExit（文案＝「精确控制」二级入口）按钮承担。
+ * 2026-10-27：默认主路径是 AI 助理；本行只在工作台面出现。
  * 不参与模式切换动画，始终原地不动（高度差由控件区 flex-1 吸收）。
  */
 export function ActionRow({

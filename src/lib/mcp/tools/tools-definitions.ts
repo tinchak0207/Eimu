@@ -6,10 +6,14 @@ import { JSON_RPC_ERROR_CODES, McpRpcError, textResult, truncateToolText } from 
 import type { McpToolCallResult } from "../protocol";
 import { agentSessionPath, runAgent } from "./agent";
 import { AGENT_SESSIONS_PATH, AGENT_SETTINGS_PATH, RUN_AGENT_DEFAULT_TIMEOUT_SECONDS, RUN_AGENT_MAX_TIMEOUT_SECONDS } from "./constants";
+import { defineDirectorTools } from "./director";
 import { canvasStatePath, runForward, runForwardProjected, snapshotState } from "./forward";
 import { asRecord, bilingual, compact, pickString } from "./helpers";
+import { filterToolsByToolset, type McpToolset } from "./toolset";
 import type { McpToolContext, McpToolDescriptor, ToolDefinition, ToolInputSchema } from "./types";
 import { isPlainObject, validateToolArguments } from "./validation";
+import { projectAgentSession } from "./session-projection";
+import { saveAgentSettingsTool, saveSettingsInputSchema } from "./settings";
 
 // 生图/改图的模型 id（`generate_image` 的 `model` 上游是必填，schema 同步宣告为必填）。
 const SKILL_FAMILIES = Object.keys(AGENT_SKILL_FAMILY_LABELS) as string[];
@@ -81,6 +85,8 @@ async function runGetSkill(args: Record<string, unknown>): Promise<McpToolCallRe
 
 function defineTools(): ToolDefinition[] {
   return [
+    // 导演面（默认 tools/list）；实现见 director.ts。
+    ...defineDirectorTools(),
     {
       name: "list_skills",
       title: "列出公开技能",
@@ -486,8 +492,8 @@ function defineTools(): ToolDefinition[] {
       name: "list_agent_sessions",
       title: "列出 agent 会话",
       description: bilingual(
-        "列出本 API key 所属账号的 Eimu agent 会话（session_id / status / title / updated_at），按最近活动由新到旧。这些会话与网页版 AI 助理是同一个账户空间（同一 settings）。拿到 session_id 后可用 get_agent_session 读对话与产物、用 run_agent 继续下任务。",
-        "List Eimu agent sessions owned by the current API key's account (id / status / title / updated_at), newest first. Same account space as the web AI assistant.",
+        "列出本账号 agent／导演会话（id／status／title／updated_at），由新到旧。同网页 AI 助理账户空间。",
+        "List agent/director sessions for this account (id / status / title / updated_at), newest first. Same account space as the web AI assistant.",
       ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       run: (args, ctx) =>
@@ -506,16 +512,39 @@ function defineTools(): ToolDefinition[] {
         }),
     },
     {
+      name: "get_agent_generation_task",
+      title: "读取本会话生成订单与费用",
+      description: bilingual(
+        "读取自有 Eimu Agent 会话中登记的生成订单及真实费用。需 session_id 和 task_id；适用于 Agent 使用账号派生密钥提交、直接图片任务查询返回404的情况。仅允许本会话耐久登记且平台租户核验通过的订单。费用查不到时返回null与unknown，不当作零。只读，不生成、不重试订单。",
+        "Read an owned agent session's durably registered generation task and ledger cost. Requires session_id and task_id. Read-only; missing cost stays unknown. Other sessions and tenants remain inaccessible.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "自有 Agent 会话ID" },
+          task_id: { type: "string", description: "该会话真实生成任务ID" },
+        },
+        required: ["session_id", "task_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) => runForward({
+        method: "GET",
+        path: (a) => agentSessionPath(pickString(a, "session_id") ?? "", `/generations/${encodeURIComponent(pickString(a, "task_id") ?? "")}`),
+      }, "get_agent_generation_task", args, ctx),
+    },
+    {
       name: "get_agent_session",
       title: "读取 agent 会话",
       description: bilingual(
-        "读取一个 Eimu agent 会话的内容：view=summary（默认，会话摘要与消息计数）、view=transcript（角色/部件级对话）、view=raw（网关原始消息，体积大）。assistant 的最终文字里含成品图片/影片 URL（用 run_agent 也可直接拿到结构化 artifacts）。会话属于本密钥账号，跨账号一律找不到。",
-        "Read one Eimu agent session: view=summary (default) | transcript | raw. The assistant's final text carries finished image/video URLs.",
+        "读 agent／导演会话：view=summary|transcript|raw。返回摘要、最新回复与 artifacts（成片／中间产物）；长内容用 pagination.next_cursor 翻页。",
+        "Read an agent/director session: view=summary|transcript|raw. Returns summary, latest reply and artifacts (film / intermediates); page long content with pagination.next_cursor.",
       ),
       inputSchema: {
         type: "object",
         properties: {
           session_id: { type: "string", description: "agent 会话 id（来自 list_agent_sessions）。" },
+          cursor: { type: "string", description: "上页 pagination.next_cursor；绑定会话内容快照，省略时读取最新尾页。" },
+          limit: { type: "integer", minimum: 1, maximum: 12000, description: "每页原始 JSON 字符数上限，默认8000；输出转义后仍受总长度限制。" },
           view: {
             type: "string",
             enum: ["summary", "transcript", "raw"],
@@ -533,14 +562,14 @@ function defineTools(): ToolDefinition[] {
           if (view === "raw") return `${AGENT_SESSIONS_PATH}/${id}/messages`;
           return `${AGENT_SESSIONS_PATH}/${id}`;
         };
-        return runForward({ method: "GET", path }, "get_agent_session", args, ctx);
+        return runForwardProjected({ method: "GET", path }, "get_agent_session", args, ctx, (payload) => projectAgentSession(payload, args));
       },
     },
     {
       name: "get_agent_settings",
       title: "读取 agent 设置",
       description: bilingual(
-        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野兽模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。",
+        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野兽模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。写入用 save_agent_settings（或 eimu_direct 的 thinking_level）。",
         "Read the account-level Eimu agent settings (including beast_mode). Read-only, no charge.",
       ),
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -548,11 +577,22 @@ function defineTools(): ToolDefinition[] {
         runForward({ method: "GET", path: AGENT_SETTINGS_PATH }, "get_agent_settings", args, ctx),
     },
     {
+      name: "save_agent_settings",
+      title: "保存 agent 设置",
+      description: bilingual(
+        "写入本 API key 所属账号的 Eimu agent 设置（部分更新：只发给出的栏位，其余保留）。thinking_level=low|medium|high|extreme 与站内「低/中/高/极限」同一张表；extreme＝极限＝野兽模式（persona=thoughtful、cost_mode=premium、beast_mode=true）。也可单独给 beast_mode / interrupt_mode / persona / cost_mode / interaction_mode。不产生费用；返回网关合并后的整份设置。",
+        "Save account-level Eimu agent settings (partial update). thinking_level=extreme means extreme/beast mode (thoughtful + premium + beast_mode=true). No charge; returns the merged settings.",
+      ),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: saveSettingsInputSchema(),
+      run: (args, ctx) => saveAgentSettingsTool(args, ctx),
+    },
+    {
       name: "run_agent",
       title: "运行 agent 任务",
       description: bilingual(
-        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
-        "Hand a task to Eimu's agent orchestrator and return its final reply plus artifact URLs. This really consumes account credits because the orchestrator may call billed generation tools itself; do not use it for plain text Q&A.",
+        "【deprecated】请优先用 eimu_direct／eimu_job。本工具仍可用：把任务交给 Eimu agent orchestrator，返回回复与成品 URL。会真实消耗额度；默认同步轮询可达 180s（上限 300s）。超时返回 status=running，可用 get_agent_session 或 eimu_job 续查。本地附件请走 POST /api/agent/biz/sessions/{session_id}/attachments。",
+        "[deprecated] Prefer eimu_direct/eimu_job. Still works: hand a task to the orchestrator; may bill; long sync poll up to 300s.",
       ),
       inputSchema: {
         type: "object",
@@ -576,8 +616,8 @@ function defineTools(): ToolDefinition[] {
       name: "abort_agent_session",
       title: "中止 agent 会话",
       description: bilingual(
-        "中止一个正在运行的 Eimu agent 会话（中断当前回合）。会话必须属于本密钥账号；上游回包原样返回。",
-        "Abort a running Eimu agent session (interrupt the current turn); returns the upstream response verbatim.",
+        "中止本账号正在运行的 agent／导演会话（打断当前回合）。",
+        "Abort a running agent/director session owned by this account (interrupts the current turn).",
       ),
       inputSchema: {
         type: "object",
@@ -706,16 +746,27 @@ const TOOL_DEFINITIONS: ToolDefinition[] = defineTools();
 
 const TOOL_INDEX: Map<string, ToolDefinition> = new Map(TOOL_DEFINITIONS.map((tool) => [tool.name, tool]));
 
-/** `tools/list` 的回应内容（只暴露 descriptor，不外泄 run/schema 内部物件）。 */
+/** 全量工具 descriptor（expert 面）；`tools/list` 默认经 `listMcpTools("director")` 过滤。 */
 export const MCP_TOOLS: readonly McpToolDescriptor[] = TOOL_DEFINITIONS.map((tool) => ({
   name: tool.name,
   title: tool.title,
   description: tool.description,
   inputSchema: tool.inputSchema as unknown as Record<string, unknown>,
+  ...(tool.annotations ? { annotations: tool.annotations } : {}),
+  ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 }));
+
+/** 按 toolset 过滤后的 tools/list 内容。默认 director。 */
+export function listMcpTools(toolset: McpToolset = "director"): readonly McpToolDescriptor[] {
+  return filterToolsByToolset(MCP_TOOLS, toolset);
+}
 
 export function listToolNames(): string[] {
   return TOOL_DEFINITIONS.map((tool) => tool.name);
+}
+
+export function listToolNamesForToolset(toolset: McpToolset = "director"): string[] {
+  return listMcpTools(toolset).map((tool) => tool.name);
 }
 
 /**

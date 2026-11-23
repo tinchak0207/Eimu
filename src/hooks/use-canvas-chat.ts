@@ -20,7 +20,7 @@
 //   - canvas/use-canvas-cards.ts         角色/场景卡域
 //   - canvas/canvas-event-settler.ts     image.done 对账收敛
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { CANVAS_INITIAL_STATE, layoutGraph } from "@/lib/canvas/reducer";
 import {
@@ -91,6 +91,7 @@ import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent-output-
 import { toast } from "@/hooks/use-toast";
 
 import { useCanvasChatOps } from "./canvas/canvas-chat-ops";
+import { useProjectSyncCanvasReducer } from "./canvas/project-sync";
 
 // ─────────────────────────────────────────── 汇出面（barrel：消费端 import 路径零改动）
 export { canvasReducer } from "./canvas/canvas-reducer-adapter";
@@ -110,8 +111,15 @@ export { downstreamInvalidationIds } from "./canvas/canvas-chat-helpers";
 export function useCanvasChat(
   sessionId?: string | null,
   projectContext?: UseCanvasChatProjectContext,
+  /**
+   * 会话恢复时从远端快照拿到的 rev（2026-10-21）：直通 useCanvasProjectSync 的
+   * initialSnapshotRev。缺省/ null ⇒ 首次上行维持旧行为（rev=0）。
+   */
+  initialSnapshotRev?: number | null,
 ): UseCanvasChatReturn {
-  const [canvas, dispatchCanvas] = useReducer(canvasReducer, CANVAS_INITIAL_STATE);
+  // S10b：dispatch 的唯一收口——用户动作→工程图回写（Actor=user），event/agent_ops 不回写；
+  // created 帧重发时保留画布上已有的位置/尺寸；工程卡集合变化时后台收敛已删节点的滞留卡。
+  const [canvas, dispatchCanvas] = useProjectSyncCanvasReducer(canvasReducer, CANVAS_INITIAL_STATE, sessionId);
   const [plans, setPlans] = useState<CanvasPlanCard[]>([]);
   const [derives, setDerives] = useState<CanvasDeriveCard[]>([]);
   const [budget, setBudget] = useState<CanvasBudget | null>(null);
@@ -381,10 +389,10 @@ export function useCanvasChat(
       styleId?: unknown;
       scriptType?: unknown;
       narrationVoice?: unknown;
-    }): boolean => {
+    }, allowEmpty = false): boolean => {
       if (!snapshot || typeof snapshot !== "object") return false;
       const restored = fromCanvasProject(snapshot);
-      if (restored.nodes.length === 0) return false;
+      if (restored.nodes.length === 0 && !allowEmpty) return false;
       everHadNodesRef.current = true;
       // 上行摘要刻意不带座标（版面权在前端 reducer，layout.ts 档头）：
       // fromCanvasProject 把缺座标补成 (0,0)，直接 load 会让所有卡叠在原点
@@ -531,9 +539,12 @@ export function useCanvasChat(
           settleCandidateNode(event.data);
           return;
         }
-        case "image.failed": {
-          // 图失败讯号（refunded/failed/超时）：与 image.done 对称。优先 task_id
+        case "image.failed":
+        case "video.failed":
+        case "audio.failed": {
+          // 媒体失败讯号（refunded/failed/超时）：与 *.done 对称。优先 task_id
           // 配对，没配上的在 turn.done 收敛时按序兜底——绝不能让节点永远转圈。
+          // video/audio.failed 栏位与 image.failed 同构；后端尚未 emit 时前端先备好。
           settleFailedNode(event.data);
           return;
         }
@@ -652,8 +663,9 @@ export function useCanvasChat(
     setLoading,
     setActiveCanvasId,
     onRemoteSnapshot: (snapshot) => {
-      restoreAgentSnapshot(snapshot as Parameters<typeof restoreAgentSnapshot>[0]);
+      return restoreAgentSnapshot(snapshot as Parameters<typeof restoreAgentSnapshot>[0], true);
     },
+    initialSnapshotRev,
   });
 
   // ─────────────────────── P2-A：聊天内多画布（切换 / 新建 / 清单）

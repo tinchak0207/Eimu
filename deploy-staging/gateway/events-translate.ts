@@ -5,6 +5,8 @@ import { opencodeFetch, revertDeadTail } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { armWatchdogTimer } from "./timers-gw.ts"
 import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
+import { withPinnedWakeSystem } from "./pinned-goal.ts"
+import { pauseAtDeploymentStepBoundary } from "./deployment-step-drain"
 // events-translate.ts —— 自 index.ts 第二阶段 Wave2 抽取：opencode 事件翻译层——eventSessionId/boundMap/boundSet/isAssistantMessage/parseToolOutput、resolveResultUrl、emitImageDone/emitVideoDone/emitAudioDone、自动制画布（canvasUnitId/readGenerateInput/autoCreateCanvasUnit/attachCanvasTask/emitCanvasResult）、toolErrorPayload、bash deny 归因（bashDenyCache）、findUploadsByBasename/resolveInvisibleUploadPaths/deniedOperationLabel、trackTurnNodeTerminal、workflowStartSchemaHint、handleToolPartUpdate、idle-step breaker（finalizeIdleStep/triggerIdleStepBreaker）。
 // 原 index.ts 2708–3618 行，逐行原样搬运（仅顶层宣告加 export 前缀）。
 // 2026-10-04 W：守卫家族文案（空转止损 nudge／deny 守卫等）书写体镜像已整体拆除——一律简体。
@@ -15,6 +17,7 @@ import { TAIL_PAYLOAD_MARKER, ensureGatewayNonce } from "./messages-gw.ts"
 // step 结算：无 tool、无非空正文、无非空 reasoning = 空 step。空 step 连续累计；
 // 任一活动归零。达阈值且 turn 活跃 → 中止 + 同轮补一次动作导向 nudge。
 export function finalizeIdleStep(state: SessionState): void {
+  if(pauseAtDeploymentStepBoundary(state)) return
   // 空转补丁：本 step 只有 no-op bash 且无正文 → 视为空 step（即使有 reasoning）
   const noopOnly = !!state.stepNoopTool && !state.stepHasTool && !state.stepHasText
   const empty = noopOnly || (!state.stepHasTool && !state.stepHasText && !state.stepHasReasoning)
@@ -38,13 +41,33 @@ export function finalizeIdleStep(state: SessionState): void {
   }
 }
 
-/** 撤回失败时只发尾端注入（原用户消息已在历史里），避免历史里出现第二条逐字相同的用户消息。 */
-export function minimalNudgeBody(full: { parts: Array<Record<string, unknown>> }): { parts: Array<Record<string, unknown>> } {
+/**
+ * 撤回失败时只发尾端注入（原用户消息已在历史里），避免历史里出现第二条逐字相同的用户消息。
+ * H36（24 项后续）：最小体只有 parts、没有 system ⇒ 该跳模型看不到【用户原始目标/后续修订/硬约束】。
+ * 传入 state 时套 withPinnedWakeSystem（只写 body.system，parts 逐字不变、不上屏）；
+ * 旧会话无原始需求或未传 state ⇒ 原样返回 { parts }，与修前逐字相同。不重放完整 admission system（19 项 [!] 待拍板）。
+ * H42：最小体也不带 agent ⇒ opencode 1.18.14 createUserMessage 走 agents.defaultInfo()＝内建 build
+ *（无 Eimu 人设、工具表 84 开，绕过 orchestrator 能力断路）；生产 opencode.db 122/122 条最小体落成 build。
+ * 沿用本回合投递体（full＝lastPromptBody 派生）的 agent；full 无 agent ⇒ 键集同修前。model 不带：
+ * 缺 model 时 opencode 取会话当前 model（=上一跳实发），full.model 在 failover 换模后是旧值，带了反而回退。
+ */
+export function minimalNudgeBody(
+  full: { parts: Array<Record<string, unknown>>; agent?: string },
+  state?: SessionState | null,
+): { parts: Array<Record<string, unknown>>; system?: string; agent?: string } {
   const texts = full.parts.filter((p) => p && p.type === "text" && typeof p.text === "string") as Array<{ type: string; text: string }>
   const last = texts.length > 0 ? texts[texts.length - 1].text : ""
   const at = last.lastIndexOf("---\n【系统注入·尾端】")
   const tail = at >= 0 ? last.slice(at) : last
-  return { parts: [{ type: "text", text: tail }] }
+  return withPinnedWakeSystem(state, { ...turnAgentField(full), parts: [{ type: "text", text: tail }] })
+}
+
+/**
+ * H42：非 admission 体沿用本回合 agent（orchestrator/creator/…）。只认非空字符串；缺席 ⇒ {}（键集同修前）。
+ */
+export function turnAgentField(body: { agent?: unknown } | null | undefined): { agent?: string } {
+  const a = body?.agent
+  return typeof a === "string" && a.trim() ? { agent: a } : {}
 }
 
 export function triggerIdleStepBreaker(
@@ -95,7 +118,7 @@ export function triggerIdleStepBreaker(
       // 2026-10-01 去重：空 step 轮零产出 → 撤掉原 user 讯息，nudgeBody（原文＋提示）只留一条。
       // 撤回失败（该轮已有产出，原用户消息必须留在历史）→ 只发尾端最小 nudge，禁止重发原文。
       const reverted = await revertDeadTail(cur.opencodeSessionId)
-      const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody)
+      const toSend = reverted ? nudgeBody : minimalNudgeBody(nudgeBody, cur)
       const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         body: JSON.stringify(toSend),
@@ -130,7 +153,7 @@ export function triggerIdleStepBreaker(
 }
 export { eventSessionId, boundMap, boundSet, isAssistantMessage, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 export { resolveResultUrl, emitImageDone, registerSessionArtifact, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
-export { canvasUnitId, summarizeCanvasTitle, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, emitCanvasResult } from "./events-translate-canvas.ts"
+export { canvasUnitId, summarizeCanvasTitle, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, emitCanvasResult, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate-canvas.ts"
 export { bashDenyCache, parseBashDenyPatterns, loadBashDenyPatterns, denyGlobToRegExp, denyHintFor, bashDenyAttribution, classifyDenySource, bashDenyProvenance, DENY_AUDIT_PATH, appendDenyAudit, detectShadowedBashDenyRules, logShadowedBashDenyRules } from "./events-translate-deny.ts"
 export { toolErrorPayload, findUploadsByBasename, ABS_PATH_RE, resolveInvisibleUploadPaths, deniedOperationLabel, trackTurnNodeTerminal, workflowStartSchemaHint, handleToolPartUpdate } from "./events-translate-tools.ts"
 export type { AudioDoneMeta, DenySource, DenyProvenance, DenyAuditRecord, ShadowedRule } from "./events-translate-types.ts"

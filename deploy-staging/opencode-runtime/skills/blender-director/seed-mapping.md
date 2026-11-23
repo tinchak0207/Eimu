@@ -157,7 +157,7 @@ L1 关键帧的路径模型与 bpy fcurve/Bezier 完全同构：
 |---|---|---|
 | 上轴 | Y up | Z up |
 | 前向约定 | forward = (sin(yaw), 0, cos(yaw))，yaw 用 atan2(dx,dz) | 前向 -Y；yaw 绕 Z |
-| 位置换算 | L1 (x, y, z) | bpy (x, **z_L1**, **-y_L1**) |
+| 位置换算 | L1 (x, y, z) | bpy (**x**, **-z_L1**, **y_L1**)（上轴 y→z；旧表写成 (x, z, -y) 会把镜头埋到地下，2026-10-22 实测修正） |
 | 朝向换算 | L1 yaw（绕 Y） | bpy 绕 Z，同角度同号（Y-up→Z-up 的右手系旋转面映射后 yaw 不变号） |
 | 关节角度 | 度（UI 友好） | `bone.rotation_euler` 弧度 = deg × π/180 |
 | 时间 | timeSec（相对动作片段） | frame = timeSec × fps（fps 默认 30） |

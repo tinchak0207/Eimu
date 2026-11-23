@@ -25,28 +25,81 @@ function db(): Database {
     CREATE INDEX IF NOT EXISTS generation_receipts_parent ON generation_receipts(parent_gw);
     CREATE INDEX IF NOT EXISTS generation_receipts_pending ON generation_receipts(status,observed_at);`)
   if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "consumer_agent")) next.exec("ALTER TABLE generation_consumers ADD COLUMN consumer_agent TEXT")
+  // intent_version：当前无业务读者（generationProducerVersion 已删），保留列不保留读者——既有库兼容。
+  if (!(next.query("PRAGMA table_info(generation_consumers)").all() as any[]).some((c) => c.name === "intent_version")) next.exec("ALTER TABLE generation_consumers ADD COLUMN intent_version INTEGER NOT NULL DEFAULT 0")
   if (!(next.query("PRAGMA table_info(generation_receipts)").all() as any[]).some((c) => c.name === "notify_count")) next.exec("ALTER TABLE generation_receipts ADD COLUMN notify_count INTEGER NOT NULL DEFAULT 0")
   connection = next
   return next
 }
 
 export function bindGenerationConsumer(child: string, parentGw: string, parentOc: string, agent?: string): void {
-  db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent) VALUES (?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")
-    .run(child, parentGw, parentOc, Date.now(), agent || null)
+  // intent_version：当前无业务读者，保留列不保留读者（既有库兼容）。
+  db().query("INSERT INTO generation_consumers(child_oc,parent_gw,parent_oc,created_at,consumer_agent,intent_version) VALUES (?,?,?,?,?,?) ON CONFLICT(child_oc) DO NOTHING")
+    .run(child, parentGw, parentOc, Date.now(), agent || null, generationWorkControl(parentGw).version)
   const binding = generationParent(child)
   if (binding?.parent_gw !== parentGw || binding.parent_oc !== parentOc) throw new Error("consumer ownership is immutable")
   if (agent) db().query("UPDATE generation_consumers SET consumer_agent=COALESCE(consumer_agent,?) WHERE child_oc=?").run(agent, child)
   db().query("UPDATE generation_receipts SET parent_gw=? WHERE producer_oc=? AND parent_gw=''").run(parentGw, child)
 }
-export function queueLegacyGenerationWake(session: string, content: string, parentGw = "", consumer = session): GenerationReceipt {
+export function queueLegacyGenerationWake(session: string, content: string, parentGw = "", consumer = session, resumeIntentVersion?: number): GenerationReceipt {
   const task_id = `wake:${createHash("sha256").update(session + "\0" + content).digest("hex")}`
   const row = registerGenerationReceipt({ task_id, parent_gw: parentGw, producer_oc: session, consumer_oc: consumer,
-    kind: "message", content })
+    kind: "message", content, ...(resumeIntentVersion!==undefined ? {resume_intent_version:resumeIntentVersion}: {}) })
   if (row.status === "queued") return completeGenerationReceipt(task_id, "succeeded", [], { content })
   return row
 }
 export function generationParent(child: string): { parent_gw: string; parent_oc: string; consumer_agent?: string } | undefined {
   return db().query("SELECT parent_gw,parent_oc,consumer_agent FROM generation_consumers WHERE child_oc=?").get(child) as any ?? undefined
+}
+
+// 工作控制与既有生成回执共用一个耐久数据库。停止模型不等于撤销外部副作用。
+export function generationWorkControl(parentGw: string): { version: number; cancelled: boolean; reason?: string } {
+  const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(`intent:${parentGw}`) as { value: string } | null
+  return row ? JSON.parse(row.value) : { version: 0, cancelled: false }
+}
+export function setGenerationWorkCancelled(parentGw: string, cancelled: boolean, reason: string): void {
+  db().transaction(() => {
+    const current = generationWorkControl(parentGw)
+    if (current.cancelled === cancelled) return
+    db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value")
+      .run(`intent:${parentGw}`, JSON.stringify({ version: current.version + 1, cancelled, reason, changed_at: Date.now() }))
+  }).immediate()
+}
+export function cancelGenerationProducer(producer: string): void {
+  db().query("INSERT INTO generation_runtime_control(name,value) VALUES(?,?) ON CONFLICT(name) DO NOTHING")
+    .run(`producer-cancel:${producer}`, String(Date.now()))
+}
+/** 续跑同一 producer（沿用同一 opencodeSessionId）＝新工作代：删掉 hard stop 留下的封条，
+ *  否则该子会话恢复后所有新提交都会被 assertGenerationWorkActive 永久挡成 409。 */
+export function clearGenerationProducerCancel(producer: string): void {
+  db().query("DELETE FROM generation_runtime_control WHERE name=?").run(`producer-cancel:${producer}`)
+}
+/** 封条 TTL：封条只封停止当时那批工作，不封会话终身。 */
+export const PRODUCER_CANCEL_TTL_MS = 6 * 3600 * 1000
+/**
+ * 提交新生成前的工作控制闸：只判「用户已撤销当前工作」这一件事。
+ * 不比较 version——用户取消再恢复后 version 永久前移，比较 version 会把合法生成永久封死。
+ * 已提交的任务不走这里，仍按真实回执处理。
+ * producer-cancel 封条带 TTL：6 小时前的停止不拦后续新工作（过期顺手 DELETE）；
+ * 值不可解析时按存在处理（fail-closed），值可信缺失时宁可多拦一次。
+ */
+export function assertGenerationWorkActive(parentGw: string, producer: string): void {
+  const cancelled = generationWorkControl(parentGw).cancelled === true
+  let producerCancelled = false
+  const seal = db().query("SELECT value FROM generation_runtime_control WHERE name=?")
+    .get(`producer-cancel:${producer}`) as { value: string } | null
+  if (seal) {
+    const raw = String(seal.value).trim()
+    const sealedAt = /^\d+$/.test(raw) ? Number(raw) : NaN
+    if (Number.isFinite(sealedAt) && Date.now() - sealedAt > PRODUCER_CANCEL_TTL_MS) {
+      clearGenerationProducerCancel(producer)
+    } else {
+      producerCancelled = true
+    }
+  }
+  if (cancelled || producerCancelled) {
+    throw new Error("generation_work_cancelled: 原工作已撤销，未提交新生成；已提交任务仍按真实回执处理")
+  }
 }
 export type GenerationReceipt = {
   task_id: string; parent_gw: string; producer_oc: string; consumer_oc: string; kind: string;
@@ -73,11 +126,21 @@ export function registerGenerationReceipt(input: Record<string, any>): Generatio
 export function completeGenerationReceipt(id: string, status: string, artifacts: Array<{ url: string }>, extra: Record<string, any>): GenerationReceipt {
   const row = generationReceipt(id)
   if (!row) throw new Error("unregistered job")
+  // 退款是已核实的财务终态；后续poll timeout/失败观察不能撤销退款或重新打开消费。
+  // failed仍可由后来真实success/refund推进，queued进度ACK也不代替最终产物消费。
+  // （b3c825d92 于 10-30 整树还原 4af310238 时被一并撤下，H17 原样拣回。）
+  if (row.status === "refunded" && status !== "refunded") return row
+  // 已取消同理：poller超时只是观察失败，不能把cancelled改写成failed并清掉已消费标记；真实退款/晚到成功仍可推进。
+  if (row.status === "cancelled" && status === "failed") return row
   if (status === "succeeded" && row.kind !== "message" && artifacts.length < (row.requested_count || 1)) throw new Error("authoritative batch is incomplete; retain task for recovery")
   // A previous failed observation must never hide a later real success.
   if (row.status === "succeeded" && status !== "succeeded") return row
   const changed = row.status !== status || JSON.stringify(row.artifacts) !== JSON.stringify(artifacts)
-  const data = { ...row, ...extra, artifacts: undefined }
+  // 2026-11-03 加固：平台轮询回包不带 cost_coins（image_get_result 传 body.cost_coins=undefined、poller 硬停不传），
+  // 直接展开会把登记时工具算好的 cost_coins 覆盖成 undefined → JSON 丢键 → image.done cost=null。
+  // 只有完成方给出有限数值才覆盖；缺省/非数值一律保留登记值。
+  const { cost_coins, ...rest } = extra
+  const data = { ...row, ...rest, ...(typeof cost_coins === "number" && Number.isFinite(cost_coins) ? { cost_coins } : {}), artifacts: undefined }
   db().query(`UPDATE generation_receipts SET status=?,artifacts=?,data=?,updated_at=?,
     observed_at=CASE WHEN ? THEN NULL ELSE observed_at END,
     downloaded_at=CASE WHEN ? THEN NULL ELSE downloaded_at END,
@@ -97,7 +160,7 @@ export function generationReceipts(parentGw?: string, pendingOnly = false): Gene
   const rows = parentGw
     ? db().query("SELECT * FROM generation_receipts WHERE parent_gw=? ORDER BY created_at").all(parentGw)
     : db().query("SELECT * FROM generation_receipts ORDER BY created_at").all()
-  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.status !== "succeeded"))
+  return rows.map(decode).filter((r) => !pendingOnly || (r.kind !== "message" && r.result_source !== "runtime_music" && r.status !== "succeeded" && r.status !== "refunded"))
 }
 export function acknowledgeGeneration(id: string, stage: string, extra: Record<string, any>): void {
   const row = generationReceipt(id)
@@ -143,6 +206,19 @@ export function renderedGeneration(id: string): void {
 
 export function generationMaintenanceEnabled(): boolean {
   return (db().query("SELECT value FROM generation_runtime_control WHERE name='maintenance'").get() as any)?.value === '1'
+}
+/** 发布软drain租约与生成收据共用真源；过期租约不永久停住制作。 */
+export function generationStepDrainRequested(): boolean {
+  return generationStepDrainState().status==="active"
+}
+export function generationStepDrainState(): {status:"active"|"inactive"|"unknown";reason?:string} {
+  const row=db().query("SELECT value FROM generation_runtime_control WHERE name='step-drain'").get() as any
+  if(!row) return {status:"inactive"}
+  try {
+    const lease=JSON.parse(row.value)
+    if(typeof lease?.owner!=="string" || !lease.owner || typeof lease.expires_at!=="number" || !Number.isFinite(lease.expires_at)) return {status:"unknown",reason:"step_drain_lease_invalid"}
+    return {status:lease.expires_at>Date.now()?"active":"inactive"}
+  } catch { return {status:"unknown",reason:"step_drain_lease_unreadable"} }
 }
 export function setGenerationMaintenance(enabled: boolean): void {
   db().query("INSERT INTO generation_runtime_control VALUES('maintenance',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value").run(enabled ? '1' : '0')

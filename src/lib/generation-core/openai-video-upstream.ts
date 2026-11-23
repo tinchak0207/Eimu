@@ -105,7 +105,9 @@ const NAPI_MODEL_NAMES = new Set(["seed-2.0", "seed-2.5"]);
 // 2026-10-13：seedance-2.0-mini 亦由 miaowu 承接，同一 new-api 实例同一 strict schema
 // （video_api：sizes 480p/720p、seconds 4–15、images_max 9、ratios 1:1/16:9/9:16/4:3/3:4）
 // ⇒ 归入本族（分辨率走 resolution、参考图走 image_urls）。
-const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max", "seedance-2.0-mini"]);
+// 2026-11-21：v6k 的 SD2.5 同属 new-api 官方 openai-video 形状（seconds/ratio/resolution/
+// image_urls），参考图上限 30（站点描述「30图10音」）。
+const SECONDS_FAMILY_MODEL_NAMES = new Set(["minimax-h3-max", "seedance-2.0-mini", "SD2.5"]);
 
 // agnes 免费档（apihub.agnes-ai.com，2026-10-13 免费兜底）：协议骨架与 sd4/xiaoyxiao 同型
 //（POST {base}/videos 创建、GET {base}/videos/{id} 轮询），但**请求体严格 schema**——
@@ -288,8 +290,9 @@ export async function generateWithOpenaiVideo(
     }
     if (isSecondsFamily) {
       // miaowu 族参考图走 image_urls（上游 video_api.images_max=9）。
-      if (references.length > 9) {
-        throw new SupplierRequestError("miaowu video family accepts at most 9 reference images.", 400);
+      const maxSecondsFamilyRefs = upstreamModel === "SD2.5" ? 30 : 9;
+      if (references.length > maxSecondsFamilyRefs) {
+        throw new SupplierRequestError(`seconds-family video upstream accepts at most ${maxSecondsFamilyRefs} reference images.`, 400);
       }
       body.image_urls = references.map((ref) => ref.url);
     } else if (isNapi) {
@@ -347,7 +350,11 @@ export async function generateWithOpenaiVideo(
 
     // 完成态：sd4/sd7 用 "completed"，sd10 用 "succeeded"（暂不接入）
     if (status === "completed" || status === "succeeded") {
-      const outputUrl = extractOutputUrl(queryResponse, baseUrl, taskId);
+      const rawOutputUrl = extractOutputUrl(queryResponse, baseUrl, taskId);
+      // v6k（SD2.5，2026-11-21 实弹）：completed 的顶层 url 指回本站
+      // `{base}/videos/{id}/content`，无 Bearer 回 401（有 Bearer 才 302 到 media-relay）。
+      // 持久化是裸 fetch，所以 v6k 的自站鉴权 URL 走带鉴权下载成 base64（限定 v6k，不动其他渠道行为）。
+      const outputUrl = rawOutputUrl && supplier.label === "v6k" && isOwnAuthContentUrl(rawOutputUrl, baseUrl) ? null : rawOutputUrl;
       if (outputUrl) {
         return {
           base64: null,
@@ -363,7 +370,7 @@ export async function generateWithOpenaiVideo(
       // drama sd25-30s／napi 族：官方文档查询响应不保证携带成品 URL，下载统一走
       // /videos/{id}/content 且需 Bearer 鉴权——artifact 下载是裸 fetch，无法带
       // 鉴权头，所以必须在这里下载成 base64 交给 persistOutputArtifact。
-      if (isDrama30s || isNapi) {
+      if (isDrama30s || isNapi || (rawOutputUrl && supplier.label === "v6k")) {
         const base64 = await downloadDramaContent(baseUrl, taskId, apiKey);
         return {
           base64,
@@ -472,6 +479,11 @@ function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, _t
   }
 
   return null;
+}
+
+/** 成品 URL 是否为本站鉴权下载口（`{base}/videos/{id}/content`，需 Bearer）。 */
+function isOwnAuthContentUrl(url: string, baseUrl: string): boolean {
+  return url.startsWith(`${baseUrl}/videos/`) && /\/content\/?(\?.*)?$/.test(url);
 }
 
 // drama sd25-30s 成品下载：/videos/{id}/content 需 Bearer 鉴权（官方 docs 第 7 节），
@@ -619,7 +631,8 @@ export async function pollOpenaiVideoTask(
   });
   const status = String(queryResponse.status ?? "").trim();
   if (status === "completed" || status === "succeeded") {
-    const outputUrl = extractOutputUrl(queryResponse, baseUrl, providerTaskId);
+    const rawOutputUrl = extractOutputUrl(queryResponse, baseUrl, providerTaskId);
+    const outputUrl = rawOutputUrl && supplier.label === "v6k" && isOwnAuthContentUrl(rawOutputUrl, baseUrl) ? null : rawOutputUrl;
     if (outputUrl) return { state: "succeeded", url: outputUrl, base64: null };
     // completed 但无公网 URL（drama sd25-30s 形状）：走 /videos/{id}/content 鉴栏下载。
     const base64 = await downloadDramaContent(baseUrl, providerTaskId, apiKey);

@@ -1,13 +1,14 @@
 // session-read.ts —— 自 index.ts 第二阶段 Wave3 无损抽取（2026-09-19）：会话读取与中止——
 // handleTranscript/handleAbortSession＋前导注释（原 index.ts 5531–5600 行，逐行原样搬运）。
 import { jsonError } from "./gw-lib.ts"
-import { isSystemWakeText, isInternalMechanismText, stripSystemReminders } from "./system-wake.ts"
+import { isSystemWakeText, isHiddenSubagentBusText, isInternalMechanismText, clientVisibleWakeText, stripSystemReminders } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { opencodeFetch, opencodeJson } from "./opencode-client.ts"
 import { stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 // 0920 停止闸：用户终止连子代理一起停（subagent.ts 不 import 本档，无循环）。
 import { stopSubagentsForParent } from "./subagent"
+import { setGenerationWorkCancelled } from "./job-store"
 // REQ-D2 停止优先：中止＝待投 steer 全数作废（steer-gw 不 import 本档，无循环）。
 import { dropPendingSteers } from "./steer-gw.ts"
 
@@ -41,17 +42,18 @@ export async function handleTranscript(key: string, id: string, req: Request): P
       const rawRole = typeof m?.info?.role === "string" ? m.info.role : "assistant"
       if (rawRole === "developer") continue
       let role = rawRole === "user" ? "user" : rawRole === "system" ? "system" : rawRole === "assistant" ? "assistant" : "assistant"
-      if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))) role = "system"
-      if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isInternalMechanismText(p.text))) continue
-      if (role === "system") {
-        const wake = Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))
-        if (!wake) continue
-      }
+      const headText = Array.isArray(m?.parts)
+        ? m.parts.find((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim().length > 0)?.text
+        : undefined
+      if ((role === "user" || role === "system") && isHiddenSubagentBusText(headText)) continue
+      if (role === "user" && isSystemWakeText(headText)) role = "system"
+      if (role === "user" && isInternalMechanismText(headText)) continue
+      if (role === "system" && !isSystemWakeText(headText)) continue
       const parts: Array<{ type: "text"; text: string } | { type: "tool"; tool: string; input: unknown }> = []
       if (Array.isArray(m?.parts)) {
         for (const p of m.parts) {
           if (p?.type === "text" && typeof p.text === "string") {
-            const text = stripSystemReminders(p.text)
+            const text = role === "system" ? clientVisibleWakeText(stripSystemReminders(p.text)) : stripSystemReminders(p.text)
             if (text.length === 0) continue
             parts.push({ type: "text", text })
           } else if (p?.type === "tool" && typeof p.tool === "string") {
@@ -68,6 +70,15 @@ export async function handleTranscript(key: string, id: string, req: Request): P
 export async function handleAbortSession(key: string, id: string): Promise<Response> {
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
+  // 取消状态写失败不是拒绝停止的理由：abort 必须照常执行（否则停止按钮整体失效），
+  // 回执把 future_submissions 如实标 unknown，绝不谎称 revoked。
+  let cancelPersisted = true
+  try {
+    setGenerationWorkCancelled(state.sessionId, true, "用户停止当前工作")
+  } catch (err) {
+    cancelPersisted = false
+    console.warn(`[gateway] user abort: generation work control persist failed session=${state.sessionId}`, err)
+  }
   try {
     const res = await opencodeFetch(`/session/${state.opencodeSessionId}/abort`, {
       method: "POST",
@@ -100,5 +111,10 @@ export async function handleAbortSession(key: string, id: string): Promise<Respo
   // N2 同款（2026-09-02）：用户中止即剥掉本轮文本帧——SSE 断线重连不再整段
   // 重放被中止轮的旧文案（stale delta 闪回根治）。
   stripStaleTurnTextFromReplay(state)
-  return Response.json({ ok: true })
+  if (!cancelPersisted) {
+    return Response.json({ ok: true, future_submissions: "unknown", upstream_cancelled: false, refunded: false,
+      note: "已停止本轮执行；取消状态未能持久化，后续提交闸门状态未知，已提交上游的任务、产物和费用以真实回执为准。" })
+  }
+  return Response.json({ ok: true, future_submissions: "revoked", upstream_cancelled: false, refunded: false,
+    note: "已停止本轮执行并撤销后续提交；已提交上游的任务、产物和费用以真实回执为准。" })
 }

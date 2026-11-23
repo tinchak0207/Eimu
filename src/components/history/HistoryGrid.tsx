@@ -108,6 +108,7 @@ export function HistoryGrid({
               <HistoryCard
                 key={entry.id}
                 entry={entry}
+                priority={entry.id === visibleEntries[0]?.id}
                 selectionMode={selectionMode}
                 selected={selectedIds.has(entry.id)}
                 onOpen={onOpen}

@@ -88,6 +88,9 @@ const CONTENT_TYPES: Record<string, string> = {
   ".flac": "audio/flac",
   ".pdf": "application/pdf",
   ".zip": "application/zip",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
+  ".blend": "application/x-blender",
 }
 
 export function contentTypeFor(filePath: string, provided?: string): string {
@@ -116,7 +119,7 @@ interface ReadFileResult {
   sha256: string
   size: number
 }
-export function readRegularFile(inputPath: string): ReadFileResult {
+export function readRegularFile(inputPath: string, maxBytes = ARTIFACT_MAX_BYTES): ReadFileResult {
   const absolutePath = path.resolve(requiredText(inputPath, "path", MAX_URL_LENGTH))
   let before: ReturnType<typeof lstatSync>
   try {
@@ -131,8 +134,8 @@ export function readRegularFile(inputPath: string): ReadFileResult {
   if (before.nlink > 1) throw new ArtifactError("file_hardlink", "拒绝硬链接文件", 400)
   // 约束：路径必须落在允许的上传根（realpath 后包含检查，防 `..` 与中间层 symlink 逃逸）。
   assertUploadPathAllowed(absolutePath)
-  if (before.size > ARTIFACT_MAX_BYTES) {
-    throw new ArtifactError("file_too_large", `文件 ${before.size} 字节，超过 16MiB 上限`, 413)
+  if (before.size > maxBytes) {
+    throw new ArtifactError("file_too_large", `文件 ${before.size} 字节，超过 ${maxBytes / 1048576}MiB 上限`, 413)
   }
   let fd: number | undefined
   try {
@@ -144,10 +147,10 @@ export function readRegularFile(inputPath: string): ReadFileResult {
       throw new ArtifactError("file_changed_during_read", "打开期间文件发生变化，整笔拒绝", 409)
     }
     assertUploadPathAllowed(`/proc/self/fd/${fd}`)
-    if (opened.size > ARTIFACT_MAX_BYTES) {
-      throw new ArtifactError("file_too_large", `文件 ${opened.size} 字节，超过 16MiB 上限`, 413)
+    if (opened.size > maxBytes) {
+      throw new ArtifactError("file_too_large", `文件 ${opened.size} 字节，超过 ${maxBytes / 1048576}MiB 上限`, 413)
     }
-    const buffer = Buffer.alloc(Math.min(opened.size + 1, ARTIFACT_MAX_BYTES + 1))
+    const buffer = Buffer.alloc(Math.min(opened.size + 1, maxBytes + 1))
     let length = 0
     while (length < buffer.length) {
       const count = readSync(fd, buffer, length, buffer.length - length, length)

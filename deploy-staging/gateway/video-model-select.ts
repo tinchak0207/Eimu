@@ -8,7 +8,13 @@
 // （jobs=0，没有被证伪）者，其中 minimax-h3 优先；有 ≥ZERO_DELIVERY_MIN_JOBS 单且 0 交付者永远排除。
 // 纯函数、无 I/O，供 pickDefaultVideoModel / resolveActiveModel / 兜底共用。
 
-export const VIDEO_FALLBACK_MODEL = "minimax-h3"
+/**
+ * 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p 全站默认）。真源 src/lib/image-model-ids.js 的
+ * DEFAULT_VIDEO_MODEL_ID（网关单独发布不能 import src/，镜像一份，改默认时两处同改）。
+ * 排序规则：默认模型只要「可用且未被证伪」就排第一，不按交付样本数让位；其余模型仍按 proven 规则。
+ */
+export const DEFAULT_VIDEO_MODEL = "seedance-2.5-720p"
+export const VIDEO_FALLBACK_MODEL = DEFAULT_VIDEO_MODEL
 /**
  * 免费兜底视频档（2026-10-13 暴君指定）：agnes 平台自有免费额度渠道，上游成本 ¥0。
  * 付费视频渠道（miaowu 余额断 / xiaoyxiao 502）全断时，它仍能供货——是**最后手段**，
@@ -70,13 +76,16 @@ export function rankVideoModels(
   const proven = ok
     .filter(isProvenVideoModel)
     .sort((a, b) => num(b.last_24h?.delivered) - num(a.last_24h?.delivered) || num(b.last_24h?.success_rate) - num(a.last_24h?.success_rate))
-  // 无样本者内部优先序：主兜底（minimax-h3，有交付史）→ 其他 → 免费兜底（agnes，最后手段）。
+  // 无样本者内部优先序：主兜底（= 平台默认模型）→ 其他 → 免费兜底（agnes，最后手段）。
   const noSampleRank = (id: unknown): number =>
     id === VIDEO_FALLBACK_MODEL ? 0 : id === FREE_FALLBACK_VIDEO_MODEL ? 2 : 1
   const noSample = ok
     .filter((m) => !isProvenVideoModel(m) && num(m.last_24h?.jobs) === 0)
     .sort((a, b) => noSampleRank(a.id) - noSampleRank(b.id))
-  return [...proven.map((m) => ({ id: m.id as string, proven: true })), ...noSample.map((m) => ({ id: m.id as string, proven: false }))]
+  const ranked = [...proven.map((m) => ({ id: m.id as string, proven: true })), ...noSample.map((m) => ({ id: m.id as string, proven: false }))]
+  const di = ranked.findIndex((r) => r.id === DEFAULT_VIDEO_MODEL)
+  if (di > 0) ranked.unshift(ranked.splice(di, 1)[0]!)
+  return ranked
 }
 
 export function pickVideoModel(models: readonly ModelStatusEntryLike[], exclude?: ReadonlySet<string>): { id: string; proven: boolean } | null {

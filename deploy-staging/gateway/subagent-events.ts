@@ -1,10 +1,12 @@
 import { appendTranscript } from "./subagent-transcript.ts"
-import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask } from "./events-translate.ts"
+import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
+import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
+import { toolOutputMusicRef } from "./events-translate-emit.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
 import type { SubagentModelRef, SubagentRun } from "./subagent-types.ts"
-import { SPEC_DEADLINE_LINE, MAX_ACTIVE_PER_PARENT, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, partialBodyOf, isInternalReviewRun, isOpenCodeSessionId } from "./subagent-types.ts"
+import { SPEC_DEADLINE_LINE, maxActivePerParent, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, partialBodyOf, isInternalReviewRun, isOpenCodeSessionId } from "./subagent-types.ts"
 import { fireSubagentHook, deps, byParent, byChildOc, completed, sessionScratchpads, sessionArtifactRegistries, pendingCriticTargets, criticDispatchedByParent, criticPassUsed, criticRetryQueue, parentStateOf, boundMap, boundSet } from "./subagent-runs.ts"
 import { finishRun, armHeartbeat } from "./subagent-finish.ts"
 import { summarizeChild } from "./subagent-liveness.ts"
@@ -114,7 +116,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // G3（2026-10-10）：reasoning 增量不再转发父会话——评测 A/B/C 数万～十几万
           // subagent.delta 主因是英文思考洪流；存活感已由 turn.status 心跳覆盖。正文 delta 照常。
           if (!hideBody && kind !== "reasoning") {
-            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: p.delta })
+            emitSubagentDelta(parentState, run, p.delta)
             appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(p.delta) })
           } else if (hideBody && kind !== "reasoning" && run.transcriptHideNoted !== true) {
             run.transcriptHideNoted = true
@@ -182,6 +184,29 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               // C1：工具状态**变化**是实时工作日志档最有价值的时点——节流仍 ≥1000ms。
               writeLiveLog(run)
             }
+            // 2026-10-31 第 1 刀补口：野兽模式下 music_gen 由 Expert 子代理调用，父会话的 tool 分支看不见 ⇒
+            // 画布从不出音频节点。子代理 music_gen 同样投影进父会话画布；键带 run id，防与父会话 callID 撞号。
+            const canvasInput = part.state?.input
+            // input 在 pending 阶段是空对象（probe 也认不出）：等带参数的 running/终态再建单元。
+            const inputReady = canvasInput != null && typeof canvasInput === "object" && Object.keys(canvasInput).length > 0
+            if (toolName === "music_gen" && inputReady && wantsAutoCanvas(toolName, canvasInput)) {
+              const canvasKey = `sub:${run.id}:${callId}`
+              if (!parentState.canvasUnitByCall.has(canvasKey) && !run.canvasCalls?.has(canvasKey)) {
+                if (!run.canvasCalls) run.canvasCalls = new Set()
+                run.canvasCalls.add(canvasKey)
+                boundSet(run.canvasCalls, 200)
+                void autoCreateCanvasUnit(parentState, toolName, canvasInput, canvasKey)
+              }
+              if (frameStatus !== "running" && !run.canvasSettled?.has(canvasKey)) {
+                if (!run.canvasSettled) run.canvasSettled = new Set()
+                run.canvasSettled.add(canvasKey)
+                boundSet(run.canvasSettled, 200)
+                const out = parseToolOutput(part.state?.output) as Record<string, unknown> | null
+                const ok = frameStatus === "ok" && out?.ok !== false
+                const err = (out?.error && typeof out.error === "object" ? out.error : { message: typeof part.state?.error === "string" ? part.state.error : "" }) as { code?: unknown; message?: unknown; human_message?: unknown }
+                void settleMusicCanvasUnit(parentState, canvasKey, ok, out, err)
+              }
+            }
           }
         }
         // FIX-A（2026-10-02）：子代理工具结果的媒体成品 → 父会话出卡。野兽模式下音乐/影片
@@ -215,7 +240,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               run.artifacts.push({ kind: "audio", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
               appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "audio", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
-            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
+            // H34：子代理产出——tool_session＝子会话（music_charge ref 里的会话就是它），账本行带关联键。
+            void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover, duration_s: c.duration_s }, {
+              tool_session: typeof part.sessionID === "string" ? part.sessionID : undefined,
+              tool_call_id: childCallId || undefined,
+              music_ref: toolOutputMusicRef(parsedOut),
+            })
           }
         }
         if (part.type !== "text" && part.type !== "reasoning") {
@@ -246,7 +276,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           const suffix = part.text.slice(emittedLen)
           // G3：reasoning part 后缀不转发（同上）；正文照常。
           if (!hideBody && part.type !== "reasoning") {
-            deps.emitToSession(parentState, "subagent.delta", { id: run.id, text: suffix })
+            emitSubagentDelta(parentState, run, suffix)
             appendTranscript(run.id, { t: Date.now(), k: "text", s: scrubSubagentPayload(suffix) })
           } else if (hideBody && part.type !== "reasoning" && run.transcriptHideNoted !== true) {
             run.transcriptHideNoted = true
@@ -348,11 +378,13 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
     // 丢弃（实锤：四次被挤掉；唯一一次跑到时 verdict 亦未回灌）。
     const list = byParent.get(parentId) ?? []
     const runningCount = list.filter((r) => r.status === "running").length
-    if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+    const cap = maxActivePerParent()
+    if (cap > 0 && runningCount >= cap) {
       criticRetryQueue.set(parentId, targets.slice(-CRITIC_PASS_MAX_TARGETS))
       boundMap(criticRetryQueue, 500)
+      const capLabel = cap === 0 ? "不限" : String(cap)
       console.log(
-        `[gateway] machine critic pass queued (parent at concurrency cap ${MAX_ACTIVE_PER_PARENT}, retry on slot release): session=${parentId}`,
+        `[gateway] machine critic pass queued (parent at concurrency cap ${capLabel}, retry on slot release): session=${parentId}`,
       )
       return false
     }
@@ -481,9 +513,13 @@ export function runGoalEvaluator(
     const prompt = typeof spec?.prompt === "string" ? spec.prompt : ""
     if (!prompt.trim() || typeof onTerminal !== "function") return false
     const parentId = String(parentState.sessionId)
-    if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) {
-      console.log(`[gateway] goal evaluator skipped (parent at concurrency cap ${MAX_ACTIVE_PER_PARENT}): session=${parentId}`)
-      return false
+    {
+      const cap = maxActivePerParent()
+      if (cap > 0 && (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= cap) {
+        const capLabel = cap === 0 ? "不限" : String(cap)
+        console.log(`[gateway] goal evaluator skipped (parent at concurrency cap ${capLabel}): session=${parentId}`)
+        return false
+      }
     }
     let chain: SubagentModelRef[] = []
     try {
@@ -560,7 +596,10 @@ export function runGoalEvaluator(
 export function maybeDrainCriticQueue(parentId: string): void {
   const queued = criticRetryQueue.get(parentId)
   if (!queued || queued.length === 0 || !deps) return
-  if ((byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= MAX_ACTIVE_PER_PARENT) return
+  {
+    const cap = maxActivePerParent()
+    if (cap > 0 && (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length >= cap) return
+  }
   const parentState = deps.resolveSession(parentId)
   if (!parentState?.sessionId) return
   criticRetryQueue.delete(parentId)
@@ -599,4 +638,25 @@ export function forgetSessionWorkspaceState(sessionId: string): void {
 export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: string; label: string; runId: string; text: string }> {
   if (!parentId) return []
   return (pendingCriticTargets.get(parentId) ?? []).slice()
+}
+
+// 子代理正文增量的出站清洗：token 级碎片里的 /opt/agent-harness/… 路径逐帧匹配不到，
+// 走主会话同一套 stripOutboundFeed（含路径的尾词扣留到拼完整再改写）。
+function emitSubagentDelta(parentState: Parameters<NonNullable<typeof deps>["emitToSession"]>[0], run: SubagentRun, text: string): void {
+  if (!run.deltaStrip) run.deltaStrip = { pending: "", suppress: false, fence: false, sawEnglish: false }
+  const safe = stripOutboundFeed(run.deltaStrip as PartStripState, text)
+  if (safe) deps!.emitToSession(parentState, "subagent.delta", { id: run.id, text: safe })
+}
+
+// 子代理收尾／被停：已投影但未落终态的 music_gen 画布单元一律置失败，不让音频节点永远转圈。
+export function settleOpenSubagentCanvas(run: SubagentRun): void {
+  if (!run.canvasCalls?.size) return
+  const parentState = parentStateOf(run)
+  if (!parentState) return
+  for (const key of run.canvasCalls) {
+    if (run.canvasSettled?.has(key)) continue
+    if (!run.canvasSettled) run.canvasSettled = new Set()
+    run.canvasSettled.add(key)
+    void settleMusicCanvasUnit(parentState, key, false, null, { code: "aborted", human_message: "音乐生成未完成（任务已停止），本次未出成品。" })
+  }
 }

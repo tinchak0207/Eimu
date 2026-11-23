@@ -264,7 +264,7 @@ export async function uploadAudio(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      signal: context?.abort,
+      signal: AbortSignal.timeout(120_000),
     })
   } catch (e) {
     throw new MusicToolError(

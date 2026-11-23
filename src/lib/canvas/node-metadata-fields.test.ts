@@ -163,6 +163,17 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
       selectedVersion: "2026-09-29T02:05:00.000Z",
     },
   },
+  // 2026-10-28 S10b：工程桥五键（S10a bridge-canvas 的 metadata）。取样刻意包含
+  // `project_pinned/project_reused = false` 与 `project_sig = ""`（签名未知）——
+  // 这两类「假值但有语义」的样本才会咬出 truthy 清洗造成的静默丢键。
+  project_node_id: { project_node_id: "keyframe_a" },
+  project_sig: { project_sig: "9f2c1e4a" },
+  project_pinned: { project_pinned: false },
+  project_stale: { project_stale: true },
+  project_reused: { project_reused: false },
+  // 2026-11-02：locked 原本两端都不在白名单（compile 锁死键）；human_edited＝人手改字记号。
+  locked: { locked: true },
+  human_edited: { human_edited: { prompt: 1793600000000, title: 1793600000001 } },
 };
 
 const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);

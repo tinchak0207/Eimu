@@ -39,7 +39,7 @@ export default tool({
     "派一个子代理执行自包含任务。",
     "何时用：多步骤、大素材加工、可并行的研究或生成；主对话需要保持精简时。",
     "何时不用：单步琐事、一句话能答的不要派；fork 由子代理发起，主会话不得 fork。",
-    "关键约束：label 与 prompt 必填；prompt 含目标、素材路径、验收标准、产出格式；async 默认后台；并发上限 3；model/effort 仅在用户明确点名时设置。",
+    "关键约束：label 与 prompt 必填；prompt 含目标、素材路径、验收标准、产出格式；async 默认后台；可并行多路；资源吃紧时再串行补派，禁止空轮询等待；model/effort 仅在用户明确点名时设置。",
     "失败处置：missing_required_args 补 label/prompt；dispatch_failed 按 gateway 文本修正；subagent_error 读 summary 决定修任务书还是换路；timeout 用相同 label 重新派发；aborted 表示会话中断。",
     "互指：后续纠偏用 subagent_message，停止用 subagent_stop，查状态用 subagent_status。",
     "示例：subagent_dispatch({label:研究竞品, prompt:研究 3 个同类纪录片开场，输出文件路径、时间码与手法对比表；验收：每条都有真实链接与时间码。, async:true})",

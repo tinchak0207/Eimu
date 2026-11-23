@@ -148,6 +148,8 @@ export interface CanvasNodeMetadata {
   key_features?: string[];
   role?: string;
   locked?: boolean;
+  /** 人手改过的栏位 → 时间戳（human-edits.ts；agent 写入路径据此不覆盖人的版本）。 */
+  human_edited?: import("./human-edits").HumanEditedFields;
   // P3: 批次 & 查阅 metadata
   referenceNodeIds?: string[];
   batchIndex?: number;
@@ -378,6 +380,21 @@ export interface CanvasNodeMetadata {
   input?: string;
   characterName?: string;
   sceneName?: string;
+  // ── 工程图桥（S10a/S10b，2026-10-28；`bridge-canvas.ts` 的 `projectNodeMetadata` 逐字写入）──
+  /**
+   * 工程图节点 id（本卡在 `project.json` 里的身份键）。清洗端＝`node-metadata-fields.ts`
+   * 的 `project_node_id`（trimmedString）；空／缺键＝非工程卡。人手回写、删除收敛与
+   * 重同步都靠它找回工程节点，漏放行＝卡沦为死卡。
+   */
+  project_node_id?: string;
+  /** 工程签名（`signature` 的 8 位摘要；空字串＝图里有节点但签名未知，必须与缺键区分）。 */
+  project_sig?: string;
+  /** 已钉住（`pin` 边界）；`false` ＝工程卡但未钉住，不能当缺键。 */
+  project_pinned?: boolean;
+  /** 过期／漂移（引擎写结果时发现启动签名≠当前签名即置位）；`false` ＝新鲜。 */
+  project_stale?: boolean;
+  /** 本轮复用了旧产物（未重新生成）；`false` ＝新跑。 */
+  project_reused?: boolean;
 }
 
 /**
@@ -600,7 +617,8 @@ export interface CanvasProjectMetaPatch {
 export type CanvasAgentOp =
   | { type: "add_node"; node: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string } }
   | { type: "update_node"; id: string; patch: { title?: string; position?: CanvasPosition; width?: number; height?: number; metadata?: Partial<CanvasNodeMetadata> } }
-  | { type: "delete_nodes"; ids: string[] }
+  /** `_override_human`：用户本轮明确要求删人改/锁定卡时才带（见 human-edits.ts 整卡守门）。 */
+  | { type: "delete_nodes"; ids: string[]; _override_human?: true | string[] }
   | { type: "connect_nodes"; connections: { fromNodeId: string; toNodeId: string }[] }
   | { type: "delete_connections"; ids: string[] }
   | { type: "select_nodes"; ids: string[] }
@@ -620,7 +638,7 @@ export type CanvasAgentOp =
    * 与 `update_node` 的分工：update_node 写新值；本 op 回到旧值——版本史住在画布端，
    * agent 不必先把旧 metadata 抄进上下文。执行端＝adapter 的 agent_ops 分派（同一次 dispatch）。
    */
-  | { type: "revert_node"; nodeId: string; version?: number };
+  | { type: "revert_node"; nodeId: string; version?: number; _override_human?: true | string[] };
 
 export interface CanvasAgentOpsEvent {
   request_id: string;

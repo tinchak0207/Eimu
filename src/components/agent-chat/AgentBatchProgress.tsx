@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { Loader2 } from "lucide-react";
 import type { AgentChatState } from "@/lib/agent-chat-types";
+import { resolveWaitingProgress } from "@/lib/waiting-contract";
 
 export interface AgentBatchProgressProps {
   items: AgentChatState["items"];
@@ -65,9 +66,11 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
   if (images === 0 && coins === 0) return null;
 
   // 有真实分母才谈百分比：分母未知时进度条退成流动指示条，绝不显示假的「X%」。
-  const hasTotal = typeof total === "number" && Number.isFinite(total) && total > 0;
-  const totalCount = hasTotal ? (total as number) : 0;
-  const pct = hasTotal ? Math.min(100, Math.round((images / totalCount) * 100)) : 0;
+  // 契约真源：src/lib/waiting-contract.ts（与粒子海等待同一口径）。
+  const waiting = resolveWaitingProgress(images, total);
+  const hasTotal = waiting.kind === "determinate";
+  const totalCount = hasTotal ? waiting.total : 0;
+  const pct = hasTotal ? waiting.pct : 0;
 
   return (
     <div className="agent-rise flex flex-col">

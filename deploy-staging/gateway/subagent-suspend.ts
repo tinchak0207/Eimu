@@ -1,6 +1,6 @@
 import { notify } from "./internal-waiters.ts"
 import type { SubagentRun } from "./subagent-types.ts"
-import { MAX_ACTIVE_PER_PARENT, unrefTimer, isOpenCodeSessionId, readJsonObject } from "./subagent-types.ts"
+import { maxActivePerParent, unrefTimer, isOpenCodeSessionId, readJsonObject } from "./subagent-types.ts"
 import { deps, byParent, byChildOc, pendingResumeQueue, parentStateOf, resolveParentSession, unknownSessionResponse, callerCanControlRun, siblingForbiddenResponse, findLiveRun } from "./subagent-runs.ts"
 import { maybeDrainCriticQueue } from "./subagent-events.ts"
 import { resolveLatestRunId } from "./subagent-status.ts"
@@ -41,7 +41,8 @@ export async function autoResumeSuspendedRun(
   if (run.status !== "suspended") return false
   const parentKey = run.parentGatewaySessionId
   const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
-  if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+  const cap = maxActivePerParent()
+  if (cap > 0 && runningCount >= cap) {
     let q = pendingResumeQueue.get(parentKey)
     if (!q) {
       q = []
@@ -109,7 +110,8 @@ export function checkPendingResumeQueue(parentId: string): void {
   const q = pendingResumeQueue.get(parentId)
   if (!q || q.length === 0) return
   const runningCount = (byParent.get(parentId) ?? []).filter((r) => r.status === "running").length
-  if (runningCount >= MAX_ACTIVE_PER_PARENT) return
+  const cap = maxActivePerParent()
+  if (cap > 0 && runningCount >= cap) return
   const next = q.shift()
   if (!next) return
   // F8（P2·无界常驻修复）：队列抽空即删键——否则每个曾入队的父会话永久留键（非空时还持有 run
@@ -242,7 +244,8 @@ export async function handleSubagentResume(req: Request): Promise<Response> {
     return Response.json({ ok: false, code: "invalid_resume_token", error: "resume_token 不匹配" }, { status: 403 })
   }
   const runningCount = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running").length
-  if (runningCount >= MAX_ACTIVE_PER_PARENT) {
+  const cap = maxActivePerParent()
+  if (cap > 0 && runningCount >= cap) {
     let q = pendingResumeQueue.get(parentKey)
     if (!q) {
       q = []

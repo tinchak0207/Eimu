@@ -60,11 +60,9 @@ const MCP_CONFIG = `  "mcpServers": {
     }
   }`;
 
-// 本机自架路线：本仓库未公开发布，外部使用者拿不到克隆地址，
-// 因此这里不写任何照抄会失败的仓库 URL，只说明「从你有权限的副本取 mcp-server/」。
-const MCP_BUILD = `# 本机自架需要本仓库的存取权限（仓库未公开发布）。
-# 从你有权限的仓库副本中取出 mcp-server/ 目录，然后：
-cd mcp-server
+// 公开源码中的本机 stdio server；与官方远端 MCP 的工具范围不同。
+const MCP_BUILD = `git clone https://github.com/tinchak0207/Eimu.git
+cd Eimu/mcp-server
 npm install
 npm run build`;
 
@@ -83,16 +81,18 @@ export default function DocsMcpPage() {
         <SectionTitle icon={Plug}>把助理带走</SectionTitle>
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
           助理不只会在这站网页里干活，也能装进你已有的 AI 工具——通过 MCP（Model Context Protocol），Claude、Codex、Cursor 里的
-          agent 说一句话，就能出图、出视频并拿到成品 URL，背后走的是同一套计费与队列。
+          agent 把一句话交给 Eimu 导演，拿回成片与中间产物。产品是 Vibe Directing／Cursor of video：不用学提示词设计和分镜，现在你也是导演。
         </p>
         {/* ---- 远端接入：一等公民，今天就能用 ---- */}
         <div className="mt-4">
           <KeyCard icon={Plug} title="远程接入（推荐，今天就能用）">
             <p>
               不用克隆仓库、不用构建：直接连 eimu.dev 的远端 MCP 端点{" "}
-              <InlineCode>POST {REMOTE_MCP_ENDPOINT}</InlineCode>，认证走{" "}
-              <InlineCode>Authorization: Bearer sk-biz-…</InlineCode>。工具比本机 server 更全，Codex、
-              Claude Code、Cursor、OpenClaw 与任意 MCP 客户端逐份可复制的配置都在{" "}
+              <InlineCode>POST {REMOTE_MCP_ENDPOINT}</InlineCode>（这是主路径），认证走{" "}
+              <InlineCode>Authorization: Bearer sk-biz-…</InlineCode>。默认{" "}
+              <InlineCode>tools/list</InlineCode> 只露导演工具；原子工具用{" "}
+              <InlineCode>?toolset=expert</InlineCode>。Codex、Claude Code、Cursor、OpenClaw 与任意 MCP
+              客户端逐份可复制的配置都在{" "}
               <a href="/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /mcp 接入页
               </a>
@@ -134,17 +134,17 @@ export default function DocsMcpPage() {
 
         {/* ---- 本机自架：保留但诚实降级 ---- */}
         <h3 className="mt-6 text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">
-          进阶：本机自架 MCP server（需仓库权限）
+          进阶：本机自架 MCP server（公开源码）
         </h3>
         <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-          本机路线要自己跑一个 stdio MCP server：
-          <span className="font-semibold text-[rgba(0,0,0,0.68)]">需要本仓库的存取权限（仓库未公开发布）</span>
-          ，外部使用者拿不到克隆地址，所以下面只说明做法，不提供可直接照抄的仓库 URL。
+          本机 stdio（仓库 mcp-server/）不是对外主路径；远端 HTTP MCP 才是。本机路线要自己跑一个 stdio MCP server：
+          <a href="https://github.com/tinchak0207/Eimu/tree/main/mcp-server" className="font-semibold text-ios-blue lg-transition hover:underline">源码已在 GitHub 公开</a>
+          。这里只启动本机 MCP 客户端适配层，仍调用官方生成 API 并使用你的密钥计费；不等于自建完整生成服务。
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <KeyCard icon={TerminalSquare} title="本机自架：构建与配置">
             <p>
-              拿到密钥后，从你有权限的仓库副本取出 <InlineCode>mcp-server/</InlineCode> 并本地构建：
+              拿到密钥后，克隆公开源码并构建 <InlineCode>mcp-server/</InlineCode>：
             </p>
             <div className="mt-3">
               <CodeBlock>{MCP_BUILD}</CodeBlock>
@@ -163,7 +163,7 @@ export default function DocsMcpPage() {
           </KeyCard>
           <KeyCard icon={ListChecks} title="本机 server 提供的 4 个工具">
             <p className="mb-3">
-              远端 MCP 的工具清单（23 个）见{" "}
+              远端 MCP 默认导演面约 5 个工具，专家面（toolset=expert）展开原子工具，清单见{" "}
               <a href="/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">
                 /mcp 接入页
               </a>

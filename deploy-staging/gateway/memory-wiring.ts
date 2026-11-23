@@ -8,6 +8,7 @@ import { createMemoryBatch } from "./memory-batch"
 import { setMemoryNoteIngestHook } from "./memory-http"
 import { MEMORY_INGEST_SECRET, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
 import { getOwnedSession } from "./sessions-core"
+import { startHistoryBackfill } from "./memory-history-wiring"
 import { jsonError } from "./gw-lib"
 import { MEMORY_PLATFORM_STATUS_BUDGET, MEMORY_L0_BUDGET, MEMORY_L1_BUDGET, MEMORY_INJECTION_TOTAL_BUDGET, MEMORY_WARM_RECALL_BUDGET, MEMORY_PRIVATE_DOCS_MAX, MEMORY_TRUNC_MARK, MEMORY_RECALL_PREFETCH_TTL_MS, MEMORY_ASSISTANT_HEAD_CHARS, MEMORY_PRIVATE_SCOPE_NOTE, clampMemoryChars, isFreshCreativeRequest, isPreferenceMemoryDoc, PROJECT_REUSE_RULE, FRESH_CREATIVE_TURN_DIRECTIVE, memoryWarmRecallRoom, buildMemoryInjectionBlocks, MEMORY_CONTINUITY_BUDGET, RECENT_ASSET_WINDOW_MS, RECENT_ASSET_MAX_ITEMS, REPEAT_TOPIC_WINDOW_MS, REPEAT_TOPIC_MIN_ROUNDS, REPEAT_TOPIC_MIN_SIMILARITY, topicSimilarity, detectRepeatTopic, extractSnapshotAssets, buildRecentAssetIndex, buildFirstTurnContinuityLines, type ContinuityRow } from "./memory-wiring-inject"
 import { ensureMemoryTrace, appendMemoryRecallTrace, noteAssistantHeadForRecall, memoryDocIds, memoryFetchExport, memorySharedCorpus, MEMORY_PLATFORM_STATUS_TTL_MS, getPlatformStatusLines, memoryRecallPrefetch, memoryRecallInflight, MEMORY_RECALL_SESSION_BYTE_BUDGET, MEMORY_RECALL_SESSION_USAGE_MAX, memoryRecallSessionBytes, memoryRecallSessionUsed, resetMemoryRecallSessionUsage, MEMORY_RECALL_TURN_MAP_MAX, memoryRecallActive, memoryRecallScoringOptions, takeMemoryRecallPrefix, recallDedupeKey, memoryRecallDedupeHit, takeWarmCorpusRecallPrefix, scheduleMemoryRecallPrefetch, type MemoryRecallPrefetchEntry } from "./memory-wiring-recall"
@@ -132,6 +133,7 @@ export function memoryBatchSlotKey(now: Date, hours: number[]): string | null {
   return `${now.toISOString().slice(0, 10)}T${String(now.getUTCHours()).padStart(2, "0")}`
 }
 let memoryBatchLastSlotKey = ""
+startHistoryBackfill() // 记忆 v2：存量会话历史索引回填（低内存、一次一个；MEMORY_HISTORY_BACKFILL=0 关闭）
 setInterval(() => {
   void (async () => {
     try {

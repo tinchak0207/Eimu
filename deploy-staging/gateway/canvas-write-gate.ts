@@ -11,8 +11,11 @@
  *   2) 命中意图 → 默认起画布骨架（既有 PROMPT_SKELETON／startFast）+ 注入「模型改 DSL」
  *   3) 近 N 天媒体会话 workflow_write 覆盖率发版门（tools/check-media-workflow-write-coverage.*）
  *
- * 本模组只放纯函数与文案；接线在 messages-gw（意图标记）、events-translate（写穿记账）、
- * opencode-event-handler（session.idle 收盘拦截）。
+ * 2026-10-28 用户裁定删闸：第 1、3 条已停用——opencode-event-handler 不再调用
+ * shouldBlockCompletionForWorkflowWrite／buildWorkflowWriteGateNudge，发版脚本不再跑覆盖率门
+ *（根因见记忆 2026-10-28-eimu-context-rot-root-cause）。这两个函数仅留作纯函数，不接线。
+ *
+ * 本模组只放纯函数与文案；接线在 messages-gw（意图标记）、events-translate（写穿记账）。
  */
 
 /** 首期硬闸覆盖的多步影音模板（Jev／PROMPT_SKELETON 判定 id）。 */
@@ -25,15 +28,43 @@ export const MULTI_STEP_AV_TEMPLATES = new Set<string>([
 
 /** 音乐制作意图关键词（模板可能判 none，但仍属多步影音）。 */
 const MUSIC_INTENT_RE =
-  /(?:\bMV\b|\bOP\b|主题曲|片头曲|片尾曲|角色歌|作词|作曲|编曲|歌词|BGM|配乐|歌曲|音乐|专辑|单曲|FlowMusic|flowmusic|lyria)/i
+  /(?:\bMV\b|\bOP\b|主题曲|片头曲|片尾曲|角色歌|作词|作曲|编曲|歌词|BGM|配乐|歌曲|音乐|专辑|单曲|FlowMusic|flowmusic|lyria|歌)/i
 
-/** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。 */
+/** 影像／成片词：只有出现这些词，音乐请求才算多步影音；纯歌曲不起影片骨架、不逼影片 DSL。
+ *  2026-10-27 实测：一首 3 分钟歌（无影像需求）被 Jev 判成 feature_film（0.86），画布起整条影片产线，
+ *  写穿闸又把「先不要生成、只问字数放不放得下」的回合拖到 15 分钟未收尾。
+ *  只收明确的银幕媒体词：片头／片尾在「片头曲／片尾曲」里是音乐词，画面／镜头／电影常见于比喻，
+ *  都不算影像需求。 */
+const AV_VISUAL_RE =
+  /(?:\bMV\b|\bmv\b|视频|影片|短片|微电影|成片|分镜|预告片|多镜|剪辑|故事板|storyboard)/i
+
+/** 纯文字委托（只要歌词/文案/方案，明确不生成媒体）：不属于多步影音制作，不触发画布写穿闸。
+ *  2026-10-21：补「只要词/只写词」——真实委托常写「帮我写一首歌词，只要词」，旧表零命中。
+ *  2026-10-21 二次修正：删掉裸 `不要生成|不要报价`（「不要生成图片，做视频」「不要报价，直接生成
+ *  一张海报」被误判 textOnly=true，画布闸与完成主张闸同时豁免）；否定只认带明确对象的形态。
+ *  2026-10-27：补「先别生成，只告诉我…」这种裸否定＋标点形态。旧表只认带媒体对象的否定，
+ *  于是一次纯问答（核字数，不生成）仍被收盘闸判定未写画布、拖到 7 分钟无正文。
+ *  误判保护仍在：命中的短语会被 NEGATED_MEDIA_RE 剥掉，之后仍有正向媒体请求就不算纯文字。 */
 const TEXT_ONLY_RE =
-  /(?:只要文字|只要歌词|只写歌词|只写文字|仅要文字|只要方案|文字稿即可|不要生成|不生成音频|不要音频|不要调用\s*music_gen|不要报价)/i
+  /(?:只要文字|只要歌词|只写歌词|只写文字|仅要文字|只要方案|只要词|只写词|文字稿即可|只要(?:文案|稿件|文稿|脚本|文字|歌词|词|方案|大纲|提纲|清单)|只写(?:文案|脚本|文字|歌词|词|方案)|不要音频|不要生成(?:音频|音乐|语音|图片|图像|视频|媒体|MV)|不需要(?:生成)?(?:音频|图片|视频)|不调用\s*music_gen|(?:不要|别|不用|不需要)生成(?:任何)?[，,。！!；;\s])/i
+
+/** 带明确对象的否定媒体短语。剥掉它之后若仍有正向媒体请求，就不算纯文字委托。 */
+const NEGATED_MEDIA_RE =
+  /(?:不要|不需要|不用|无需|别)\s*(?:生成|做|制作|要|需要|出|调用)?\s*(?:音频|音乐|语音|图片|图像|视频|媒体|MV|music_gen)/gi
+
+/** 正向媒体成品请求：剥掉否定短语后命中（做视频／生成一张海报…）→ 不是纯文字委托。 */
+const MEDIA_REQUEST_RE =
+  /(?:做|生成|制作|出|画|来|要|需要)\s*(?:一张|一个|一段|一条|几|些|多)?\s*(?:图片|图像|海报|封面|照片|视频|影片|短片|宣传片|广告片|成片|动画|音乐|歌曲|主题曲|配乐|音频|配音|语音|MV|模型)/i
+
+/** 倒装媒体请求：媒体名词在前、请求动词在后（「视频也要」「海报得做」）。
+ *  2026-10-21 实测：「不要生成图片，视频也要」剥掉否定短语后 MEDIA_REQUEST_RE 只认「动词+媒体」语序，
+ *  漏判成纯文字委托 → 画布闸与完成主张闸同时豁免。 */
+const MEDIA_OBJECT_FIRST_RE =
+  /(?:图片|图像|海报|封面|照片|视频|影片|短片|宣传片|广告片|成片|动画|音乐|歌曲|主题曲|配乐|音频|配音|语音|MV|模型)(?:也|还|都|同样)?\s*(?:要|需要|得|做|来)/i
 
 /** 多镜／成片制作意图关键词（模板漏判兜底）。 */
 const MULTI_SHOT_AV_RE =
-  /(?:多镜|分镜|成片|长片|短剧|预告片|纪录片|广告片|宣传片|剧集|番剧|短片|storyboard|shot\s*list|镜头表)/i
+  /(?:多镜|分镜|成片|长片|短剧|预告片|纪录片|广告片|宣传片|剧集|番剧|短片|storyboard|shot\s*list|镜头表|(?:做|生成|制作|拍|剪|出|来)\s*.{0,4}(?:视频|影片))/i
 
 export const WORKFLOW_WRITE_GATE_MARK = "【画布写穿闸·未达标】"
 
@@ -44,11 +75,29 @@ export interface AvIntentInput {
   musicExpertSeen?: boolean
 }
 
+/**
+ * 用户是否明确只要纯文字成品（歌词/文案/方案）。
+ * 判据与 isMultiStepAvProductionIntent 的早退逐字一致：复用同一组 TEXT_ONLY_RE / MULTI_SHOT_AV_RE
+ *（出现多镜／成片字样即不算纯文字），供完成主张闸豁免「正文即交付」的委托。
+ */
+export function isTextOnlyRequest(text: string): boolean {
+  const p = typeof text === "string" ? text : ""
+  if (!p.trim()) return false
+  if (!TEXT_ONLY_RE.test(p) || MULTI_SHOT_AV_RE.test(p)) return false
+  // 「不要生成图片，做视频」「不要报价，直接生成一张海报」：否定短语之外仍有媒体请求 → 不是纯文字。
+  // 2026-10-21 补倒装语序（「视频也要」）：正向媒体请求含「动词+媒体」与「媒体+动词」两种。
+  const stripped = p.replace(NEGATED_MEDIA_RE, " ")
+  return !MEDIA_REQUEST_RE.test(stripped) && !MEDIA_OBJECT_FIRST_RE.test(stripped)
+}
+
 /** 是否命中「多步影音制作」意图（硬闸覆盖面；首期＝music + 多镜视频）。 */
 export function isMultiStepAvProductionIntent(input: AvIntentInput): boolean {
   const p = typeof input.prompt === "string" ? input.prompt : ""
   // 纯文字委托不是媒体生产：不拦收盘、不逼写画布（2026-10-21 实测：歌词正文被闸门挤成「见上一条」）。
-  if (p.trim() && TEXT_ONLY_RE.test(p) && !MULTI_SHOT_AV_RE.test(p)) return false
+  if (isTextOnlyRequest(p)) return false
+  // 纯歌曲（无 MV／视频／成片等影像词）＝单步音乐制作：Jev 即使判成影片模板，也不起影片骨架、不逼写影片 DSL。
+  // 2026-10-27 Hack 实测：「做首歌，不要视频」被未剥否定的原文判成影音（「视频」命中），先剥否定再看影像词。
+  if (MUSIC_INTENT_RE.test(p) && !AV_VISUAL_RE.test(p.replace(NEGATED_MEDIA_RE, " "))) return false
   const tid = typeof input.templateId === "string" ? input.templateId.trim() : ""
   if (tid && MULTI_STEP_AV_TEMPLATES.has(tid)) return true
   if (input.musicExpertSeen === true) return true
@@ -118,7 +167,6 @@ export function buildAvCanvasSkeletonDirective(templateId: string, opts?: { plan
     `【机器·画布写穿·默认骨架】System One 判定多步影音制作＝\`${templateId}\`${lean ? "（策划瘦身：仅 text／结构）" : ""}。` +
     `网关已按模板自动起画布骨架（PROMPT_SKELETON／DSL 可读）。规则：\n` +
     `1. 不要另起平行产线；读 \`canvas_get_state\` 的 \`dsl\`，改 steps 后用 \`workflow_write\` 整份交回（模型改 DSL，不是手拼 ops）。\n` +
-    `2. 收盘硬闸：本会话未成功 \`workflow_write\`（非 dry_run）不得完成；document 链接不能代替画布写穿。\n` +
-    `3. 新产线确认：工具回 \`confirm_new_line\` 时，确为有意铺线则带 \`confirm_new_line: true\` 重交。`
+    `2. 新产线确认：工具回 \`confirm_new_line\` 时，确为有意铺线则带 \`confirm_new_line: true\` 重交。`
   )
 }

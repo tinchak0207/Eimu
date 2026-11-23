@@ -1,7 +1,8 @@
 // uploads-media.ts — 附件上传与档名/类型/zip 安检（自 index.ts 105-242 区逐行抽取，2026-09-19 Wave1）
 import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
-import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, UPLOADS_DIR } from "./constants-gateway.ts"
+import { createHash } from "node:crypto"
+import { ALLOWED_UPLOAD_EXTS, UPLOAD_MAX_BYTES, AUDIO_UPLOAD_MAX_BYTES, AUDIO_UPLOAD_EXTS, UPLOADS_DIR } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 export function sanitizeUploadName(raw: string): string | null {
@@ -61,6 +62,14 @@ export function contentTypeForExt(ext: string): string {
     ".json": "application/json",
     ".csv": "text/csv",
     ".zip": "application/zip",
+    // 造世界 3D 资产（model3d_generate／world_generate 转存）：网格与 Gaussian splat。
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+    ".spz": "application/x-spz",
+    ".ply": "application/x-ply",
+    // Source attachments are read as text, never executed as an uploaded web page.
+    ".html": "text/plain; charset=utf-8",
+    ".htm": "text/plain; charset=utf-8",
   }
   return map[ext] ?? "application/octet-stream"
 }
@@ -97,24 +106,54 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
     const form = await req.formData()
     const files = form.getAll("file") as File[]
     if (files.length === 0) return jsonError(400, "no file field", "bad_request", "bad_request")
+    if (files.some((file) => !(file instanceof File))) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
+    // 0 字节文件在 Bun 里可能被解析成 String（无 filename 的 part），file.name 为 undefined，
+    // sanitizeUploadName 的 path.basename(undefined) 抛 TypeError → 500「upload failed」。
+    // 空文件是坏请求，统一回 400（2026-10-28 实测：用户传空 wav 只看到一句上传失败，没有原因）。
+    // 一次可传多个 part，失败时必须点名是哪一个文件，否则用户不知道改谁。
+    const emptyFile = files.find((file) => file.size === 0)
+    if (emptyFile) {
+      const emptyName = typeof emptyFile.name === "string" && emptyFile.name ? emptyFile.name : "(unnamed)"
+      return jsonError(400, `empty file: ${emptyName}`, "bad_request", "bad_request")
+    }
     const uploadDir = path.join(UPLOADS_DIR, state.sessionId)
     await mkdir(uploadDir, { recursive: true })
-    const results: { name: string; path: string; size: number }[] = []
+    // 整批预校验后落盘：旧码边验边写，一批里后一项不合格（超 4MB／扩展名不允许／路径不合法）
+    // 时前面几项已经写进 uploads，用户拿到 400、服务端留下客户端永远拿不到 path 的孤儿文件，
+    // 重试还会堆 dup-2、dup-3（2026-10-28 Hack 实测 a3.wav + b.exe 同批提交触发）。
+    const planned: { file: File; safeName: string }[] = []
     for (const file of files) {
-      if (file.size > UPLOAD_MAX_BYTES) {
-        return jsonError(413, "file exceeds 4MB limit", "payload_too_large", "payload_too_large")
+      if (!(file instanceof File)) return jsonError(400, "file field must be a file", "bad_request", "bad_request")
+      // 无 filename 的 part 会让 file.name 为 undefined；此处统一按空名处理，避免 path.extname 抛错。
+      const rawName = typeof file.name === "string" ? file.name : ""
+      // 音频走单独的 50MB 上限：4MB 只够 23 秒立体声 WAV，音乐素材（翻唱/参考/粗剪）根本传不上来。
+      const isAudio = AUDIO_UPLOAD_EXTS.has(path.extname(rawName).toLowerCase())
+      const maxBytes = isAudio ? AUDIO_UPLOAD_MAX_BYTES : UPLOAD_MAX_BYTES
+      if (file.size > maxBytes) {
+        const mb = Math.round(maxBytes / (1024 * 1024))
+        const overName = typeof file.name === "string" && file.name ? file.name : "(unnamed)"
+        return jsonError(413, `file exceeds ${mb}MB limit: ${overName}`, "payload_too_large", "payload_too_large")
       }
-      const safeName = sanitizeUploadName(file.name)
+      const safeName = sanitizeUploadName(rawName)
       if (!safeName) {
-        return jsonError(400, `disallowed file type: ${path.extname(file.name)}`, "bad_request", "bad_request")
+        return jsonError(400, `disallowed file type: ${path.extname(rawName) || "(no extension)"}（${rawName || "(unnamed)"}）`, "bad_request", "bad_request")
       }
+      const plannedDest = path.join(uploadDir, safeName)
+      if (!path.resolve(plannedDest).startsWith(path.resolve(UPLOADS_DIR))) {
+        return jsonError(400, "invalid path", "bad_request", "bad_request")
+      }
+      planned.push({ file, safeName })
+    }
+    const results: { name: string; path: string; size: number; sha256: string; upload_id: string; content_type: string }[] = []
+    for (const { file, safeName } of planned) {
       // 同名不覆盖：原子占位改得实际落盘名，清单与磁碟保持一致（P1）。
       const finalName = await reserveUniqueUploadName(uploadDir, safeName)
       const dest = path.join(uploadDir, finalName)
       if (!path.resolve(dest).startsWith(path.resolve(UPLOADS_DIR))) {
         return jsonError(400, "invalid path", "bad_request", "bad_request")
       }
-      await Bun.write(dest, await file.arrayBuffer())
+      const bytes = Buffer.from(await file.arrayBuffer())
+      await Bun.write(dest, bytes)
       if (finalName.toLowerCase().endsWith(".zip")) {
         const probe = zipProbe(dest)
         if (probe !== null) {
@@ -122,7 +161,9 @@ export async function handleAttachmentUpload(key: string, id: string, req: Reque
           return jsonError(400, `zip rejected: ${probe}`, "bad_request", "bad_request")
         }
       }
-      results.push({ name: finalName, path: `uploads/${state.sessionId}/${finalName}`, size: file.size })
+      const sha256 = createHash("sha256").update(bytes).digest("hex")
+      const uploadId = createHash("sha256").update(`${state.sessionId}\0${sha256}`).digest("hex")
+      results.push({ name: finalName, path: `uploads/${state.sessionId}/${finalName}`, size: bytes.length, sha256, upload_id: uploadId, content_type: contentTypeForExt(path.extname(finalName).toLowerCase()) })
     }
     return Response.json({ attachments: results })
   } catch (e) {

@@ -30,7 +30,7 @@ export const ACK_DELAY_MS = Number.parseInt(process.env.ACK_DELAY_MS || "15000",
 // 不要用 JSON 契约（会先出 reasoning，首 content 落到 1,865–2,547ms，慢 0.8–1.1s）。
 // 路径取舍：opencode/* 路径多 ~3s 固定开销 → 走直连 provider，不经 opencode。
 // 计费红线：ledger 只在 emitImageDone / emitVideoDone / emitAudioDone /
-// recordWorkflowRefund / emitImageFailed / confirm-approved 六处写入，文字回合
+// recordWorkflowRefund / emitImageFailed|emitVideoFailed|emitAudioFailed / confirm-approved 写入，文字回合
 // 零 ledger 写入 → 本调用不重复扣费。**若未来新增「按 token 对用户计费」，
 // 该机制必须显式排除 turn.plan**（此处是一次不进模型上下文的旁路 LLM 调用）。
 export const TURN_PLAN_ENABLED = process.env.TURN_PLAN_ENABLED !== "0"
@@ -86,6 +86,11 @@ export const HEARTBEAT_DELAY_AFTER_ACK_MS = Number.parseInt(process.env.HEARTBEA
 // turn.done。时间戳 turnLastFrameAt 由 emitToSession 全量刷新——长工具执行
 // 只要有任何帧（tool.result/canvas/文本）就不误杀，只咬连帧都没有的冻结。
 export const MIDTURN_STALL_MS = Number.parseInt(process.env.MIDTURN_STALL_MS || "90000", 10) || 90_000
+// R31（2026-10-31）：工具在跑时不算冻结。单次 bash（ffmpeg／numpy 扫 20 分钟音频）超过 90 秒
+// 是音乐类任务的常态，实测会被中段停滞哨误判、重投并最终收起 turn，成品归零。
+// 工具 in-flight 期间改为发进度心跳并续等，最多 MIDTURN_INFLIGHT_MAX_WAITS 次后仍按诚实收尾处理。
+// 6 次 × 90 秒 ≈ 9 分钟，给真正的长工具（ffmpeg 扫整段音频）留足余量，同时不让人干等 18 分钟。
+export const MIDTURN_INFLIGHT_MAX_WAITS = Number.parseInt(process.env.MIDTURN_INFLIGHT_MAX_WAITS || "6", 10) || 6
 // R8-B 工单 #3（2026-08-29）：question pending 心跳周期——pending 期间每 30s
 // 一帧用户可见心跳（R8 实锤：question 卡后 129s 零帧死寂）。
 export const QUESTION_HEARTBEAT_MS = Number.parseInt(process.env.QUESTION_HEARTBEAT_MS || "30000", 10) || 30_000
@@ -251,7 +256,7 @@ export const CANVAS_EMIT_ALLOWED = new Set([
 // 此前不在白名单＝遗漏（opencode 工具链 emitEvent 端已放行 audio.done，网关这头不放行会让
 // 工具推的事件在路由层被 400 丢弃＝no-op）。非新增攻击面：/internal/emit 只绑 127.0.0.1:8081
 // 内网（VPS ufw 8081/tcp ALLOW 172.16.0.0/12，非公网可达）。
-export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
+export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "video.failed", "audio.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
 
 export const WORKSPACE_DIR = "/opt/agent-harness/workspace"
 export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
@@ -260,11 +265,15 @@ export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
 export const TTS_AUDIO_DIR = path.join(WORKSPACE_DIR, "tts-audio")
 export const TTS_PUBLIC_BASE = (process.env.TTS_PUBLIC_BASE || "https://store.tinchak0207.xyz/agent/v1/audio").replace(/\/+$/, "")
 export const UPLOAD_MAX_BYTES = 4 * 1024 * 1024 // 4MB per file
+// 音频单独放宽（2026-10-31 实测：10.9MB 的 62 秒 WAV 被 4MB 闸挡下，音乐用户传不了自己的素材）。
+// 4MB 对立体声 WAV 只够 23 秒；视频已有 100MB 直传，音频给到 50MB（约 4.7 分钟 CD 质量 WAV）。
+export const AUDIO_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+export const AUDIO_UPLOAD_EXTS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"])
 export const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（浏览器原片直传）
 export const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])
 export const ALLOWED_UPLOAD_EXTS = new Set([
   ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".json",
-  ".csv", ".xml", ".yaml", ".yml", ".png", ".jpg", ".jpeg",
+  ".csv", ".xml", ".yaml", ".yml", ".html", ".htm", ".png", ".jpg", ".jpeg",
   ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".zip",
   // 音频附件（本地参考素材：翻唱 source_audio 等）。与 two-phase-upload.ts 的
   // ALLOWED_UPLOAD_CONTENT_TYPES（audio/mpeg|wav|mp4|aac）对齐，另补 flac/ogg

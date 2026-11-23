@@ -26,6 +26,8 @@ export interface PersistableState {
   vettingInjected: boolean
   userMemory?: { user_profile: Record<string, unknown>; lessons: string[] }
   profileOnboardingPending?: boolean
+  /** 临时对话（2026-11-06）：不注入、不写、不索引记忆。 */
+  memoryTemporary?: boolean
   compact?: { lastCount: number; at: number }
   /** N1（2026-08-27）：in-flight turn 打点——turn 开始时写入、正常结束清零；
    *  gateway 重启后恢复会话时据此判断是否要自动重投 lastPromptBody。 */
@@ -36,6 +38,11 @@ export interface PersistableState {
   /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨
    *  agent-gateway 重启存活（否则用户批准过的偏离出口会被重启关上）。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文（≤12k），压缩/重启后每回合重注 system。 */
+  originalUserPrompt?: string
+  /** 2026-11-02：首回合硬约束句与用户后续修订台账（长期可改：多轮后各层不回退）。 */
+  pinnedConstraints?: string
+  userRevisions?: string[]
 }
 /** DB row 的 data 栏位 JSON 形状（Map/Set 均序列化为阵列）。 */
 export interface PersistedData {
@@ -56,12 +63,19 @@ export interface PersistedData {
   vettingInjected: boolean
   userMemory?: { user_profile: Record<string, unknown>; lessons: string[] }
   profileOnboardingPending?: boolean
+  /** 临时对话（2026-11-06）：不注入、不写、不索引记忆。 */
+  memoryTemporary?: boolean
   compact?: { lastCount: number; at: number }
   lastTurnActiveAt?: number
   /** 会话摘要标题镜像（2026-09-12）：null=尚未生成（占位标题已在抓取侧归一化掉）。 */
   title?: string | null
   /** 2026-10-02：模板偏离 token 镜像（shape 防护在 hydrateRow，坏形状一律还原为 null）。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文镜像。 */
+  originalUserPrompt?: string
+  /** 2026-11-02：硬约束句与用户修订台账镜像。 */
+  pinnedConstraints?: string
+  userRevisions?: string[]
 }
 
 export interface PersistedRow {
@@ -90,6 +104,9 @@ export interface UserSettings {
   cost_mode: string
   /** 野兽模式（MOE 改革，2026-09-08）：settings 布林，dispatch 时快照进 subagent run。 */
   beast_mode?: boolean
+  /** 记忆开关（2026-11-06）：显式 false 才落盘；缺省＝开启。 */
+  memory_use?: boolean
+  memory_generate?: boolean
 }
 export interface ReworkRecord {
   runId: string

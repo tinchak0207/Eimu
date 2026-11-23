@@ -75,7 +75,7 @@ import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/Direct
 // AgentTemplateFull 为纯型别 import（编译期擦除，不拉 payload 进 bundle）。
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
-import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
+import { fetchAgentCanvasSnapshotWithRev } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
 import { AgentQueryHandoff, type PlaygroundMode } from "@/components/image-playground/query-handoff";
@@ -98,6 +98,7 @@ export default function ImagePlayground({ suggestions }: { suggestions: Suggesti
   // 卡片底板、右边结果画布、底下案例区全部原地不动，也不跳 /agent 独立页。
   //
   // 2026-09-22 暴君裁定：**首屏初始面翻成 AI 助理**，直接生图降为同级第二面
+  // 2026-10-27 手感审计 #8：一体壳已默认 agent；工作台精确控制是二级入口（顶栏滑杆钮）。
   // （不删除、toggle 语义一行不动）。理由是首屏决定产品定位——进站第一眼看见
   // 的是参数框＋输入框＋输出框，就会被判定成生图中转站；新范式若锁在「先点
   // 助理再发话」两步之后，每一步都不是使用者已知的。深度连结（?agent=1）的
@@ -214,6 +215,10 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  // 2026-10-21：会话恢复拿到的远端快照 rev（按 sid 打标）。交给 useCanvasChat →
+  // useCanvasProjectSync，首次上行才不会再固定发 rev=0（服务端 CAS 必然 409）。
+  // 打标 sid 是硬要求：换会话那一帧 state 尚未被 effect 清掉，不能把旧会话 rev 带过去。
+  const [restoredSnapshotRev, setRestoredSnapshotRev] = useState<{ sid: string; rev: number | null } | null>(null);
   // Bug1a：模板库退场旗标随「进入新对话」复位。session id 变了 = 开新聊天 =
   // 画布已被清空，模板库必须再次出现（「开启新聊天就代表 Canvas 进入模板展示态」）；
   // 续上同一会话（toggle 往返 / 刷新 resume）不复位 —— 那是继续对话，不是新开始。
@@ -251,7 +256,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     findProjectIdBySession,
     findProjectIdByCanvas,
     findChatBySession,
-  });
+  }, restoredSnapshotRev && restoredSnapshotRev.sid === currentSessionId ? restoredSnapshotRev.rev : null);
   canvasHostRef.current = canvasHost;
 
   // 双向同步方向A：画布选中 workflow 节点 → chat 切到该节点所属会话。
@@ -329,7 +334,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
-
   // Bug1b：会话恢复回填。refresh/重进后左聊天续上（本地存档 resume），但右画布
   // 空白 —— 快照此前只有上行没有下行。监听 currentSessionId：每个新拿到的 sid 拉
   // 一次闸道存档（GET 同上行端点），仅当 nodes>0 才回填；拉取异步到达时 sessionId
@@ -345,10 +349,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     const tryRestore = async () => {
       const host = canvasHostRef.current;
       if (!host || host.nodes.length > 0 || host.plans.length > 0) return true;
-      const snapshot = await fetchAgentCanvasSnapshot(sid);
-      if (cancelled || !snapshot) return false;
+      const pulled = await fetchAgentCanvasSnapshotWithRev(sid);
+      if (cancelled || !pulled.state) return false;
       if (!host || host.nodes.length > 0 || host.plans.length > 0) return true;
-      host.restoreAgentSnapshot(snapshot);
+      host.restoreAgentSnapshot(pulled.state);
+      // rev 与这次回填绑定：无 rev 时传 null（首次上行保持旧行为发 0，不猜测）。
+      setRestoredSnapshotRev({ sid, rev: pulled.rev });
       return true;
     };
     void tryRestore();

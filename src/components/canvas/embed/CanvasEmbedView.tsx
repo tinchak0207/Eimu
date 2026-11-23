@@ -4,6 +4,7 @@ import { type Dispatch, type MutableRefObject, type SetStateAction } from "react
 import { X } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasNode } from "@/lib/canvas/types";
+import { stampHumanEdit, type HumanEditableField } from "@/lib/canvas/human-edits";
 import type { CanvasLod, CanvasStageId, CanvasStageSummary } from "@/lib/canvas/lod";
 import type { InspectInput } from "../node-view/node-inspect";
 import type { CanvasMenuItem } from "../CanvasContextMenu";
@@ -125,6 +126,7 @@ interface CanvasEmbedViewProps {
   handleApproveAllShots: (shotIds: readonly string[]) => void;
   handleEditorProduce: (results: CanvasImageEditResult[], _mode: CanvasImageEditMode) => void;
   generateChildFromSource: (sourceId: string, title: string, params: { prompt: string; referenceUrls?: string[] }) => void;
+  titleEditRequest: { id: string; nonce: number } | null;
 }
 
 export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
@@ -141,7 +143,7 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
     handleReviewStage, handleSelectLod, openEngineering, referenceCandidatesFor, entityCandidatesFor,
     shotEntityCardIdsFor, handleRerun, handleEditWorkflowNode, handleRegenerateAsset, handleReplaceAsset,
     handleRejectAsset, handleApproveAllAssets, handleRejectShot, handleApproveAllShots, handleEditorProduce,
-    generateChildFromSource,
+    generateChildFromSource, titleEditRequest,
   } = P;
   const {
     selectedIds, setSelectedIds, selectedConnectionId, setSelectedConnectionId, setHoveredNodeId, menu, setMenu,
@@ -156,6 +158,9 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
     upscaleNode, extractFramesFromNode,
   } = P.generation;
 
+  // 人手改字/改提示词留记号（human-edits.ts）：agent 下一轮 workflow_write / update_node 不得盖掉。
+  const humanStamp = (nid: string, field: HumanEditableField) =>
+    stampHumanEdit(canvasStateRef.current.nodes.find((n) => n.id === nid)?.metadata, [field]);
   const hasNodes = canvas.nodes.length > 0;
   // 透析卡的即时萤幕矩形（client 座标）：面板 FLIP 起讫点与光束起点，飞行途中每帧跟著走。
   const engineeringNode = engineeringNodeId ? nodeById.get(engineeringNodeId) ?? null : null;
@@ -305,7 +310,9 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
                 onStartPortDrag={startPortDrag}
                 onNodeContextMenu={openNodeMenu}
                 onRename={canvas.renameNode}
-                onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text })}
+                titleEditRequest={titleEditRequest}
+                onPromptDraft={(nid, prompt, opts) => canvas.patchNodeMetadata(nid, { prompt, human_edited: humanStamp(nid, "prompt") }, opts)}
+                onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text, human_edited: humanStamp(nid, "content") })}
                 onUpdateReferenceRole={(nid, role) => canvas.patchNodeMetadata(nid, { referenceRole: role })}
                 onPatchMetadata={(nid, patch) => canvas.patchNodeMetadata(nid, patch)}
                 onRetry={
@@ -652,7 +659,7 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
             ? (prompt) => {
                 // 填进当前节点面板：写入节点 metadata 后重开面板（面板读 initialPrompt）。
                 const nid = promptPanelNodeId;
-                canvasStateRef.current.patchNodeMetadata(nid, { prompt }, { history: false });
+                canvasStateRef.current.patchNodeMetadata(nid, { prompt, human_edited: humanStamp(nid, "prompt") }, { history: false });
                 setPromptPanelNodeId(null);
                 window.setTimeout(() => setPromptPanelNodeId(nid), 0);
                 setLibraryOpen(false);
@@ -667,7 +674,7 @@ export function CanvasEmbedView({ P }: { P: CanvasEmbedViewProps }) {
                 // agent 依参数回流处理，这里不越权切模型。
                 const nid = promptPanelNodeId;
                 if (typeof config.prompt === "string" && config.prompt.trim()) {
-                  canvasStateRef.current.patchNodeMetadata(nid, { prompt: config.prompt }, { history: false });
+                  canvasStateRef.current.patchNodeMetadata(nid, { prompt: config.prompt, human_edited: humanStamp(nid, "prompt") }, { history: false });
                 }
                 setPromptPanelNodeId(null);
                 window.setTimeout(() => setPromptPanelNodeId(nid), 0);

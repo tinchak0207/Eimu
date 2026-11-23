@@ -14,6 +14,9 @@ import { createFailureRecord } from "./failure-record";
 import { planGenerationAttemptReplay } from "./operation-registry";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { persistOutputArtifact } from "./artifact-service";
+import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import {
   attemptedSupplierRoutingForOutput,
   beginGenerationAttempt,
@@ -187,7 +190,7 @@ export function shouldExtendQueueDeadline(input: {
 
 /**
  * 欠费无替补即时失败（2026-09-28 漫剧评测实锤）：唯一视频渠道回 401＋insufficient_user_quota
- * 时，registry 只认原生 402 为硬停，job 被放回伫列；帐号进 30 分钟 cooldown 后再无可租
+ * 时，registry 只认原生 402 为硬停，job 被放回伫列；帐号进欠费 cooldown（现 3 分钟）后再无可租
  * 供应商，单子以 overloaded 空转到 25 分钟 deadline 才死——用户等 25 分钟只拿到「超时」。
  * 本 job 上一次失败已判定欠费，且诊断显示没有别的可用供应商（全被排除／冷却／不健康）
  * → 立即失败＋退款，让上游如实说「渠道余额不足」。容量满（capacity_saturated）不算：
@@ -240,6 +243,43 @@ export function shouldFailFastImageAfter5xxUnhealthy(input: {
 /** 病灶 D：把 extend 实际写入 DB 的 deadline 同步回内存 job.deadlineAt，消除语义漂移。 */
 export function applyExtendedDeadline(job: GenerationJob, extendedTo: Date | null): void {
   if (extendedTo) job.deadlineAt = extendedTo;
+}
+
+/**
+ * 降档交付的差价退款（2026-10-25）。
+ *
+ * 上游出了成片但没到请求档位（例：H3 出 768P、auto-hd 段没跑成），本次按实际
+ * 档位重算应扣金额，把多收的退回去——片子照交，钱按真实规格收，不多收、不吞片。
+ * 只在真的算出更低金额时退；算不出或更高就不动账（宁可少退也不乱退）。
+ */
+async function refundResolutionDowngrade(
+  job: GenerationJob,
+  downgraded: { actualResolution: string; requestedResolution: string; reason: string },
+  workerId: string,
+  sql: GenerationSql,
+): Promise<number> {
+  const durationSeconds = Number(job.workflow?.durationSeconds ?? 0);
+  const count = Math.max(1, Number(job.requestedCount ?? 1));
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
+  const coins = generationCoins(job.modelId, {
+    resolution: downgraded.actualResolution as never,
+    durationSeconds,
+    generateAudio: job.workflow?.generateAudio === true,
+  });
+  // 目录里没有该档（或该档不认识）时 generationCoins 回落到最小币步长，不是真价：不猜金额，直接不动账。
+  if (!Number.isFinite(coins) || coins <= PRICING_COIN_STEP) return 0;
+  // 账本单位是配额整数（币 × QUOTA_PER_COIN），币值不能直接和 billingAmount 相减/入账。
+  const actual = Math.round(coins * count * QUOTA_PER_COIN);
+  const charged = Number(job.billingAmount ?? 0);
+  const refund = charged - actual;
+  if (!Number.isFinite(refund) || refund <= 0 || refund >= charged) return 0;
+  await commitGenerationBilling(job, actual, sql);
+  const result = await refundGenerationBilling({ job, amount: refund, executorId: workerId }, sql);
+  if (result !== "applied") {
+    console.error(`[generation-worker] downgrade refund requires reconciliation job=${job.id} state=${result} amount=${refund}`);
+    return 0;
+  }
+  return refund;
 }
 
 async function refundFailure(job: GenerationJob, completed: number, workerId: string, sql: GenerationSql): Promise<void> {
@@ -532,6 +572,23 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           // 鉴权头只在本次下载使用，不写进 artifact.metadata／evidence。
           downloadHeaders,
         }, sql);
+        // 降档交付（2026-10-25）：成片没到请求档位就按实际档重算并退差价。
+        // 片子照交，钱按真实规格收——既不拿低清冒充高清，也不把做好的片子吞掉。
+        if (output.downgraded) {
+          const refunded = await refundResolutionDowngrade(job, output.downgraded, workerId, sql);
+          emitJobEvent({
+            jobId: job.id,
+            event: JOB_EVENT.attemptSucceeded,
+            actor: `worker:${workerId}`,
+            detail: {
+              resolution_downgraded: true,
+              actual_resolution: output.downgraded.actualResolution,
+              requested_resolution: output.downgraded.requestedResolution,
+              downgrade_reason: output.downgraded.reason,
+              refunded_coins: refunded,
+            },
+          }, sql);
+        }
         const latencyMs = Date.now() - startedAt;
         await completeGenerationAttempt({
           jobId: job.id,

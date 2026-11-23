@@ -88,20 +88,21 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
             <p className="text-ios-subhead font-semibold text-foreground">
               我这么理解你的愿望
             </p>
-            <p className="mt-0.5 break-words text-sm leading-[1.55] text-muted-foreground">
+            <p className="mt-0.5 break-words text-ios-footnote leading-[1.55] text-muted-foreground">
               {interpret}
             </p>
           </div>
         </div>
       )}
       {/* 预览决策卡语汇（2026-09-20 对版）：币数不再单独成行放大，改右端
-          `text-ios-footnote font-medium text-[#b8860b]` 小字「N 币」；
-          金额的第二处落在主钮文案「确认 · N 币」上。 */}
+          小字「N 币」。币色＝设计系统 coin-gold #c9a84c（MASTER.md）；
+          tailwind 无 text-coin-gold，用 DESIGN.md 既有配方 text-[#c9a84c]，
+          禁暗金旧色。摘要行字级 text-ios-subhead（=0.9375rem）。 */}
       <div className={cn("flex items-baseline justify-between gap-3", interpret && "mt-3")}>
-        <p className="agent-turn-text min-w-0 text-[0.9375rem] leading-snug text-foreground">
+        <p className="agent-turn-text min-w-0 text-ios-subhead leading-snug text-foreground">
           {summary}
         </p>
-        <span className="shrink-0 text-ios-footnote font-medium text-[#b8860b]">
+        <span className="shrink-0 text-ios-footnote font-medium text-[#c9a84c]">
           {formatCoins(amountCoins)} 币
         </span>
       </div>

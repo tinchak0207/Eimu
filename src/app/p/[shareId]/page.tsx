@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight, EyeOff, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, EyeOff, Maximize2, Sparkles } from "lucide-react";
 import { getPublicShare } from "@/lib/share-store";
 import { buildSharePath } from "@/lib/share-remix";
 import { getSiteUrl } from "@/lib/site-url";
@@ -130,6 +130,16 @@ export default async function PublicSharePage({ params }: RouteParams) {
                   className="h-full w-full object-contain"
                 />
               </div>
+              {/* 在赏阅里打开：整页深链（/view），可放大、逐处标记。URL 非 http(s) 时 /view 会如实报打不开，这里不挂入口。 */}
+              {/^https?:\/\//i.test(view.imageUrl) && (
+                <Link
+                  href={`/view?${new URLSearchParams({ u: view.imageUrl, k: "image", ...(view.prompt ? { title: summarise(view.prompt, 40) } : {}) }).toString()}`}
+                  className="absolute bottom-4 right-4 inline-flex min-h-11 items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.55)] px-4 text-[13px] font-medium text-white backdrop-blur transition-colors hover:bg-[rgba(0,0,0,0.7)] sm:bottom-5 sm:right-5"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  在赏阅中打开
+                </Link>
+              )}
             </div>
           </div>
 

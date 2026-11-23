@@ -174,18 +174,23 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const storedEntries = await listGeneratedHistoryEntries(auth.user.id);
-  let taskEntries: HistoryEntry[] = [];
-  if (generationControlPlaneEnabled()) {
-    try {
-      const jobs = await listGenerationJobsForTenant(`web:${auth.user.id}`, { limit: 500 });
-      taskEntries = jobs.map(generationJobHistoryEntry);
-    } catch (error) {
-      console.error("[history] generation task projection unavailable", error);
-    }
-  } else {
-    taskEntries = await fetchControlPlaneHistory(req, searchParams);
-  }
+  // Blob 索引和任务投影互不依赖，同时请求，首屏只等待较慢的一路。
+  const [storedEntries, taskEntries] = await Promise.all([
+    listGeneratedHistoryEntries(auth.user.id),
+    (async (): Promise<HistoryEntry[]> => {
+      if (generationControlPlaneEnabled()) {
+        try {
+          const jobs = await listGenerationJobsForTenant(`web:${auth.user.id}`, { limit: 500 });
+          return jobs.map(generationJobHistoryEntry);
+        } catch (error) {
+          console.error("[history] generation task projection unavailable", error);
+          return [];
+        }
+      } else {
+        return fetchControlPlaneHistory(req, searchParams);
+      }
+    })(),
+  ]);
   const merged = mergeHistoryEntries(storedEntries, taskEntries);
   const data = paginateHistoryEntries(filterHistoryEntries(merged, query), cursor, pageSize);
 

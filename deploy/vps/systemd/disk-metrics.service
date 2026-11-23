@@ -1,0 +1,6 @@
+[Unit]
+Description=Write disk headroom JSON for the gatus probe
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disk-metrics.sh

@@ -2,17 +2,15 @@
 //
 // 四件事：
 //   1. 受理端点 POST /agent/v1/sessions/:id/steer（router.ts 转发到 handleSteer）。
-//   2. 真注入：回合卡在 question 断点（pendingQuestions 非空）时，steer 文本以
-//      「答覆」语义回灌 question 工具结果 —— opencode 在同一个 turn 内读到它继续跑，
-//      不终止回合、不另起用户讯息。轮子＝questions-gw.settleQuestion（既有调用链，
-//      此处只换 answer 内容为用户的引导语）。
-//   3. 诚实排队：没有 question 断点时，opencode 物理上没有「回合中注入」的入口
-//      （mid-turn prompt 只会被静默排队到本轮结束）。这里不假装生效——收进
-//      state.pendingSteers，本回合收尾时按 FIFO 拼成一条下一回合的指引投递，
-//      过程中每一条的状态都上报（queued → applied / aborted / failed），UI 必须看得见。
+//   2. 无回合中注入：question 断点没有可信的注入接口（见 handleSteer 的 ① 注释），
+//      一律走排队腿。宁可排队也不吞指令／谎报已生效。
+//   3. 诚实排队：opencode 物理上没有「回合中注入」的入口（mid-turn prompt 只会被
+//      静默排队到本轮结束）。这里不假装生效——收进 state.pendingSteers，本回合收尾时
+//      按 FIFO 拼成一条下一回合的指引投递，过程中每一条的状态都上报
+//      （queued → applied / aborted / failed），UI 必须看得见。
 //   4. 命令身份（REQ-D2b，2026-09-23）：受理前查 tombstone、**投递前**落地 steer_id +
-//      冻结 payload_hash、终态即墓碑、重放一律回可辨识错误码。两条投递腿（question 注入
-//      与队列投递）都必须带同一身份——否则重连后同一条指引可以被投递第二次。
+//      冻结 payload_hash、终态即墓碑、重放一律回可辨识错误码。唯一的投递腿（队列投递）
+//      必须带同一身份——否则重连后同一条指引可以被投递第二次。
 //      身份语义在 steer-identity.ts，持久层在 persistence.ts（steer_commands 表），
 //      恢复扫描在 steer-ledger-gw.ts。
 //
@@ -21,7 +19,6 @@ import type { SessionState } from "./types-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
-import { settleQuestion } from "./questions-gw.ts"
 import {
   STEER_MAX_CHARS,
   STEER_MAX_QUEUE,
@@ -30,6 +27,7 @@ import {
   gateSteerAcceptance,
   isValidSteerId,
   planSteerFlush,
+  steerBatchText,
   steerFrameIds,
   type PendingSteer,
   type SteerStatus,
@@ -130,32 +128,9 @@ function turnInFlight(state: SessionState): boolean {
 }
 
 /**
- * 真注入：回合卡在 question 断点 → 把引导语当作答覆回灌，当前回合内生效。
- * 回传被注入的 requestId 清单；空清单＝没有断点可用（呼叫端落回诚实排队）。
- */
-async function injectIntoQuestionBreakpoint(state: SessionState, text: string): Promise<string[]> {
-  const requestIds = [...state.pendingQuestions.keys()]
-  if (requestIds.length === 0) return []
-  const injected: string[] = []
-  for (let i = 0; i < requestIds.length; i++) {
-    // 第一张卡吃用户的引导语（这正是「追加指引」的落点）；同轮其余卡照旧用
-    // 「已转向新话题」的跳过语义收敛——一句引导语不该被当成多题的答案。
-    const answer = i === 0 ? text : undefined
-    try {
-      await settleQuestion(state, requestIds[i], answer)
-      injected.push(requestIds[i])
-    } catch (err) {
-      console.error(`[gateway] steer inject failed: question=${requestIds[i]} session=${state.sessionId}:`, err)
-    }
-  }
-  return injected
-}
-
-/**
  * POST /agent/v1/sessions/:id/steer  body { content, steer_id }（steer_id 必填，见下）
  *
  * 回传形态（前端据此显示，绝不含糊）：
- *   200 { ok:true, status:"injected", steer_id, injected_into:[que_*], applied_in_turn:true }
  *   200 { ok:true, status:"queued", steer_id, position, deduped? }
  *   400 { ok:false, code:"steer_id_required" } —— 没带 steer_id（D-7 fail-closed，网关不自铸）
  *   400 { ok:false, code:"steer_id_invalid" }  —— 带了但不在值域 [A-Za-z0-9._-]{1,64} 内
@@ -236,8 +211,8 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
 
   // 停止优先的闸（D2-1a 修复，D-6 校正）：不只看「回合在跑」，还要看「回合有没有被
   // **用户**停掉」。abort 落地后到 idle 帧之间的那段窗口，lastTurnActiveAt 仍是旧值、
-  // pendingQuestions 可能还在——只凭 turnInFlight 就会放行，接著走①的注入腿把用户的
-  // 引导语当「答覆」POST 进一个已经中止的回合，还回 applied_in_turn:true（假话）。
+  // pendingQuestions 可能还在——只凭 turnInFlight 就会放行（旧版还会走已删除的注入腿，
+  // 把用户的引导语当「答覆」POST 进一个已经中止的回合，还回 applied_in_turn:true 的假话）。
   //
   // D-6：闸门把中止来源一起交给纯核心（abortIsUserStop 是停止优先的唯一判据）——
   // 系统中止（空转断路器）窗口**照常受理**，因为那只是换一种方式续跑同一轮，排队中的
@@ -283,37 +258,10 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
     return rejectSteerReplay(state, begun.command, begun.code, begun.httpStatus)
   }
 
-  // ① 真注入优先：回合卡在 question 断点 → 这一条在本回合内生效。
-  // D-6：**中止轮（任何来源）都不得走注入腿**——中止轮残留的 question 卡已经失效，
-  // 把引导语当「答覆」回灌再回 applied_in_turn:true，就是把 D2-1a 那颗假话换个地方说
-  //（该论据与中止来源无关）。系统中止窗口因此落到下面的诚实排队腿：状态如实回 queued，
-  // 指引留在队列里等本轮收尾照常投递。
-  const injectEligible = state.turnAborted !== true && state.pendingQuestions.size > 0
-  if (injectEligible) {
-    // 注入＝第二条投递腿，同样带身份：**先标 dispatched（投递已发出、尚未确认）再注入**。
-    // 中断点在注入与确认之间 → 重启恢复落 uncertain，永不自动重发（否则重连后可被重放）。
-    steerLedger.markDispatched(steerId, Date.now())
-    const injectedInto = await injectIntoQuestionBreakpoint(state, content)
-    if (injectedInto.length > 0) {
-      console.log(
-        `[gateway] steer injected into frozen turn: steer=${steerId} session=${state.sessionId} questions=${injectedInto.length}`,
-      )
-      // 确认到达 → 终态 injected（冻结，迟到帧不得改写）。
-      steerLedger.settle(steerId, "injected", Date.now())
-      emitSteerStatus(state, steerId, "injected", { text: content })
-      return Response.json({
-        ok: true,
-        steer_id: steerId,
-        status: "injected",
-        applied_in_turn: true,
-        injected_into: injectedInto,
-      })
-    }
-    // 断点在投递途中消失（竞态）：命令停在 dispatched＝在途未确认。落回排队腿时**不改状态**
-    // ——对使用者仍是「排队中」（steer-identity.steerWireStatus 把 dispatched 映回 queued），
-    // 而重启恢复会把它落 uncertain；绝不假装没送过（那会让重放合法化）。
-  }
-
+  // ① 一律排队：question 断点没有可信注入接口（settleQuestion 只 reject 并丢掉文本，
+  // 旧版走它会让前端收到 status:"injected"/applied_in_turn:true 的假话，用户指令被吞）。
+  // 宁可排队也不吞指令／谎报已生效——这里不 markDispatched、不另起注入腿；状态只有
+  // 排队与收尾时的终态。中止轮（任何来源）同样落到这条腿，指引留在队列里等收尾照常投递。
   // ② 诚实排队：入队判定（顺序／同 id 与同文去重／上限）走纯核心。
   const queue = steerQueue(state)
   const outcome = enqueueSteer(queue, rawContent, { now: Date.now(), id: steerId })
@@ -468,5 +416,119 @@ export async function flushPendingSteers(state: SessionState): Promise<void> {
   }
   console.log(
     `[gateway] steer flush ${status}: ${ids.length} steer(s) session=${state.sessionId}`,
+  )
+}
+
+/** 重投腿要带回来的东西：拼好的指引文本 + 条目本体（终态结算只依赖本体，不再回查队列）。 */
+export interface SteerRetryInjection {
+  text: string
+  steers: PendingSteer[]
+}
+
+/**
+ * 零正文／上游错误重投腿（opencode-event-handler 的 setTimeout 内、发车之前呼叫）。
+ *
+ * 为什么需要这一格：那些腿在 `session.idle` 里 `break`，永远到不了文件底部的
+ * `flushPendingSteers`——而 flushPendingSteers 会开**新回合**（driveTurn），与重投并发。
+ * 重投腿的语义是「同一回合的下一跳」，所以指引必须**并入同一条重投 body**，
+ * 而不是另起一回合。
+ *
+ * 顺序纪律（与 flushPendingSteers 同款）：
+ *   空队列 → null（不经手任何状态，无 steer 的回合与改动前逐位等价）。
+ *   逾时 → 落 failed + queue_expired 帧与 ledger（TTL 兜底，不并入重投）。
+ *   无 batch → 清空队列，返回 null。
+ *   有 batch → 逐条 **先** markDispatched（持久），成功者才离队并投递；标记失败者
+ *     当场落 failed（delivery_failed 帧 + ledger）后离队，一条都没标记成功则返回 null
+ *     且不投递。
+ *
+ * markDispatched 与 flush 同款，防重启把没送出的当没送过：投递一旦发出而进程在确认前
+ * 中断，重启恢复会落 uncertain 且永不自动重发，不会变成第二次投递。
+ */
+export function takePendingSteersForRetry(state: SessionState): SteerRetryInjection | null {
+  const queue = steerQueue(state)
+  if (queue.length === 0) return null
+  const plan = planSteerFlush(queue, { turnAborted: false, now: Date.now() })
+  for (const drop of plan.dropped) {
+    const steer = queue.find((s) => s.id === drop.id)
+    if (!steer) continue
+    if (drop.reason === "aborted") {
+      // turnAborted 固定 false，此支理论上不可达；保留与 flushPendingSteers 逐字同款语义。
+      emitSteerStatusForAll(state, steer, "aborted", { reason: "aborted" })
+      steerLedger.settle(steer.id, "aborted", Date.now(), "aborted")
+    } else {
+      emitSteerStatusForAll(state, steer, "failed", { reason: "queue_expired" })
+      steerLedger.settle(steer.id, "failed", Date.now(), "queue_expired")
+    }
+  }
+  if (!plan.batch) {
+    state.pendingSteers = []
+    return null
+  }
+  // 保序取回条目本体（别名要一起收终态帧）；离队（只移除本批）在交出之前完成，
+  // 重投期间新来的 steer 该进下一回合的队列。
+  const live = plan.batch.ids
+    .map((id) => queue.find((s) => s.id === id))
+    .filter((s): s is PendingSteer => s !== undefined)
+  // 先持久标记再离队：markDispatched 的内部 store.write 抛错时条目**不得**已经离队，
+  // 否则 ledger 停在 queued/dispatched、队列却空了＝用户指引静默丢一截（只有重启恢复
+  // 才会落 uncertain）。标记成功的进 marked 才允许离队并投递。
+  const marked: PendingSteer[] = []
+  const failedIds = new Set<string>()
+  for (const steer of live) {
+    try {
+      steerLedger.markDispatched(steer.id, Date.now())
+      marked.push(steer)
+    } catch (err) {
+      failedIds.add(steer.id)
+      console.error(
+        `[gateway] steer retry-injection mark failed: steer=${steer.id} session=${state.sessionId}:`,
+        err,
+      )
+    }
+  }
+  // 标记失败的那几条当场落 failed 终态（帧 + ledger）——不能把 ledger 留成 queued 幽灵，
+  // 也不能让它们留在队列里被后续 flush 当「没送过」再投一次。连 failed 都写不下时
+  // （ledger 仍 queued）才留在队列，交给后续 flush 重试：绝不让队列与 ledger 双空。
+  const settledFailed = new Set<string>()
+  for (const steer of live) {
+    if (!failedIds.has(steer.id)) continue
+    try {
+      emitSteerStatusForAll(state, steer, "failed", { reason: "delivery_failed" })
+      steerLedger.settle(steer.id, "failed", Date.now(), "delivery_failed")
+      settledFailed.add(steer.id)
+    } catch (err) {
+      console.error(
+        `[gateway] steer retry-injection failed-settle failed: steer=${steer.id} session=${state.sessionId}:`,
+        err,
+      )
+    }
+  }
+  state.pendingSteers = queue.filter(
+    (s) => !marked.some((m) => m.id === s.id) && !settledFailed.has(s.id),
+  )
+  // 一条都没标记成功 → 不投递（队列未被这些条目清空，后续 flush 仍会尝试投递）。
+  if (marked.length === 0) return null
+  // 投递文本只拼 **已持久标记** 的条目：标记失败者的文本若混进重投 body，它的终态是
+  // failed，却已经被模型看到——那是另一种假话。
+  const text = marked.length === live.length ? plan.batch.text : steerBatchText(marked)
+  console.log(
+    `[gateway] steer retry-injection taken: ${marked.length} steer(s) session=${state.sessionId}`,
+  )
+  return { text, steers: marked }
+}
+
+/**
+ * 重投结果结算（只依赖 takePendingSteersForRetry 带回来的条目本体）。
+ * applied = prompt_async 已被上游接受；failed = 没送到（delivery_failed），诚实落终态。
+ */
+export function settleSteerRetryInjection(state: SessionState, steers: readonly PendingSteer[], ok: boolean): void {
+  if (steers.length === 0) return
+  const status: SteerStatus = ok ? "applied" : "failed"
+  for (const steer of steers) {
+    emitSteerStatusForAll(state, steer, status, ok ? undefined : { reason: "delivery_failed" })
+    steerLedger.settle(steer.id, ok ? "applied" : "failed", Date.now(), ok ? undefined : "delivery_failed")
+  }
+  console.log(
+    `[gateway] steer retry-injection ${status}: ${steers.length} steer(s) session=${state.sessionId}`,
   )
 }

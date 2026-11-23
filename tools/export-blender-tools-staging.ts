@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 //
-// deploy-staging/blender-gateway/blender_tools.ts 机械导出器（片 AJ，2026-09-06）。
+// deploy-staging/opencode-runtime/lib/blender-tools-impl.ts 机械导出器（片 AJ，2026-09-06）。
 //
 // 为什么需要它：staging 稿是 VPS gateway 载入的工具真身（→ .opencode/lib/blender-tools-impl.ts），
 // 此前靠手工与真源 src/lib/blender-tools.ts 同步，实际漂移过（T2 评测实锤：部署版缺
@@ -20,7 +20,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const SOURCE = join(root, "src/lib/blender-tools.ts");
-const TARGET = join(root, "deploy-staging/blender-gateway/blender_tools.ts");
+const TARGET = join(root, "deploy-staging/opencode-runtime/lib/blender-tools-impl.ts");
 const CHECK = process.argv.includes("--check");
 
 const source = readFileSync(SOURCE, "utf8");

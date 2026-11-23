@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily cleanup of regenerable disk usage (caches, sandbox scratch, old gateway releases)
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/local/bin/regen-cleanup.sh

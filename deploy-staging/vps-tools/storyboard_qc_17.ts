@@ -146,7 +146,7 @@ const SEMANTIC_SYSTEM = [
 
 export default tool({
   description:
-    "分镜 17 道 QC 门（单镜 5-30 秒，默认模型 minimax-h3 单镜 5-15 秒推荐 15 秒/段长须声明（拆条打满模型最大档）/镜号连续/角色场景卡锁定/关键帧尾帧音讯锚点/交付比例等，17 项清单移植自 PRD 源文 shortdrama-domain，逐门代码判定 pass/block+证据）。shots 填分镜表 JSON（阵列或 {shots:[...]}，栏位 shotId/order/sceneId/prompt/durationSeconds/characterCardIds/sceneCardIds/keyframeId/lastFrameId/audioAnchorId/aspectRatio），也接受每行一镜的纯文本。另附 LLM 语义判定段（情绪连贯/轴线/节奏，失败诚实标 unavailable）。ready=true 才可进关键帧渲染。",
+    "分镜 17 道 QC 门（单镜 5-30 秒，默认模型 seedance-2.5-720p 单镜 10-29 秒推荐 10-15 秒/段长须声明（拆条打满模型最大档）/镜号连续/角色场景卡锁定/关键帧尾帧音讯锚点/交付比例等，17 项清单移植自 PRD 源文 shortdrama-domain，逐门代码判定 pass/block+证据）。shots 填分镜表 JSON（阵列或 {shots:[...]}，栏位 shotId/order/sceneId/prompt/durationSeconds/characterCardIds/sceneCardIds/keyframeId/lastFrameId/audioAnchorId/aspectRatio），也接受每行一镜的纯文本。另附 LLM 语义判定段（情绪连贯/轴线/节奏，失败诚实标 unavailable）。ready=true 才可进关键帧渲染。",
   args: {
     shots: tool.schema.string().describe("分镜表：JSON 字串或每行一镜的纯文本"),
     locked_character_card_ids: tool.schema.string().optional().describe("已锁定角色卡 id，JSON 阵列字串或逗号分隔"),

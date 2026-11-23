@@ -40,9 +40,15 @@ export function normalizeQuestionItems(raw: unknown): PendingQuestion["questions
   return out
 }
 
+/** 用户真答覆必须是「非空行 × 非空 cell」：`[[]]`、`[["x"],[]]`、`[[""]]` 都不是答覆。 */
 export function isQuestionAnswers(value: unknown): value is string[][] {
   if (!Array.isArray(value) || value.length === 0) return false
-  return value.every((row) => Array.isArray(row) && row.every((cell) => typeof cell === "string" && cell.length > 0))
+  return value.every(
+    (row) =>
+      Array.isArray(row) &&
+      row.length > 0 &&
+      row.every((cell) => typeof cell === "string" && cell.trim().length > 0),
+  )
 }
 
 export async function lookupOpencodeQuestion(state: SessionState, callId: string): Promise<{ id: string; questions: PendingQuestion["questions"] } | null> {
@@ -159,11 +165,12 @@ export async function rejectOpencodeQuestion(requestId: string, sessionId: strin
         body: "{}",
         timeoutMs: 5000,
       })
-      if (res.ok || res.status === 404) return
+      if (res.ok) return
     } catch {
       // best-effort
     }
   }
+  throw new Error("question_reject_unconfirmed")
 }
 
 export async function handleQuestion(key: string, id: string, req: Request): Promise<Response> {
@@ -236,45 +243,10 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
 // answer 内容为跳过语义；best-effort——上游失败不抛出，由调用方清 Map 并照常
 // 发新消息。
 export async function settleQuestion(state: SessionState, requestId: string, answerOverride?: string): Promise<void> {
-  const answerText = answerOverride ?? "（用户已转向新话题，本问题自动跳过）"
-  // reply 端点要求 answers 为 string[][] 且每格非空（isQuestionAnswers 同款），
-  // 一行对应一道 question：逐题填充同一句跳过文案。
-  const pending = state.pendingQuestions.get(requestId)
-  const answers = Array.from({ length: Math.max(pending?.questions.length ?? 1, 1) }, () => [answerText])
-  const urls = [
-    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
-    `/question/${encodeURIComponent(requestId)}/reply`,
-  ]
-  let replied = false
-  for (const url of urls) {
-    try {
-      const res = await opencodeFetch(url, {
-        method: "POST",
-        body: JSON.stringify({ answers }),
-        timeoutMs: 8000,
-      })
-      if (res.ok) {
-        replied = true
-        break
-      }
-      if (res.status !== 404) break
-    } catch {
-      // best-effort
-    }
-  }
+  // 跳过与超时都不是答案。拒绝未获上游确认时抛错并保留 pending，不能假清卡。
+  await rejectOpencodeQuestion(requestId, state.opencodeSessionId)
   state.pendingQuestions.delete(requestId)
-  if (replied) {
-    // ok 后记账同 handleQuestion：答覆语义标记 + 时间戳刷新。此处布的中段哨捕获旧
-    // turnGen，handleSendMessage 随后 bump turnGen，tick 因 gen
-    // 不匹配自行失效，无残留（见 armMidturnStallTimer 守卫）。
-    state.questionAnsweredThisTurn = true
-    state.turnFrozenByQuestion = false
-    if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
-    state.turnLastFrameAt = Date.now()
-    state.turnProgressAt = Date.now()
-    state.lastUserVisibleAt = Date.now()
-    armMidturnStallTimer(state)
-  }
-  // 无论上游成败都按既有形态 emit：前端 question 卡必须变已决，否则永远 pending。
-  emitToSession(state, "question.replied", { request_id: requestId, answer: answerText })
+  state.turnFrozenByQuestion = false
+  if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
+  emitToSession(state, "question.rejected", { request_id: requestId, reason: answerOverride ? "expired_without_consent" : "skipped_without_consent" })
 }

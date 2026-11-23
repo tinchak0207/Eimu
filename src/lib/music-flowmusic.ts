@@ -63,6 +63,7 @@ export function isFlowMusic2ApiEnabled(): boolean {
 }
 
 export interface GenerateFlowMusicTrackOptions {
+  beforeSubmit?: () => Promise<void>
   prompt: string
   /** 自订歌词（[Verse]/[Chorus] 段落标签）；缺省=随 style prompt 意图（器乐需 prompt 注明）。 */
   lyrics?: string
@@ -217,6 +218,7 @@ async function downloadAudio(
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(FLOWMUSIC_DOWNLOAD_TIMEOUT_MS) })
   } catch (e) {
+    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
     throw new Error(`FlowMusic2API 音频下载失败（网络层，URL=${url}）：${(e as Error)?.message ?? String(e)}`)
   }
   if (!response.ok) {
@@ -246,6 +248,7 @@ export async function generateFlowMusicTrack(
   }
   let response: Response
   try {
+    await opts.beforeSubmit?.()
     response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -253,6 +256,7 @@ export async function generateFlowMusicTrack(
       signal: AbortSignal.timeout(FLOWMUSIC_TIMEOUT_MS),
     })
   } catch (e) {
+    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
     throw new Error(
       `FlowMusic2API 请求失败（网络层，端点 ${baseUrl}/v1/chat/completions）：${(e as Error)?.message ?? String(e)}`,
     )
@@ -298,6 +302,7 @@ export async function generateFlowMusicTrack(
         ...(candidate.soundPrompt !== undefined ? { soundPrompt: candidate.soundPrompt } : {}),
       })
     } catch (e) {
+    if ((e as any)?.code === "music_admission_rejected" || (e as any)?.code === "generation_work_cancelled") throw e
       candidateErrors.push({
         candidateIndex: candidate.candidateIndex,
         upstreamUrl: candidate.url,

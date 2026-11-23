@@ -4,6 +4,8 @@
 //   缺口 2：工具结果翻译层的媒体安全网只认顶层 url/video_url/audio_url 与字面
 //           videos[]/audios[]，不识真实巢状形状（video_result_fetch 的
 //           {jobs:[{video_url}]}、last_frame_video_chain 的 {shots:[{mp4_url}]}）。
+// 2026-10-27 对称补齐：video.failed / audio.failed 与 image.failed 同契约
+//           （白名单＋if 链＋refunded/human_message），防静默丢帧假成功。
 // 全部为真行为断言：驱动真实 handler、收集真实 SSE 帧并解析 payload；非源码字串断言。
 // 跑法：cd deploy-staging/gateway && bun test video-audio-media-card-emit.test.ts
 import { afterAll, expect, test } from "bun:test"
@@ -174,6 +176,77 @@ test("handleInternalEmit(audio.done) → 200 且 session SSE 恰收到该帧（�
   expect(a[0]!.cost_coins).toBe(7)
   expect(a[0]!.task_id).toBe("j5")
   expect(a[0]!.media_kind).toBe("audio")
+})
+
+// ── 2026-10-27：/internal/emit 的 video.failed / audio.failed 与 image.failed 对称 ──
+test("handleInternalEmit(video.failed) → 200 且 SSE 恰收到 video.failed（refunded+human_message）", async () => {
+  const captured: string[] = []
+  const s = register("sess-g1-video-failed", captured)
+  const req = new Request("http://test.local/internal/emit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: s.sessionId,
+      event: "video.failed",
+      data: { task_id: "jv-fail", reason: "upstream timeout", refunded: true },
+    }),
+  })
+  const res = await handleInternalEmit(req)
+  expect(res.status).toBe(200)
+  const v = frames(captured, "video.failed")
+  expect(v.length).toBe(1)
+  expect(v[0]!.task_id).toBe("jv-fail")
+  expect(v[0]!.reason).toBe("upstream timeout")
+  expect(v[0]!.refunded).toBe(true)
+  expect(typeof v[0]!.human_message).toBe("string")
+  expect(frames(captured, "image.failed").length).toBe(0)
+  expect(frames(captured, "audio.failed").length).toBe(0)
+})
+
+test("handleInternalEmit(audio.failed) → 200 且 SSE 恰收到 audio.failed（未退款）", async () => {
+  const captured: string[] = []
+  const s = register("sess-g1-audio-failed", captured)
+  const req = new Request("http://test.local/internal/emit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: s.sessionId,
+      event: "audio.failed",
+      data: { task_id: "ja-fail", reason: "provider rejected", refunded: false },
+    }),
+  })
+  const res = await handleInternalEmit(req)
+  expect(res.status).toBe(200)
+  const a = frames(captured, "audio.failed")
+  expect(a.length).toBe(1)
+  expect(a[0]!.task_id).toBe("ja-fail")
+  expect(a[0]!.reason).toBe("provider rejected")
+  expect(a[0]!.refunded).toBe(false)
+  expect(typeof a[0]!.human_message).toBe("string")
+  expect(frames(captured, "image.failed").length).toBe(0)
+  expect(frames(captured, "video.failed").length).toBe(0)
+})
+
+test("handleInternalEmit(image.failed) 回归 → 仍发 image.failed（旧行为不可退化）", async () => {
+  const captured: string[] = []
+  const s = register("sess-g1-image-failed", captured)
+  const req = new Request("http://test.local/internal/emit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      session_id: s.sessionId,
+      event: "image.failed",
+      data: { task_id: "ji-fail", reason: "queue full", refunded: true },
+    }),
+  })
+  const res = await handleInternalEmit(req)
+  expect(res.status).toBe(200)
+  const i = frames(captured, "image.failed")
+  expect(i.length).toBe(1)
+  expect(i[0]!.task_id).toBe("ji-fail")
+  expect(i[0]!.refunded).toBe(true)
+  expect(frames(captured, "video.failed").length).toBe(0)
+  expect(frames(captured, "audio.failed").length).toBe(0)
 })
 
 test("handleInternalEmit 白名单外事件 video.bogus → 400（防放宽：防线仍在）", async () => {

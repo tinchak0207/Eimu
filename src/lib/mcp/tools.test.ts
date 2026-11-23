@@ -107,11 +107,14 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
     label: "改成 2 步",
   },
   workflow_rollback: { node_id: "wf-a", project_id: "proj-1", version: 1 },
+  eimu_direct: { prompt: "拍一支咖啡广告", mode: "full", budget_cap: 20, confirm: true, wait_seconds: 5 },
+  eimu_job: { job_id: "sess-1", action: "get" },
   list_agent_sessions: {},
   get_agent_session: { session_id: "sess-1", view: "transcript" },
   get_agent_settings: {},
   run_agent: { prompt: "画一只猫", session_id: "sess-1", timeout_seconds: 30, session_directive: "简短回复" },
   abort_agent_session: { session_id: "sess-1" },
+  get_agent_generation_task: { session_id: "sess-1", task_id: "task-1" },
   check_delivery_contract: {
     expert_id: "music",
     kind: "music_track",
@@ -172,8 +175,11 @@ test("工具表：必填栏位缺一不可——空物件对有 required 的工�
     workflow_write: "arguments.source",
     workflow_rollback: "arguments.node_id",
     get_agent_session: "arguments.session_id",
+    eimu_direct: "arguments.prompt",
+    eimu_job: "arguments.job_id",
     run_agent: "arguments.prompt",
     abort_agent_session: "arguments.session_id",
+    get_agent_generation_task: "arguments.session_id",
     check_delivery_contract: "arguments.expert_id",
   };
   for (const tool of MCP_TOOLS) {
@@ -218,6 +224,11 @@ test("参数验证：型别、值域、额外栏位都要被拒（不是静默�
     ["get_agent_session", { session_id: "s", view: "full" }, /view 只能是/],
     ["get_agent_session", { session_id: "s", nope: 1 }, /nope 不是本工具支援的参数/],
     ["get_agent_settings", { nope: 1 }, /nope 不是本工具支援的参数/],
+    ["eimu_direct", { prompt: "x", wait_seconds: 0 }, /wait_seconds 不得小于 1/],
+    ["eimu_direct", { prompt: "x", wait_seconds: 99 }, /wait_seconds 不得大于 45/],
+    ["eimu_direct", { wait_seconds: 10 }, /prompt 是必填参数/],
+    ["eimu_job", { action: "get" }, /job_id 是必填参数/],
+    ["eimu_job", { job_id: "s", action: "nope" }, /action 只能是/],
     ["run_agent", { prompt: "x", timeout_seconds: 0 }, /timeout_seconds 不得小于 1/],
     ["run_agent", { prompt: "x", timeout_seconds: 999 }, /timeout_seconds 不得大于 300/],
     ["run_agent", { timeout_seconds: 10 }, /prompt 是必填参数/],
@@ -1139,7 +1150,8 @@ test("鉴权正负对照：无 Bearer → 401，形状错的金钥 → 401，未
 
   const valid = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { auth: `Bearer ${VALID_KEY}` });
   assert.equal(valid.status, 200, "登记过的金钥必须放行（正向对照）");
-  assert.ok(((rpcBody(valid.text).result?.tools as unknown[]) ?? []).length >= 8);
+  // 默认 toolset=director 只露导演面（b11c0f3b4），至少 eimu_direct／eimu_job＋会话三件。
+  assert.ok(((rpcBody(valid.text).result?.tools as unknown[]) ?? []).length >= 5);
 });
 
 test("金钥不回声：任何鉴权回应的 body 与标头都不得出现 key 片段", async () => {
@@ -1709,4 +1721,16 @@ test("漂移探针：每支 MCP 工具的转发目标都能落地，且没有被
     [],
     `MCP 工具目标被控面代理遮蔽（路由写了却跑不到）：\n  ${shadowed.join("\n  ")}`,
   );
+});
+
+test("产物 URL 抽取：全形标点／中文是边界，不吞进 URL（2026-11-01 生产实测 .png（2.31）", async () => {
+  const { extractAgentArtifacts } = await import("./tools/agent");
+  const got = extractAgentArtifacts(
+    "首帧 https://store.example/image-data/files/a/000-b7.png（2.31 MB），成片：https://store.example/x/film.mp4。另见 ![k](https://store.example/k.webp)",
+  );
+  assert.deepEqual(got.map((a) => a.url).sort(), [
+    "https://store.example/image-data/files/a/000-b7.png",
+    "https://store.example/k.webp",
+    "https://store.example/x/film.mp4",
+  ]);
 });

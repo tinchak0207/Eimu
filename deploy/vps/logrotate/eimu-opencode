@@ -1,0 +1,15 @@
+# Install: /etc/logrotate.d/eimu-opencode
+# opencode writes one ever-growing opencode.log (67M on 2026-11-03, never rotated).
+# copytruncate because opencode keeps the file open and has no reopen signal.
+/opt/agent-harness/workspace/.local/share/opencode/log/opencode.log
+{
+	su agentsvc agentsvc
+	daily
+	maxsize 50M
+	rotate 3
+	compress
+	delaycompress
+	copytruncate
+	missingok
+	notifempty
+}

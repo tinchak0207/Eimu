@@ -72,6 +72,43 @@ test("directImagePrompt: 空输入原样返回", () => {
   assert.equal(directImagePrompt("   "), "   ".trim());
 });
 
+test("official H3 Content IR is returned unchanged", () => {
+  const ir = [
+    "integrated_multimodal_description: [Shot 1] A beautiful cinematic shot. She looks scared as the door opens.",
+    "",
+    "overall_soundscape: The door latch clicks once.",
+    "",
+    "non_diegetic_music: N/A",
+  ].join("\n");
+  assert.equal(directVideoPrompt(ir), ir);
+  assert.match(directVideoPrompt("a beautiful cat on a windowsill"), /striking detail/);
+});
+
+test("official H3 Ref2VA IR is returned unchanged", () => {
+  const ir = [
+    "subject_definitions:",
+    "<Subject 1> is the woman in <Picture 1>.",
+    "",
+    "summary:",
+    "[reference generation] <Subject 1> turns toward the door.",
+    "",
+    "retention_analysis:",
+    "<Subject 1> (appears in [Shot 1]): fully_preserved - her coat stays.",
+    "",
+    "detailed_description:",
+    "The target video is live-action.",
+    "[Shot 1] <Subject 1> turns toward the door.",
+    "",
+    "overall_soundscape:",
+    "Room tone continues.",
+    "",
+    "non_diegetic_music:",
+    "N/A",
+  ].join("\n");
+  assert.equal(directVideoPrompt(ir), ir);
+  assert.doesNotMatch(directVideoPrompt(ir), /Continuous physical action drives the shot/);
+});
+
 test("appends the motion contract when the prompt is bare", () => {
   const out = directVideoPrompt("a cat on a windowsill");
   assert.match(out, /Continuous physical action drives the shot/);

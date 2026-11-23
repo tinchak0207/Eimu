@@ -1,0 +1,18 @@
+# Install: /etc/logrotate.d/eimu-gateway-errors  (H51)
+# File written by /usr/local/bin/eimu-gw-errlog.py (eimu-gw-errlog.timer), which reopens
+# it every run, so no signal/postrotate is needed and no service is touched.
+# Retention 30 days (>= 14d). Bound: the exporter appends <= 32 KiB per 5-min run
+# (<= ~9.2 MiB/day); maxsize 8M + compress => total stays < 50M even under a flood.
+/var/log/eimu-gateway-errors.log
+{
+	su root adm
+	daily
+	maxsize 8M
+	rotate 30
+	maxage 45
+	missingok
+	notifempty
+	compress
+	delaycompress
+	create 0640 root adm
+}

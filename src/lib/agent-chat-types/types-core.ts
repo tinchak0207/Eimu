@@ -92,7 +92,7 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   /**
    * 卡片状态。`pending` 是**中继态：已提交、成品未到**（tool.result.artifact_pending）
    * —— 提交型生图/生片工具在任务交出去的那一刻不再假报「已完成」，等
-   * image/video/audio.done 或 image.failed 到了才转终态。
+   * image/video/audio.done 或 image/video/audio.failed 到了才转终态。
    *
    * `needs_auth`（2026-10-04 缺陷 C）＝**需要授权**的 action 态：`local_files`
    * 未授权路径回 needs_authorization，卡片必须停在「等用户选授权范围」，绝非「完成」。

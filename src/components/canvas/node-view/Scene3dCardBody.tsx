@@ -19,6 +19,9 @@ import { useState } from "react";
 import { Download, Eye, Mountain, X } from "lucide-react";
 import type { CanvasNode, Scene3dCardMetadata } from "@/lib/canvas/types";
 import { Scene3dGltfViewport } from "./Scene3dGltfViewport";
+import { OpenInViewerButton } from "@/components/viewer/OpenInViewerButton";
+import { stableAssetId } from "@/lib/viewer/from-items";
+import type { ViewAsset } from "@/lib/viewer/types";
 
 /** stills 网格上限（契约 3-6 张；超量截断不渲染，防 agent 回传爆卡）。 */
 const STILLS_MAX = 6;
@@ -45,6 +48,13 @@ export function Scene3dCardBody({ node }: { node: CanvasNode }) {
   // 导入卡的主体＝视口本身（无需切换钮）；glb 不可用时主体整块不出现。
   const inlineViewport = Boolean(isImport && glbPlayable);
 
+  // 赏阅入口：glb 在手＝3D 场景（Scene3dSurface 吃 glb url）；否则退而看 turntable 影片；都没有就不挂入口。
+  const viewAsset: ViewAsset | null = glbPlayable
+    ? { id: stableAssetId(scene.glb_path), kind: "scene3d", url: scene.glb_path, ...(node.title ? { title: node.title } : {}) }
+    : scene?.turntable_url && isHttpUrl(scene.turntable_url)
+      ? { id: stableAssetId(scene.turntable_url), kind: "video", url: scene.turntable_url, ...(node.title ? { title: node.title } : {}) }
+      : null;
+
   if (!scene) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
@@ -55,7 +65,8 @@ export function Scene3dCardBody({ node }: { node: CanvasNode }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
+      {viewAsset && <OpenInViewerButton asset={viewAsset} className="absolute right-1.5 top-1.5 z-10" />}
       {/* 主体：导入卡＝GLB 视口直接当主体；导演卡＝turntable 播放器（NodeBody Video 分支同款原生播放器） */}
       {inlineViewport ? (
         <div className="min-h-0 flex-1">

@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { AgentToolAuthScope, AgentToolCallItem } from "@/lib/agent-chat-types";
 import { taskStatusTone } from "@/lib/agent-task-status";
-import { classifiedErrorStatus } from "@/lib/agent-error-status";
+import { classifiedErrorStatus, sanitizeDisplayError } from "@/lib/agent-error-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {
@@ -436,7 +436,7 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
       {/* 失败原因两态（2026-10-11）：gateway 已分类的 code（如 flowmusic_*）渲染成
           分类状态位（一句话类别 + 是否可重试），不把可能夹带上游原文的 human_message
-          直甩界面；未分类的照旧展示人话原文字（兜底不消失）。 */}
+          直甩界面；未分类的过 sanitizeDisplayError 降级脱敏原文（兜底不消失、不裸 code）。 */}
       {taskStatusTone(item.status).isFailure &&
         (errorStatus ? (
           <div className="ml-[22px] flex flex-col gap-0.5 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
@@ -451,7 +451,7 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
         ) : (
           item.error && (
             <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
-              {item.error}
+              {sanitizeDisplayError(item.error)}
             </p>
           )
         ))}
@@ -514,9 +514,9 @@ function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
           <div className="flex items-start gap-2">
             <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <p className="text-ios-footnote font-medium text-foreground/80">这是二进制文件，无法当文字读取</p>
+              <p className="text-ios-footnote font-medium text-foreground/80">这是本机媒体，文字通道不传字节</p>
               <p className="mt-0.5 break-words text-ios-caption1 text-foreground/55 [overflow-wrap:anywhere]">
-                请改用附件下载查看原始内容；直接按文字读只会得到乱码。
+                本机 agent 用 probe_media 看片，用 render_media 在这台电脑上剪完写回。不要当成已经读完。
               </p>
               {(item.readBytes !== undefined || item.totalBytes !== undefined) && (
                 <p className="mt-0.5 text-ios-caption1 tabular-nums text-foreground/45">

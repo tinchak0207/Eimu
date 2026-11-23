@@ -18,7 +18,7 @@ import { resolveAgentCaller } from "@/lib/agent-session-guard";
 
 export const noStore = { "Cache-Control": "no-store" } as const;
 
-export type SkillOwner = { ok: true; ownerKey: string } | { ok: false; response: NextResponse };
+export type SkillOwner = { ok: true; ownerKey: string; key: string } | { ok: false; response: NextResponse };
 
 /**
  * 解析呼叫者的私有库 ownerKey。
@@ -46,5 +46,5 @@ export async function resolveSkillOwner(req: NextRequest): Promise<SkillOwner> {
       response: NextResponse.json({ error: "internal_error", success: false }, { status: 500, headers: noStore }),
     };
   }
-  return { ok: true, ownerKey };
+  return { ok: true, ownerKey, key: caller.key };
 }

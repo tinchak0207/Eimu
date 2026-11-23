@@ -52,6 +52,20 @@ BASE="${RECON_BASE:-HEAD}"
 git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" "$BASE" || { echo "RECON_FAIL: 无法解析基准 $BASE"; exit 2; }
 HEAD_DIR="$WORKTREE/deploy-staging/opencode-runtime"
 
+# 提示词范围基准（2026-11-05）：prompts-only 快发只装 AGENTS.md＋skills/_prompt-routing，
+# 其余文件仍等于「最近一次全量发布」。故这两处用 RECON_PROMPTS_BASE（history 末行）覆盖到基准树里，
+# 其余仍用 RECON_BASE；不设或相同则行为与旧版逐位一致。
+PBASE="${RECON_PROMPTS_BASE:-}"
+if [ -n "$PBASE" ] && [ "$PBASE" != "$BASE" ]; then
+  PWORKTREE=$(mktemp -d /tmp/vps-oc-recon-prompts.XXXXXX)
+  git -C "$GIT_DIR" worktree add --quiet --detach "$PWORKTREE" "$PBASE" || { echo "RECON_FAIL: 无法解析提示词基准 $PBASE"; exit 2; }
+  P_DIR="$PWORKTREE/deploy-staging/opencode-runtime"
+  rm -rf "$HEAD_DIR/skills/_prompt-routing"
+  [ -d "$P_DIR/skills/_prompt-routing" ] && cp -a "$P_DIR/skills/_prompt-routing" "$HEAD_DIR/skills/_prompt-routing"
+  [ -f "$P_DIR/AGENTS.md" ] && cp -a "$P_DIR/AGENTS.md" "$HEAD_DIR/AGENTS.md"
+  git -C "$GIT_DIR" worktree remove --force "$PWORKTREE" 2>/dev/null || true
+fi
+
 # 漂移比对排除清单（不影响发布安装）：
 #   opencode.json 由 gateway 的 gen-opencode.ts 于执行期从 model registry 重新生成（单一写者），
 #   与 opencode 轨基准 commit 恒不相符 → 不纳入漂移比对（2026-10-03）。

@@ -3,17 +3,30 @@ import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
 import { WORKSPACE_DIR, UPLOADS_DIR, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
-import { humanMessageFor, summarizeArgs } from "./humanize-gw.ts"
+import { humanMessageFor, visibleToolArgs } from "./humanize-gw.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { workflowService } from "./workflow-gw.ts"
 import { emitQuestionRequest } from "./questions-gw.ts"
 import { maybeEnqueueLyricAlignFromTool } from "./lyric-align-hook.ts"
 import { isSuccessfulWorkflowWrite } from "./canvas-write-gate.ts"
+import { pauseAtDeploymentStepBoundary } from "./deployment-step-drain"
+
+
+/** 2026-10-27：闸门/运行时错误原文可给模型，但用户可见帧改产品句或不发卡。 */
+function isRuntimeGateErrorText(message: string): boolean {
+  return /计划模式状态查询|已按\s*fail-closed|权限求值失败|权限求值响应不可解析|计划模式状态不可解析|已有\s*\d*\s*个子代理在跑|当前在跑的子代理已达上限|subagent_id\s*不存在|需要人工确认/.test(message)
+}
+const RUNTIME_GATE_USER_SOFT = "这一步暂时没做成，我换条路继续。"
+
+// 2026-10-21：工具生命周期终态（running 永不终结只标「未确认」）与完成主张证据收集。
+import { noteToolRunning, noteToolTerminal, toolCallSignature, TOOL_RUNNING_CAP } from "./tool-lifecycle.ts"
+import { recordDeliveryEvidence } from "./claim-gate.ts"
 import { markDirty } from "./sessions-core.ts"
 import { canvasResultNodeId } from "./canvas-cascade-state.ts"
+import { MODEL_SELF_FIX_CODE, isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
-import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate-emit.ts"
-import { AUTO_CANVAS_TOOLS, readGenerateInput, autoCreateCanvasUnit, attachCanvasTask } from "./events-translate-canvas.ts"
+import { emitImageDone, emitVideoDone, emitAudioDone, toolOutputMusicRef } from "./events-translate-emit.ts"
+import { readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, wantsAutoCanvas, settleMusicCanvasUnit, settleCanvasUnitWithoutTask } from "./events-translate-canvas.ts"
 import { bashDenyAttribution, bashDenyProvenance, appendDenyAudit } from "./events-translate-deny.ts"
 import type { DenyProvenance } from "./events-translate-types.ts"
 /**
@@ -30,11 +43,14 @@ export function toolErrorPayload(
 ): { code: string; message: string; human_message: string } {
   let code = "tool_failed"
   let message = fallbackMessage
+  let toolHuman: string | undefined
   const e = parsed && typeof parsed === "object" ? parsed.error : null
   if (typeof e === "string" && e) {
     message = e
   } else if (e && typeof e === "object") {
-    const o = e as { code?: unknown; message?: unknown; hint?: unknown }
+    const o = e as { code?: unknown; message?: unknown; hint?: unknown; human_message?: unknown }
+    // 2026-10-31：工具自带用户侧短句（模型侧 hint 保留诊断细节）→ 用户侧以它为准。
+    if (typeof o.human_message === "string") toolHuman = o.human_message
     if (o.code && typeof o.code === "object") {
       const inner = o.code as { message?: unknown; code?: unknown }
       if (typeof inner.message === "string" && inner.message) message = inner.message
@@ -45,7 +61,10 @@ export function toolErrorPayload(
       if (typeof o.code === "string" && o.code) code = o.code
     }
   }
-  return { code, message, human_message: humanMessageFor(message, code) }
+  // 模型自修类（未提交、改参数再调）→ 出站 code=model_self_fix、两栏空串：前端整行不显示
+  //（判定只看工具原始 code/hint/message，权威在 user-facing-error）。模型侧原文在 opencode 输出里不受影响。
+  if (isModelSelfFixError({ code, message })) return { code: MODEL_SELF_FIX_CODE, message: "", human_message: "" }
+  return { code, message, human_message: toolHuman || humanMessageFor(message, code) }
 }
 
 /**
@@ -183,6 +202,13 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   const status = typeof st.status === "string" ? st.status : ""
   if (!callId || !status) return
 
+  // 2026-10-21 Hack：生命周期登记（幂等）必须先于 status 去重早退。
+  // 同一 callID 的第二次 running 才带 input 时，旧顺序在登记前就早退 → 工具签名永远补不上；
+  // terminal 同理，被去重吞掉会让调用永久留在在跑表（只在 completed/error 收尾）。
+  const runningReg = status === "pending" || status === "running" ? noteToolRunning(state, callId, toolName, st.input, Date.now()) : undefined
+  if (status === "completed" || status === "error") noteToolTerminal(state, callId)
+  if(status === "completed" || status === "error") pauseAtDeploymentStepBoundary(state)
+
   // Dedup by callID + status so a repeated identical status does not re-emit.
   const dedupKey = `${callId}:${status}`
   if (state.toolStatusSeen.has(dedupKey)) return
@@ -196,6 +222,24 @@ export function handleToolPartUpdate(state: SessionState, part: any): void {
   }
 
 if (status === "pending" || status === "running") {
+    // 2026-10-21 工具生命周期：登记已在去重早退前完成；这里只处理重复签名播报，不阻断调用。
+    const dup = runningReg ?? {}
+    if (dup.duplicateOf) {
+      // 2026-10-21：同签名重复调用只播报一次（实测同一签名 46 次调用会刷 46 条 tool.duplicate）。
+      // 去重集合与 toolRunningCalls 同生命周期：volatile、不随 turn 清空（"不清空也行"），
+      // 上限复用 TOOL_RUNNING_CAP，超出丢最旧。
+      const signature = toolCallSignature(toolName, st.input)
+      const announced = state.toolDuplicateAnnounced ?? (state.toolDuplicateAnnounced = new Set<string>())
+      if (signature && !announced.has(signature)) {
+        announced.add(signature)
+        boundSet(announced, TOOL_RUNNING_CAP)
+        emitToSession(state, "tool.duplicate", {
+          tool: toolName,
+          call_id: callId,
+          duplicate_of: dup.duplicateOf,
+        })
+      }
+    }
     // question is not a generic running tool. The agent is blocked on a
     // que_* request; emit question.request so the frontend can reply.
     if (toolName === "question") {
@@ -205,7 +249,7 @@ if (status === "pending" || status === "running") {
     // 只在拿到工具输入后才发 invoke。opencode 的 pending 状态常只有
     // {status:"pending"} 而没有 input；等 running（input 完整）再发，
     // 前端工具卡才显示得出「在做什么」，不是黑盒。
-    const argsSummary = summarizeArgs(st.input)
+    const argsSummary = visibleToolArgs(toolName, st.input)
     if (state.toolInvokeSeen.has(callId)) return
     if (!argsSummary && status === "pending") return
     state.toolInvokeSeen.add(callId)
@@ -216,10 +260,11 @@ if (status === "pending" || status === "running") {
     })
     // 自动制画布：image_* 工具首次建立画布单元。deepseek 完全不知道——
     // 它只是提交请求，gateway 拦截参数自动建文本/配置/图片节点。
-    if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId) && st.input != null) {
+    if (st.input != null && wantsAutoCanvas(toolName, st.input) && !state.canvasUnitByCall.has(callId)) {
       void autoCreateCanvasUnit(state, toolName, st.input, callId)
     }
   } else if (status === "completed") {
+    noteToolTerminal(state, callId)
     // 若 running 阶段因 input 缺失没发过 invoke，这里补发一次（completed 的
     // input 一定完整），确保前端工具卡必定有说明、不黑盒。
     if (!state.toolInvokeSeen.has(callId) && st.input != null) {
@@ -227,10 +272,13 @@ if (status === "pending" || status === "running") {
       boundSet(state.toolInvokeSeen, TOOL_STATUS_DEDUP_CAP)
       emitToSession(state, "tool.invoke", {
         tool: toolName,
-        args_summary: summarizeArgs(st.input),
+        args_summary: visibleToolArgs(toolName, st.input),
       })
       // 同上：跑到 completed 才见到 input 的工具（理论上不会，但保险起见）。
-      if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId)) {
+      // 无 task_id 的同步拒绝（ok:false）不补建：没提交的调用不留节点。
+      const early = parseToolOutput(st.output) as { ok?: unknown; task_id?: unknown } | null
+      const syncRejected = early !== null && typeof early === "object" && early.ok === false && !(typeof early.task_id === "string" && early.task_id)
+      if (wantsAutoCanvas(toolName, st.input) && !state.canvasUnitByCall.has(callId) && (toolName === "music_gen" || !syncRejected)) {
         void autoCreateCanvasUnit(state, toolName, st.input, callId)
       }
     }
@@ -259,6 +307,9 @@ if (status === "pending" || status === "running") {
     const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
     const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
     const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
+    // 2026-10-21 完成主张闸：只有**成功**的 completed 回执才算交付证据
+    //（URL / task_id / 落盘路径），供 session.idle 判定「有主张无回执」。
+    if (ok) recordDeliveryEvidence(state, toolName, parsed ?? st.output)
     // 2026-10-11 修画布：记账真写穿（非 dry_run），供 session.idle 收盘硬闸。
     if (toolName === "workflow_write" && isSuccessfulWorkflowWrite(parsed, ok)) {
       state.workflowWriteSucceeded = true
@@ -291,6 +342,9 @@ if (status === "pending" || status === "running") {
       // 自动制画布：submit 完成后把 task_id 挂回 unit，完成事件才够关联。
       if (ok && typeof parsed?.task_id === "string" && parsed.task_id) {
         attachCanvasTask(state, callId, parsed.task_id)
+      } else if (!ok && !(typeof parsed?.task_id === "string" && parsed.task_id) && wantsAutoCanvas(toolName, st.input)) {
+        // 同步拒绝（未拿到 task_id）：画布单元不能永远 loading——拒收删单元，提交未知置 error。
+        void settleCanvasUnitWithoutTask(state, callId, toolErr, false)
       }
       emitToSession(state, "tool.result", {
         tool: toolName,
@@ -372,6 +426,8 @@ if (status === "pending" || status === "running") {
           if (bits.length) quoteSummary = bits.join("，")
         }
       }
+      // 音乐上画布：music_gen 同步回执即终态，按 callId 回写音频节点（probe 未建单元 ⇒ 无操作）。
+      if (toolName === "music_gen") void settleMusicCanvasUnit(state, callId, ok, parsedObj, toolErr)
       const subagentTimeout = toolName === "subagent_dispatch" && !ok && /超过预定时间/.test(toolErr?.message ?? "")
       emitToSession(state, "tool.result", {
         tool: toolName,
@@ -427,7 +483,13 @@ if (status === "pending" || status === "running") {
       if (parsed !== null && typeof parsed === "object") {
         const media = collectToolOutputMediaUrls(parsed)
         for (const c of media.video) void emitVideoDone(state, c.url, c.cost_coins, undefined, "video")
-        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover })
+        // H34：账本行带关联键（实际跑工具的会话、callID、music_gen 回执的 music_ref），SSE 帧不变。
+        const audioLink = {
+          tool_session: typeof part?.sessionID === "string" ? part.sessionID : undefined,
+          tool_call_id: callId || undefined,
+          music_ref: toolOutputMusicRef(parsed),
+        }
+        for (const c of media.audio) void emitAudioDone(state, c.url, c.cost_coins, undefined, "audio", { title: c.title, cover: c.cover, duration_s: c.duration_s }, audioLink)
         // 出曲后自动 lyric-align（异步）：歌词来自工具入参，URL 来自出参；失败不挡播放。
         if (media.audio.length > 0) {
           maybeEnqueueLyricAlignFromTool({
@@ -440,6 +502,7 @@ if (status === "pending" || status === "running") {
       }
     }
   } else if (status === "error") {
+    noteToolTerminal(state, callId)
     const err = st.error
     let message =
       typeof err === "string"
@@ -447,6 +510,16 @@ if (status === "pending" || status === "running") {
         : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : "tool failed"
+    // 生成工具抛错收尾（提交结果未知）：已铺的单元结果节点置 error＋人话原因，不留转圈节点。
+    if (wantsAutoCanvas(toolName, st.input)) {
+      const aborted = /\b(aborted?|cancel(?:led|ed) by user|interrupted by user)\b/i.test(message)
+      const canvasErr = { code: aborted ? "aborted" : "tool_error", message, human_message: aborted ? "本次生成已中止。" : humanMessageFor(message) }
+      if (toolName === "music_gen") void settleMusicCanvasUnit(state, callId, false, null, canvasErr)
+      // 自修提示（`…未提交。`）＝确定没提交 ⇒ 按拒收删单元；其余抛错提交结果未知 ⇒ 置 error。
+      else void settleCanvasUnitWithoutTask(state, callId, canvasErr, !isModelSelfFixError(message))
+    }
+    // 2026-10-31：自修判定只看工具 throw 的原文（下方 deny/workflow_start 改写之前）。
+    const rawToolMessage = message
     // 0919 断点②修复：question 工具以 aborted 收尾≠用户中止——是 orchestrator
     // 调 question 冻结 turn 时杀掉在途轮的内部中止（实锤 13:00:21 两条
     // 「已按你的要求中止本轮」冒充用户话术）。此处换中性话术；用户真中止
@@ -506,13 +579,18 @@ if (status === "pending" || status === "running") {
       }
     }
     // S2a：error 态的 tool.result 同样补齐三栏位错误合同。
+    // 闸门/运行时错误：模型侧 message 仍保留原文；用户可见 human_message 换成产品句。
+    const gateErr = !isQuestionFreezeAbort && isRuntimeGateErrorText(message)
+    // 2026-10-31：工具抛出的自修提示（`project_lock_changed: …未提交。` 等）→ 不出红字、不弹 session.error。
+    const selfFix = !isQuestionFreezeAbort && !gateErr && isModelSelfFixError(rawToolMessage)
+    const userFacing = isQuestionFreezeAbort ? message : gateErr ? RUNTIME_GATE_USER_SOFT : selfFix ? "" : humanMessageFor(message)
     emitToSession(state, "tool.result", {
       tool: toolName,
       ok: false,
       error: {
-        code: isQuestionFreezeAbort ? "question_freeze" : "tool_error",
-        message,
-        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message),
+        code: isQuestionFreezeAbort ? "question_freeze" : gateErr ? "runtime_gate" : selfFix ? MODEL_SELF_FIX_CODE : "tool_error",
+        message: selfFix ? "" : message,
+        human_message: userFacing,
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
         ...(denyProv ? { deny_provenance: denyProv } : {}),
       },
@@ -521,6 +599,15 @@ if (status === "pending" || status === "running") {
     // 不记上游错（不是渠道故障，别误触 failover 重投）。
     if (isQuestionFreezeAbort) {
       console.log(`[gateway] question freeze abort: callId=${callId} — turn paused pending answer (no error frame)`)
+      return
+    }
+    // 闸门/运行时错误：工具卡已有产品句，不再弹 session.error 红气泡（原文只给模型）。
+    if (gateErr) {
+      console.log(`[gateway] runtime gate tool_error card suppressed: callId=${callId} tool=${toolName}`)
+      return
+    }
+    if (selfFix) {
+      console.log(`[gateway] model self-fix tool_error (no red card): callId=${callId} tool=${toolName}`)
       return
     }
     emitSessionError(state, "tool_error", message)

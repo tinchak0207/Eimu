@@ -9,7 +9,7 @@
 // emitRecoveryClosingIfSilent/isInterrogativeMessage/releasePendingVideoWorkflows）
 // （原 index.ts 5821–6368 行，逐行原样搬运）。
 import type { SessionState } from "./types-gateway.ts"
-import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
+import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, MIDTURN_INFLIGHT_MAX_WAITS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
 import { sessions, markDirty, isRestoredGatewayTurn } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { personaPatienceMul } from "./sessions-http.ts"
@@ -17,7 +17,8 @@ import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
-import { billingAutoApprovalEnabled } from "./charge-approval-policy.ts"
+import { hasInFlightTool } from "./opencode-event-handler-hooks.ts"
+import { drainOneQueuedUserMessage, hasQueuedUserMessages, isDrainingUserMessageQueue } from "./queued-user-messages.ts"
 // 2026-10-04 W：看门狗/心跳等守卫家族固定文案的书写体镜像已整体拆除——一律简体。
 // TODO(整合 Wave3)：以下符号仍住 index.ts 且未 export（本任务禁改 index.ts；bun build
 // 对未 export 的 named import 报错，已实测 2026-09-19）。依第一阶段占位符法（记忆
@@ -132,6 +133,9 @@ export function clearMidturnStallTimer(state: SessionState): void {
   if (state.midturnStallTimer) {
     clearTimeout(state.midturnStallTimer)
     state.midturnStallTimer = null
+    // R31：撤哨（含 session.idle 收尾 / 新一轮布防）＝本轮结束，工具在途等待计数一并清零。
+    // 只在真有活计时器时清：回调内自续时计时器已先置 null，等待次数不会被抹掉。
+    state.midturnInFlightWaits = 0
   }
 }
 
@@ -149,8 +153,24 @@ export function armMidturnStallTimer(state: SessionState): void {
     if (cur.pendingQuestions.size > 0 || cur.pendingConfirms.size > 0) return
     const last = cur.turnLastFrameAt ?? 0
     if (!(last > 0 && Date.now() - last >= MIDTURN_STALL_MS)) {
+      cur.midturnInFlightWaits = 0 // R31：已有真实新帧＝不在工具等待链上
       armMidturnStallTimer(cur) // 还有帧进来：滚动续盯，直到 idle 撤哨
       return
+    }
+    // R31（2026-10-31）：工具在跑 ≠ turn 冻结。长工具（ffmpeg／numpy 扫整段音频）从
+    // tool.invoke 到 tool.result 零帧，实测被误判成中段冻结后重投（用户消息重复注入、
+    // 模型从头上跑）再收起 turn，成品归零。工具在途期间只发进度心跳并续等；绝不重投。
+    if (hasInFlightTool(cur)) {
+      const waits = (cur.midturnInFlightWaits ?? 0) + 1
+      cur.midturnInFlightWaits = waits
+      if (waits <= MIDTURN_INFLIGHT_MAX_WAITS) {
+        console.log(`[gateway] R5-C midturn-stall: tool in flight, waiting (${waits}/${MIDTURN_INFLIGHT_MAX_WAITS}) — session=${cur.sessionId}`)
+        emitToSession(cur, "turn.status", { text: "这一步还在跑，我继续等，好了就回你。" })
+        armMidturnStallTimer(cur)
+        return
+      }
+      // 超过上限仍不重投（重投＝用户消息重复注入＋双跑）：跳过第一咬，直接落如实收尾。
+      cur.midturnStallRetried = true
     }
     if (!cur.midturnStallRetried) {
       // ── 第一咬：告警 + 单次重投（复用 watchdog 模式）──
@@ -192,6 +212,7 @@ export function armMidturnStallTimer(state: SessionState): void {
     })
     emitToSession(cur, "turn.done", {})
     cur.lastTurnActiveAt = 0
+    cur.midturnInFlightWaits = 0 // R31：回合已收尾，等待计数不留给下一轮
     markDirty(cur)
   }, MIDTURN_STALL_MS)
 }
@@ -208,20 +229,15 @@ export function clearQuestionHeartbeat(state: SessionState): void {
   clearQuestionAssumeTimer(state)
 }
 
-// ── 片AJ（2026-09-07）：question 卡 3 分钟超时自动应答 ──
+// ── 片AJ（2026-09-07）：question 卡 3 分钟超时自动 reject ──
 // 背景（片AB 评测 T4 实锤）：无人值守跑批时 question 卡在确认门前无限挂死。
-// 语义（2026-10-06 缺陷 A2 修正）：超时自动应答**不得**充当「照第一项执行」的
-// 授权。旧实现取各题第一选项拼成「已代答第一项继续：〈label〉」，读起来就是
-// 「照第一项做」——而 agent 自建的「开工确认」卡首项恰恰是付费开工（实测首项
-// ＝「按计划开跑（推荐）」，代答后子代理真跑了付费 music_gen，未经用户同意）。
-// 旧注释「confirm（花钱决策）不在此列」只覆盖 platform 侧 kind:"confirm" 的卡，
-// agent 自建确认卡走 question 通道照旧走到这里，该假设不成立——限权必须落在本
-// 函数内。现在超时投递一段**限权指令**：如实声明用户未回复并标 assumed，禁止在
-// 无用户同意下启动任何付费生成／上传／下单，只允许继续不花钱的步骤；选项仅作
-// 参考并列且不构成授权。仍要 settle（不能挂住 turn，这正是本机制存在的理由），
-// 转发核心复用 settleQuestion（双 URL 兜底 + ok 后记账 + question.replied 前端
-// 变已决）。best-effort：上游失败照 settleQuestion 既有形态收尾，不重试不抛出
-//（reconcile/新消息路径接管）。
+// 语义（2026-10-06 缺陷 A2）：超时**不得**充当「照第一项执行」的授权；旧实现取各题
+// 第一选项拼成「已代答第一项继续：〈label〉」（实测首项＝付费开工，子代理真跑了付费
+// music_gen）。现在只 reject 不代答：settleQuestion 固定发
+// reason="expired_without_consent"，前端映射为「超时未回复」，不投递任何可被当成
+// 用户选择的文案。仍要 settle（不能挂住 turn，这正是本机制存在的理由），转发核心复用
+// settleQuestion（双 URL 兜底 + ok 后记账）。best-effort：上游失败照 settleQuestion
+// 既有形态收尾，不重试不抛出（reconcile/新消息路径接管）。
 export function clearQuestionAssumeTimer(state: SessionState): void {
   if (state.questionAssumeTimer) {
     clearTimeout(state.questionAssumeTimer)
@@ -241,45 +257,24 @@ export function armQuestionAssumeTimer(state: SessionState): void {
 
 export async function autoAssumeQuestions(state: SessionState): Promise<void> {
   if (state.pendingQuestions.size === 0) return
-  // 只取首项是为了拼「照第一项做」的旧语义；现在只作参考列出，故如实收全部
-  // 选项，避免只列首项＝变相把首项打成「唯一/推荐项」。
-  const labels: string[] = []
-  for (const pending of state.pendingQuestions.values()) {
-    for (const q of pending.questions) {
-      for (const opt of q.options ?? []) {
-        if (opt.label) labels.push(opt.label)
-      }
-    }
-  }
-  // 2026-10-06 缺陷 A2 根因：旧话术「已代答第一项继续：〈label〉」把首项 label
-  // 拼成「照第一项做」的授权，而首项完全可能是付费开工（实测首项＝「按计划开跑
-  //（推荐）」）——代答一出，子代理真去跑了付费 music_gen。话术必须是一段限权
-  // 指令：声明用户未回复、标 assumed、禁止未获同意就启动付费动作，只许继续不花
-  // 钱的事；选项只作参考列出并明示「未选择任何一项」，不再构成授权。
-  const optionsNote = labels.length
-    ? `原卡提供的选项（仅列出供你了解用户可选的方向，本次没有选择其中任何一项、不构成授权）：${labels.join("；")}。`
-    : "原卡没有提供可选项。"
-  const autonomousAuthorized = await billingAutoApprovalEnabled(state)
-  const answerText = autonomousAuthorized
-    ? "（用户 3 分钟未回复，本条为超时自动续接，不是用户选择某个选项的答复，assumed。）网关核实完全访问或自动模式的持续授权仍有效：当前任务内扣费、必要返工、换模及可合理判断的制作选择直接继续，不再问开工或扣费；本条没有新增授权，也没有改变用户明确的预算、禁止生成、取消或方案须确认要求。若原问题缺少无法合理推断的关键输入，或用户明确要求亲自选定方案，则保持该决策待用户答复；其它已有授权的步骤继续。" + optionsNote
-    :
-    "（用户 3 分钟未回复，本条为超时自动代答，不是用户同意的答复，assumed。）限权指令：" +
-    "① 在用户明确同意之前，不得启动任何付费生成、付费上传、下单或其他会产生费用的动作；" +
-    "② 可以继续不花钱的步骤（读资料、整理方案、给出分析或草稿结论）；" +
-    "③ 若继续推进必须依赖付费动作，请停下，把当前结论与待办列清楚，等用户回来决定。" +
-    optionsNote
+  // 2026-10-21：超时只做 reject（settleQuestion），不再拼一段线上永不投递的 answerText——
+  // settleQuestion 只把 override 当布尔用（决定 reason），文案从不送达模型/前端；
+  // 前端已把 reason="expired_without_consent" 映射为「超时未回复」。限权语义由
+  // 该 reason＋既有提示词承载，不再每轮 await 计费授权查询。
   const count = state.pendingQuestions.size
+  let assumed = 0
   for (const requestId of [...state.pendingQuestions.keys()]) {
     try {
-      await settleQuestion(state, requestId, answerText)
+      await settleQuestion(state, requestId, "expired_without_consent")
+      assumed += 1
     } catch (err) {
       console.error(`[gateway] auto-assume question failed: ${requestId} — session=${state.sessionId}:`, err)
-      state.pendingQuestions.delete(requestId)
     }
   }
-  state.pendingQuestions.clear()
-  clearQuestionHeartbeat(state)
-  console.log(`[session] auto-assumed ${count} pending question(s) after ${QUESTION_ASSUME_MS}ms — session=${state.sessionId}`)
+  if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
+  // 2026-10-21：按实际 reject 成功数打印（行为不变）；失败数另记，不再把「尝试过」谎报成「已代答」。
+  const failed = count - assumed
+  console.log(`[session] auto-assumed ${assumed}/${count} pending question(s) after ${QUESTION_ASSUME_MS}ms — session=${state.sessionId}${failed ? ` failed=${failed}` : ""}`)
 }
 
 export function armQuestionHeartbeat(state: SessionState): void {
@@ -398,14 +393,32 @@ export function armWatchdogTimer(state: SessionState): void {
       if (turnHasActivity(cur)) return
       const body = cur.lastPromptBody
       if (!body) return
-      // 2026-10-01 去重：清僵尸后撤零产出死尾（revertDeadTail 内部吞错，永不挡重投）。
-      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
-        method: "POST",
-        headers: opencodeHeaders(),
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10000),
-      }))
-        .then((res) => {
+      // 2026-10-01 去重：清僵尸后撤零产出死尾。
+      // 2026-11-14 修复（真会话 13:03:26 实锤）：此前忽略 revertDeadTail 的返回值，撤尾失败
+      // （revert HTTP 409）仍照送原始 prompt，opencode 把同一条用户消息再追加一遍——对话里
+      // 出现两条相同的 user 消息、且两轮都不出回覆。现在撤尾失败只重布一次看门狗、不重投：
+      // 上游若其实活着会自然产出；仍死则第二次哨咬走既有「如实收尾」话术。撤尾成功时行为不变。
+      void (async () => {
+        await clearZombieBusyRun(cur).catch(() => false)
+        let reverted = false
+        try {
+          reverted = await revertDeadTail(cur.opencodeSessionId)
+        } catch {
+          // 撤尾异常＝无法确认旧尾巴已撤，同样按失败处理，避免重复用户消息。
+          reverted = false
+        }
+        if (!reverted) {
+          console.warn(`[gateway] watchdog: revert dead tail failed (409/不可撤)，跳过重投以免重复用户消息 — session=${cur.sessionId} gen=${gen}`)
+          if ((cur.turnGen ?? 0) === gen && !turnHasActivity(cur)) armWatchdogTimer(cur)
+          return
+        }
+        try {
+          const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+            method: "POST",
+            headers: opencodeHeaders(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10000),
+          })
           if (!res.ok) throw new Error(`status ${res.status}`)
           console.log(`[gateway] watchdog: retry dispatched for session=${cur.sessionId} gen=${gen}`)
           // N2：重投轮开始——剥掉旧 turn 的文本帧（含 watchdog 自己的告警帧），
@@ -413,8 +426,7 @@ export function armWatchdogTimer(state: SessionState): void {
           stripStaleTurnTextFromReplay(cur)
           // 重投已出发：重新布哨等第二轮判定（cur 仍零动静才会咬）。
           if ((cur.turnGen ?? 0) === gen && !turnHasActivity(cur)) armWatchdogTimer(cur)
-        })
-        .catch((e: unknown) => {
+        } catch (e) {
           console.error(`[gateway] watchdog: retry dispatch failed for session=${cur.sessionId}:`, e)
           // 重投发不出去：这轮已无恢复手段，进入终局话术（Q3：如实三句式，
           // 不再诬陷「会话损坏」、不再建议必然失败的「新开一个」）。
@@ -438,7 +450,8 @@ export function armWatchdogTimer(state: SessionState): void {
             // 「还魂帧」，紧接著发「刚才是误判，已自动恢复」，两句互相打脸）。
             cur.deathDeclared = true
           }
-        })
+        }
+      })()
       return
     }
     // ── 第二次咬：重投也没唤醒——LLM 后端无响应，如实告知（Q3 去误导） ──
@@ -505,6 +518,45 @@ export function armErrorStallTimer(state: SessionState): void {
   }, TURN_ERROR_WATCHDOG_MS)
 }
 
+/** 本轮小结的人话标签：节点种类（id 尾段）与工具名 → 中文；工具名部分同名抄自
+ *  src/components/agent-chat/AgentToolCard.tsx TOOL_TITLES。 */
+const STEP_LABELS: Record<string, string> = {
+  // 节点种类（events-translate-canvas 的 `${unitId}-image|text|config`）
+  image: "生成图片",
+  video: "生成视频",
+  film: "生成视频",
+  audio: "生成音频",
+  music: "生成音乐",
+  text: "整理提示词",
+  config: "配置参数",
+  // 工具名（同 AgentToolCard TOOL_TITLES）
+  image_generate: "生成图片",
+  image_edit: "编辑图片",
+  image_upscale: "放大图片",
+  canvas_generate_image: "画布生图",
+  background_remove: "抠图去背",
+  virtual_tryon: "虚拟试穿",
+  keyframe_render: "生成关键帧",
+  last_frame_video_chain: "首尾帧续接视频",
+  music_gen: "生成音乐",
+  tts_speak: "语音合成",
+  workflow_generate: "执行节点生成",
+  workflow_rerun_node: "重跑节点",
+  blender_render: "Blender 渲染",
+}
+function stepLabel(raw: string): string {
+  const hit = STEP_LABELS[raw]
+  if (hit) return hit
+  // 未知的裸英文标识（工具名/内部 id 尾段）不进用户视线。
+  return /^[A-Za-z0-9_]+$/.test(raw) ? "其他环节" : raw
+}
+/** 同名多条合并：「生成图片、生成图片、生成图片」→「生成图片 ×3」（保留首次出现顺序）。 */
+function groupStepLabels(labels: string[]): string[] {
+  const counts = new Map<string, number>()
+  for (const l of labels) counts.set(l, (counts.get(l) ?? 0) + 1)
+  return [...counts].map(([l, n]) => (n > 1 ? `${l} ×${n}` : l))
+}
+
 /** R4-A S8（2026-08-28）：turn 收尾兜底汇报——本轮有节点落终态但零主动汇报
  *  时补一帧中文总结（R4 实锤：第一轮 5 成功+1 失败零汇报悄悄收工）。环名
  *  来源 = workflow graph 节点的模板预置 title（如「角色卡」），取不到才用
@@ -529,9 +581,12 @@ export function emitTurnEndSummaryIfSilent(state: SessionState): void {
       if (typeof v === "number") costById.set(k, v)
     }
   }
-  const labelOf = (id: string): string => titleById.get(id) || (id.includes("-") ? id.slice(id.lastIndexOf("-") + 1) : id)
-  const okList = nodes.filter((n) => n.status === "success").map((n) => labelOf(n.id))
-  const badList = nodes.filter((n) => n.status === "error").map((n) => labelOf(n.id))
+  // 2026-10-31：节点无模板 title 时 id 尾段是节点种类／工具名（`<unit>-image`），给用户看人话标签。
+  const labelOf = (id: string): string => titleById.get(id) || stepLabel(id.includes("-") ? id.slice(id.lastIndexOf("-") + 1) : id)
+  const okList = groupStepLabels(nodes.filter((n) => n.status === "success").map((n) => labelOf(n.id)))
+  const badList = groupStepLabels(nodes.filter((n) => n.status === "error").map((n) => labelOf(n.id)))
+  const okCount = nodes.filter((n) => n.status === "success").length
+  const badCount = nodes.filter((n) => n.status === "error").length
   if (okList.length === 0 && badList.length === 0) return
   let spent = 0
   let anyCost = false
@@ -544,12 +599,12 @@ export function emitTurnEndSummaryIfSilent(state: SessionState): void {
     }
   }
   const lines: string[] = ["【本轮小结】"]
-  lines.push(okList.length > 0 ? `已完成 ${okList.length} 个环节：${okList.join("、")}。` : "本轮没有完成的环节。")
-  if (badList.length > 0) lines.push(`失败 ${badList.length} 个环节：${badList.join("、")}。失败节点可在画布上重试。`)
+  lines.push(okCount > 0 ? `已完成 ${okCount} 个环节：${okList.join("、")}。` : "本轮没有完成的环节。")
+  if (badCount > 0) lines.push(`失败 ${badCount} 个环节：${badList.join("、")}。失败节点可在画布上重试。`)
   if (anyCost) lines.push(`本轮已完成环节共花费 ${Math.round(spent * 100) / 100} 币。`)
   lines.push(badList.length > 0 ? "下一步：可重试失败节点，或告诉我接下来怎么调整。" : "下一步：可继续推进后续环节，或让我检查已完成环节的产出。")
   emitToSession(state, "message.delta", { text: lines.join("\n") + "\n" })
-  console.log(`[gateway] S8 turn-end fallback summary: ${okList.length} ok / ${badList.length} failed — session=${state.sessionId}`)
+  console.log(`[gateway] S8 turn-end fallback summary: ${okCount} ok / ${badCount} failed — session=${state.sessionId}`)
 }
 
 /** R5-C（2026-08-28）：恢复轮强制结语——watchdog 重投/redrive/中段哨重投的
@@ -599,3 +654,21 @@ export function releasePendingVideoWorkflows(state: SessionState): void {
     })
   }
 }
+
+// ── 2026-11-13：排队用户消息的周期性兜底排空 ───────────────────────────────
+// 主排空挂在 emitTurnDone，但仓库里另有多处终局出口绕过它（看门狗终局、中段停滞
+// 二次收尾、nudge 重发失败、deferred 投递失败、恢复回合收尾、abort 重试腿、
+// job-delivery 收尾）——这些只清 lastTurnActiveAt 或手发 turn.done。若本轮死在其中
+// 之一，「已加入队列」的消息永远等不到下一个 emitTurnDone、就这样永久滞留。
+// 这条 tick 只补「已经没有在途回合、却还有排队消息」的状态；条件与
+// drainOneQueuedUserMessage 内部守卫一致，drainingSessions 保证不与 emitTurnDone 的
+// 排空重入。刻意不改上述任何终局出口的语义。
+const USER_QUEUE_SWEEP_MS = 5000
+setInterval(() => {
+  for (const state of sessions.values()) {
+    if (!hasQueuedUserMessages(state)) continue
+    if ((state.lastTurnActiveAt ?? 0) > 0) continue
+    if (isDrainingUserMessageQueue(state)) continue
+    drainOneQueuedUserMessage(state)
+  }
+}, USER_QUEUE_SWEEP_MS).unref?.()

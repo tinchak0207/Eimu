@@ -1,4 +1,5 @@
 import type { ReviewClass } from "./delivery-gate-types.ts"
+import { LEGACY_UPSTREAM_SHELL_RE, MODEL_SELF_FIX_CODE, isModelSelfFixError, userFacingError, userFacingErrorParts, visibleToolError, type UserFacingErrorKind } from "./user-facing-error.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // F10（2026-10-04）：内审/复核正文从用户可见文字剥离 v2（结构判定 + 分层降级）
@@ -39,6 +40,8 @@ const INTERNAL_ENDPOINT_URL_RE =
 const BARE_LOOPBACK_RE = /(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?|localhost:\d+/gi
 
 /** F11：内部路径 / 源码路径行号 / runId / token 计数——用户可见文字里出现即泄漏。 */
+// 2026-10-31：子代理回执的 artifact_path 等绝对工作区路径（e2e 6117e082 subagent.done 实锤外泄）。
+export const OPT_HARNESS_PATH_RE = /\/opt\/agent-harness\/[^\s`"'，。；、（）()「」\[\]]+/g
 const INTERNAL_PATH_RE = /outputs\/subagent\/[^\s`"'）)】]*|\.opencode\/[^\s`"'）)】]*/gi
 const SOURCE_REF_RE = /\b[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|json|md):\d+(?::\d+)?/gi
 const RUN_ID_RE = /\brunId\b[\s:：=]*[0-9a-zA-Z_-]*/gi
@@ -298,7 +301,59 @@ const PROSE_REWRITE_RULES: Array<[RegExp, string]> = [
   [/\bduration[\s\-_.]*source\b/gi, "时长来源"],
   [/\bprompt[\s\-_.]*used\b/gi, "提示词"],
   [/\bqc\b/gi, "质检"],
+  // 架构/调度方言：模型把自己的席位、工具表、派工机制当成话讲出来时，换成不暴露内部的说法。
+  // 只兜底，不是主修——真正的修法在提示词侧（见 opencode-runtime/AGENTS.md 的说话纪律）。
+  [/能力断路[·・]?物理事实/gi, ""],
+  [/能力断路/g, "能力范围"],
+  [/唯一通路/g, "只能这样走"],
+  [/物理移除|物理关闭/g, "不可用"],
+  [/\borchestrator\b/gi, "协调"],
+  [/\bsubagent_dispatch\b/gi, "派工"],
+  [/\bcanvas_apply_ops\b/gi, "画布操作"],
+  [/\bworkflow_write\b/gi, "画布写入"],
+  [/\bnew_production_line\b\s*[:：]\s*(?:false|true)/gi, ""],
+  [/\bwf_[a-z0-9_]+\b/gi, "画布流程"],
 ]
+
+/** 2026-10-27：内部运行时/闸门错误句——可继续给模型当工具回执，禁止进用户可见帧。 */
+const PRODUCT_RUNTIME_SOFT = "这一步暂时没做成，我换条路继续。"
+const RUNTIME_GATE_ERROR_LINE_RE =
+  /计划模式状态查询(?:超时\/不可达|失败)|计划模式状态不可解析|已按\s*fail-closed|权限求值失败|权限求值响应不可解析|已有\s*\d*\s*个子代理在跑|当前在跑的子代理已达上限|subagent_id\s*不存在|工具「[^」]*」需要人工确认|需要人工确认[（(]/i
+
+/** 剥掉或改写内部闸门/运行时错误句；整段只剩此类错误时换成产品句。 */
+function scrubRuntimeGateErrors(s: string): string {
+  if (!s) return s
+  const hasGate = (t: string) => RUNTIME_GATE_ERROR_LINE_RE.test(t)
+  // 无命中快路径（test 会推进 lastIndex；无 g 旗标时通常无妨，仍重置）
+  if (!hasGate(s)) return s
+  RUNTIME_GATE_ERROR_LINE_RE.lastIndex = 0
+  const kept: string[] = []
+  let hit = false
+  for (const line of s.split("\n")) {
+    if (hasGate(line)) {
+      hit = true
+      RUNTIME_GATE_ERROR_LINE_RE.lastIndex = 0
+      continue
+    }
+    kept.push(line)
+  }
+  let joined = kept.join("\n")
+  const before = joined
+  joined = joined
+    .replace(/计划模式状态查询超时\/不可达：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/计划模式状态不可解析：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/权限求值失败（HTTP \d+），已按 fail-closed 拒绝工具调用。/g, "")
+    .replace(/权限求值响应不可解析：已按 fail-closed 拒绝写\/执行类工具；只读工具仍可用。/g, "")
+    .replace(/已有\s*\d+\s*个子代理在跑，等一个完成再派/g, "")
+    .replace(/当前在跑的子代理已达上限，等一路完成后再派/g, "")
+    .replace(/subagent_id 不存在或已过期[^\n]*/g, "")
+    .replace(/工具「[^」]*」需要人工确认[^\n]*/g, "")
+    .replace(/计划模式状态查询失败（HTTP \d+），已拒绝工具调用。/g, "")
+  if (joined !== before) hit = true
+  const trimmed = joined.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  if (!hit) return s
+  return trimmed.length === 0 ? PRODUCT_RUNTIME_SOFT : trimmed
+}
 
 /** 单块（非代码栅栏）正文的定向清洗：删纯内部栏位行/标题行/裸栏名行，再逐条改写。
  *  无任何命中时**原样返回**（零误伤正常正文）。 */
@@ -321,8 +376,9 @@ function scrubProseChunk(chunk: string): string {
     r = r.replace(BARE_LOOPBACK_RE, "本机地址")
     return r
   })
-  if (!changed && rewritten === chunk) return chunk
-  return rewritten.trim().length === 0 ? "" : rewritten
+  const gated = scrubRuntimeGateErrors(rewritten)
+  if (!changed && gated === chunk) return chunk
+  return gated.trim().length === 0 ? "" : gated
 }
 
 /**
@@ -334,7 +390,9 @@ export function scrubVisibleProse(raw: unknown): string {
   if (raw.length === 0) return raw
   // 代码栅栏整段不碰（split 后奇数索引即栅栏段）。
   const parts = raw.split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))/)
-  return parts.map((p, i) => (i % 2 === 1 ? p : scrubProseChunk(p))).join("")
+  const out = parts.map((p, i) => (i % 2 === 1 ? p : scrubProseChunk(p))).join("")
+  // 整段仅剩闸门错误（或空）时，scrubProseChunk 已换成产品句；再兜一层短语级剥离。
+  return scrubRuntimeGateErrors(out)
 }
 
 /**
@@ -392,12 +450,34 @@ function isUserVisibleTextFrame(name: string): boolean {
  *  ② 模型自述**正文/状态/通知**帧 → 同源判定 + 逐句定向改写（scrubVisibleProse）；
  *  其余帧（tool payload、canvas、结构化字段等）一律不碰 → 零误伤。
  */
-export function scrubVisibleFrame(name: string, data: unknown): unknown {
+function scrubUserFacingErrorText(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length === 0) return typeof raw === "string" ? raw : ""
+  const cleaned = scrubRuntimeGateErrors(raw)
+  return cleaned === raw ? scrubVisibleProse(raw) : cleaned
+}
+
+const MEDIA_FAILED_KIND: Record<string, UserFacingErrorKind> = {
+  "image.failed": "image",
+  "video.failed": "video",
+  "audio.failed": "audio",
+}
+
+/**
+ * 用户可见 SSE 帧的单一咽喉点清洗（sse-core.emitToSession 每帧必经）。
+ *  ① 子代理摘要/正文 → F10 同源判定；② 正文/状态/通知 → scrubVisibleProse；
+ *  ③ 2026-10-30 防线 2：所有**失败帧**（session.error / tool.result ok:false /
+ *     image|video|audio.failed / canvas.node.updated status=error）的可见文案一律过
+ *     user-facing-error.ts 的唯一出口：空串、tool failed、上游英文、内部串 → 有原因有下一步的人话，
+ *     原文只进服务端日志。message/reason/errorDetails 也同步替换，前端任何回落都拿不到原文。
+ *  其余帧一律不碰 → 零误伤。`where` 只用于日志定位。
+ */
+export function scrubVisibleFrame(name: string, data: unknown, where?: string): unknown {
   if (data === null || typeof data !== "object" || Array.isArray(data)) return data
   const d = data as Record<string, unknown>
+  const at = where ? `${name} ${where}` : name
   if (name === "subagent.done") {
     if (typeof d.summary !== "string") return data
-    const cleaned = scrubSubagentPayload(d.summary)
+    const cleaned = scrubSubagentPayload(d.summary).replace(OPT_HARNESS_PATH_RE, "（内部存档）")
     return cleaned === d.summary ? data : { ...d, summary: cleaned }
   }
   if (name === "subagent.delta") {
@@ -407,8 +487,71 @@ export function scrubVisibleFrame(name: string, data: unknown): unknown {
   }
   if (isUserVisibleTextFrame(name)) {
     if (typeof d.text !== "string") return data
-    const cleaned = scrubVisibleProse(d.text)
+    let cleaned = scrubVisibleProse(d.text)
+    // 旧兜底壳「执行失败（上游原因：X）」不论从哪个 emit 点拼出来，都换成统一出口的人话。
+    LEGACY_UPSTREAM_SHELL_RE.lastIndex = 0
+    if (LEGACY_UPSTREAM_SHELL_RE.test(cleaned)) {
+      LEGACY_UPSTREAM_SHELL_RE.lastIndex = 0
+      cleaned = cleaned.replace(LEGACY_UPSTREAM_SHELL_RE, (_m, inner: string) => userFacingError(inner, { kind: "tool", where: at }))
+    }
     return cleaned === d.text ? data : { ...d, text: cleaned }
+  }
+  // 2026-10-27：session.error / tool.result 红卡不得把闸门/运行时原文甩给用户（闸门句先换产品句）。
+  if (name === "session.error") {
+    const msg = typeof d.message === "string" ? d.message : ""
+    const human = typeof d.human_message === "string" ? d.human_message : ""
+    const candidate = (human ? scrubUserFacingErrorText(human) : "") || scrubUserFacingErrorText(msg)
+    const visible = userFacingError(candidate, { kind: "session", where: at })
+    if (visible === msg && visible === human) return data
+    return { ...d, message: visible, human_message: visible }
+  }
+  if (name === "tool.result" && d.ok === false && d.error && typeof d.error === "object" && !Array.isArray(d.error)) {
+    const err = d.error as Record<string, unknown>
+    const msg = typeof err.message === "string" ? err.message : ""
+    const hasHuman = typeof err.human_message === "string"
+    const human = hasHuman ? (err.human_message as string) : ""
+    // 授权卡（needs_authorization）走专门的 action 态，文案是本站写的选择提示，不碰。
+    if (err.code === "needs_authorization" || err.action_required === "authorize_local_files") return data
+    const tool = typeof d.tool === "string" ? d.tool : "?"
+    // 2026-10-31：模型自修类（未提交/未扣费、改参数再调）→ 两栏都清空，用户侧不出红字、
+    // 前端任何回落也拿不到给模型的原句。判定唯一权威＝user-facing-error.visibleToolError。
+    // 只看原始 code/message（不看 human_message）；出站统一 code=model_self_fix，前端整行不显示。
+    if (isModelSelfFixError({ code: err.code, message: msg })) {
+      return err.code === MODEL_SELF_FIX_CODE && msg === "" && human === ""
+        ? data
+        : { ...d, error: { ...err, code: MODEL_SELF_FIX_CODE, message: "", human_message: "" } }
+    }
+    // human_message 显式为空串＝发起方判定「模型自修回路、不出红字」（卡片只显示中性未成功）：
+    // 尊重该语义，但 message 同步换成人话，前端任何回落都拿不到原文。
+    if (hasHuman && human === "") {
+      const visibleMsg = msg ? userFacingError(scrubUserFacingErrorText(msg), { kind: "tool", where: `${at} tool=${tool}`, silent: true }) : msg
+      return visibleMsg === msg ? data : { ...d, error: { ...err, message: visibleMsg } }
+    }
+    const candidate = (human ? scrubUserFacingErrorText(human) : "") || scrubUserFacingErrorText(msg)
+    const visible = visibleToolError(tool, { code: err.code, message: msg, human_message: candidate }, at)
+    if (visible === msg && visible === human) return data
+    return { ...d, error: { ...err, message: visible, human_message: visible } }
+  }
+  const mediaKind = MEDIA_FAILED_KIND[name]
+  if (mediaKind) {
+    const reason = typeof d.reason === "string" ? d.reason : ""
+    const human = typeof d.human_message === "string" ? d.human_message : ""
+    const parts = userFacingErrorParts(human || reason, { kind: mediaKind, where: at })
+    // 原文已经可见（人话）且两栏一致 → 原样；否则 reason 给短原因（前端外壳「生成失败（…）」用），
+    // human_message 给整句。
+    if (parts.reason === reason && parts.text === human) return data
+    return { ...d, reason: parts.reason, human_message: parts.text }
+  }
+  if (name === "canvas.node.updated") {
+    const patch = d.patch
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return data
+    const p = patch as Record<string, unknown>
+    if (p.status !== "error") return data
+    const details = typeof p.errorDetails === "string" ? p.errorDetails : ""
+    const human = typeof p.human_message === "string" ? p.human_message : ""
+    const visible = userFacingError(human || details, { kind: "node", where: at })
+    if (visible === details && visible === human) return data
+    return { ...d, patch: { ...p, errorDetails: visible, human_message: visible } }
   }
   return data
 }

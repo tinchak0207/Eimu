@@ -115,6 +115,7 @@ export function useAgentSurfaceSessionActions(P: AgentSurfaceSessionActionsProps
   imageActions: AgentTranscriptProps["imageActions"];
   videoActions: AgentTranscriptProps["videoActions"];
   audioActions: AgentTranscriptProps["audioActions"];
+  onSendFeedback: (text: string) => void;
 } {
   const lastAssetQueryRef = useRef<string | null>(null);
   useEffect(() => {
@@ -664,6 +665,11 @@ export function useAgentSurfaceSessionActions(P: AgentSurfaceSessionActionsProps
     P.setPrefill({ text: `微调第 ${item.seq} 段${kind}（${item.url}）：`, nonce: Date.now() });
   }, []);
 
+  /** 赏阅「发给助理」：与「微调」同一条预填路径——只预填输入框，不自动送出。 */
+  const onSendFeedback = useCallback((text: string): void => {
+    P.setPrefill({ text, nonce: Date.now() });
+  }, []);
+
   const imageActions: AgentTranscriptProps["imageActions"] = {
     onSaveToLibrary,
     onEdit,
@@ -712,5 +718,6 @@ export function useAgentSurfaceSessionActions(P: AgentSurfaceSessionActionsProps
     imageActions,
     videoActions,
     audioActions,
+    onSendFeedback,
   };
 }

@@ -19,6 +19,7 @@ import { billingPermissionTenant } from "./charge-approval-policy.ts"
 import { MEMORY_INGEST_BASE_URL, MEMORY_INGEST_SECRET, MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
 import { MEMORY_PROMPT_VERSION, MEMORY_SIGNATURE_HEADER, signMemoryBytes } from "./memory-batch.ts"
 import { applyMemoryGates } from "./memory-gate.ts"
+import { memoryWriteActive } from "./memory-history-wiring.ts"
 import { normalizeMemoryNote } from "./memory-note.ts"
 import { resolveSession } from "./sessions-core.ts"
 import { subagentParentState } from "./subagent.ts"
@@ -322,7 +323,17 @@ export async function handleMemory(req: Request, pathname: string): Promise<Resp
   }
 
   // note：session/tenant 已解析完毕，ownerKey 由 state.apiKey 派生（绝不看请求体）。
-  if (isNote) return await handleMemoryNote(body, state.sessionId, state.apiKey)
+  if (isNote) {
+    // 记忆 v2：临时对话／memory_generate=false → 不写新记忆（工具如实回报，不假装成功）。
+    if (!memoryWriteActive(state)) {
+      return errorResponse(
+        "memory_disabled",
+        state.memoryTemporary === true ? "本会话为临时对话，记忆已关闭，不写入新记忆。" : "用户已在设置里关闭「自动记录新记忆」，不写入新记忆。",
+        403,
+      )
+    }
+    return await handleMemoryNote(body, state.sessionId, state.apiKey)
+  }
 
   const location: MemoryLocation & { name?: string } = {
     scope,

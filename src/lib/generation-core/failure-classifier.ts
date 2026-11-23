@@ -74,10 +74,15 @@ function retryAfterDate(value: string | null | undefined, now: Date): Date {
  * 上游欠费/额度不足时账号冷却时长（2026-09-27 INC-VIDEO-0927）。
  *
  * 欠费是帐务状态，不是凭证失效：冷却而非永久隔离，让 recoverExpiredCooldowns
- * 在充值后自动捡回渠道（30 分钟足够人工或自动充值落地，也足够避免对欠费上游
- * 空转烧 attempt）。凭证类（authentication）仍走 disabled 人工恢复。
+ * 在充值后自动捡回渠道。凭证类（authentication）仍走 disabled 人工恢复。
+ *
+ * 2026-11-03 由 30 分钟缩到 3 分钟：「充值后立刻能用」。视频中转站的 token 级
+ * billing 端点恒回无限额（1e8）、用户级余额要另签 access token，没有通用余额
+ * 接口；但欠费时上游在「预扣费」一步就拒单（¥0、约 1 秒、switchSupplier 换渠道），
+ * 所以真实订单本身就是零成本余额探针——冷却到期放下一单去试即可，充值后
+ * ≤3 分钟自动恢复（实录：dmc 11-02 欠费 ¥0.03，充值后要等满 30 分钟）。
  */
-const QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS = 30 * 60_000;
+const QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS = 3 * 60_000;
 
 /** 计价配置错的 capability 冷却（H2）：只作用于 capability，不碰 supplier/account。 */
 const PRICING_CONFIG_CAPABILITY_COOLDOWN_MS = 180_000;

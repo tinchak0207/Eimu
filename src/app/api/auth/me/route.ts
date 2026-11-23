@@ -176,6 +176,33 @@ async function applyLoginSideFacts(payload: unknown, req: NextRequest): Promise<
   await Promise.all([applyWelcomeGift(payload), attribution, invite]);
 }
 
+// new-api 对「凭证本身无效」不一定回 401：线上 v1.0.0-rc.21 对失效 access token 回
+// HTTP 200 + {success:false, message:"Unauthorized, invalid access token"}（2026-11-04 生产
+// 日志 34 次；mem 2026-10-11-shell-session-invalid-diagnosis 也实测过）。只认 401 会把它映射成
+// 502，前端按 transient 处理、不清 token，用户卡在坏会话里反复打本路由（加固 66）。
+// 只收「token 无效／过期」这一族；超时、5xx、New-Api-User 不匹配、权限不足、封禁等一律
+// 不算——不能重演 2026-09-05「上游故障被当成登出」。
+const NEWAPI_INVALID_CREDENTIAL_CODES = new Set([
+  "AUTH_UNAUTHORIZED",
+  "ACCESS_TOKEN_EXPIRED",
+  "AUTH_TOKEN_EXPIRED",
+  "AUTH_SESSION_REVOKED",
+  "ACCESS_TOKEN_LEGACY_RETIRED",
+]);
+const NEWAPI_INVALID_CREDENTIAL_MESSAGE =
+  /invalid access token|access token (?:has )?expired|access token\s*(?:无效|已过期|已失效)|legacy access tokens? (?:have|has) been retired/i;
+
+/** 上游是否明确判定「这把凭证无效／过期」（＝会话已失效，而不是上游暂时不可用）。 */
+function isUpstreamInvalidCredential(
+  status: number,
+  data: { success?: boolean; message?: unknown; code?: unknown } | null,
+): boolean {
+  if (status === 401) return true;
+  if (status < 200 || status >= 300 || !data || data.success !== false) return false;
+  if (typeof data.code === "string" && NEWAPI_INVALID_CREDENTIAL_CODES.has(data.code)) return true;
+  return typeof data.message === "string" && NEWAPI_INVALID_CREDENTIAL_MESSAGE.test(data.message);
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   const userIdHeader = req.headers.get("x-user-id");
@@ -215,7 +242,7 @@ export async function GET(req: NextRequest) {
       signal: AbortSignal.timeout(ME_UPSTREAM_TIMEOUT_MS),
     });
     const data = await upstream.json().catch(() => null) as
-      | { success?: boolean; message?: string; data?: unknown }
+      | { success?: boolean; message?: string; code?: unknown; data?: unknown }
       | null;
 
     // new-api 对 Bearer 模式强制 New-Api-User 头；前端 user 存储可能是坏残留
@@ -241,20 +268,22 @@ export async function GET(req: NextRequest) {
     }
 
     if (!upstream.ok || !data?.success) {
+      const sessionExpired = isUpstreamInvalidCredential(upstream.status, data);
       console.error("[auth/me] upstream rejected", {
         status: upstream.status,
         message: data?.message ?? null,
         credentialHashPrefix: cacheKey.slice(0, 8),
         hasUserIdHeader: Boolean(userIdHeader),
+        sessionExpired,
       });
       return NextResponse.json(
         {
           success: false,
-          message: upstream.status === 401
+          message: sessionExpired
             ? "session_expired"
             : sanitizeUpstreamMessage(data?.message) ?? "获取用户信息失败",
         },
-        { status: upstream.status === 401 ? 401 : 502 },
+        { status: sessionExpired ? 401 : 502 },
       );
     }
     await applyLoginSideFacts(data, req);

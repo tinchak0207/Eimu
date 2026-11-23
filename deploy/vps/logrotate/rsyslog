@@ -1,0 +1,24 @@
+# Install: /etc/logrotate.d/rsyslog (replaces Ubuntu default; original backed up first)
+# Ubuntu's file had "daily" + "size 200M". In logrotate, size overrides the time
+# interval, so auth.log grew to 164M across 15 days (sudo session spam) and was never
+# rotated. maxsize keeps daily rotation and also rotates early if a file passes 100M.
+/var/log/syslog
+/var/log/mail.log
+/var/log/kern.log
+/var/log/auth.log
+/var/log/user.log
+/var/log/cron.log
+{
+	su root adm
+	rotate 7
+	daily
+	maxsize 100M
+	missingok
+	notifempty
+	compress
+	delaycompress
+	sharedscripts
+	postrotate
+		/usr/lib/rsyslog/rsyslog-rotate
+	endscript
+}

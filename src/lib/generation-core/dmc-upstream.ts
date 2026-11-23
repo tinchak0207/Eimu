@@ -230,9 +230,20 @@ export async function generateWithDmc(
     });
     hdTaskId = String(hdCreate.id ?? hdCreate.task_id ?? "").trim();
   } catch (error) {
-    // 失败路径会把 error.providerTaskId 写回 attempt：必须保住 hdx 指针
-    //（否则 H3 已完成、超分未提交的真相会被抹掉）。
-    throw withDmcTaskRef(error, h3Ref);
+    // 超分提交失败（上游过载 / 5xx / 超时），但 H3 那一版 768P 已经出片并已付钱。
+    // 保留 hdx 指针让对帐接手（对帐会走降档交付），同时**本次同步就交出 768P**，
+    // 不让这一次调用以失败收场而吃掉已经做好的片子。
+    const preserved = withDmcTaskRef(error, h3Ref);
+    const detail = error instanceof Error ? error.message : String(preserved);
+    return {
+      base64: null,
+      url: h3OutputUrl,
+      providerTaskId: h3Ref,
+      httpStatus: 200,
+      endpointLabel: supplier.label,
+      supplierModelId: DMC_API_MODEL,
+      downgraded: { actualResolution: "768P", requestedResolution: upscaleTarget, reason: `auto_hd_submit_failed: ${detail}` },
+    };
   }
   if (!hdTaskId) {
     throw new SupplierRequestError("DMC auto-hd create response is missing id.", 502, undefined, undefined, undefined, h3Ref);
@@ -463,10 +474,25 @@ export async function pollDmcTask(
     const task = response.task as DmcTask;
     const status = String(task.status ?? "").trim();
     if (status === "succeeded") {
-      // 禁止把低清冒充高清：H3 已完成即证明「超分未提交」，按失败退款。
+      // H3 已完成、超分未提交（控制面两段之间中断，或 /hd/tasks 提交失败/过载）。
+      // 上游的 768P 成片是真做完了、真扣了钱，直接判失败退款等于把片子吞掉：
+      // 用户拿不到任何东西，我方白付一次 H3 生成费，上游 COS 上堆着没人取的成片。
+      // 改为交付这版 768P，并在 reason 里写明它只是 768P 不是 ref.target，
+      // 让上层按低一档计价/退差价——明明白白缩水交付，不冒充、也不吞。
+      const downgradedUrl = typeof task.content?.url === "string" ? task.content.url : "";
+      if (!downgradedUrl) {
+        return {
+          state: "failed",
+          reason: `DMC H3 task ${ref.taskId} completed but returned no downloadable url, and auto-hd ${ref.target} super-resolution was never submitted.`,
+        };
+      }
       return {
-        state: "failed",
-        reason: `DMC H3 task ${ref.taskId} completed but auto-hd ${ref.target} super-resolution was never submitted (control-plane interrupted between stages); refund and do not deliver 768P as ${ref.target}.`,
+        state: "succeeded",
+        url: downgradedUrl,
+        base64: null,
+        // H3 成片是公网无鉴权 COS URL，不带 downloadHeaders。
+        downgraded: { actualResolution: "768P", requestedResolution: ref.target, reason: "auto_hd_not_submitted" },
+        reason: `delivered 768P because auto-hd ${ref.target} super-resolution was never submitted; not ${ref.target}.`,
       };
     }
     if (status === "failed") {

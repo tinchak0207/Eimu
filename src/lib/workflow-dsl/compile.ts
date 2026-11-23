@@ -19,6 +19,7 @@
 //   6. 对 DSL 编译产物 decompile（decompile.ts）后再 compile → 全部 update_node、
 //      零新增连线（round-trip 幂等）。
 
+import { guardAgentPatchAgainstHumanEdits, humanEditBlockedMessage, humanEditOverriddenMessage, HUMAN_OVERRIDE_KEY, type HumanEditableField } from "../canvas/human-edits";
 import {
   CanvasNodeType,
   type CanvasAgentOp,
@@ -34,6 +35,7 @@ import {
   type WorkflowDslStep,
   type WorkflowValidationIssue,
 } from "./schema";
+import { compileProjectDsl, type ProjectCompileInput, type ProjectCompileResult } from "./project-ops";
 
 // WorkflowValidationIssue 的权威定义在 schema.ts（compile/decompile 共用），此处按契约再导出。
 export type { WorkflowValidationIssue } from "./schema";
@@ -136,6 +138,48 @@ function buildStepMetadata(source: WorkflowDslSource, step: WorkflowDslStep, ste
     }
   }
   return md;
+}
+
+/** locked 节点保留的身份键：DSL 重写只许刷新归属/拓扑序，prompt/参数/标题一律不动。 */
+const LOCKED_IDENTITY_KEYS = ["workflow_id", "workflow_ns", "stepId", "stepIndex"] as const;
+
+/**
+ * 重编译已存在节点的 patch 收口（P0，2026-10-28）：update_node 的 metadata 是浅合并，
+ * 所以「保留」＝不进 patch。
+ *   · status：节点已有 status（done/success、loading、error、人手改过）一律不重置；
+ *     只有存量节点完全没 status 时才补 idle。产物引用（content/storageKey/imageTaskId…）
+ *     本就不在 DSL 输出里，浅合并天然保留。
+ *   · locked===true（人手锁定）：patch 只留身份键，title/prompt/model/size/count/meta 透传全部不覆盖；
+ *     DSL 与锁定内容有差异时回 dropped=true，由调用方记 warning（不静默）。
+ */
+function patchForExisting(
+  existing: CanvasNode,
+  title: string,
+  metadata: WorkflowNodeMetadata,
+): { patch: { title?: string; metadata: WorkflowNodeMetadata }; lockedDropped: boolean; humanBlocked: HumanEditableField[]; humanOverridden: HumanEditableField[] } {
+  const prevMd = (existing.metadata ?? {}) as WorkflowNodeMetadata;
+  if (prevMd.locked === true) {
+    const kept: WorkflowNodeMetadata = {};
+    for (const key of LOCKED_IDENTITY_KEYS) if (key in metadata) (kept as Record<string, unknown>)[key] = metadata[key];
+    let lockedDropped = title !== existing.title;
+    for (const [key, value] of Object.entries(metadata)) {
+      if (key === "status" || (LOCKED_IDENTITY_KEYS as readonly string[]).includes(key)) continue;
+      if (JSON.stringify(prevMd[key]) !== JSON.stringify(value)) lockedDropped = true;
+    }
+    return { patch: { metadata: kept }, lockedDropped, humanBlocked: [], humanOverridden: [] };
+  }
+  const next: WorkflowNodeMetadata = { ...metadata };
+  if (prevMd.status !== undefined && prevMd.status !== null) delete next.status;
+  // 人手改过的栏位（metadata.human_edited）不覆盖（2026-11-02）：与 reducer agent_ops 同一把尺，
+  // 未在 step.meta._override_human 点名的 title/prompt/content 改动剔除并回 warning。
+  // current 来自上行快照（prompt/content 已截断），以 agent 视图判等；reducer 拿全文再判一次。
+  const guarded = guardAgentPatchAgainstHumanEdits(existing, { title, metadata: next as Record<string, unknown> }, { currentIsAgentView: true });
+  return {
+    patch: guarded.patch as { title?: string; metadata: WorkflowNodeMetadata },
+    lockedDropped: false,
+    humanBlocked: guarded.blocked,
+    humanOverridden: guarded.overridden,
+  };
 }
 
 // ─────────────────────────── 编译期校验（schema 之后的跨步骤语义）
@@ -350,6 +394,27 @@ function suggestTools(input: string): string[] {
 
 // ─────────────────────────── 编译主入口
 
+const PROJECT_ONLY_STEP_KEYS = ["forEach", "takes", "onFail", "pinned", "refs", "intent", "params", "inputs"];
+
+/**
+ * DSL v2 入口（2026-10-28）：target:"canvas" = 旧 compileWorkflow（一字不变）；
+ * target:"project" = 编译成工程图强类型 PatchOp[]（project-ops.ts）。
+ */
+export function compileWorkflowForTarget(
+  target: "canvas",
+  source: WorkflowDslSource,
+  current: WorkflowCompileInput,
+): WorkflowCompileResult;
+export function compileWorkflowForTarget(target: "project", source: unknown, current: ProjectCompileInput): ProjectCompileResult;
+export function compileWorkflowForTarget(
+  target: "canvas" | "project",
+  source: WorkflowDslSource | unknown,
+  current: WorkflowCompileInput | ProjectCompileInput,
+): WorkflowCompileResult | ProjectCompileResult {
+  if (target === "project") return compileProjectDsl(source, current as ProjectCompileInput);
+  return compileWorkflow(source as WorkflowDslSource, current as WorkflowCompileInput);
+}
+
 /**
  * 全图校验 → 增量 op 发射（对 current）。任何 error → ok:false、ops 空。
  * current 仅读；呼叫方把 ops 交 canvas_apply_ops / 前端 adapter 执行。
@@ -366,6 +431,9 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
   const topoOrder = graph.topoOrder;
 
   const warnings: string[] = [];
+  // DSL v2 字段只在 target:"project" 下生效；画布路径不静默吞掉（旧 DSL 不含这些键，输出不变）。
+  const v2Only = valid.steps.filter((s) => PROJECT_ONLY_STEP_KEYS.some((k) => k in s));
+  if (v2Only.length > 0) warnings.push(`步骤 ${v2Only.map((s) => s.id).join("、")} 含 forEach/takes/onFail/pinned/refs/intent/params/inputs 字段，仅 target:"project" 生效，画布编译已忽略`);
   const nodeIds = new Map<string, string>();
   for (const step of topoOrder) nodeIds.set(step.id, workflowNodeId(valid.workflow, step.id));
 
@@ -382,7 +450,12 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
     const existing = currentById.get(nodeId);
     if (existing) {
       // patch 禁含 position/width/height/moved——人拖位置自动保留（canvas-reducer-adapter update_node 语义）。
-      ops.push({ type: "update_node", id: nodeId, patch: { title: step.title, metadata } });
+      // 已存在节点：status 不重置、locked 节点内容不覆盖（见 patchForExisting）。
+      const { patch, lockedDropped, humanBlocked, humanOverridden } = patchForExisting(existing, step.title, metadata);
+      if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      if (humanBlocked.length > 0) warnings.push(humanEditBlockedMessage(`步骤 ${step.id}`, humanBlocked));
+      if (humanOverridden.length > 0) warnings.push(humanEditOverriddenMessage(`步骤 ${step.id}`, humanOverridden));
+      ops.push({ type: "update_node", id: nodeId, patch });
       updated++;
       continue;
     }
@@ -436,12 +509,18 @@ export function compileWorkflow(source: WorkflowDslSource, current: WorkflowComp
           ],
         };
       }
-      ops.push({ type: "update_node", id: originNodeId, patch: { title: step.title, metadata } });
+      const { patch, lockedDropped, humanBlocked, humanOverridden } = patchForExisting(target, step.title, metadata);
+      if (lockedDropped) warnings.push(`步骤 ${step.id} 的画布节点已锁定，DSL 对其标题/prompt/参数的改动未生效`);
+      if (humanBlocked.length > 0) warnings.push(humanEditBlockedMessage(`步骤 ${step.id}`, humanBlocked));
+      if (humanOverridden.length > 0) warnings.push(humanEditOverriddenMessage(`步骤 ${step.id}`, humanOverridden));
+      ops.push({ type: "update_node", id: originNodeId, patch });
       updated++;
       nodeIds.set(step.id, originNodeId);
       continue;
     }
     // 一律不带 position/width/height：座标留 (0,0) 交 reducer nextPosition。
+    // _override_human 只是给已存在人手节点的运输键，新节点不落。
+    delete (metadata as Record<string, unknown>)[HUMAN_OVERRIDE_KEY];
     ops.push({ type: "add_node", node: { id: nodeId, type: kindToNodeType(step.kind), title: step.title, metadata } });
     added++;
   }

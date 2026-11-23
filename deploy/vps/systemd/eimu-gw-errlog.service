@@ -1,0 +1,14 @@
+# Install: /etc/systemd/system/eimu-gw-errlog.service  (H51)
+# Exports agent-gateway/poller/exec-bridge error lines from the journal to
+# /var/log/eimu-gateway-errors.log before disk-guard's 50M vacuum rotates them away.
+# Read-only towards services. Rollback: see eimu-gw-errlog.timer.
+[Unit]
+Description=Eimu gateway error log export (journal -> /var/log/eimu-gateway-errors.log)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/eimu-gw-errlog.py
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=64M
+TimeoutStartSec=120

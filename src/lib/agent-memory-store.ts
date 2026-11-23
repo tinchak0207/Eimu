@@ -71,6 +71,7 @@ export { isMemoryCurrentlyValid } from "./agent-memory-store/validity";
 export { listMemoryDocs, readMemoryIndexMd } from "./agent-memory-store/read-api";
 export { ingestMemoryDocs } from "./agent-memory-store/ingest";
 export { retractMemoryDocs, reviewMemoryDocs } from "./agent-memory-store/mutate";
+export { createUserMemory, updateUserMemory, deleteUserMemories, USER_MEMORY_DOMAIN, USER_MEMORY_MAX_PER_OWNER } from "./agent-memory-store/user-memory";
 export { listMemoryRevisions } from "./agent-memory-store/history";
 export { saveBatchReport } from "./agent-memory-store/reports";
 export type { MemoryScope, MemoryType, EvidenceKind, MemoryStatus, MemoryProposal, AgentMemoryDoc, AgentMemoryDocInput, MemoryRejectReason, MemoryIngestInput, MemoryIngestResult, MemoryRetractInput, MemoryReviewAction, MemoryReviewInput, MemoryReviewResult, MemoryScopeInput, MemoryCatalogEntry, MemoryCatalog } from "./agent-memory-store/types";

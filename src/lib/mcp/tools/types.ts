@@ -36,6 +36,8 @@ export interface McpDispatchRequest {
   /** 工具名，只用于组幂等键，不进上游 body。 */
   toolName: string;
   body?: unknown;
+  /** multipart 上传（附件）：有它就不发 JSON，Content-Type 交给 fetch 补 boundary。 */
+  form?: FormData;
 }
 
 export interface McpDispatchResponse {

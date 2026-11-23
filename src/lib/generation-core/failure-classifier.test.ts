@@ -82,7 +82,7 @@ test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quot
   assert.equal(result.switchSupplier, true);
   // INC-VIDEO-0927：欠费改冷却（可自愈），不再永久 disabled。
   assert.equal(result.quarantineSupplier, false);
-  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 3 * 60_000);
 });
 
 test("402 English insufficient quota fails fast as quota exhaustion", () => {
@@ -91,7 +91,7 @@ test("402 English insufficient quota fails fast as quota exhaustion", () => {
   assert.equal(result.retryable, false);
   assert.equal(result.switchSupplier, true);
   assert.equal(result.quarantineSupplier, false);
-  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 3 * 60_000);
 });
 
 test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exhausted 且可自愈", () => {
@@ -103,7 +103,7 @@ test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exha
   );
   assert.equal(result.failureClass, "quota_exhausted");
   assert.equal(result.quarantineSupplier, false);
-  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 3 * 60_000);
 });
 
 test("bare 502 without quota copy is still a retryable overload (regression)", () => {

@@ -225,8 +225,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     canvasStateRef.current.selectNode(nodeId);
   }, [canvasStateRef]);
 
-  /** A2：干净点击 → 开节点面板（修饰键/连线模式/Group/Prompt 除外——
-   *  prompt 节点是备忘卡不是生成落地位，双击正文直编即可，不开生成面板）。 */
+  /** A2：干净点击 → 开节点面板（修饰键/连线模式/Group/Text/Prompt 除外——
+   *  文本和提示词卡是给人改字的，单击正文就地编辑，不开生成面板）。 */
   const handleNodeClick = useCallback((nodeId: string) => {
     if (modifiersRef.current.ctrl || modifiersRef.current.shift) return;
     if (connectingRef.current || portDragRef.current) return;
@@ -236,6 +236,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       node.type === CanvasNodeType.Group ||
       node.type === CanvasNodeType.Video ||
       node.type === CanvasNodeType.Audio ||
+      node.type === CanvasNodeType.Text ||
       node.type === CanvasNodeType.Prompt ||
       node.type === CanvasNodeType.Scene3d // 3D 场景卡 P1 只读+播放，无生成面板语义
     ) return;

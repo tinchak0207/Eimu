@@ -49,6 +49,9 @@ function loadContractsAtImport(): DeliveryContracts {
         qcSignatureRequired: c.qcSignatureRequired === true,
       }
     }
+    // 2026-11-04：代码内置的「静态单图」契约（不入 JSON：JSON 与 src 镜像/指南三边一致由测试锁死，
+    // 且它不是一个可派工的 Expert，只是 video-director 被借去出静态图时的替身契约）。
+    if (!out[STILL_IMAGE_CONTRACT_AGENT]) out[STILL_IMAGE_CONTRACT_AGENT] = STILL_IMAGE_CONTRACT
     console.log(
       `[gateway] delivery gate: 契约已载入 ${Object.keys(out).length} 个 Expert（${file}）`,
     )
@@ -60,6 +63,36 @@ function loadContractsAtImport(): DeliveryContracts {
     console.warn(`[gateway] delivery gate: 契约档不可读（${why}），契约视为空，全放行：${file}`)
     return {}
   }
+}
+
+/**
+ * 2026-11-04 契约按产物类型选（病灶：orchestrator 把「一张极简咖啡馆海报」派给 video-director——
+ * 平台没有静态图 Expert——子代理交的是单图回执，却被按视频契约 shots/duration_sec/model_hint/qc
+ * 逐栏核对，实到 0 栏 → 误判未达标 + 机器化重派再烧一轮）。
+ * 判据：agent 是 video-director，且任务书是纯静态图意图、没有任何视频/音频产物或工具证据 → 改用
+ * 「静态单图」契约。保守：只要出现一丝视频证据，仍按原视频契约，零回归。
+ */
+export const STILL_IMAGE_CONTRACT_AGENT = "image-still"
+export const STILL_IMAGE_CONTRACT: ExpertDeliveryContract = {
+  requiredFields: ["task_id", "size", "qc"],
+  qcSignatureRequired: true,
+}
+const VIDEO_INTENT_RE = /视频|影片|成片|分镜|mp4|kind\s*[=:：]\s*["']?video|video_quote|video_fetch|video_result|duration_seconds|last_frame_video_chain|timeline_|audio_first_timeline|music_gen|配乐|动画|\d+\s*秒/i
+const STILL_INTENT_RE = /海报|封面|头图|插画|壁纸|poster|banner|logo|单张|一张图|静态图|kind\s*[=:：]\s*["']?image|image_generate/i
+const VIDEO_TOOL_RE = /^(video_|last_frame_video_chain|timeline_|audio_first_timeline|music_gen|keyframe_render|blender_)/
+export function contractAgentFor(run: {
+  agent?: string
+  prompt?: string
+  toolTimeline?: ReadonlyArray<{ tool: string }>
+  artifacts?: ReadonlyArray<{ kind: string }>
+}): string | undefined {
+  const agent = run.agent
+  if (agent !== "video-director") return agent
+  if ((run.artifacts ?? []).some((a) => a.kind === "video" || a.kind === "audio")) return agent
+  if ((run.toolTimeline ?? []).some((t) => VIDEO_TOOL_RE.test(t.tool))) return agent
+  const prompt = typeof run.prompt === "string" ? run.prompt : ""
+  if (VIDEO_INTENT_RE.test(prompt) || !STILL_INTENT_RE.test(prompt)) return agent
+  return STILL_IMAGE_CONTRACT_AGENT
 }
 
 /** 模组载入即读（module-load 快照；换契约档须重启 gateway 才生效，同 expert-ids.json 语义）。 */

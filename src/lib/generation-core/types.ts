@@ -280,6 +280,15 @@ export interface SupplierGenerationOutput {
    * provider_result_json／加密 receipt／日志／DB 明文。
    */
   downloadHeaders?: Record<string, string>;
+  /**
+   * 降档交付（2026-10-25）：成片已出但没到请求档位（例：H3 出了 768P、auto-hd 那段
+   * 没跑成）。交付物就是现有这一版，如实标注并据实计价，不冒充目标档、也不整笔丢弃。
+   */
+  downgraded?: {
+    actualResolution: string;
+    requestedResolution: string;
+    reason: string;
+  };
   httpStatus: number;
   endpointLabel: string;
   supplierModelId: string;
@@ -300,5 +309,17 @@ export type ProviderTaskPollResult =
       base64: string | null;
       /** 上游产物需鉴权下载时的请求头（只进 fetch，绝不落库/入日志）。 */
       downloadHeaders?: Record<string, string>;
+      /**
+       * 降档交付（2026-10-25）：上游成品已出、但目标档位那一段没跑完时，交付手上
+       * 这一版并如实标注，而不是整笔判死。上层据此按低档计价/退差价。
+       * 绝不用它冒充目标档：交付物永远是 actualResolution 那一版。
+       */
+      downgraded?: {
+        actualResolution: string;
+        requestedResolution: string;
+        reason: string;
+      };
+      /** 给人看的交付说明（含降档原因）；为空表示与请求档位一致。 */
+      reason?: string;
     }
   | { state: "failed"; reason: string };

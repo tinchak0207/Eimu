@@ -49,6 +49,8 @@ export interface CanvasEmbedMenuItemsInput {
   deleteSelected: () => void;
   /** 语义缩放 LOD 3（2026-09-30）：打开工程透析面板；缺省 = 不出该项。 */
   openEngineering?: (nodeId: string) => void;
+  /** 右键重命名：让节点标题进入卡片内输入框。缺省时此项不做事。 */
+  beginRename?: (nodeId: string) => void;
 }
 
 /** 变体母卡上限：超过即整个「存为角色变体卡」子选单不渲染（不造死按钮、不静默截断）。 */
@@ -88,6 +90,7 @@ export function buildCanvasEmbedMenuItems({
   handleDeleteNode,
   deleteSelected,
   openEngineering,
+  beginRename,
 }: CanvasEmbedMenuItemsInput): (CanvasMenuItem | "separator")[] {
   if (!menu) return [];
   const state = canvasStateRef.current;
@@ -148,12 +151,7 @@ export function buildCanvasEmbedMenuItems({
       ? ([{ id: "engineering", label: "工程透析", onSelect: () => openEngineering(node.id) }] as CanvasMenuItem[])
       : []),
     { id: "connect", label: "连线到其他节点", onSelect: () => setConnecting({ sourceId: node.id, cursor: null }) },
-    { id: "rename", label: "重命名", onSelect: () => {
-      // 触发节点内编辑：直接改 title 为当前值走 NodeView 双击路径成本更高，
-      // 这里用 prompt() 太丑——选单触发交给 NodeView 的双击；此项用浏览器原生输入。
-      const next = window.prompt("重命名节点", node.title);
-      if (next && next.trim() && next.trim() !== node.title) state.renameNode(node.id, next.trim());
-    } },
+    { id: "rename", label: "重命名", onSelect: () => beginRename?.(node.id) },
     "separator",
     { id: "copy", label: "复制", shortcut: "Ctrl+C", onSelect: copySelection },
     { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },

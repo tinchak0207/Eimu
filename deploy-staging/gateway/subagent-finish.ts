@@ -1,7 +1,7 @@
 import { notify } from "./internal-waiters.ts"
 import { parseToolOutput, collectToolOutputMediaUrls } from "./events-translate.ts"
 import { saveDurableSubagentRun, durableSubagentRun } from "./job-store"
-import { checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
+import { contractAgentFor, checkDelivery, formatDeliveryGateNotice, buildReworkDirective, criticVerdictRejected, conflictingVerdicts, CRITIC_VERDICT_CONFLICT_CODE, checkCriticReceipt, CRITIC_REJECT_MARK, CRITIC_PASS_MARK, REWORK_FAIL_MARK, DELIVERY_CONTRACTS, evaluateCriticScoreThreshold, CRITIC_SCORE_THRESHOLD_POLICY, scrubSubagentPayload, ArtifactVerifyRecord, CriticScoreSample, DeliveryGateResult, CriticPassTarget } from "./delivery-gate"
 import { listArtifacts, artifactLocalEvidenceMatches } from "./artifact-store.ts"
 import { saveReworkRecord, deleteReworkRecord, saveCriticVerdict, saveExpertLesson, saveDelivery } from "./persistence"
 import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, MeasuredMediaResult } from "./media-quality.ts"
@@ -10,7 +10,7 @@ import { HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, isShellTool, SUMMARY_MAX_CHARS,
 import { fireSubagentHook, deps, byParent, byChildOc, completed, resumable, pendingCriticTargets, deliveredByParent, noteDurableTerminalRetry, CRITIC_PENDING_CAP, parentStateOf, boundMap, removeFromRegistries } from "./subagent-runs.ts"
 import { oldestPendingTool, persistRunOutput, childUsageSnapshot } from "./subagent-liveness.ts"
 import { dispatchAttempt } from "./subagent-attempt.ts"
-import { maybeDrainCriticQueue } from "./subagent-events.ts"
+import { maybeDrainCriticQueue, settleOpenSubagentCanvas } from "./subagent-events.ts"
 import { writeLiveLog, appendTranscriptEnd } from "./subagent-live.ts"
 import { deliverChildTurn, findRunById, forkResultDeliveryTarget } from "./subagent-messages.ts"
 import { checkPendingResumeQueue } from "./subagent-suspend.ts"
@@ -100,12 +100,17 @@ async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: st
 function artifactVerifyRecords(run: SubagentRun): ArtifactVerifyRecord[] {
   try {
     if (!run.opencodeSessionId) return []
-    return listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
+    const records = listArtifacts(run.opencodeSessionId, "mine").map((view) => ({
       name: view.name,
       verify_status: view.verify_status,
       url: view.url,
       local_available: artifactLocalEvidenceMatches(view),
     }))
+    // 同名多条（先登记了还没写完的空文件、后又重登记）：只要有一条过得了就算这个交付物有证据，
+    // 不拿被取代的空占位去拦——2026-10 实测 57 次研究子代理成果在盘却被判失败。
+    const passes = (r: ArtifactVerifyRecord): boolean => r.verify_status !== "blocked" && (r.url === null ? r.local_available === true : r.verify_status === "verified")
+    const passedNames = new Set(records.filter(passes).map((r) => r.name))
+    return records.filter((r) => passes(r) || !passedNames.has(r.name))
   } catch (e) {
     console.warn(`[gateway] delivery gate: artifact verify 状态读取失败，拒绝交付 run=${run.id}`, e)
     return [{ name: "artifact_store_unavailable", verify_status: "blocked" }]
@@ -130,6 +135,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   const softStop = run.softStopping
   run.softStopping = undefined
   run.status = status
+  settleOpenSubagentCanvas(run)
   // CC 2.1.302 结果契约：usage 必须随完成通知/status 返回。summarizeChild 路径已算过；
   // 超时/上游错误等收尾路径在此补一次（幂等：已有值不重算）。
   if (!run.usage) run.usage = await childUsageSnapshot(run)
@@ -141,8 +147,24 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   const persist = persistRunOutput(run, status, fullText, error)
   if (status === "ok" && artifactEvidenceVerdict.ok && run.agent && !run.stopped && typeof run.goalEvaluator !== "function") {
     const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
-    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "", contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined })
-    if (arr.length > 20) arr.shift()
+    // at/turnGen 供 dispatch 端判「本专辑范围内」的交付（bug B），不新建持久化结构。
+    arr.push({
+      agent: run.agent,
+      label: run.label,
+      relPath: persist.relPath ?? "",
+      contractOk: run.agent === "lyricist" ? checkDelivery(run.agent, fullText, DELIVERY_CONTRACTS, artifactVerify).ok : undefined,
+      at: Date.now(),
+      turnGen: parentStateOf(run)?.turnGen,
+    })
+    // 2026-10-24 修 bug C：淘汰不再无差别 shift()。两条闸（先词后曲／专辑工序）与歌词注入
+    // 都靠本簿判「本专辑已有词/曲」，把最早的 lyricist/music 记录整笔丢掉，等于让后来派的
+    // 谱曲任务看不到已经交付的词、让评审以为专辑还没有实体。所以超出上限时优先淘汰
+    // **非 lyricist/music 的旧记录**（研究、排版、剪辑等）；全是关键记录时才退回 shift()。
+    if (arr.length > 20) {
+      const victim = arr.findIndex((d) => d.agent !== "lyricist" && d.agent !== "music")
+      if (victim >= 0) arr.splice(victim, 1)
+      else arr.shift()
+    }
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
   }
@@ -191,7 +213,8 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
   } else if (status === "ok" && ((run.beastMode === true || run.agent === "lyricist" || run.agent === "music") && run.agent || artifactVerify.length > 0)) {
     // 历史契约范围不扩大；其他 run 仅检查其实际登记的产物证据。
     const enforceContract = run.beastMode === true || run.agent === "lyricist" || run.agent === "music"
-    const verdict = checkDelivery(enforceContract ? run.agent : undefined, fullText, DELIVERY_CONTRACTS, artifactVerify)
+    const contractAgent = contractAgentFor(run) ?? run.agent
+    const verdict = checkDelivery(enforceContract ? contractAgent : undefined, fullText, DELIVERY_CONTRACTS, artifactVerify)
     // 片 D（2026-09-15）：FAIL → 机器化重派一次（同 Expert 同任务＋修正指令注回，硬帽
     // reworkCount=1）。触发条件＝闸门区块外条件（ok+beastMode+agent）加 FAIL 判定，
     // 非 Expert/已失败收场零污染；status==="ok" 是必要条件——上游 error/超时不进重派链。
@@ -232,12 +255,12 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       } else if (run.reworkFailure) {
         // 重派投递从未成功（如 opencode 不可达）：重派没跑过，done 不伪称 reworked——
         // 维持片 C 原「未达标」标记语义，仅缀一行失败事实。
-        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
+        summary = `${formatDeliveryGateNotice(contractAgent ?? "", verdict, DELIVERY_CONTRACTS)}（自动重派投递失败：${run.reworkFailure}）\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing }
       } else {
         // 重派后复检仍 FAIL：标记升级「重派后仍未达标」，交由既有唤醒链如实回报。
         // status 栏语义不动（仍 ok——重派是补救尝试，不保证成功，也不把缺口洗成错误）。
-        summary = `${formatDeliveryGateNotice(run.agent ?? "", verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
+        summary = `${formatDeliveryGateNotice(contractAgent ?? "", verdict, DELIVERY_CONTRACTS, REWORK_FAIL_MARK)}\n${summary}`
         deliveryGate = { ok: false, missing: verdict.missing, reworked: true, stillFailing: true }
       }
       run.summary = summary
@@ -271,7 +294,7 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       })
       if (response.ok) criticMessages = await response.json()
     } catch { /* missing perception remains PARTIAL */ }
-    const receipt = checkCriticReceipt(run.criticReviewed ?? [], criticMessages)
+    const receipt = checkCriticReceipt(run.criticReviewed ?? [], criticMessages, run.criticAudioReceipts ?? [])
     const reviewPartial = run.agent !== "critic" || !receipt.ok
     qualityReviewPartial = reviewPartial
     const missingTypes: string[] = []
@@ -289,6 +312,14 @@ export async function finishRun(run: SubagentRun, status: "ok" | "error", fullTe
       { value: measured?.score ?? null, source: measured ? "measured" : null },
       scoreEnforced,
     )
+    // C2（2026-10-21）：同一 payload 内 PASS 与 PARTIAL/FAIL 并存 = 判决自相矛盾 → 一律拒收。
+    // criticVerdictRejected 已内置同判据；这里额外留一行带拒收码的日志，供事后对帐定位。
+    const verdictConflict = conflictingVerdicts(typeof fullText === "string" ? fullText : "")
+    if (verdictConflict) {
+      console.warn(
+        `[gateway] ${CRITIC_VERDICT_CONFLICT_CODE}: critic_run=${run.id} label="${run.label}" pass="${verdictConflict.pass}" other="${verdictConflict.other}" → 判决冲突，按退回处理`,
+      )
+    }
     run.machineCriticRejected = reviewPartial || criticVerdictRejected(fullText) || forcedByScore
     if (forcedByScore) {
       console.warn(
@@ -647,7 +678,7 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
   // D11：重派是新的完整 attempt——旧 attempt 的 usage 必须清掉，否则终态会回带首轮数字。
   run.usage = undefined
   // D6：childPath／parentSubagentId（深度来源）原样保留；重派不是「回到根层」。
-  run.prompt = `${run.prompt}\n\n---\n\n${buildReworkDirective(run.agent ?? "", verdict, DELIVERY_CONTRACTS)}`
+  run.prompt = `${run.prompt}\n\n---\n\n${buildReworkDirective(contractAgentFor(run) ?? run.agent ?? "", verdict, DELIVERY_CONTRACTS)}`
   if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
   const hardMs = run.asyncMode ? ASYNC_HARD_TIMEOUT_MS : HARD_TIMEOUT_MS
   run.timeoutTimer = setTimeout(() => {

@@ -26,7 +26,23 @@ export interface AuthResult {
   transient?: boolean;
 }
 
-export async function fetchMe(token: string): Promise<AuthResult> {
+// Only share concurrent reads. Completed auth/quota results are never cached,
+// so refresh after a generation, top-up, profile change, or login stays fresh.
+const pendingMe = new Map<string, Promise<AuthResult>>();
+
+export function fetchMe(token: string, options: { forceFresh?: boolean } = {}): Promise<AuthResult> {
+  if (typeof window === "undefined") return requestMe(token);
+  const key = JSON.stringify([token, getStoredToken(), getStoredUser()?.id ?? null]);
+  const pending = pendingMe.get(key);
+  if (pending && !options.forceFresh) return pending;
+  const request = requestMe(token).finally(() => {
+    if (pendingMe.get(key) === request) pendingMe.delete(key);
+  });
+  pendingMe.set(key, request);
+  return request;
+}
+
+async function requestMe(token: string): Promise<AuthResult> {
   try {
     const cookieToken = typeof document !== "undefined"
       ? document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith("napi_token="))?.slice("napi_token=".length)

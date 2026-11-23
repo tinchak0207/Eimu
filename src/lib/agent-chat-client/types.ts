@@ -142,6 +142,10 @@ export interface AgentSettings {
   cost_mode: AgentCostMode;
   interaction_mode: AgentInteractionMode;
   beast_mode: boolean;
+  /** 记忆总开关：false＝本账号对话不再读取任何记忆（私有记忆／历史对话／画像）。缺省 true。 */
+  memory_use: boolean;
+  /** 自动记录：false＝不再从对话里自动生成新记忆（已有记忆不受影响）。缺省 true。 */
+  memory_generate: boolean;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -150,6 +154,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   cost_mode: "balanced",
   interaction_mode: "preset",
   beast_mode: false,
+  memory_use: true,
+  memory_generate: true,
 };
 
 export const AGENT_SETTINGS_STORAGE_KEY = "agent-settings-v1";

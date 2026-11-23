@@ -2,6 +2,7 @@
 //
 // reduceCanvasEvent 的签名是 (state, CanvasSseEvent)，不是标准 reducer。
 // 这里包一层 adapter，同时容纳「本端动作」（载入专案、拖动节点、undo 还原）。
+import { guardAgentPatchAgainstHumanEdits, HUMAN_OVERRIDE_KEY, humanProtectedDeleteMessage, isHumanProtectedNode, opOverridesNode, stampHumanEdit } from "@/lib/canvas/human-edits";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
@@ -253,7 +254,11 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       if (!title) return state;
       const prev = state.nodes.find((n) => n.id === action.nodeId);
       if (!prev) return state;
-      const renamed: CanvasNode = { ...prev, title };
+      // rename 只来自人手（CanvasEmbedView onRename）；agent 改标题走 agent_ops.update_node。
+      // 记人手标题，agent 下一轮不得盖回（human-edits.ts）。
+      const renamed: CanvasNode = title === prev.title
+        ? { ...prev, title }
+        : { ...prev, title, metadata: { ...prev.metadata, human_edited: stampHumanEdit(prev.metadata, ["title"]) } };
       const next: CanvasReducerState = {
         ...state,
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? renamed : n)),
@@ -346,15 +351,21 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
           case "update_node": {
             const prevNode = next.nodes.find((n) => n.id === op.id);
             if (!prevNode) break;
+            // 人手改过的栏位不许 agent 盖掉（2026-11-02）：未点名 _override_human 的
+            // title/prompt/content 改动剔除，保留人的版本；compile 侧另回 warning 给 agent。
+            const guarded = guardAgentPatchAgainstHumanEdits(prevNode, op.patch as { title?: string; metadata?: Record<string, unknown> });
+            const guardedMd = guarded.patch.metadata as Record<string, unknown> | undefined;
+            if (guardedMd) delete guardedMd[HUMAN_OVERRIDE_KEY];
+            const patch = guarded.patch as typeof op.patch;
             const updated: CanvasNode = {
               ...prevNode,
-              ...(op.patch.title ? { title: op.patch.title.slice(0, 120) } : {}),
-              ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
-              ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
-              ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
-              // 契约：op.patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
+              ...(patch.title ? { title: patch.title.slice(0, 120) } : {}),
+              ...(patch.position ? { position: patch.position, moved: true } : {}),
+              ...(typeof patch.width === "number" ? { width: Math.max(120, patch.width) } : {}),
+              ...(typeof patch.height === "number" ? { height: Math.max(90, patch.height) } : {}),
+              // 契约：patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
               // 确认收紧会剥掉被读键，维持直通，理由见 agent_ops 开头注释。
-              ...(op.patch.metadata ? { metadata: { ...prevNode.metadata, ...op.patch.metadata } } : {}),
+              ...(patch.metadata ? { metadata: { ...prevNode.metadata, ...patch.metadata } } : {}),
             };
             next = {
               ...next,
@@ -365,9 +376,20 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             if (reason) next = recordCanvasNodeVersion(next, op.id, reason);
             break;
           }
-          case "delete_nodes":
-            next = canvasReducer(next, { type: "delete_many", nodeIds: op.ids });
+          case "delete_nodes": {
+            // 整卡守门（2026-11-03）：人改/锁定卡未带 _override_human 不删（网关已先拦一次并
+            // 回 409 给 agent；这里是前端兜底——旧网关、直连回放都过这一把）。
+            const guardedIds: string[] = [];
+            const allowedIds = op.ids.filter((id) => {
+              const target = next.nodes.find((n) => n.id === id);
+              if (!target || !isHumanProtectedNode(target.metadata) || opOverridesNode(op, id)) return true;
+              guardedIds.push(id);
+              return false;
+            });
+            if (guardedIds.length > 0) console.warn(`[canvas] ${humanProtectedDeleteMessage(guardedIds)}`);
+            if (allowedIds.length > 0) next = canvasReducer(next, { type: "delete_many", nodeIds: allowedIds });
             break;
+          }
           case "connect_nodes":
             for (const c of op.connections) {
               next = canvasReducer(next, { type: "connect", fromNodeId: c.fromNodeId, toNodeId: c.toNodeId });
@@ -386,6 +408,13 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             // 版本回退（2026-10-03）：直接复用 reducer 既有回退语义（只还原 title+metadata，
             // 座标/尺寸不动；回退本身 append 一版 reason="revert"）。agent 读 node_versions
             // 索引后指名版本即可，不必把旧 metadata 抄进上下文。
+            {
+              const target = next.nodes.find((n) => n.id === op.nodeId);
+              if (target && isHumanProtectedNode(target.metadata) && !opOverridesNode(op, op.nodeId)) {
+                console.warn(`[canvas] ${humanProtectedDeleteMessage([op.nodeId], "回退")}`);
+                break;
+              }
+            }
             next = revertCanvasNodeToVersion(next, op.nodeId, op.version);
             break;
           default:

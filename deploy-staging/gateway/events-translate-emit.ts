@@ -1,11 +1,11 @@
 import type { SessionState } from "./types-gateway.ts"
 import { PLATFORM_BASE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
-import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
+import { emitQuotaChanged, appendLedgerFor, claimLedgerDone } from "./quota-ledger.ts"
 import { flushPendingCompact } from "./messages-gw.ts"
 import { boundMap, boundSet } from "./events-translate-core.ts"
 import { emitCanvasResult } from "./events-translate-canvas.ts"
-import type { AudioDoneMeta } from "./events-translate-types.ts"
+import type { AudioDoneMeta, AudioLedgerLink } from "./events-translate-types.ts"
 // Shared image.done emission path, deduped per session by url (bounded Set, cap
 // 100, evict oldest). Both the opencode tool-result translation and the
 // /internal/emit entry point go through here, so the same image can never be
@@ -63,7 +63,8 @@ export async function emitImageDone(
   if (task_id) {
     emitCanvasResult(state, task_id, publicUrl, cost_coins)
   }
-  void appendLedgerFor(state, {
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, publicUrl, cost_coins)) void appendLedgerFor(state, {
     kind: "image",
     event: "done",
     task_id,
@@ -119,7 +120,12 @@ export async function emitVideoDone(
   registerSessionArtifact(state, { url, kind: media_kind === "film" ? "film" : "video", task_id })
   // 影片/成片 content 已是绝对公开 URL，无需 resolveResultUrl（它只重写 /v1/images/.../result 形态）。
   emitToSession(state, "video.done", { url, cost_coins, task_id, media_kind })
-  void appendLedgerFor(state, {
+  // 自动制画布：与 emitImageDone 同构——task 挂过 unit（image_generate kind:"video"）就回写结果节点，否则永远转圈。
+  if (task_id) {
+    emitCanvasResult(state, task_id, url, cost_coins)
+  }
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, url, cost_coins)) void appendLedgerFor(state, {
     kind: "video",
     event: "done",
     task_id,
@@ -129,6 +135,24 @@ export async function emitVideoDone(
   void emitQuotaChanged(state)
 }
 
+// H34：只收非空字符串；music_ref 必须是 music: 前缀（music_gen 的 ref 形状），否则不写。
+export function audioLedgerLinkFields(link?: AudioLedgerLink): Partial<AudioLedgerLink> {
+  if (!link) return {}
+  const ok = (v: unknown, max = 256): v is string => typeof v === "string" && v.length > 0 && v.length <= max
+  return {
+    ...(ok(link.tool_session) ? { tool_session: link.tool_session } : {}),
+    ...(ok(link.tool_call_id) ? { tool_call_id: link.tool_call_id } : {}),
+    ...(ok(link.music_ref) && link.music_ref.startsWith("music:") ? { music_ref: link.music_ref } : {}),
+  }
+}
+
+// H34：从工具回执顶层取 music_ref（music_gen 回执带；其它工具无此键＝undefined）。
+export function toolOutputMusicRef(parsed: unknown): string | undefined {
+  if (parsed === null || typeof parsed !== "object") return undefined
+  const v = (parsed as Record<string, unknown>).music_ref
+  return typeof v === "string" && v.startsWith("music:") ? v : undefined
+}
+
 export async function emitAudioDone(
   state: SessionState,
   url: string,
@@ -136,6 +160,7 @@ export async function emitAudioDone(
   task_id?: string,
   media_kind?: "audio",
   meta?: AudioDoneMeta,
+  link?: AudioLedgerLink,
 ): Promise<void> {
   if (!url) return
   if (state.announcedUrls.has(url)) return
@@ -152,13 +177,16 @@ export async function emitAudioDone(
     ...(meta?.title ? { title: meta.title } : {}),
     ...(meta?.cover ? { cover: meta.cover } : {}),
     ...(meta?.lyric_status ? { lyric_status: meta.lyric_status } : {}),
+    ...(typeof meta?.duration_s === "number" && meta.duration_s > 0 ? { duration_s: Math.round(meta.duration_s * 100) / 100 } : {}),
   })
-  void appendLedgerFor(state, {
+  // H22：ledger done 每 task×成品一行（幂等）；SSE/画布照旧。
+  if (claimLedgerDone(task_id, url, cost_coins)) void appendLedgerFor(state, {
     kind: "audio",
     event: "done",
     task_id,
     cost_coins,
     result_url: url,
+    ...audioLedgerLinkFields(link),
   })
   void emitQuotaChanged(state)
 }

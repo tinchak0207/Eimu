@@ -5,7 +5,17 @@ import { messagesInWindow, MessageWindow, SubagentUsageMessage, SubagentEffort }
 
 export const SPEC_DEADLINE_LINE = "\n预期 5 分钟（超 2x 杀线）。\n"
 
-export const MAX_ACTIVE_PER_PARENT = 3
+/** 每父会话同时 running 子代理上限。0 或未设 = 不限（2026-10-27 暴君取消原硬顶 3）。env SUBAGENT_MAX_ACTIVE_PER_PARENT 可再收紧。 */
+export function maxActivePerParent(): number {
+  const raw = (process.env.SUBAGENT_MAX_ACTIVE_PER_PARENT ?? "").trim()
+  if (!raw) return 0
+  if (!/^\d+$/.test(raw)) return 0
+  const n = Number(raw)
+  if (!Number.isSafeInteger(n) || n < 0) return 0
+  return Math.min(n, 999)
+}
+/** @deprecated 兼容旧 import：解析后的上限；0 表示不限。优先用 maxActivePerParent()。 */
+export const MAX_ACTIVE_PER_PARENT = maxActivePerParent()
 
 export const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
 // R6（2026-09-10）：async 子代理无工具轮询死线顶著，军团研究/创作任务合法更长，
@@ -89,7 +99,7 @@ export function resolveCheckpointFile(dir: string, runId: string, checkpointId: 
 }
 export const PERSIST_TAIL = "[gateway 落盘: 完整结果未截断]"
 export const COMPLETED_TTL_MS = 10 * 60 * 1000 // status 轮询窗口，过期即弃
-export const SUBAGENT_BUSY_MESSAGE = "已有 3 个子代理在跑，等一个完成再派"
+export const SUBAGENT_BUSY_MESSAGE = "当前在跑的子代理已达上限，等一路完成后再派"
 
 // ── 2026-10-14 子代理协作总线（Subagent Collaboration Bus）─────────────────────
 // 病灶（生产实录）：父／子代理「仿佛不认识」——父只能看到「子代理仍在运行（已 120s）」、
@@ -350,6 +360,11 @@ export interface SubagentRun {
   artifacts: Array<{ kind: string; url: string; task_id?: string; cost_coins?: number }>
   // 2026-10-05：子代理工具状态帧（subagent.tool）的每 callID 已发状态，防重复刷帧。
   toolStatusEmitted: Map<string, string>
+  // 2026-10-31：子代理 music_gen 投影进父会话画布——已建单元／已落终态的 canvas 键（sub:<run>:<call>）。
+  canvasCalls?: Set<string>
+  canvasSettled?: Set<string>
+  // 子代理正文增量出站清洗状态（stripOutboundFeed 的跨帧扣留）。
+  deltaStrip?: { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; hi?: string }
   // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
   // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
   // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。
@@ -372,6 +387,9 @@ export interface SubagentRun {
   // 2026-10-03：机器 critic run 被派时所审的那批 Expert 交付（跨 finishRun 需要它们的
   // 正文抽取可量测媒体 URL）。只在 maybeRunMachineCriticPass 建立 run 时赋值一次。
   criticReviewed?: CriticPassTarget[]
+  // 2026-11-22：critic 评审席原生听音频的回执（本次 attempt 真把音频 file part 送进了能听的模型才有；
+  // 换到不能听的模型/没抽到音频则为空）。checkCriticReceipt 用它当音频「实际感知」证据。
+  criticAudioReceipts?: Array<{ artifact: string; sha256: string; bytes: number; mime: string; model: string }>
   // 0920 暴君裁定（停止闸）：用户／orchestrator 主动停止。置位后：
   //   ① killSwitch 已 abort+DELETE 子会话；② 所有事件与重投路径一律早退
   //   （stopCheck 见 stopped 即 return），含换模重试与交付闸门重派；
@@ -436,6 +454,8 @@ export interface SubagentRun {
   // fork：子会话由父会话 `/session/{id}/fork` 服务端复制完整历史（含 tool_use/tool_result），
   // 继承同一 agent 工具面与模型；结果只取 fork 自己新产生的最后一则 assistant 文本。
   isFork?: boolean
+  /** H62：fork 实际继承的父会话 agent（run.agent 对 fork 恒空）；只用于登记 generation_consumers.consumer_agent，不进请求体。 */
+  forkAgent?: string
   /** fork 的历史来源（呼叫者的 opencode 会话 id）。父字段仍指向主会话，避免破坏归属/唤醒链。 */
   forkSourceOpencodeSessionId?: string
   /** D4/D3：fork 的 boundary messageID（必须在父消息列表中找到）与 fork 会话创建时刻。
@@ -680,7 +700,11 @@ export type ForkContext =
  * wakeParent 时 async 请求按同步处理，不裸奔）。
  */
 export type ResearchPredecessor = { runId: string; agent: string; label: string; relPath: string }
-export const RESEARCH_PRECEDED_EXPERTS = ["screenwriter", "video-director", "director3d", "motion-director", "web3d-director"]
+// 2026-10-24：新增 lyricist / music。此前缺口正是「写词/谱曲从不受研究先行约束」——
+// 概念专辑研究一路派出、写词的人读不到研究结论，研究价值清零。名单本身只用于
+// researchPredecessors 的补充取证（旧 run 没有交付行时把它们的产物也算作前置证据）；
+// 是否拦、是否注入研究正文一律由 Jev 的 guard_consumes_research 判决，不靠本名单。
+export const RESEARCH_PRECEDED_EXPERTS = ["screenwriter", "video-director", "director3d", "motion-director", "web3d-director", "lyricist", "music"]
 
 /**
  * G2（2026-10-14 协作总线修复）：安全读 JSON body。

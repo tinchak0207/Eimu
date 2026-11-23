@@ -13,6 +13,7 @@
 // 对帐协议映射都查 registry，不需改其他档。同协议供给只动本档（N=1）。
 
 import type { SupplyAdapter } from "./generation-core/supply-registry";
+import { linkiiAdapter } from "./generation-core/linkii-upstream";
 
 export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate" | "tts";
 
@@ -63,6 +64,59 @@ export interface RegistryChannel {
 
 export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // REGISTRY-ENTRIES-START（脚本插入点，此注释与结束标记之间的条目由工具维护，手改会被覆盖）
+{
+    // linkii（https://www.linkii.tech，2026-11-23 接入）：
+    // AI 绘画（前 5 个模型：gpt-image-2.5-sunburst/543, gpt-image-2.5-flare/549,
+    // kling-2.1/515, vidu-q2/519, si-4.5/511）与 AI 视频（vidu-q3-turbo/603）。
+    label: "linkii",
+    baseUrlEnv: "LINKII_BASE_URL",
+    apiKeyEnv: "LINKII_PASSWORD",
+    enabledEnv: "LINKII_ENABLED",
+    tier: "managed_pool",
+    sitePriority: 5,
+    chatImageModels: [],
+    adapterType: "linkii",
+    adapter: linkiiAdapter,
+    claims: [
+      { modelId: "gpt-image-2.5-sunburst", supplierModelId: "543", kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-flare", supplierModelId: "549", kinds: ["image_generate", "image_edit"] },
+      { modelId: "kling-2.1", supplierModelId: "515", kinds: ["image_generate", "image_edit"] },
+      { modelId: "vidu-q2", supplierModelId: "519", kinds: ["image_generate", "image_edit"] },
+      { modelId: "si-4.5", supplierModelId: "511", kinds: ["image_generate", "image_edit"] },
+      {
+        modelId: "vidu-q3-turbo",
+        supplierModelId: "603",
+        kinds: ["video_generate"],
+        unitPriceCny: 0,
+        resolutions: ["720p", "1080p"],
+        priceSource: "linkii school/personal quota 2026-11-23",
+      },
+    ],
+  },
+
+{
+    // v6k（https://www.v6k.top，2026-11-21 暴君指定）：**seedance 2.5 720p 默认渠道**。
+    // new-api 上游（openai-video 端点：POST {base}/videos 创建、GET {base}/videos/{id} 轮询，
+    // 与 miaowuai 同型，adapter 零改动）。上游模型名 `SD2.5`（GET /api/pricing 2026-11-21
+    // 免 key 唯读实查：billing_mode=tiered_expr、**按秒计价**，USD/s × 7.3：
+    // 480p 0.023287671233→¥0.17/s、720p 0.034246575342→¥0.25/s、1080p 0.109589041096→¥0.80/s(表内标 ¥0.6)；
+    // 参考视频另计 reference_video_seconds 同价；4–30 秒、30 图 10 音、比例含 21:9）。
+    // 只认领 480p/720p 两档（≤720p，符合成本闸红线）；同站其余 seedance 变体（TT／BB／稳
+    // 系列等）为不同货源，未核价不认领。key 只在 VPS env（V6K_API_KEY），不入仓库。
+    label: "v6k",
+    baseUrlEnv: "V6K_BASE_URL",
+    apiKeyEnv: "V6K_API_KEY",
+    enabledEnv: "V6K_ENABLED",
+    tier: "managed_pool",
+    sitePriority: 0,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      { modelId: "seedance-2.5-720p", supplierModelId: "SD2.5", kinds: ["video_generate"], unitPriceCnyPerSecond: { "480p": 0.17, "720p": 0.25 }, resolutions: ["720p"], priceSource: "GET https://www.v6k.top/api/pricing 2026-11-21 (SD2.5 tiered_expr per video_seconds: 480p 0.023287671233 USD/s, 720p 0.034246575342 USD/s; 站点描述 480-0.17/720-0.25 ¥/s)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "SD2.5", kinds: ["video_generate"], unitPriceCnyPerSecond: { "480p": 0.17, "720p": 0.25 }, resolutions: ["480p"], priceSource: "GET https://www.v6k.top/api/pricing 2026-11-21 (SD2.5 tiered_expr per video_seconds: 480p 0.023287671233 USD/s, 720p 0.034246575342 USD/s; 站点描述 480-0.17/720-0.25 ¥/s)" },
+    ],
+  },
+
 {
     // xiaoyxiao（api.xiaoyxiao.xyz，2026-09-27 暴君裁定）：**视频唯一权威渠道**。
     // 上游协议与我方既有 openai_video 轮子同型（禁造新轮子）：POST {base}/videos
@@ -208,9 +262,9 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     sitePriority: 11,
     chatImageModels: [],
     claims: [
-      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate"] },
-      { modelId: "gpt-image-2.5-flare", supplierModelId: null, kinds: ["image_generate"] },
-      { modelId: "gpt-image-2.5-sunburst", supplierModelId: null, kinds: ["image_generate"] },
+      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-flare", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image-2.5-sunburst", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
     ],
   },
 
@@ -257,10 +311,33 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     tier: "managed_pool",
     sitePriority: 11,
     chatImageModels: [],
-    // 2026-10-22 暴君裁定：gpt image 系列供货商全部换成 a6api，yyds 清空认领。
-    // 保留空条目＝seed 维护 supplier 行并将旧 capability 收回（is_current=false），
-    // 调度路由（model-routes.config.ts）已不再含 yyds，不会再有尝试。
-    claims: [],
+    // 2026-10-31 暴君裁定：gpt image 系列出图渠道改为 yyds 优先（a6api 退为兜底）。
+    // 2026-10-31 实测（VPS 经控面容器的 key，直连 images/generations，1024x1024）：
+    // gpt-image-2 200/29.5s（首发一次 150s 超时）、flare 200/38.8s、sunburst 200/29.5s，均真出图 b64。
+    // 价格与 edit 能力沿 10/22 前契约（0.016 元/次；edits 2026-09-14／10-14 生产实证）。
+    claims: [
+      {
+        modelId: "gpt-image-2",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+      {
+        modelId: "gpt-image-2.5-flare",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+      {
+        modelId: "gpt-image-2.5-sunburst",
+        supplierModelId: null,
+        kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 统一 0.016 元/次; 免 key 唯读实查)",
+      },
+    ],
   },
 
 {

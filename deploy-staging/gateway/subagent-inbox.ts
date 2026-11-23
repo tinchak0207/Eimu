@@ -9,10 +9,22 @@ import { writeLiveLog, pushParentNote } from "./subagent-live.ts"
  * POST /internal/subagent/notify —— 子→父回报（spec §3.1；照 X5/X9）。
  * body { session_id(子会话 oc id), kind:"progress"|"blocked"|"question", text, question? }
  * 语义：父会话在途回合 → 只追加 state.subagentNotes ＋ 发 `subagent.note` 帧，回
- * `skipped_inactive`（**不打断**）；父空闲 → 唤醒一次回 `accepted`。唤醒节流 60s；
- * `question` 不节流并登记阻塞式提问（有界、带 question_id／is_blocking／超时）。
+ * `skipped_inactive`（**不打断**）；父空闲且 kind 为 blocked/question → 唤醒一次回 `accepted`。
+ * **kind=progress 永不 prompt_async**：只入队，等完成/失败/阻塞/提问唤醒时折叠送达。
+ * 进度若每分钟开一轮，会把系统事实写进模型上下文并在用户屏幕上冒出来，压缩跟着空转。
+ * 唤醒节流 60s；`question` 不节流并登记阻塞式提问（有界、带 question_id／is_blocking／超时）。
  * 立场：这是「子代理之言」——送进父会话的正文带不可信前缀（Y4），不构成授权。
  */
+
+function queuedProgressResponse(extra: Record<string, unknown> = {}): Response {
+  return Response.json({
+    ok: true,
+    delivery: "queued",
+    parent_woken: false,
+    ...extra,
+    note: "进度已入队，不另开模型回合，也不写进用户屏幕。完成、失败、阻塞或需要决策时才会唤醒派工方，并带上期间进度。",
+  })
+}
 export async function handleSubagentNotify(req: Request): Promise<Response> {
   if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
   const body = (await readJsonObject(req)) as {
@@ -62,6 +74,7 @@ export async function handleSubagentNotify(req: Request): Promise<Response> {
     } catch {
       /* 帧失败不影响回报送达父会话队列 */
     }
+    if (kind === "progress") return queuedProgressResponse()
     const busy0 = fallback.ackTimer != null
     if (busy0 || typeof deps.wakeParentNote !== "function") {
       return Response.json({ ok: true, delivery: "skipped_inactive", parent_woken: false, ...(questionId ? { question_id: questionId } : {}), note: "子代理已不在跑：回报已存进父会话队列（未打扰在途回合）。" })
@@ -141,6 +154,8 @@ export async function handleSubagentNotify(req: Request): Promise<Response> {
   } catch (e) {
     console.error(`[gateway] subagent note emit failed: id=${run.id}`, e)
   }
+  // 进度不唤醒。父会话空闲时每 60s 开一轮，会把同一段系统事实反复写进上下文并触发压缩。
+  if (kind === "progress") return queuedProgressResponse()
   // 父忙（本回合在途）＝只入队不打断（X9 SkippedInactive）；未注入唤醒出口＝同样只入队并如实回报。
   const busy = state.ackTimer != null
   if (busy || typeof deps.wakeParentNote !== "function") {

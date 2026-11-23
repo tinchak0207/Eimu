@@ -2,7 +2,7 @@
  * `/api/mcp` —— Eimu 的 MCP（Model Context Protocol）端点，Streamable HTTP 传输。
  *
  * 定位：这是**第二个入口，不是第二套系统**。外部 coding agent（Codex / Claude Code /
- * OpenClaw…）透过 MCP 驱动 Eimu 的生图/生视频/TTS/放大与公开技能库，但：
+ * OpenClaw…）透过 MCP 把需求交给 Eimu 导演拿成片；默认 tools/list 只露导演面，原子工具须 toolset=expert。底层仍：
  * - 鉴权逐字复用 B 端那把闸（`authenticateBizApiKey` + `readBearerToken`），
  *   没有第二套验 key 的路径；
  * - 业务与计费零重写——工具把参数转发给既有 `/api/v1/**`，扣费/配额/幂等/退款
@@ -53,20 +53,31 @@ import {
   type JsonRpcId,
   type McpInitializeResult,
 } from "@/lib/mcp/protocol";
-import { MCP_TOOLS, callTool, createHttpDispatcher } from "@/lib/mcp/tools";
+import { listMcpTools, parseMcpToolset, callTool, createHttpDispatcher, type McpToolset } from "@/lib/mcp/tools";
 import { HARNESS_PROMPTS, HARNESS_RESOURCES, type HarnessPrompt } from "@/lib/mcp/harness-guide";
 import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）
 
 const SERVER_INSTRUCTIONS = [
-  "Eimu 提供图像生成/编辑、视频生成、文本转语音、放大，以及公开技能库检索。",
-  "生成类工具会真实扣费：先用 get_quota 看余额、用 list_models 取 model id 再生成。",
-  "异步任务（generate_video / tts）返回 id，用 get_result 轮询。",
-  "本 server 另提供 harness 指南（资源 eimu://harness/guide 与 prompt eimu-harness），用于提升生成质量的交付契约与验收纪律。",
+  "Eimu 是 Vibe Directing／Cursor of video：不用学提示词设计和分镜，现在你也是导演。",
+  "默认 tools/list 只返回导演工具：eimu_direct → eimu_job 轮询，终态交付成片与中间产物；另有 list/get/abort_agent_session。",
+  "原子工具（生图／生视频／TTS／画布／harness 等）须显式 toolset=expert（URL ?toolset=expert、头 X-Eimu-Toolset、或 params.toolset）。",
+  "生成会真实扣费；eimu_direct 正式跑须 budget_cap 或 confirm。有界等待超时只轮询、勿重提交。",
 ].join(" ");
+
+/** 解析本次请求的 toolset（query → 头 → params）。 */
+function resolveRequestToolset(req: NextRequest, params: unknown): McpToolset {
+  return parseMcpToolset({
+    searchParams: req.nextUrl.searchParams,
+    header: req.headers.get("x-eimu-toolset") ?? req.headers.get("X-Eimu-Toolset"),
+    altHeader: req.headers.get("mcp-toolset") ?? req.headers.get("Mcp-Toolset"),
+    params,
+  });
+}
 
 function noStore(status: number, body: unknown, traceId: string, headers?: Record<string, string>) {
   const response = new NextResponse(body === undefined ? null : JSON.stringify(body), {
@@ -115,13 +126,28 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 /**
  * **公开站点 origin**（只喂 401 的 `WWW-Authenticate: resource_metadata`）：
- * 显式配置优先（反向代理/自订域名下最稳），否则用本次请求的 origin。
- * 注意：这是「使用者连进来的域名」，生产＝Cloudflare 前置的 `https://eimu.dev`；
- * **不可**拿它当工具转发目标（Vercel 出口会被 CF 挑战，见档头）。
+ * 1. 显式 `MCP_SELF_ORIGIN`（生产应设为 `https://eimu.dev`；反向代理/自订域名下最稳）；
+ * 2. 否则用本次请求的 origin——但要丢掉不可达宿主（`0.0.0.0` / `::`）：
+ *    Next/Vercel 绑 `0.0.0.0` 时 `req.url.origin` 会吐 `https://0.0.0.0:3000`，
+ *    客户端顺着 `resource_metadata` 去发现就死（2026-11-01 生产实测）；
+ * 3. 再回落 `getSiteUrlFromEnv()`（默认 `https://eimu.dev`）。
+ * 注意：这是「使用者连进来的域名」；**不可**拿它当工具转发目标（Vercel 出口会被 CF 挑战，见档头）。
  */
+function isUnusablePublicHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  return host === "0.0.0.0" || host === "::" || host === "0:0:0:0:0:0:0:0";
+}
+
 function resolvePublicOrigin(req: NextRequest): string {
   const configured = process.env.MCP_SELF_ORIGIN?.trim().replace(/\/+$/, "");
-  return configured || new URL(req.url).origin;
+  if (configured) return configured;
+  try {
+    const fromReq = new URL(req.url).origin;
+    if (!isUnusablePublicHost(new URL(fromReq).hostname)) return fromReq;
+  } catch {
+    // fall through
+  }
+  return getSiteUrlFromEnv();
 }
 
 /** 控制面 origin（已 trim、去尾斜线；未配置回空字串）。 */
@@ -139,6 +165,8 @@ function controlPlaneOrigin(): string {
  *    被 Cloudflare 发 managed challenge（`Just a moment` 403）。生产值＝
  *    `https://image.tinchak0207.xyz`（同 Vercel 专案、`server: Vercel`、不挂 CF 的自订域名）；
  *    换值**必须**是不挂 Cloudflare 的 origin——换回公开域名（`eimu.dev`）等于复发。
+ *    2026-11-01 起站点自托管在 VPS（eimu-site 容器，Vercel 暂停）：生产值改为 `http://127.0.0.1:3000`
+ *    （容器自身，不经 CF／nginx）。注意 `eimu.dev` 顶级域对 GET 一律 301→www，回落到公开 origin 会拿到 301。
  * 2. 对 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路径表（唯一真源＝
  *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不挂 CF 的控制面 origin。
  *    匹配规则：source 形如 `/api/v1/:path*` 者做「前缀 + 捕获剩余段」；其余 source 精确相等。
@@ -257,8 +285,10 @@ export async function POST(req: NextRequest) {
     case "ping":
       return rpcOk(traceId, id, {});
 
-    case "tools/list":
-      return rpcOk(traceId, id, { tools: MCP_TOOLS });
+    case "tools/list": {
+      const toolset = resolveRequestToolset(req, parsed.params);
+      return rpcOk(traceId, id, { tools: listMcpTools(toolset) });
+    }
 
     case "tools/call": {
       const params = typeof parsed.params === "object" && parsed.params !== null
@@ -289,6 +319,9 @@ export async function POST(req: NextRequest) {
 
     case "resources/list":
       // 只露「有什么」：投影掉 text 全文，全文交给 resources/read 按 uri 取。
+      // harness 指南教的是原子工具手拼（generate_image／run_agent…），默认导演面的 tools/list 里没有这些工具；
+      // 与 /mcp 页「专家面另含 harness」一致，导演面不列（read 仍可按 uri 取，不报错）。
+      if (resolveRequestToolset(req, parsed.params) !== "expert") return rpcOk(traceId, id, { resources: [] });
       return rpcOk(traceId, id, {
         resources: HARNESS_RESOURCES.map(({ uri, name, description, mimeType }) => ({
           uri,
@@ -320,6 +353,8 @@ export async function POST(req: NextRequest) {
 
     case "prompts/list":
       // 投影掉 build 函式：清单是纯资料，必须可 JSON 序列化。
+      // 同 resources/list：eimu-harness 提示模板只在专家面列出（导演面会被它引去调不存在的原子工具）。
+      if (resolveRequestToolset(req, parsed.params) !== "expert") return rpcOk(traceId, id, { prompts: [] });
       return rpcOk(traceId, id, {
         prompts: HARNESS_PROMPTS.map(({ name, title, description, arguments: args }) => ({
           name,

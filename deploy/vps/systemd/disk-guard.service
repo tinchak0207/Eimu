@@ -1,0 +1,6 @@
+[Unit]
+Description=Reclaim regenerable disk space before root filesystem fills
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disk-guard.sh

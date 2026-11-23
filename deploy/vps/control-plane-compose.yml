@@ -33,6 +33,13 @@ services:
       dockerfile: Dockerfile
       target: runner
     container_name: image-control-api
+    # 冻结镜像没有 a6api 渠道，且 directVideoPrompt 会改写 H3 官方 Content IR。
+    # 容器以 root 启动，先把宿主上的增量写进正在执行的 chunk，再降权到 nextjs。
+    # 镜像本身已含增量时脚本空操作。
+    user: "0:0"
+    volumes:
+      - /opt/image-control-plane/runtime-delta:/runtime-delta:ro
+    entrypoint: ["/runtime-delta/start-api.sh"]
     restart: always
     logging:
       driver: json-file

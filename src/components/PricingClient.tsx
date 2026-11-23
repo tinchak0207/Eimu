@@ -76,6 +76,22 @@ function resolutionShortLabel(resolution: string): string {
 }
 
 /**
+ * 兑换失败文案。上游 new-api 的错误是英文且相当笼统（无效码、已用、过期都回
+ * "Redemption failed, please try again later"），直接透给用户等于没说。已知语境
+ * 换成人话；认不出的才原样显示，免得把我们没见过的真实原因也吞掉。
+ */
+function redeemFailureText(message: string | undefined): string {
+  const raw = (message ?? "").trim();
+  if (!raw) return "兑换码无效或已使用";
+  if (/redemption failed|invalid redemption|not found/i.test(raw)) {
+    return "这个兑换码无效、已用过或已过期，请核对后再试";
+  }
+  if (/expired/i.test(raw)) return "这个兑换码已过期";
+  if (/unauthorized|invalid access token/i.test(raw)) return "登录状态已失效，请重新登录后再兑换";
+  return raw;
+}
+
+/**
  * 首充专享卡（一次性、限一帐号一次）：只在「已登录且控面确认还有资格」时出现，
  * 且永远排在三档正价之前（这是转化率最高的一张牌）。
  *
@@ -379,7 +395,7 @@ export function PricingClient() {
         toast({ title: "兑换成功", description: coins ? `已到账 ${coins} 金币` : "金币已到账" });
         setRedeemCode("");
       } else {
-        toast({ title: "兑换失败", description: res.message ?? "兑换码无效或已使用", variant: "destructive" });
+        toast({ title: "兑换失败", description: redeemFailureText(res.message), variant: "destructive" });
       }
     } catch {
       toast({ title: "网络错误", variant: "destructive" });

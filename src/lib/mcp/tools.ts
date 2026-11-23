@@ -18,7 +18,8 @@
  * 理由写在 `createHttpDispatcher` 的注解里。
  */
 
-export { callTool, listToolNames, MCP_TOOLS, __getToolSchemaForTests } from "./tools/tools-definitions";
+export { callTool, listToolNames, listToolNamesForToolset, listMcpTools, MCP_TOOLS, __getToolSchemaForTests } from "./tools/tools-definitions";
+export { parseMcpToolset, filterToolsByToolset, DIRECTOR_TOOL_NAMES, DEFAULT_MCP_TOOLSET, type McpToolset } from "./tools/toolset";
 export { createHttpDispatcher } from "./tools/dispatch";
 export { validateToolArguments } from "./tools/validation";
 export { MAX_TOOL_TEXT_LENGTH } from "./protocol";

@@ -1,6 +1,6 @@
 ---
 name: image-gen
-description: 生图备援渠道（付费，仅当 agent-pixai 免费池不可用时使用）。用户要「生成图片、把这张图改一下、放大图片」时，若 agent-pixai 已失败或用户明确要求平台付费渠道，用它。走 image.tinchak0207.xyz 平台 API，生图非同步（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），改图同步 10-30s。
+description: 生图首选渠道（平台渠道，与 image_generate 同源；agent-pixai 免费池长期不可用，默认不选）。用户要「画一张、生成图片、把这张图改一下、放大图片」时直接用它。走 image.tinchak0207.xyz 平台 API，生图非同步（空闲时几十秒到几分钟，高峰期排队可能更久、逾时自动退款），改图同步 10-30s。
 license: internal
 metadata:
   audience: coding-agent

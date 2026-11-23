@@ -1,5 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useViewer } from "@/components/viewer/ViewerHost";
+import { stableAssetId } from "@/lib/viewer/from-items";
+import type { ViewAsset } from "@/lib/viewer/types";
 
 interface ImageLightboxProps {
   src: string;
@@ -12,11 +15,67 @@ interface ImageLightboxProps {
 }
 
 /**
- * 全屏放大灯箱：从 ImageDisplay 的 zoom portal 逐字搬出复用（2026-09-10 暴君
+ * 单图放大：对外契约（src/alt/onClose/caption/footer）不变，内部是赏阅（Viewer）的薄封装——
+ * 调用方（ImageDisplay / ReferenceImageUpload / AssetReviewPanel / ShotReviewPanel）零改动换壳。
+ * 无 ViewerProvider 的环境（独立挂载/测试）退回下方 LegacyImageLightbox。
+ */
+export function ImageLightbox(props: ImageLightboxProps) {
+  const { available } = useViewer();
+  return available ? <ViewerBackedLightbox {...props} /> : <LegacyImageLightbox {...props} />;
+}
+
+function ViewerBackedLightbox({ src, alt, onClose, caption, footer }: ImageLightboxProps) {
+  const { open, close, update } = useViewer();
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  const asset = useMemo<ViewAsset>(
+    () => ({ id: stableAssetId(src), kind: "image", url: src, ...(alt ? { title: alt } : {}) }),
+    [src, alt],
+  );
+  // 本组件持有的会话是否还活着：用户关闭（壳回调 onClose）后置 false，卸载时只关自己的会话。
+  const liveRef = useRef(false);
+  const footerRef = useRef(footer);
+  const captionRef = useRef(caption);
+  useEffect(() => {
+    footerRef.current = footer;
+    captionRef.current = caption;
+  });
+
+  useEffect(() => {
+    liveRef.current = true;
+    open(asset, {
+      caption: captionRef.current,
+      extraFooter: footerRef.current,
+      onClose: () => {
+        if (!liveRef.current) return;
+        liveRef.current = false;
+        onCloseRef.current();
+      },
+    });
+    return () => {
+      if (liveRef.current) {
+        liveRef.current = false;
+        close();
+      }
+    };
+  }, [asset, open, close]);
+
+  // footer 常带状态（复制中/已复制）：原位更新，不重挂载舞台。
+  useEffect(() => {
+    if (liveRef.current) update({ caption, extraFooter: footer });
+  }, [caption, footer, update]);
+
+  return null;
+}
+
+/**
+ * 降级实现（仅 Provider 缺席时使用）。全屏放大灯箱：从 ImageDisplay 的 zoom portal 逐字搬出复用（2026-09-10 暴君
  * 裁定：参考图缩图点击放大与生成图「点一下放大」必须是同一个窗口）。
  * 挂载即 pushState + 监听 Esc / 浏览器后退；点背板关闭；img 阻止冒泡。
  */
-export function ImageLightbox({ src, alt, onClose, caption, footer }: ImageLightboxProps) {
+function LegacyImageLightbox({ src, alt, onClose, caption, footer }: ImageLightboxProps) {
   // onClose 多为调用处的内联箭头（每次 render 新引用）；经 ref 中转，
   // 生命周期 effect 只在挂载时跑一次，保证 pushState 不随父组件重渲染重复入栈。
   const onCloseRef = useRef(onClose);

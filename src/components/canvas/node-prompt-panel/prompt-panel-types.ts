@@ -26,6 +26,8 @@ export interface CanvasNodePromptPanelProps {
   initialCount?: number;
   isRunning: boolean;
   onClose: () => void;
+  /** 输入即写回节点。第一笔 history 为 true，其后为 false。不点生成也留下。 */
+  onPromptDraft?: (nodeId: string, prompt: string, opts?: { history?: boolean }) => void;
   onGenerate: (nodeId: string, prompt: string, options: {
     model?: string;
     size?: string;

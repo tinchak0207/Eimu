@@ -12,7 +12,21 @@ export type GatewayPromptPart =
 
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
-  ledger?: { amount_coins: number; task_id?: string; model?: string }
+  // H20：workflow_id 让批量确认能落到批次；request_id 由 settleConfirm 以 map 键写入，不在此重复。
+  ledger?: { amount_coins: number; task_id?: string; model?: string; workflow_id?: string }
+  // 2026-11-01 MCP 可执行确认卡：与 SSE confirm.request 同一段说明文字，供 GET /status 只读投影
+  //（外部 MCP 客户端收不到 SSE，否则看不到卡在批什么）。仅内存，不入持久化。
+  description?: string
+}
+
+/**
+ * 2026-11-13：回合在途时排队的用户普通消息。
+ * body 是受理收下的原始 JSON body 原样保存（保住 content／attachments／canvas_state／
+ * session_directive 等全部栏位，不是只存 content），排空时原样回放给既有受理链。
+ */
+export interface QueuedUserMessage {
+  body: Record<string, unknown>
+  enqueuedAt: number
 }
 
 export interface PendingQuestion {
@@ -34,6 +48,9 @@ export type ConfirmOutcome = "approved" | "denied" | "expired"
 export interface ResolvedConfirm {
   outcome: ConfirmOutcome
   resolvedAt: number
+  // 2026-11-01：扣费卡（有 ledger）结算时抄下金额，GET /status 投影「近窗已批准合计」
+  //（随 CONFIRM_RESOLVED_TTL_MS 一并回收；MCP budget_cap 自动批准的保守累计用）。
+  amount_coins?: number
 }
 
 export interface SSEClient {
@@ -127,6 +144,8 @@ export interface SessionState {
   }
   /** 账户无画像：开场用选择题采集（question 工具）。 */
   profileOnboardingPending: boolean
+  /** 临时对话（2026-11-06）：整场不注入、不写、不索引记忆；创建时由 payload.temporary 决定。 */
+  memoryTemporary?: boolean
   // 2026-08-25 模板隐形注入：站点点模板卡时上送的引导指示，随首条讯息 system 注入。
   // 不进 transcript、用户不可见；注入一次即弃（directiveInjected），换模板可覆盖重注。
   sessionDirective?: string
@@ -146,6 +165,12 @@ export interface SessionState {
   pendingCompact?: boolean
   /** 2026-10-02：模板偏离 token（网关签发、单次核销、TTL 15 分）。落持久层＝跨 agent-gateway 重启存活。 */
   tplDeviateToken?: { token: string; at: number } | null
+  /** 2026-10-28：首回合用户原文（≤12k，持久化），每回合注入【用户原始目标·压缩不可丢】。 */
+  originalUserPrompt?: string
+  /** 2026-10-28 首回合硬约束句（2026-11-02 起持久化，原本重启即失）。 */
+  pinnedConstraints?: string
+  /** 2026-11-02：首回合后的用户修订台账（≤16 条×400 字，持久化），每回合注入【用户后续修订·压缩不可丢】。 */
+  userRevisions?: string[]
   /** 已上报过 turn.status 的 compaction part id（2026-10-02 压缩可见化去重，volatile）。 */
   compactionNotified?: Set<string>
   /** 已发过 context.compacted 边界事件的摘要讯息去重键（2026-10-02 压缩语义化，volatile）。
@@ -169,7 +194,8 @@ export interface SessionState {
   // 抖动重试（2026-08-22）：turn 结束但零文本输出 = 上游模型抖动死亡的特征，
   // gateway 自动重发同一条 prompt（上限 TURN_MAX_RETRIES）。volatile，不持久化；
   // revive 后为 undefined，读取处一律带 ?? 预设值。
-  lastPromptBody?: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string } } | null
+  /** H42：agent 运行时本就随 admission 体存在（orchestrator/creator），补进型别供非 admission 体沿用。 */
+  lastPromptBody?: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } | null
   // 修复1（2026-09-19 cn:deepseek-v4.1-flash 死链事故）：本轮「实际 dispatch 出去」
   // 的模型（prompt 首投与 failover/jitter 重投都更新）。volatile。降权判定必须用它——
   // lastPromptBody.model 是 turn 起点模型，failover 换模后不回写，用旧值会把死帐户
@@ -209,6 +235,11 @@ export interface SessionState {
    *  每条带 deadline（STEER_QUEUE_TTL_MS）：逾时不投递、落 failed 终态，
    *  前端以同一个 TTL 自行翻「未能送达」——重启后不得留下永久「排队中」。 */
   pendingSteers?: PendingSteer[]
+  /** 2026-11-13：回合在途时用户新投的普通消息（FIFO，上限 8，原始 body 原样保存）。
+   *  回合收尾（emitTurnDone）排空一条，经既有受理链重投；排队期间不动 turnGen、
+   *  不清任何回合状态（旧行为会让上游中止在途 assistant 消息、首条回覆归零）。
+   *  注意：本栏位未进入 persistence.ts 的 PERSISTED_DATA_KEYS 白名单，进程重启后丢失。 */
+  pendingUserMessages?: QueuedUserMessage[]
   // ── P2b（2026-09-11）：空转止损（全部 volatile，不持久化）──
   /** 本 turn 连续空 step 计数。 */
   idleSteps?: number
@@ -234,6 +265,22 @@ export interface SessionState {
   workflowWriteGateNudgeSent?: boolean
   /** 开场骨架建好后待注入的「模型改 DSL」指令（注入后清空）。 */
   pendingAvCanvasDirective?: string
+  // ── 工具生命周期终态（2026-10-21；volatile，不进持久化）──
+  /** 在跑工具调用（callId → 工具/签名/起点）。pending/running 登记，completed/error 移除，
+   *  session.idle 扫超时（>10 分钟）未终态者。只标「未确认」，禁止改写成成功。上限 256。 */
+  toolRunningCalls?: Map<string, { tool: string; signature: string; startedAt: number }>
+  /** 已向会话播报过 tool.stale 的 callId（每 callId 只播一次）。上限 256。 */
+  toolStaleAnnounced?: Set<string>
+  /** 已向会话播报过 tool.duplicate 的调用签名（同签名只播一次；实测同签名 46 次会刷 46 条）。
+   *  上限复用 TOOL_RUNNING_CAP＝256；与 toolRunningCalls 同生命周期（volatile，不随 turn 清空）。 */
+  toolDuplicateAnnounced?: Set<string>
+  // ── 无回执完成主张闸（2026-10-21；volatile，不进持久化）──
+  /** 本轮模型正文尾部（判定「已完成/已交付」类主张）；gen 变化即自动重置。上限 4000 字。 */
+  turnAssistantTail?: { gen: number; text: string }
+  /** 本轮**已完成**工具带回的交付证据（URL/task_id/绝对路径）；gen 变化即清空。上限 128。 */
+  claimEvidence?: { gen: number; items: string[] }
+  /** 已因「有完成主张但零证据」拦截过一次的 turnGen（每 turnGen 只拦一次，防死循环）。 */
+  claimGateNudgeSentGen?: number
   /** 2026-10-02：自上次动作以来的 reasoning 累计（无工具长推理断路器，见 reasoning-cap.ts）。 */
   reasonSinceActionChars?: number
   reasonSinceActionAt?: number
@@ -287,6 +334,8 @@ export interface SessionState {
   midturnStallTimer?: ReturnType<typeof setTimeout> | null
   /** 中段停滞哨是否已重投过一次（防风暴，每 turn 一次）。volatile。 */
   midturnStallRetried?: boolean
+  /** R31：工具 in-flight 导致的中段等待次数（用于最终诚实收尾的上限判定）。 */
+  midturnInFlightWaits?: number
   /** 本轮是否为恢复轮（watchdog 重投/redrive/中段哨重投）——收尾兜底结语用。 */
   recoveryRound?: boolean
   // ── R4-A（2026-08-28）：三死线修复的新增状态（全部 volatile，不进持久化白名单）──

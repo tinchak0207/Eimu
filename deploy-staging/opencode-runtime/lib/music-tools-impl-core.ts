@@ -2,6 +2,7 @@ import * as fsp from "node:fs/promises"
 import * as nodePath from "node:path"
 import { createHash } from "node:crypto"
 import { FlowMusicServiceError } from "./music_flowmusic"
+import { LinkiiClientError } from "./linkii-client"
 import { YUE2_HMAC_SECRET_ENV, generateYue2Track, isYue2TransientFailure, yue2TransientCode, type GenerateYue2TrackOptions, type GenerateYue2TrackResult } from "./music_yue2"
 
 // ── plumbing（ok/fail/resolveKey 同构 director-common.ts） ───────────────────
@@ -16,8 +17,10 @@ export function ok(data: Record<string, unknown>): MusicToolResult {
 }
 
 export function fail(code: string, hint: string, extra?: Record<string, unknown>): MusicToolResult {
-  const { title, ...rest } = extra ?? {}
-  return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error: { code, hint }, ...rest }) }
+  // human_message（可选）＝用户侧短句，进 error 对象；hint 只给模型（可带诊断细节）。
+  const { title, human_message, ...rest } = extra ?? {}
+  const error = typeof human_message === "string" && human_message ? { code, hint, human_message } : { code, hint }
+  return { title: (title as string) ?? "失败", output: JSON.stringify({ ok: false, error, ...rest }) }
 }
 
 /** 同构 director-common resolveKey：gateway /internal/session-key 解 Bearer，fallback HARNESS_API_KEY。 */
@@ -53,6 +56,7 @@ export class MusicToolError extends Error {
 export function toFail(e: unknown): MusicToolResult {
   if (e instanceof MusicToolError) return fail(e.code, e.message)
   if (e instanceof FlowMusicServiceError) return fail(e.code, e.message)
+  if (e instanceof LinkiiClientError) return fail(e.code, e.message)
   return fail("music_tool_error", `music_gen 工具执行异常：${(e as Error)?.message ?? String(e)}`)
 }
 
@@ -118,59 +122,69 @@ export function yue2FallbackReason(e: unknown): string {
     : message
 }
 
-// ── YuE2 瞬时故障不回落（2026-10-11 事故修复）────────────────────────────────
+// ── YuE2 瞬时故障：快速判败、交给回落链（2026-10-31 用户裁定）────────────────────
 //
-// 事故：YuE2 的**瞬时**故障（HTTP 429 busy／服务不可达／超时）被工具层当硬失败，静默
-// 换到付费通路 FlowMusic 出货并扣 1 币（累计 5 币全花在这种回落上）。用户口径＝音乐只走 YuE2。
+// 沿革：2026-10-11 曾因「瞬时故障被静默换到付费通路 FlowMusic 并扣费」改成瞬时不回落、退避
+// 重试同一通路后直接 fail。2026-10-31 生产事故（ses_e7211ef0dffe7S6KleX7YB4F1Q）：反向隧道断，
+// 三次 music_gen 全回 yue2_unreachable，agent 退成去掉歌词的器乐版、再拿 TTS 念白冒充演唱。
+// 用户裁定：病根是**静默**，不是回落本身——回落必须恢复，且回执里明说换了通路。
 //
-// 规则：YuE2 抛**瞬时**错误（判定依据＝music_yue2.ts 的 isYue2TransientFailure：429 busy／
-// 502-504／网络层／超时，与实作同源）→ 按退避**重试同一通路**，绝不触发付费回落；
-// 仍失败则如实 fail（错误码 yue2_busy／yue2_unreachable／yue2_timeout／yue2_unavailable），
-// 回执明写「未回落、未扣费」。YuE2 抛**硬**错误（语义错误等）→ 既有回落链保持不变。
-// 带 abc／翻唱的委托（hasScoreSemantics）本就从不回落，本次亦同受退避保护。
+// 规则：
+// - yue2_unreachable／yue2_timeout／yue2_unavailable：不重试同一通路（隧道断了 20 秒内不会好；
+//   超时重试＝重烧约 6 分钟 GPU，见 2026-10-05 超时风暴），首败即抛 Yue2TransientExhaustedError
+//   （attempts=1），由工具层并入回落链（回执带 fallback_from／fallback_reason／channel）。
+// - yue2_busy（HTTP 429，单槽被占）：保留 5s／15s 退避重试同一通路，仍忙再交给回落链。
+// - 判定依据＝music_yue2.ts 的 isYue2TransientFailure（与实作同源，不在此重判）；
+//   硬失败原样抛出，同走回落链。带 abc／翻唱的委托（hasScoreSemantics）仍不回落、如实 fail。
 
-/** 瞬时故障重试间隔（毫秒）：首败后 5s、再败后 15s＝最多重试 2 次（共 3 次尝试）。 */
-const YUE2_TRANSIENT_RETRY_DELAYS_MS = [5_000, 15_000] as const
+/** yue2_busy 的退避间隔（毫秒）：首败后 5s、再败后 15s＝最多重试 2 次（共 3 次尝试）。 */
+const YUE2_BUSY_RETRY_DELAYS_MS = [5_000, 15_000] as const
 
-/** 瞬时穷尽标记错误：工具层据此**不回落**、直接 fail（带诚实码与文案）。 */
+/** YuE2 瞬时失败（已按规则重试/判败）标记错误：工具层据此并入回落链；带乐谱语义时如实 fail。 */
 export class Yue2TransientExhaustedError extends Error {
   code: string
   attempts: number
-  constructor(code: string, attempts: number, message: string) {
+  /** 用户侧短句（不含端点、内部通路与部署措辞）；message 给模型，保留诊断细节。 */
+  humanMessage: string
+  constructor(code: string, attempts: number, message: string, humanMessage = "") {
     super(message)
     this.code = code
     this.attempts = attempts
+    this.humanMessage = humanMessage
     this.name = "Yue2TransientExhaustedError"
   }
 }
 
 /**
- * 生成一次 YuE2；抛出**瞬时**错误则按 YUE2_TRANSIENT_RETRY_DELAYS_MS 退避重试同一通路。
- * 瞬时穷尽 → 抛 Yue2TransientExhaustedError（工具层不回落、直接 fail）；
- * 硬失败 → 原样抛出（工具层走既有回落链）。
+ * 生成一次 YuE2。瞬时错误中只有 yue2_busy 按 YUE2_BUSY_RETRY_DELAYS_MS 退避重试同一通路；
+ * 不可达／超时／不可用首败即抛 Yue2TransientExhaustedError（工具层并入回落链）；
+ * 硬失败原样抛出（工具层同走回落链）。
  */
 export async function generateYue2TrackResilient(
   opts: GenerateYue2TrackOptions,
 ): Promise<GenerateYue2TrackResult> {
-  const attempts = YUE2_TRANSIENT_RETRY_DELAYS_MS.length + 1
   let lastError: unknown
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  let attempts = 0
+  for (;;) {
+    attempts += 1
     try {
       return await generateYue2Track(opts)
     } catch (e) {
       if (!isYue2TransientFailure(e)) throw e
       lastError = e
-      const delay = YUE2_TRANSIENT_RETRY_DELAYS_MS[attempt - 1]
+      if (yue2TransientCode(e) !== "yue2_busy") break
+      const delay = YUE2_BUSY_RETRY_DELAYS_MS[attempts - 1]
       if (delay === undefined) break
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
   const code = yue2TransientCode(lastError)
+  const retried = attempts > 1 ? `已退避重试 ${attempts - 1} 次仍失败` : "未重试同一通路"
   throw new Yue2TransientExhaustedError(
     code,
     attempts,
-    `YuE2 瞬时不可用（${code}：${yue2FallbackReason(lastError)}）；已按退避重试 ${attempts - 1} 次仍失败。` +
-      "按「音乐只走 YuE2」的要求，本次未回落 FlowMusic／Lyria、未扣费。请稍候（等本机当前生成结束或反向隧道恢复）后原样重试。",
+    `YuE2 瞬时不可用（${code}：${yue2FallbackReason(lastError)}）；${retried}。`,
+    `音乐生成服务暂时${code === "yue2_busy" ? "繁忙" : code === "yue2_timeout" ? "响应超时" : "连不上"}，本次未扣费。稍后重试即可。`,
   )
 }
 

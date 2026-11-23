@@ -4,6 +4,7 @@
 // ＋记帐——internal handlers banner/LedgerEntry/appendLedger/appendLedgerFor（原 index.ts 6370–6405 行；
 // 6407 起的 isLoopback 已归 auth-gw.ts，未带）。逐行原样搬运。
 import { appendFile } from "node:fs/promises"
+import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs"
 import type { SessionState } from "./types-gateway.ts"
 import { LEDGER_PATH, QUOTA_URL } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
@@ -93,6 +94,22 @@ export interface LedgerEntry {
   result_url?: string
   kind?: string
   event?: string
+  // H20（2026-11-04）：confirm/approved 的关联键。request_id＝工具层提交平台时的 Idempotency-Key
+  //（generation_job.idempotency_key），对账据此逐笔连到 job；旧行无此键＝未关联，不崩。
+  request_id?: string
+  workflow_id?: string
+  // H22（2026-11-04）：失败/退款行的来源标注。refund_source="platform_job"＝该 task 的持久回执终态
+  // 来自平台 generation_job.status='refunded'（平台仅在全额 refund operation applied 后才置此态）；
+  // refund_claim="caller"＋refund_status="unconfirmed"＝调用方声称已退、平台账未证实，行记 failed 不记 refunded。
+  refund_source?: string
+  refund_claim?: string
+  refund_status?: string
+  // H31（2026-11-04）：平台事后退款补记行的标注＝补记前回执的终态（failed/cancelled）；首个终态即 refunded 的行无此键。
+  refund_backfill_of?: string
+  // H34（2026-11-04）：audio done 行关联键（见 events-translate-types.ts AudioLedgerLink）；旧行无键＝未关联。
+  tool_session?: string
+  tool_call_id?: string
+  music_ref?: string
 }
 
 export async function appendLedger(entry: LedgerEntry): Promise<void> {
@@ -101,6 +118,109 @@ export async function appendLedger(entry: LedgerEntry): Promise<void> {
   } catch (e) {
     console.error(`[gateway] ledger append failed: ${e}`)
   }
+}
+
+// H22（2026-11-04）：done 每个 task 的每个成品只记一行（幂等）。旧去重只在单会话内按「原始 url」——同一 task
+// 经工具回执（相对 /v1/images/<id>/result）与 drain 投递（公开 URL）两路到达、或重启后重放时各记一行，
+// 对账把 cost_coins 加两次（生产 10867 行实测：两行都带费的同 task done 47 个，45 个同一 result_url）。
+// 键＝task_id＋最终 result_url：同 task 同成品只记一次；工作流节点重跑（同 node.id、新成品、新扣费）照旧各记。
+// 唯一放行重复：先到的那行没带费、后到的带费——补记带费行，避免把真实扣费漏出 ledger。
+// 只管 ledger 写入：SSE/画布/扣费路径一律不动。进程级表首用时从现有 ledger 尾部种子，跨重启也不重记。
+const LEDGER_DONE_CAP = 20000
+const LEDGER_SEED_BYTES = 8 * 1024 * 1024
+let ledgerDone: Map<string, boolean> | undefined
+const doneKey = (task_id: string, url: string) => `${task_id}\u0000${url}`
+function costed(cost: unknown): boolean { return typeof cost === "number" && cost > 0 }
+function doneMap(): Map<string, boolean> {
+  if (ledgerDone) return ledgerDone
+  const seen = new Map<string, boolean>()
+  try {
+    if (existsSync(LEDGER_PATH)) {
+      const fd = openSync(LEDGER_PATH, "r")
+      try {
+        const size = fstatSync(fd).size
+        const len = Math.min(size, LEDGER_SEED_BYTES)
+        const buf = Buffer.alloc(len)
+        readSync(fd, buf, 0, len, size - len)
+        const lines = buf.toString("utf-8").split("\n")
+        if (size > len) lines.shift() // 截断的首行
+        for (const line of lines) {
+          if (!line.includes('"done"')) continue
+          try {
+            const o = JSON.parse(line)
+            if (o?.event !== "done" || typeof o.task_id !== "string" || !o.task_id || typeof o.result_url !== "string") continue
+            const k = doneKey(o.task_id, o.result_url)
+            seen.set(k, seen.get(k) === true || costed(o.cost_coins))
+          } catch {}
+        }
+      } finally { closeSync(fd) }
+    }
+  } catch (e) {
+    console.error(`[gateway] ledger done-seed failed: ${e}`)
+  }
+  while (seen.size > LEDGER_DONE_CAP) seen.delete(seen.keys().next().value as string)
+  ledgerDone = seen
+  return seen
+}
+// true＝本次应写 done 行（同步占位，防两路并发同写）；无 task_id 或无 url 的行不去重（照旧写）。
+export function claimLedgerDone(task_id: string | undefined, result_url: string | undefined, cost_coins: unknown): boolean {
+  if (!task_id || !result_url) return true
+  const map = doneMap()
+  const k = doneKey(task_id, result_url)
+  const prev = map.get(k)
+  if (prev === true || (prev === false && !costed(cost_coins))) return false
+  map.delete(k)
+  map.set(k, costed(cost_coins))
+  if (map.size > LEDGER_DONE_CAP) map.delete(map.keys().next().value as string)
+  return true
+}
+
+// H31（2026-11-04）：refunded 行每个 task 只记一次（幂等）。平台事后退款（回执 failed/cancelled→refunded）由
+// /internal/job-completion 当场补记一行；drain 随后重渲染同一终态时再走 failureLedgerFields，须共用此表才不重记。
+// 种子＝ledger 尾部任一车道（含旧 generation 车道）已有的 refunded 行：已有 refunded 行的 task 不再补。
+// 回执 refunded 为终态（completeGenerationReceipt 不再改写），故按 task_id 一键即可；只管 ledger 写入，不动 SSE/扣费/退款。
+let ledgerRefunded: Set<string> | undefined
+function refundedSet(): Set<string> {
+  if (ledgerRefunded) return ledgerRefunded
+  const seen = new Set<string>()
+  try {
+    if (existsSync(LEDGER_PATH)) {
+      const fd = openSync(LEDGER_PATH, "r")
+      try {
+        const size = fstatSync(fd).size
+        const len = Math.min(size, LEDGER_SEED_BYTES)
+        const buf = Buffer.alloc(len)
+        readSync(fd, buf, 0, len, size - len)
+        const lines = buf.toString("utf-8").split("\n")
+        if (size > len) lines.shift() // 截断的首行
+        for (const line of lines) {
+          if (!line.includes('"refunded"')) continue
+          try {
+            const o = JSON.parse(line)
+            if (o?.event === "refunded" && typeof o.task_id === "string" && o.task_id) { seen.delete(o.task_id); seen.add(o.task_id) }
+          } catch {}
+        }
+      } finally { closeSync(fd) }
+    }
+  } catch (e) {
+    console.error(`[gateway] ledger refunded-seed failed: ${e}`)
+  }
+  while (seen.size > LEDGER_DONE_CAP) seen.delete(seen.values().next().value as string)
+  ledgerRefunded = seen
+  return seen
+}
+// H47（2026-11-04）：只读查询——该 task 是否已记过 refunded 行（本进程写过或 ledger 尾部种子里有）。不占位。
+export function ledgerHasRefunded(task_id: string | undefined): boolean {
+  return !!task_id && refundedSet().has(task_id)
+}
+// true＝本次应写 refunded 行（同步占位，防补记与 drain 两路并发同写）；无 task_id 不去重（照旧写）。
+export function claimLedgerRefunded(task_id: string | undefined): boolean {
+  if (!task_id) return true
+  const set = refundedSet()
+  if (set.has(task_id)) return false
+  set.add(task_id)
+  if (set.size > LEDGER_DONE_CAP) set.delete(set.values().next().value as string)
+  return true
 }
 
 export async function appendLedgerFor(state: SessionState, overrides: Partial<LedgerEntry>): Promise<void> {

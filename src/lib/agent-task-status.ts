@@ -1,8 +1,14 @@
 // 子代理／工具卡任务状态的单一语义表（0920 收口）。
 //
+// 用途（2026-10-27 分叉裁定）：本表 label 是**会话／工单语义**
+// （「已完成」「运行中」「生成中」）——供 tone／isFailure 判定与工单面。
+// **助理 UI 行尾／状态点 aria 不得读本表 label**；可见字与 aria 一律走
+// AgentToolCard STATUS_META 字面「完成」「运行中…」（AgentSubagentBar
+// STATUS_WORD 镜射同一套）。停≠失败：stopped＝中性灰「已停止」。
+//
 // 背景：任务状态（running/pending/ok/error/failed/interrupted/stopped…）的
 // 中文标签、色调、「是否算失败」曾散布在多个组件的字面比较里，酿成
-// 「人工停止被判失败」的假判定事故。本表是状态 → UI 语义的唯一权威：
+// 「人工停止被判失败」的假判定事故。本表是状态 → tone／isFailure 的权威：
 // 组件只查表，不再各自字面比较。
 //
 // 语义裁定（0920 暴君钦定）：
@@ -10,7 +16,6 @@
 //     自己的决定，标红失败是欺君。
 //   - interrupted（回合收尾时仍在 running 的诚实收尾）同样中性。
 //   - error/failed 才算失败；running/pending 是进行中。
-// 表内 label 照抄改前各组件的实际渲染值（渲染输出零变更的收口重构）。
 
 export type AgentTaskStatus =
   | "running"

@@ -3,6 +3,8 @@
 // 约束：verify 没有探测结果时只能报 no_row，不得宣称干净。
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import path from "node:path"
+import { artifactDownloadUrl, persistArtifactSnapshot } from "./artifact-delivery.ts"
+import { ARTIFACT_DELIVERY_MAX_BYTES } from "./artifact-store-types.ts"
 import { assetDir, defaultAssetUrl, localAssetPath, safeAssetKey, writeAssetFile } from "./artifact-store-paths.ts"
 import { contentTypeFor, expectedContentTypeForUrl, normalizeAssetId, normalizeExpectedVersion, normalizeVersion, optionalText, probeUrl, readRegularFile, requiredText, slugFor } from "./artifact-store-io.ts"
 import { assertHttpUrl, artifactRow, canReadArtifact, db, requireArtifact, requireOwner, requireReadAccess, resolveActor, resolvedVersion, rowView, sameIdentity, userExists, versionRow, withImmediate } from "./artifact-store-index.ts"
@@ -74,7 +76,7 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
   const ownerKey = sessionId
   const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
   // 约束：文件在进入事务前完整读取并校验；失败不得留下半条版本。
-  const file = readRegularFile(input.path)
+  const file = readRegularFile(input.path, ARTIFACT_DELIVERY_MAX_BYTES)
   const contentType = contentTypeFor(file.absolutePath, optionalText(input.contentType, "content_type", 256))
   const rawUrl = optionalText(input.url, "url", MAX_URL_LENGTH)
   const url = rawUrl ? assertHttpUrl(rawUrl) : null
@@ -96,12 +98,13 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
         )
         .run(sessionId, ownerKey, name, slugFor(sessionId, name), now, now)
       const artifactId = Number(inserted.lastInsertRowid)
+      persistArtifactSnapshot(artifactId, file.sha256, file.bytes, input.deliverySessionId)
       db()
         .query(
           `INSERT INTO artifact_versions(artifact_id,version,url,path,sha256,bytes,content_type,producer,verified_at,verify_status,created_at)
            VALUES(?,?,?,?,?,?,?,?,NULL,'unverified',?)`,
         )
-        .run(artifactId, 1, url, file.absolutePath, file.sha256, file.size, contentType, producer, now)
+        .run(artifactId, 1, url ?? (input.deliverySessionId ? artifactDownloadUrl(input.deliverySessionId, artifactId, 1) : null), file.absolutePath, file.sha256, file.size, contentType, producer, now)
       const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(artifactId) as any
       const view = rowView(artifact, versionRow(artifactId, 1))
       return { ...view, readBack: view, changed: true }
@@ -123,7 +126,8 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
     // P2-6：内容未变（sha256/bytes 相同）不升版本，但必须吸收新的 url/content_type/producer 元数据
     // 并回 changed:true——新 URL 不得被吞掉。
     if (live && String(live.sha256) === file.sha256 && Number(live.bytes) === file.size) {
-      const nextUrl = url ?? (typeof live.url === "string" ? live.url : null)
+      persistArtifactSnapshot(Number(existing.id), file.sha256, file.bytes, input.deliverySessionId)
+      const nextUrl = url ?? (input.deliverySessionId ? artifactDownloadUrl(input.deliverySessionId, Number(existing.id), liveVersion) : (typeof live.url === "string" ? live.url : null))
       const nextPath = file.absolutePath
       const nextType = contentType
       const nextProducer = producer ?? (typeof live.producer === "string" ? live.producer : null)
@@ -154,6 +158,7 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
     // P2-11：版本号单调——删除最新版后不得复用同号；epoch 记录历史最大版本。
     const epoch = Number(existing.version_epoch ?? 0)
     const nextVersion = Math.max(liveVersion, Number.isFinite(epoch) ? epoch : 0) + 1
+    persistArtifactSnapshot(Number(existing.id), file.sha256, file.bytes, input.deliverySessionId)
     // P1-3：owner_key 只由创建时决定，后续版本更新不得改写。
     db()
       .query("UPDATE artifacts SET latest_version=?,version_epoch=?,updated_at=? WHERE id=?")
@@ -163,7 +168,7 @@ export function publishArtifact(input: PublishArtifactInput): PublishArtifactRes
         `INSERT INTO artifact_versions(artifact_id,version,url,path,sha256,bytes,content_type,producer,verified_at,verify_status,created_at)
          VALUES(?,?,?,?,?,?,?,?,NULL,'unverified',?)`,
       )
-      .run(Number(existing.id), nextVersion, url, file.absolutePath, file.sha256, file.size, contentType, producer, now)
+      .run(Number(existing.id), nextVersion, url ?? (input.deliverySessionId ? artifactDownloadUrl(input.deliverySessionId, Number(existing.id), nextVersion) : null), file.absolutePath, file.sha256, file.size, contentType, producer, now)
     const artifact = db().query("SELECT * FROM artifacts WHERE id=?").get(Number(existing.id)) as any
     const view = rowView(artifact, versionRow(Number(existing.id), nextVersion))
     return { ...view, readBack: view, changed: true }
@@ -221,6 +226,16 @@ export function setAcl(input: SetAclInput): ArtifactVersionView {
   const live = versionRow(Number(updated.id), Number(updated.latest_version))
   return rowView(updated, live)
 }
+// 本平台交付下载地址走账号鉴权：不带凭证的 HEAD 探测必然 401，
+// 这不是「参数错误」，也不能据此宣称链接干净，只是拿不到匿名探测结果。
+function isPlatformAuthDownloadUrl(rawUrl: string): boolean {
+  try {
+    const { pathname } = new URL(rawUrl)
+    return /^\/api\/agent\/biz\/(?:sessions\/[^/]+\/artifacts\/\d+\/versions\/\d+\/download|.+\/download)\/?$/.test(pathname)
+  } catch {
+    return false
+  }
+}
 export async function verifyArtifact(input: VerifyArtifactInput): Promise<VerifyArtifactResult> {
   const sessionId = requiredText(input.sessionId, "session_id", MAX_NAME_LENGTH)
   const name = requiredText(input.name, "name", MAX_NAME_LENGTH)
@@ -274,9 +289,12 @@ export async function verifyArtifact(input: VerifyArtifactInput): Promise<Verify
     // SSRF 拦截等安全拒绝必须原样上报，不能混成普通 unreachable。
     reason = probe.error === "private_address" || probe.error === "unsupported_url_scheme" || probe.error === "too_many_redirects" || probe.error === "dns_resolution_failed"
       ? probe.error
-      : probe.status === null
-        ? "unreachable"
-        : "http_status"
+      : (probe.status === 401 || probe.status === 403) && isPlatformAuthDownloadUrl(view.url)
+        // 账号鉴权下载地址不带凭证探测必然 401：不是参数错误，也不能据此宣称链接干净。
+        ? "auth_required"
+        : probe.status === null
+          ? "unreachable"
+          : "http_status"
   } else if (probe.partial) {
     reason = "body_partial"
   } else if ((probe.bytes ?? 0) <= 0 && input.allowEmpty !== true) {

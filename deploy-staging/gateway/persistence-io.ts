@@ -28,10 +28,14 @@ export const PERSISTED_DATA_KEYS = [
   "vettingInjected",
   "userMemory",
   "profileOnboardingPending",
+  "memoryTemporary",
   "compact",
   "lastTurnActiveAt",
   "title", // 别名：记忆体 sessionTitle ↔ 落盘 title（见 hydrateRow）
   "tplDeviateToken",
+  "originalUserPrompt",
+  "pinnedConstraints",
+  "userRevisions",
 ] as const
 
 export function serialize(state: PersistableState): PersistedData {
@@ -57,10 +61,14 @@ export function serialize(state: PersistableState): PersistedData {
     vettingInjected: state.vettingInjected,
     userMemory: state.userMemory,
     profileOnboardingPending: state.profileOnboardingPending,
+    memoryTemporary: state.memoryTemporary === true ? true : undefined,
     compact: state.compact,
     lastTurnActiveAt: state.lastTurnActiveAt,
     title: state.sessionTitle ?? null,
     tplDeviateToken: state.tplDeviateToken ?? null,
+    originalUserPrompt: typeof state.originalUserPrompt === "string" ? state.originalUserPrompt : undefined,
+    pinnedConstraints: typeof state.pinnedConstraints === "string" ? state.pinnedConstraints : undefined,
+    userRevisions: Array.isArray(state.userRevisions) && state.userRevisions.length > 0 ? state.userRevisions : undefined,
   }
 }
 
@@ -102,6 +110,7 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     vettingInjected: d.vettingInjected === true,
     userMemory: d.userMemory,
     profileOnboardingPending: d.profileOnboardingPending === true,
+    memoryTemporary: d.memoryTemporary === true,
     compact: d.compact,
     lastTurnActiveAt: typeof d.lastTurnActiveAt === "number" ? d.lastTurnActiveAt : 0,
     sessionTitle: typeof d.title === "string" && d.title ? d.title : null,
@@ -115,6 +124,18 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
       const at = (t as { at?: unknown }).at
       return { token, at: typeof at === "number" && Number.isFinite(at) ? at : Date.now() }
     })(),
+    // 2026-10-28：老会话（无此键但已有事件）还原为 ""，防重启后 turnGen 归零把后续消息误钉成原始目标。
+    originalUserPrompt: typeof d.originalUserPrompt === "string"
+      ? d.originalUserPrompt
+      : (typeof d.eventCounter === "number" && d.eventCounter > 0 ? "" : undefined),
+    // 2026-11-02：硬约束句持久化（老会话无此键 → 有事件即 ""，不把后续消息误当首回合抽约束）。
+    pinnedConstraints: typeof d.pinnedConstraints === "string"
+      ? d.pinnedConstraints.slice(0, 2000)
+      : (typeof d.eventCounter === "number" && d.eventCounter > 0 ? "" : undefined),
+    // 形状防护：只收字串、每条 ≤401（含省略号）、最多 16 条（保留最新）。
+    userRevisions: Array.isArray(d.userRevisions)
+      ? d.userRevisions.filter((x): x is string => typeof x === "string" && x.length > 0).map((x) => x.slice(0, 401)).slice(-16)
+      : undefined,
   }
 }
 

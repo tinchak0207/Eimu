@@ -52,6 +52,12 @@ export class ImageBillingRevertedError extends Error {
 const AUTH_CACHE_TTL_MS = 30_000;
 const AUTH_CACHE_MAX_ENTRIES = 500;
 const authMicroCache = new Map<string, { expiresAt: number; user: ImageBillingUser }>();
+// 只合并无消费的并发身份读取，不改变额度检查、缓存寿命和扣费路径。
+// fetcher 独立分组，避免不同传输实现（含注入调用）共享响应。
+const authReads = new WeakMap<FetchLike, Map<string, Promise<{
+  ok: boolean;
+  result: GatewayResult<ImageBillingUser>;
+}>>>();
 
 // 网关计费调用的硬超时。没有它，退款请求在网关 hang 死时会一路耗到 Vercel 的
 // maxDuration 硬杀点——函数被杀则退款丢失、路由事件也一并蒸发，恰好是最需要
@@ -120,15 +126,33 @@ export async function authenticateImageUser(
     authMicroCache.delete(cacheKey);
   }
 
-  const response = await fetcher(`${getGatewayBaseUrl()}/api/user/self`, {
-    headers: {
-      Authorization: auth,
-      "New-Api-User": userId,
-    },
-    cache: "no-store",
-    signal: AbortSignal.timeout(GATEWAY_BILLING_TIMEOUT_MS),
-  });
-  const result = await readGatewayResult<ImageBillingUser>(response);
+  let reads = requiredQuota === 0 ? authReads.get(fetcher) : undefined;
+  if (requiredQuota === 0 && !reads) {
+    reads = new Map();
+    authReads.set(fetcher, reads);
+  }
+  let pending = reads?.get(cacheKey);
+  if (!pending) {
+    pending = (async () => {
+      const response = await fetcher(`${getGatewayBaseUrl()}/api/user/self`, {
+        headers: {
+          Authorization: auth,
+          "New-Api-User": userId,
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(GATEWAY_BILLING_TIMEOUT_MS),
+      });
+      return { ok: response.ok, result: await readGatewayResult<ImageBillingUser>(response) };
+    })();
+    reads?.set(cacheKey, pending);
+  }
+  let response: Awaited<typeof pending>;
+  try {
+    response = await pending;
+  } finally {
+    if (reads?.get(cacheKey) === pending) reads.delete(cacheKey);
+  }
+  const { result } = response;
 
   if (!response.ok || !result.success || !result.data?.id) {
     return { ok: false, status: 401, message: result.message ?? "登录已过期，请重新登录。" };
@@ -147,7 +171,7 @@ export async function authenticateImageUser(
     user: { ...result.data },
   });
 
-  return { ok: true, user: result.data, bypassBilling: false };
+  return { ok: true, user: { ...result.data }, bypassBilling: false };
 }
 
 async function adjustImageQuota(

@@ -1,0 +1,32 @@
+/* AgentBatchProgress：分母未知时的「进行中」流动光带（逐行复制
+   AgentBatchProgress.tsx:128-133 的 INDETERMINATE_CSS）。 */
+.agent-batch-indeterminate {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.agent-batch-indeterminate::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -45%;
+  width: 45%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(0, 122, 255, 0.3), rgba(0, 122, 255, 0.75), rgba(0, 122, 255, 0.3));
+  animation: agent-batch-indeterminate 1.3s ease-in-out infinite;
+}
+@keyframes agent-batch-indeterminate {
+  0% { left: -45%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-batch-indeterminate::after {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.25;
+  }
+}

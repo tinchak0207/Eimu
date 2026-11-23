@@ -1,0 +1,9 @@
+/* 生成历史页：只放 Tailwind 表达不了的平台细节。
+   版面一律走 Tailwind（与网页版手机端同一套 class）。 */
+
+/* 多选选中态（history.css:56-59 的 .hist-card.is-selected）。
+   page-shared.scss 只复制了卡片基底，选中描边落在本页作用域。 */
+.hist-card.is-selected {
+  border: 1px solid rgba(0, 122, 255, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 0 0 3px rgba(0, 122, 255, 0.14);
+}

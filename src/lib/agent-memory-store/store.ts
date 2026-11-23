@@ -1,7 +1,7 @@
 import { list } from "@/lib/blob-backend";
 import { CATALOG_JOURNAL_PREFIX, MEMORY_CATALOG_VERSION } from "./constants";
-import { bodyKey, catalogEntryKey, catalogKey, legacyPrivateBodyKey, memoryIdentity, revisionKey } from "./keys";
-import { readBlobJson, writeBlobText } from "./blob-io";
+import { bodyKey, catalogEntryKey, catalogKey, legacyPrivateBodyKey, legacyRevisionKey, memoryIdentity, revisionKey } from "./keys";
+import { deleteBlobAt, readBlobJson, writeBlobText } from "./blob-io";
 import { normalizeAuditIdList, normalizeAuditString, normalizeContributors, normalizeIsoField, normalizeLastOperation, normalizeProposed, normalizeSupersedes } from "./normalize";
 import type { AgentMemoryDoc, MemoryCatalog, MemoryCatalogEntry, MemoryScope } from "./types";
 
@@ -364,4 +364,30 @@ async function writeRevision(previous: AgentMemoryDoc): Promise<void> {
   await writeBlobText(key, JSON.stringify(previous));
 }
 
-export { withCatalogLock, findCatalogEntryByIdOrAlias, entryMatchesIds, loadCatalog, saveCatalog, writeCatalogEntry, readDoc, writeDoc, writeRevision, revisionsMemory };
+/** 历史世代硬删的上限（history 只读最近 50 代；这里放宽到 200 防遗漏）。 */
+const PURGE_MAX_REVISIONS = 200;
+
+/**
+ * 硬删一条文档的全部落盘痕迹：正文（新旧路径）、全部历史世代、逐文档 catalog 日志，
+ * 并清进程内缓存。聚合快照与 INDEX 由调用方在持锁段内统一收口。
+ * 返回是否全部删净（任一 blob 删除失败回 false，调用方如实上报，不假装删干净）。
+ */
+async function purgeDocBlobs(entry: MemoryCatalogEntry): Promise<boolean> {
+  const body = bodyKey(entry.scope, entry.ownerKey, entry.domain, entry.slug);
+  const keys = [body, catalogEntryKey(entry)];
+  if (entry.scope === "private") keys.push(legacyPrivateBodyKey(entry.ownerKey, entry.slug));
+  const ids = [entry.id, ...(entry.aliases ?? [])];
+  const top = Math.min(PURGE_MAX_REVISIONS, Math.max(1, Math.floor(entry.revision ?? 1)));
+  for (const id of ids) {
+    for (let revision = 1; revision <= top; revision += 1) {
+      keys.push(revisionKey(id, revision), legacyRevisionKey(id, revision));
+      revisionsMemory.delete(revisionKey(id, revision));
+      revisionsMemory.delete(legacyRevisionKey(id, revision));
+    }
+  }
+  docsMemory.delete(body);
+  const results = await Promise.all(keys.map((key) => deleteBlobAt(key)));
+  return results.every(Boolean);
+}
+
+export { purgeDocBlobs, withCatalogLock, findCatalogEntryByIdOrAlias, entryMatchesIds, loadCatalog, saveCatalog, writeCatalogEntry, readDoc, writeDoc, writeRevision, revisionsMemory };
