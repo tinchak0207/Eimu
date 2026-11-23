@@ -22,7 +22,7 @@ function Agent3DCardComponent({ item }: Agent3DCardProps) {
   return (
     <figure className="agent-rise">
       <div className="relative">
-        <Viewer asset={asset} density="inline" className="h-[min(420px,52dvh)]" />
+        <Viewer asset={asset} density="inline" />
         <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-full bg-black/55 px-2 py-0.5 text-ios-caption1 font-medium text-white/90 backdrop-blur-md">
           3D 模型
         </span>
