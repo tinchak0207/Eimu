@@ -2,9 +2,10 @@
 
 // Agent 3D 成品卡：model3d.done 的聊天呈现。内联即可旋转（赏阅 Scene3dSurface，
 // 与画布 scene_3d 卡、赏阅全屏同一个渲染器），点「放大」进全屏赏阅；GLB 可直接下载。
+// 带贴图的 GLB 常有几十 MB（混元3D 实测 79MB）：先出占位，点一下才下载并挂实时视口，不在聊天里偷偷吃流量。
 
-import { memo, useMemo } from "react";
-import { Coins, Download } from "lucide-react";
+import { memo, useMemo, useState } from "react";
+import { Box, Coins, Download } from "lucide-react";
 import type { AgentModel3dItem } from "@/lib/agent-chat-types";
 import { viewAssetFromModel3dItem } from "@/lib/viewer/from-items";
 import { Viewer } from "@/components/viewer/Viewer";
@@ -19,10 +20,24 @@ function formatCoins(n: number): string {
 
 function Agent3DCardComponent({ item }: Agent3DCardProps) {
   const asset = useMemo(() => viewAssetFromModel3dItem(item), [item]);
+  const [armed, setArmed] = useState(false);
   return (
     <figure className="agent-rise">
       <div className="relative">
-        <Viewer asset={asset} density="inline" />
+        {armed ? (
+          <Viewer asset={asset} density="inline" />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setArmed(true)}
+            className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-[#0b0f14] text-white/85 [touch-action:manipulation]"
+            aria-label="加载 3D 预览"
+          >
+            <Box className="h-8 w-8" aria-hidden="true" />
+            <span className="text-ios-subhead font-medium">点击查看 3D 模型</span>
+            <span className="text-ios-caption1 text-white/50">可拖动旋转 · 文件较大，点开才加载</span>
+          </button>
+        )}
         <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 rounded-full bg-black/55 px-2 py-0.5 text-ios-caption1 font-medium text-white/90 backdrop-blur-md">
           3D 模型
         </span>

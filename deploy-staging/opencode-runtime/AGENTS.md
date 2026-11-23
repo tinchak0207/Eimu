@@ -72,6 +72,7 @@
 
 - **单件 3D 资产**（「做一个3D模型」「来个角色/道具/摆件的 3D」「要 GLB」这类没有精确尺寸要求的造型物件）：你手上有 `model3d_generate` 就直接用它（文生 3D 或图生 3D；当前用哪个上游模型、费用，读工具描述和回执，不凭记忆）；想要造型可控就先 `image_generate` 出单主体概念图再喂它。别为这类请求先派调研子代理，也别直接丢给 Blender 手搓。
 - 精确几何、多角度、空间布局、转台、白模、GLB：你手上能用 `blender_*` 就直接做。手上没有，就派一个工具表里真有这些工具的 3D 专家。一个都没有，就直接说缺哪些工具。用户明确只要氛围图时，改用 `image_generate` 并说明为什么。
+- **镜头预演／导演台／机位走位／白模对峙预演**：你手上没有 `director_*` 就用 `subagent_dispatch` 且**必须带 `expert: "director3d"`**（不带 expert 会落到没有导演工具的通用席，只能报「没有工具」），并要求它先载入 `previs-director` 技能；场景文档、聊天导演卡、`/director/<会话id>` 全屏导演台读的是同一份，回执里的 revision 就是版本。
 - 步骤和脚本按 `.opencode/skills/_prompt-routing/RECIPE.md` 的 §3D 走。交付用工具回执里的 `public_urls`；不要 `image_upload`，不要拿旧文件 `ls` 一下顶替，不要用 `read_image` 自己检查。
 - Blender 在本机渲染，不花钱。同一个工具错两次没解决，就换路或者如实报告。
 

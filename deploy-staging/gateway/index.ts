@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import path from "node:path"
 import { loadUserSettings, sweepStaleRows } from "./persistence"
-import { initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection, composeNoteWakeInjection } from "./subagent"
+import { subagentParentState, initSubagent, recoverReworkRunsOnStartup, SUBAGENT_UNTRUSTED_PREFIX, renderSubagentNoteWakeContent, renderSubagentNoteQueueBlock, composeSubagentWakeInjection, composeNoteWakeInjection } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { setSteerTurnDeliverer } from "./steer-gw.ts"
 import { setQueuedUserMessageDeliverer } from "./queued-user-messages.ts"
@@ -57,12 +57,14 @@ import { startWorkflowWakeScanner } from "./workflow-gw.ts"
 
 // ─── Director（片3，2026-09-02）：/agent/v1/director 家族 ───
 // emitter/resolver 注入：复用现有 emitToSession 与 resolveSession，不发明新机制。
+// 子代理（director3d 等）的 opencode 子会话不在主 sessions 表：director_* 工具以子会话 id 调进来时
+// 回落到父会话（场景文档、导演卡、全屏导演台都按父会话 id 落账），否则 director_get_state 恒 404「session not found」。
 setDirectorEmitter((sid, name, data) => {
-  const st = resolveSession(sid)
+  const st = resolveSession(sid) ?? subagentParentState(sid)
   if (st) emitToSession(st, name, data)
 })
 setDirectorSessionResolver((sid) => {
-  const st = resolveSession(sid)
+  const st = resolveSession(sid) ?? subagentParentState(sid)
   return st ? { sessionId: st.sessionId, apiKey: st.apiKey } : undefined
 })
 
