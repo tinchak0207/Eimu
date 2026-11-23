@@ -16,6 +16,16 @@ import { dispatchAttempt, retryWithNextModel } from "./subagent-attempt.ts"
 import { recordToolTimeline, writeLiveLog, ensureTranscript } from "./subagent-live.ts"
 import { flushPendingChildMessages } from "./subagent-messages.ts"
 
+/** 音乐回调只能更新实际所属父会话的当前工作；原资产和账本不在这里改写。 */
+function isCurrentMusicProducer(run: SubagentRun, parent: { sessionId: string; opencodeSessionId: string }, child: string, partSession: unknown): boolean {
+  if (run.opencodeSessionId !== child || partSession !== child ||
+      run.parentGatewaySessionId !== parent.sessionId || run.parentOpencodeSessionId !== parent.opencodeSessionId) return false
+  const binding = generationParent(child)
+  const work = generationWorkControl(parent.sessionId)
+  return binding?.parent_gw === parent.sessionId && binding.parent_oc === parent.opencodeSessionId &&
+    binding.intent_version === work.version && !work.cancelled
+}
+
 /** 全局 tap 入口：子会话事件翻译成 subagent.* 帧发到父会话。 */
 export function handleSubagentEvent(event: any, opencodeSessionId: string): void {
   if (!deps) return
@@ -166,9 +176,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           //   { id: 子代理 run id, call_id, tool, status: "running"|"ok"|"failed" }
           // 工具名原样送（前端用既有 toolDisplayName() 转人话），不在此造中文、
           // 不送 state.title/input（可能含内部路径与命令原文，属于泄漏面）。
+          // 旧工作/错归属音乐回调不写当前画布、卡片或交付凭据；在途工具 bookkeeping 已在上方收尾。
+          if (part.tool === "music_gen" && !isCurrentMusicProducer(run, parentState, opencodeSessionId, part.sessionID)) break
           if (callId && st) {
-            const acceptedMusicPending = part.tool === "music_gen" && st === "completed" && isAcceptedLinkiiMusicPending(parseToolOutput(part.state?.output))
-            const frameStatus = acceptedMusicPending || st === "pending" || st === "running" ? "running" : st === "completed" ? "ok" : "failed"
+            const completedOutput = st === "completed" ? parseToolOutput(part.state?.output) : null
+            const acceptedMusicPending = part.tool === "music_gen" && isAcceptedLinkiiMusicPending(completedOutput)
+            const frameStatus = acceptedMusicPending || st === "pending" || st === "running" ? "running" : st === "completed" && completedOutput?.ok !== false ? "ok" : "failed"
             // 2026-10-14 协作总线（X8 工具三段）：工具时间线在有界表里就地维护
             // （Begin=首次见到该 callID，End=状态落终；同一 part 会多次 updated，故就地更新
             // 而不是追加），父模型不必再靠 SSE 帧拼装才知道子代理在跑什么工具。
@@ -231,18 +244,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           if (parsedOut && !isAcceptedLinkiiMusicPending(parsedOut) && typeof parsedOut.task_id === "string" && parsedOut.task_id) {
             attachCanvasTask(parentState, childCallId, parsedOut.task_id)
           }
-          const media = collectToolOutputMediaUrls(parsedOut)
+          // 失败回执里即便带着参考/上游 URL，也不能当成这次音乐的成功产物发卡。
+          const media = collectToolOutputMediaUrls(part.tool === "music_gen" && parsedOut?.ok === false ? null : parsedOut)
           // Expert 真出曲的回执属于父会话当前工作，不能只出音频卡却漏掉完成主张的凭据。
           // 身份取自耐久父子绑定与当前工作代；旧代、已撤销、失败、pending、shell/读档均不计。
-          if (part.tool === "music_gen" && parsedOut?.ok === true && media.audio.length > 0 &&
-              run.opencodeSessionId === opencodeSessionId && part.sessionID === opencodeSessionId &&
-              run.parentGatewaySessionId === parentState.sessionId && run.parentOpencodeSessionId === parentState.opencodeSessionId) {
-            const binding = generationParent(opencodeSessionId)
-            const work = generationWorkControl(parentState.sessionId)
-            if (binding?.parent_gw === parentState.sessionId && binding.parent_oc === parentState.opencodeSessionId &&
-                binding.intent_version === work.version && !work.cancelled) {
-              for (const audio of media.audio) recordDeliveryEvidence(parentState, "music_gen", { url: audio.url })
-            }
+          if (part.tool === "music_gen" && parsedOut?.ok === true && media.audio.length > 0) {
+            for (const audio of media.audio) recordDeliveryEvidence(parentState, "music_gen", { url: audio.url })
           }
           for (const c of media.video) {
             if (!run.artifacts.some((a) => a.url === c.url)) {
