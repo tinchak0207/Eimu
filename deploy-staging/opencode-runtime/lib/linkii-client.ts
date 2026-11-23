@@ -566,7 +566,9 @@ export async function linkiiJson<T = any>(
     path,
     (token) => {
       const headers = new Headers(reqInit.headers ?? {})
-      headers.set("Authorization", `Bearer ${token}`)
+      headers.delete("Authorization")
+      headers.set("X-SXKJ-AIGC-Token", `Bearer ${token}`)
+      if (!headers.has("X-Locale")) headers.set("X-Locale", "zh-MO")
       if (!headers.has("Accept")) headers.set("Accept", "application/json")
       if (reqInit.body !== undefined && typeof reqInit.body === "string" && !headers.has("Content-Type")) {
         headers.set("Content-Type", "application/json")
@@ -599,7 +601,8 @@ export async function linkiiUpload(
       return {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          "X-SXKJ-AIGC-Token": `Bearer ${token}`,
+          "X-Locale": "zh-MO",
           Accept: "application/json",
         },
         body: form,

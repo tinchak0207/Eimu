@@ -270,6 +270,7 @@ export default tool({
           "/web/ai/modeling/create",
           {
             method: "POST",
+            timeoutMs: 60_000,
             body: JSON.stringify({
               deploymentId: HUNYUAN_DEPLOYMENT_ID,
               prompt: promptToSend,
@@ -287,8 +288,9 @@ export default tool({
           context.abort,
         )
 
-        const taskId = createRes?.data?.id
-        const creationId = createRes?.data?.creationId
+        const createData = createRes?.data && typeof createRes.data === "object" ? createRes.data : createRes
+        const taskId = createData?.id ?? createData?.taskId
+        const creationId = createData?.creationId ?? createData?.workId
         if (taskId == null || taskId === "" || creationId == null || creationId === "") {
           throw new Error(`混元3D 提交任务失败（${createRes?.code ?? "unknown"}）：${createRes?.message || JSON.stringify(createRes).slice(0, 200)}`)
         }

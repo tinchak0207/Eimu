@@ -219,6 +219,23 @@ function classifyLinkiiBusinessFailure(
 ): SupplierRequestError {
   const codeText = code !== undefined && code !== null ? String(code).trim() : "";
   const combined = `${codeText} ${message}`;
+  const non2xxUpstreamStatus = (fallback: number) => (httpStatus >= 400 ? httpStatus : fallback);
+  if (
+    codeText === "C9999" &&
+    /(正在生成中|請等待完成|请等待完成|等待完成後再提交|等待完成后再提交|already generating|in progress)/i.test(
+      message,
+    )
+  ) {
+    return new SupplierRequestError(
+      message || "Linkii drawing slot busy (C9999).",
+      503,
+      "10",
+      rawBody,
+      "overloaded",
+      providerTaskId,
+      503,
+    );
+  }
   if (codeText === "C1015" || httpStatus === 429) {
     return new SupplierRequestError(
       message || "Linkii rate limited.",
@@ -227,7 +244,7 @@ function classifyLinkiiBusinessFailure(
       rawBody,
       "rate_limited",
       providerTaskId,
-      httpStatus,
+      non2xxUpstreamStatus(429),
     );
   }
   if (
@@ -243,7 +260,7 @@ function classifyLinkiiBusinessFailure(
       rawBody,
       "quota_exhausted",
       providerTaskId,
-      httpStatus,
+      non2xxUpstreamStatus(402),
     );
   }
   if (
@@ -259,7 +276,7 @@ function classifyLinkiiBusinessFailure(
       rawBody,
       "content_rejected",
       providerTaskId,
-      httpStatus,
+      non2xxUpstreamStatus(400),
     );
   }
   const normalizedStatus = httpStatus >= 400 && httpStatus <= 499 ? httpStatus : 502;
@@ -270,7 +287,7 @@ function classifyLinkiiBusinessFailure(
     rawBody,
     undefined,
     providerTaskId,
-    httpStatus,
+    non2xxUpstreamStatus(normalizedStatus),
   );
 }
 
@@ -767,6 +784,7 @@ async function submitDrawing(supplier: SupplierRecord, input: SupplierGeneration
         aspectRatio,
         images,
       }),
+      timeoutMs: 240_000,
     }),
     { signal: input.signal },
   );
@@ -780,6 +798,49 @@ async function submitDrawing(supplier: SupplierRecord, input: SupplierGeneration
 
   const providerTaskId = `drawing:${workId}`;
   await input.onProviderTaskSubmitted?.(providerTaskId, "linkii");
+
+  if (createData) {
+    const createStatus = String(createData.status ?? "").trim().toLowerCase();
+    if (createStatus === "failed" || createStatus === "abandoned") {
+      const errorMessage = extractWorkError(createData, "Linkii drawing failed");
+      throw classifyLinkiiBusinessFailure(errorMessage, 502, JSON.stringify(createData).slice(0, 500), providerTaskId);
+    }
+
+    const isPendingStatus =
+      createStatus === "running" ||
+      createStatus === "pending" ||
+      createStatus === "processing" ||
+      createStatus === "queued";
+    const createUrl = isPendingStatus ? "" : extractWorkMediaUrl(createData, "image", mediaBaseUrl);
+
+    if (createStatus === "completed" || createUrl) {
+      if (!createUrl) {
+        throw new SupplierRequestError(
+          `Linkii drawing work ${workId} completed with empty result URL.`,
+          502,
+          undefined,
+          JSON.stringify(createData).slice(0, 500),
+          "empty_result",
+          providerTaskId,
+        );
+      }
+      return {
+        base64: null,
+        url: createUrl,
+        providerTaskId,
+        providerRequestId: workId,
+        httpStatus: 200,
+        endpointLabel: supplier.label,
+        supplierModelId: upstreamModel,
+        evidence: {
+          adapter: "linkii",
+          supplierId: supplier.id,
+          failureDomain: supplier.failureDomain,
+          deploymentId,
+        },
+      };
+    }
+  }
 
   const deadline = Date.now() + DRAWING_MAX_WAIT_MS;
   while (Date.now() < deadline) {
