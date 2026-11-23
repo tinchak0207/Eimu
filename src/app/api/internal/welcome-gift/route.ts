@@ -16,6 +16,7 @@ import {
 import { generationDatabaseConfigured } from "@/lib/generation-core/database";
 import {
   WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN,
+  MINIAPP_WELCOME_GIFT_QUOTA,
   backfillWelcomeGifts,
   grantWelcomeGift,
   createPostgresWelcomeGiftStore,
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     const userId = typeof body.userId === "number" ? body.userId : Number.NaN;
     const op = body.op ?? "grant";
-    if ((op !== "grant" && op !== "noticed" && op !== "modal_seen") || !Number.isInteger(userId) || userId <= 0) {
+    if ((op !== "grant" && op !== "grant_miniapp" && op !== "noticed" && op !== "modal_seen") || !Number.isInteger(userId) || userId <= 0) {
       return NextResponse.json({ ok: false, message: "缺少合法的 op 或 userId。" }, { status: 400 });
     }
     if (op === "noticed") {
@@ -78,7 +79,9 @@ export async function POST(req: NextRequest) {
       const updated = await createPostgresWelcomeGiftStore().markModalSeen(userId);
       return NextResponse.json({ ok: true, updated });
     }
-    const result = await grantWelcomeGift(userId, productionWelcomeGiftDeps());
+    const deps = productionWelcomeGiftDeps();
+    // 只认 HMAC 已验证的服务端操作，绝不采信 body.amount/body.source。
+    const result = await grantWelcomeGift(userId, op === "grant_miniapp" ? { ...deps, amountQuota: MINIAPP_WELCOME_GIFT_QUOTA } : deps);
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     console.error("[internal/welcome-gift] failed", error);

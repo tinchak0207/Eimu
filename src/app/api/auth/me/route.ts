@@ -6,9 +6,9 @@ import { sanitizeUpstreamMessage } from "@/lib/proxy";
 import { isSessionTokenRevoked, lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
 import {
-  WELCOME_GIFT_IMAGE_COUNT,
   ackWelcomeGiftModalSeenViaRelay,
   welcomeGiftModalCopy,
+  welcomeGiftImageCount,
   type WelcomeGiftResult,
 } from "@/lib/welcome-gift";
 import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
@@ -55,8 +55,8 @@ const welcomeGiftModalMemo = new Map<number, WelcomeGiftModal | null>();
 
 /** 由 grant 结果推导弹窗内容（币数/张数/文案皆来自 welcome-gift 的具名常量）。 */
 function welcomeGiftModalOf(result: WelcomeGiftResult): WelcomeGiftModal {
-  const copy = welcomeGiftModalCopy(result.coins, WELCOME_GIFT_IMAGE_COUNT);
-  return { pending: true, coins: result.coins, images: WELCOME_GIFT_IMAGE_COUNT, ...copy };
+  const copy = welcomeGiftModalCopy(result.coins, welcomeGiftImageCount(result.coins));
+  return { pending: true, coins: result.coins, images: welcomeGiftImageCount(result.coins), ...copy };
 }
 
 /** 记住本轮拿到的弹窗状态；本轮没拿到答案（null）时保留上一轮的记忆。 */

@@ -8,9 +8,9 @@ import {
   ackWelcomeGiftNoticeViaRelay,
   grantWelcomeGiftViaRelay,
   welcomeGiftNotice,
+  welcomeGiftImageCount,
   type WelcomeGiftResult,
 } from "@/lib/welcome-gift";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export interface WelcomeGiftLoginDeps {
   grant?: typeof grantWelcomeGiftViaRelay;
@@ -32,7 +32,7 @@ export async function ensureWelcomeGiftOnLogin(
 
     const notify = deps.notify ?? ((id: number, notice: { title: string; body: string }) => createNotification(id, notice));
     try {
-      await notify(userId, welcomeGiftNotice(result.amountQuota / QUOTA_PER_COIN));
+      await notify(userId, welcomeGiftNotice(result.coins, welcomeGiftImageCount(result.coins)));
     } catch (error) {
       console.error(`[welcome-gift] 站内通知写入失败 user=${userId}：${error instanceof Error ? error.message : String(error)}`);
       return result;
