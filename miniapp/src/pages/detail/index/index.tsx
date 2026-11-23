@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Image, Text, View, Video } from '@tarojs/components'
+import { Audio, Button, Image, Text, View, Video } from '@tarojs/components'
 import Taro, { useLoad, useShareAppMessage } from '@tarojs/taro'
 import { ApiError, request } from '../../../lib/request'
 import { ensureLogin } from '../../../lib/session'
@@ -45,13 +45,14 @@ function modelLabel(modelId: string): string {
 interface MediaView {
   url: string
   isVideo: boolean
+  isAudio: boolean
 }
 
 /** 成品地址：取第一个带 url 的结果；视频按 mimeType 判定，不看 kind（avatar/lipsync 也出片）。 */
 function mediaOf(task: GenerationTask | null): MediaView | null {
   const result = task?.results?.find((item) => Boolean(item.url))
   if (!result?.url) return null
-  return { url: result.url, isVideo: (result.mimeType || '').startsWith('video/') }
+  return { url: result.url, isVideo: (result.mimeType || '').startsWith('video/'), isAudio: (result.mimeType || '').startsWith('audio/') }
 }
 
 export default function DetailPage() {
@@ -89,6 +90,15 @@ export default function DetailPage() {
   }, [])
 
   useLoad((options) => {
+    if (options?.historyAudio === '1') {
+      const source = Taro.getStorageSync('eimu_history_audio_preview') as { url?: string; prompt?: string } | undefined
+      Taro.removeStorageSync('eimu_history_audio_preview')
+      if (source?.url) {
+        setTask({ taskId: '', modelId: '', kind: 'tts', status: 'succeeded', prompt: source.prompt, requestedCount: 1, completedCount: 1, createdAt: '', updatedAt: '', results: [{ resultId: '', taskId: '', outputIndex: 0, url: source.url, mimeType: 'audio/mpeg', width: null, height: null }] })
+        setLoading(false)
+        return
+      }
+    }
     const id = options?.id ? String(options.id) : ''
     taskIdRef.current = id
     if (!id) {
@@ -115,10 +125,10 @@ export default function DetailPage() {
     const prompt = (task?.prompt ?? '').trim()
     const title = prompt ? prompt.slice(0, 20) : 'Eimu 作品'
     // 分享卡只吃图片；视频作品没有可用缩略图时交给微信默认截图。
-    const imageUrl = media && !media.isVideo ? media.url : undefined
+    const imageUrl = media && !media.isVideo && !media.isAudio ? media.url : undefined
     return {
       title,
-      path: task ? `${DETAIL_ROUTE}?id=${encodeURIComponent(task.taskId)}` : '/pages/index/index',
+      path: task?.taskId ? `${DETAIL_ROUTE}?id=${encodeURIComponent(task.taskId)}` : '/pages/agent/index',
       ...(imageUrl ? { imageUrl } : {}),
     }
   })
@@ -135,7 +145,7 @@ export default function DetailPage() {
   }
 
   function handlePreview() {
-    if (!media || media.isVideo) return
+    if (!media || media.isVideo || media.isAudio) return
     Taro.previewImage({ urls: [media.url], current: media.url })
   }
 
@@ -149,10 +159,12 @@ export default function DetailPage() {
       }
       if (media.isVideo) {
         await Taro.saveVideoToPhotosAlbum({ filePath: download.tempFilePath })
+      } else if (media.isAudio) {
+        await Taro.shareFileMessage({ filePath: download.tempFilePath, fileName: 'eimu-audio.mp3' })
       } else {
         await Taro.saveImageToPhotosAlbum({ filePath: download.tempFilePath })
       }
-      Taro.showToast({ title: '已保存到相册', icon: 'success' })
+      Taro.showToast({ title: media.isAudio ? '文件已交给微信分享' : '已保存到相册', icon: 'success' })
     } catch (err) {
       const detail = (err as { errMsg?: string; message?: string } | null)
       const message = detail?.errMsg || detail?.message || '保存失败，请稍后重试'
@@ -234,7 +246,7 @@ export default function DetailPage() {
         <>
           <View className='card detail__media-card'>
             {media ? (
-              media.isVideo ? (
+              media.isAudio ? <Audio src={media.url} controls name={task.prompt?.slice(0, 40) || '音乐作品'} /> : media.isVideo ? (
                 <Video
                   className='detail__video'
                   src={media.url}
@@ -324,11 +336,11 @@ export default function DetailPage() {
               disabled={!media || saving}
               onClick={handleSave}
             >
-              {media?.isVideo ? '保存视频' : '保存到相册'}
+              {media?.isAudio ? '分享音频文件' : media?.isVideo ? '保存视频' : '保存到相册'}
             </Button>
-            <Button className='btn btn--ghost detail__action' openType='share'>
+            {task.taskId ? <Button className='btn btn--ghost detail__action' openType='share'>
               分享
-            </Button>
+            </Button> : null}
           </View>
         </>
       ) : null}

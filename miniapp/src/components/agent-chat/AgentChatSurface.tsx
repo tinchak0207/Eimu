@@ -4,6 +4,7 @@ import { activateAgentAssetPack, listAgentAssets, type AgentAssetPack, type Agen
 import { AgentChatPanel, type AgentChatPanelProps } from './AgentChatPanel'
 import { AgentSessionList } from './AgentSessionList'
 import { Icon } from './icons'
+import { useTemporaryChat } from '../../lib/agent-temporary-chat'
 
 /**
  * 聊天区外壳。结构逐行复制自 src/components/agent-chat/AgentChatSurface.tsx:336-345
@@ -33,6 +34,7 @@ export interface AgentHistoryPanelProps {
 
 export type AgentChatSurfaceProps = AgentChatPanelProps & {
   onOpenProjects: () => void
+  onStartTemporary?: () => void
   /**
    * 抽屉「我的资产」的受控开关：值变化且 >0 时打开资产浮层。
    * 顶栏按钮行为不变（仍走 toggleAssets）。
@@ -44,10 +46,12 @@ export type AgentChatSurfaceProps = AgentChatPanelProps & {
 
 export function AgentChatSurface({
   onOpenProjects,
+  onStartTemporary,
   openAssetsSignal = 0,
   history,
   ...panelProps
 }: AgentChatSurfaceProps) {
+  const temporaryChat = useTemporaryChat(panelProps.sessionId)
   // null = 未加载，[] = 已加载但为空（AgentChatSurface.tsx:82-85）。
   const [showAssets, setShowAssets] = useState(false)
   const [assetPacks, setAssetPacks] = useState<AgentAssetPack[] | null>(null)
@@ -159,6 +163,8 @@ export function AgentChatSurface({
           {/* 右簇：max-sm:contents 后唯一的项目钮成为外层 flex item，靠 justify-between
               落在最左（与 p1 顶栏下方那颗文件夹图标同位置）。 */}
           <View className='ml-auto flex items-center gap-0.5 max-sm:contents'>
+            {temporaryChat.temporary ? <Text className='rounded-full bg-ios-blue/[0.12] px-2 py-0.5 text-ios-caption2 font-medium text-ios-blue'>临时对话 · 不记忆</Text> : null}
+            {onStartTemporary ? <View className='flex min-h-11 items-center justify-center rounded-full px-2 text-ios-caption1 text-foreground/45' onClick={onStartTemporary}><Text>临时对话</Text></View> : null}
             <View
               className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground/45'
               onClick={onOpenProjects}

@@ -136,49 +136,16 @@ export function replacePromptStyleSuffix(
   return nextSuffix ? insertPromptSnippet(promptWithoutStyle, nextSuffix) : promptWithoutStyle
 }
 
-/**
- * 模型展示元数据（厂商 / 推荐角标 / 单价）。
- *
- * 真源：src/lib/generation-model-catalog/catalog.ts
- *   gpt-image-2            :76-84   imageCredits 1k/2k/4k = 10/20/80
- *   gemini-3.1-flash-image :85-97   imageCredits 1k/2k/4k = 20/20/30
- *   pixai-tsubaki2         :424-436 imageCredits 1k = 0.01
- * 计价换算同 src/lib/generation-model-catalog/pricing.ts:33-49：币 = credits / 10。
- * miniapp/src/lib/models.ts 只开放这三个模型（本阶段硬编码，不做动态拉取）。
- */
-export interface ModelMeta {
-  vendor: string
-  promotionTag?: string
-  credits: Record<string, number>
-}
-
-export const MODEL_META: Record<string, ModelMeta> = {
-  'gpt-image-2': {
-    vendor: 'OpenAI',
-    credits: { '1k': 10, '2k': 20, '4k': 80 },
-  },
-  'gemini-3.1-flash-image': {
-    vendor: 'Google',
-    credits: { '1k': 20, '2k': 20, '4k': 30 },
-  },
-  'pixai-tsubaki2': {
-    vendor: 'PixAI',
-    promotionTag: '推荐',
-    credits: { '1k': 0.01 },
-  },
-}
-
-/** 同 pricing.ts:33-49 的 generationCoins（没有费率表时回 1 币兜底）。 */
-export function modelCoins(modelId: string, resolution: string): number {
-  const meta = MODEL_META[modelId]
-  const credits = meta?.credits[resolution]
-  if (credits === undefined) return 1
-  return Math.round((credits / 10) * 100000) / 100000
-}
-
-/** 同 pricing.ts:51-64 的 modelPriceLabel（图片分支）。 */
-export function modelPriceLabel(modelId: string, resolution: string): string {
-  return `${modelCoins(modelId, resolution)} 币/张`
+/** 与网页版模型目录同源；价格实时覆写由 syncModelPricing 注入。 */
+export { generationCoins as modelCoins } from '../../lib/generation-model-catalog/pricing'
+import { GENERATION_MODEL_CATALOG } from '../../lib/generation-model-catalog/catalog'
+import { modelPriceLabel as catalogPriceLabel } from '../../lib/generation-model-catalog/pricing'
+import type { OutputResolution } from '../../lib/generation-model-catalog/types'
+export const MODEL_META = GENERATION_MODEL_CATALOG
+export function modelPriceLabel(modelId: string, resolution: string, generateAudio?: boolean): string {
+  const model = GENERATION_MODEL_CATALOG[modelId]
+  const supportedResolution = model?.resolutions.includes(resolution as OutputResolution) ? resolution : model?.defaultResolution
+  return catalogPriceLabel(modelId, { resolution: supportedResolution as OutputResolution, generateAudio: generateAudio ?? model?.defaultAudio })
 }
 
 /** 同 src/components/GenerationProgressBar.tsx:4-21（时长与曲线一字不动）。 */

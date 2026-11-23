@@ -45,7 +45,7 @@ export type AgentItem =
       totalBytes?: number
       truncated?: boolean
     }
-  | { kind: 'image'; id: string; url: string; costCoins?: number; taskId?: string; seq: number }
+  | { kind: 'image'; id: string; url: string; costCoins?: number; taskId?: string; seq: number; recipe?: { prompt?: string; model?: string; size?: string; lora?: string } }
   | {
       kind: 'video'
       id: string
@@ -189,4 +189,65 @@ export const THINKING_LEVEL_HINTS: Record<ThinkingLevel, string> = {
   medium: '速度与质量兼顾',
   high: '先充分思考再动手，更全面',
   extreme: '最高质量、开启野兽模式',
+}
+
+export interface AgentSubagentRunSummary {
+  id: string;
+  label: string;
+  agent: string;
+  status: "running" | "ok" | "error" | "stopped";
+  started_at: number;
+  last_activity_at: number;
+  elapsed_ms: number;
+  silent_ms: number;
+  tool?: string;
+  pending_tools?: number;
+  tools: AgentSubagentRunTool[];
+  artifacts: AgentSubagentRunArtifact[];
+  summary?: string;
+  transcript: AgentSubagentRunTranscriptInfo;
+}
+
+/**
+ * 转录流里的一行。字段随 k 变化，形状即网关合同：
+ * text→s（长正文切块时续块带 cont:true，首块不带）；
+ * tool→id,name,status；artifact→kind,url；note→name,s；end→status,summary。
+ */
+export type AgentSubagentTranscriptEntry =
+  | { t: number; k: "meta" }
+  | { t: number; k: "text"; s: string; cont?: boolean }
+  | { t: number; k: "tool"; id: string; name: string; status: "running" | "ok" | "failed" }
+  | { t: number; k: "artifact"; kind: string; url: string }
+  | { t: number; k: "note"; name: string; s: string }
+  | { t: number; k: "end"; status: "running" | "ok" | "error" | "stopped"; summary?: string };
+
+/** 转录分页回应：续拉只认 next_offset，eof 为真后不再请求。 */
+export interface AgentSubagentTranscriptPage {
+  object: string;
+  run_id: string;
+  entries: AgentSubagentTranscriptEntry[];
+  next_offset: number;
+  truncated: boolean;
+  eof: boolean;
+  size: number;
+}
+export interface AgentSubagentRunTool {
+  call_id: string;
+  tool: string;
+  status: "running" | "ok" | "failed";
+  at: number;
+  ended_at?: number;
+}
+
+/** 子代理产出的附件引用（列表端点 artifacts[]）。 */
+export interface AgentSubagentRunArtifact {
+  kind: string;
+  url: string;
+}
+
+/** 转录可用性（列表端点 transcript）。 */
+export interface AgentSubagentRunTranscriptInfo {
+  available: boolean;
+  bytes: number;
+  truncated: boolean;
 }

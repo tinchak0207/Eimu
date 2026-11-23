@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Text, Video, View } from '@tarojs/components'
 import { cn } from '../../lib/cn'
+import { saveAgentMediaToHistory, downloadAgentMedia } from '../../lib/agent-media-history'
 import { Icon } from './icons'
 import { AgentRerunMenu } from './AgentRerunMenu'
 import type { AgentItem } from './types'
@@ -135,11 +136,11 @@ export function AgentVideoCard({ item, onSaveToLibrary, onDownload, onRerun, onV
   }, [])
 
   const handleSave = useCallback(async () => {
-    if (!onSaveToLibrary || saveState === 'loading' || saveState === 'saved') return
+    if (saveState === 'loading' || saveState === 'saved') return
     setSaveState('loading')
     let ok = false
     try {
-      ok = await onSaveToLibrary(item)
+      ok = onSaveToLibrary ? await onSaveToLibrary(item) : await saveAgentMediaToHistory(item)
     } catch {
       ok = false
     }
@@ -151,11 +152,11 @@ export function AgentVideoCard({ item, onSaveToLibrary, onDownload, onRerun, onV
   }, [item, onSaveToLibrary, saveState, flash])
 
   const handleDownload = useCallback(async () => {
-    if (!onDownload || downState === 'loading') return
+    if (downState === 'loading') return
     setDownState('loading')
     let ok = false
     try {
-      ok = await onDownload(item)
+      ok = onDownload ? await onDownload(item) : await downloadAgentMedia(item)
     } catch {
       ok = false
     }
@@ -238,7 +239,7 @@ export function AgentVideoCard({ item, onSaveToLibrary, onDownload, onRerun, onV
       <View className='mt-1 flex flex-wrap gap-1 px-3.5 pb-3'>
         <VideoAction
           label={saveState === 'saved' ? '已存' : saveState === 'failed' ? '未存入' : '存图库'}
-          disabled={!onSaveToLibrary || saveState === 'loading' || saveState === 'saved'}
+          disabled={saveState === 'loading' || saveState === 'saved'}
           tone={saveState === 'failed' ? 'danger' : undefined}
           onClick={() => void handleSave()}
         >
@@ -252,7 +253,7 @@ export function AgentVideoCard({ item, onSaveToLibrary, onDownload, onRerun, onV
         </VideoAction>
         <VideoAction
           label={downState === 'failed' ? '失败' : '下载'}
-          disabled={!onDownload || downState === 'loading'}
+          disabled={downState === 'loading'}
           tone={downState === 'failed' ? 'danger' : undefined}
           onClick={() => void handleDownload()}
         >
@@ -272,7 +273,7 @@ export function AgentVideoCard({ item, onSaveToLibrary, onDownload, onRerun, onV
         <VideoLightbox
           src={item.url}
           onClose={() => setViewerOpen(false)}
-          onDownload={onDownload ? () => void onDownload(item) : undefined}
+          onDownload={() => void handleDownload()}
         />
       ) : null}
     </View>

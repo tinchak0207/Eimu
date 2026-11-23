@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View } from '@tarojs/components'
+import { Text, View } from '@tarojs/components'
 import Taro, { useUnload } from '@tarojs/taro'
 import {
   abortAgentSession,
@@ -21,6 +21,8 @@ import {
   saveAgentThinkingLevel,
   sendAgentMessage,
   startAgentPolling,
+  steerAgentSession,
+  readCachedAgentSettings,
   type AgentPollingHandle,
   type AgentSessionSummary,
   type AgentSseEvent,
@@ -29,10 +31,11 @@ import {
 } from '../../lib/agent'
 import { createFrameBatcher, type FrameBatcher } from '../../lib/agent-frame-batch'
 import { clearPersisted, loadPersisted, savePersisted } from '../../lib/agent-persistence'
+import { setTemporaryArmed } from '../../lib/agent-temporary-chat'
 import { ApiError } from '../../lib/request'
-import { ensureLogin, fetchMe, type MiniUser } from '../../lib/session'
+import { clearSession, ensureLogin, type MiniUser } from '../../lib/session'
 import { QUOTA_PER_COIN } from '../../lib/quota'
-import { Navbar } from '../../components/Navbar'
+import { getNavbarHeight, Navbar } from '../../components/Navbar'
 import { MobileDrawer } from '../../components/MobileDrawer'
 import { PageBoundary } from '../../components/pages/PageBoundary'
 import { AgentChatSurface } from '../../components/agent-chat/AgentChatSurface'
@@ -131,6 +134,8 @@ export default function AgentPage() {
   const exampleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 切会话竞态闸：只有最后一次 bootstrapSession 能落地状态/开流。
   const bootSeqRef = useRef(0)
+  const authGenerationRef = useRef(0)
+  const loginActionRef = useRef(false)
   // 账号身份：本地缓存按账号隔离（读不到该账号就当没有存档）。
   const ownerIdRef = useRef<number | null>(null)
 
@@ -258,6 +263,7 @@ export default function AgentPage() {
           const requestId = readString(data, 'request_id')
           if (!requestId) return
           setConfirms((previous) => previous.filter((card) => card.requestId !== requestId))
+        return true
           break
         }
         case 'question.request': {
@@ -369,11 +375,11 @@ export default function AgentPage() {
       streamRef.current = connectAgentStream(id, {
         lastEventId: cursor,
         onConnected: () => {
-          if (mountedRef.current) setConnection('open')
+          if (mountedRef.current && sessionIdRef.current === id) setConnection('open')
         },
-        onEvent: (event) => batcherRef.current?.push(event),
+        onEvent: (event) => { if (sessionIdRef.current === id) batcherRef.current?.push(event) },
         onUnavailable: () => {
-          if (!mountedRef.current) return
+          if (!mountedRef.current || sessionIdRef.current !== id) return
           // 小程序平台不支持 chunked / 连续重连失败：先把已缓冲的文字帧落地，
           // 再转轮询静默兜底。
           batcherRef.current?.flush()
@@ -393,6 +399,9 @@ export default function AgentPage() {
   const bootstrapSession = useCallback(
     async (targetId?: string): Promise<boolean> => {
       const seq = ++bootSeqRef.current
+      clearSendWatch()
+      sendingRef.current = false
+      setSending(false)
       // 换轨前把当前会话的进度落盘（否则连续切换会丢掉上一段的加速快照）。
       persistSnapshot()
       batcherRef.current?.drop()
@@ -514,18 +523,21 @@ export default function AgentPage() {
       if (!createdFresh) void patchAgentSessionMemory(id)
       return true
     },
-    [openStream, persistSnapshot],
+    [openStream, persistSnapshot, clearSendWatch],
   )
 
   /** 拉历史会话目录（服务端为真源；失败给一句人话，不挡聊天）。 */
   const refreshHistory = useCallback((): void => {
+    const generation = authGenerationRef.current
+    const owner = ownerIdRef.current
+    if (owner === null) return
     setHistoryError('')
     void listSessions()
       .then((items) => {
-        if (mountedRef.current) setHistorySessions(items)
+        if (mountedRef.current && generation === authGenerationRef.current && ownerIdRef.current === owner) setHistorySessions(items)
       })
       .catch(() => {
-        if (mountedRef.current) setHistoryError('历史加载失败，请重新打开重试。')
+        if (mountedRef.current && generation === authGenerationRef.current && ownerIdRef.current === owner) setHistoryError('历史加载失败，请重新打开重试。')
       })
   }, [])
 
@@ -533,6 +545,7 @@ export default function AgentPage() {
   useEffect(() => {
     mountedRef.current = true
     let disposed = false
+    const authGeneration = authGenerationRef.current
 
     const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
     setStatusBarHeight(Number(info.statusBarHeight ?? 20))
@@ -540,15 +553,15 @@ export default function AgentPage() {
     async function boot(): Promise<void> {
       try {
         const current = await ensureLogin()
-        if (disposed) return
+        if (disposed || authGeneration !== authGenerationRef.current) return
         setUser(current)
         ownerIdRef.current = typeof current.id === 'number' ? current.id : null
         void fetchAgentThinkingLevel().then((level) => {
-          if (!disposed) setThinkingLevel(level)
-        })
+          if (!disposed && authGeneration === authGenerationRef.current) setThinkingLevel(level)
+        }).catch((error) => { if (!disposed && authGeneration === authGenerationRef.current) setErrorText(error instanceof Error ? error.message : '设置读取失败') })
         refreshHistory()
       } catch (error) {
-        if (disposed) return
+        if (disposed || authGeneration !== authGenerationRef.current) return
         setErrorText(error instanceof Error ? error.message : '登录失败，请稍后重试')
         setBooting(false)
         setConnection('idle')
@@ -595,8 +608,11 @@ export default function AgentPage() {
       setDraft('')
       if (viaExample) setPendingExample(text)
 
+      const wasActive = turnActive
+      const steerId = wasActive && readCachedAgentSettings().interrupt_mode === 'steer' ? nextId('steer') : undefined
+      const ownerGeneration = bootSeqRef.current
       // 乐观插入用户气泡（appendUserTurn，actions.ts:6-27）。
-      setItems((previous) => [...previous, { kind: 'user', id: nextId('user'), text }])
+      setItems((previous) => [...previous, { kind: 'user', id: nextId('user'), text, ...(steerId ? { steer: { id: steerId, status: 'uncertain' as const } } : {}) }])
       setTurnActive(true)
       setTurnStatus(undefined)
 
@@ -621,7 +637,18 @@ export default function AgentPage() {
           setSessionId(id)
           setSessionStarting(false)
         }
-        await sendAgentMessage(id, text)
+        if (steerId) {
+          try {
+            const ack = await steerAgentSession(id, text, { steerId })
+            if (ownerGeneration !== bootSeqRef.current) return
+            setItems((previous) => previous.map((item) => item.kind === 'user' && item.steer?.id === steerId ? { ...item, steer: { id: ack.steer_id, status: ack.status, ...(ack.status === 'queued' && ack.position !== undefined ? { position: ack.position } : {}) } } : item))
+          } catch (error) {
+            // 仅网关明确无活动回合才改走普通消息；重放/状态未知不重投。
+            if (error instanceof ApiError && (error.code === 'no_active_turn' || error.code === 'turn_aborted')) await sendAgentMessage(id, text)
+            else throw error
+          }
+        } else await sendAgentMessage(id, text)
+        if (ownerGeneration !== bootSeqRef.current) return
         if (!fallbackRef.current) {
           const current = streamRef.current
           if (!current || current.isClosed()) {
@@ -629,6 +656,7 @@ export default function AgentPage() {
           }
         }
       } catch (error) {
+        if (ownerGeneration !== bootSeqRef.current) return
         setErrorText(error instanceof Error ? error.message : '发送失败，请重试')
         setDraft(text)
         setTurnActive(false)
@@ -639,7 +667,7 @@ export default function AgentPage() {
         setPendingExample(null)
       }
     },
-    [clearSendWatch, openStream],
+    [clearSendWatch, openStream, turnActive],
   )
 
   const handleSend = useCallback(() => {
@@ -666,21 +694,26 @@ export default function AgentPage() {
   }, [stopPending])
 
   const handleConfirm = useCallback(
-    async (requestId: string, approved: boolean): Promise<void> => {
+    async (requestId: string, approved: boolean): Promise<boolean> => {
       const id = sessionIdRef.current
-      if (!id) return
+      const generation = bootSeqRef.current
+      if (!id) return false
       setConfirms((previous) =>
         previous.map((card) => (card.requestId === requestId ? { ...card, resolving: true } : card)),
       )
       try {
         await resolveAgentConfirm(id, requestId, approved)
+        if (generation !== bootSeqRef.current || sessionIdRef.current !== id) return false
         // 权威收敛靠网关 confirm.resolved；这里先乐观收起。
         setConfirms((previous) => previous.filter((card) => card.requestId !== requestId))
+        return true
       } catch (error) {
+        if (generation !== bootSeqRef.current || sessionIdRef.current !== id) return false
         setErrorText(error instanceof Error ? error.message : '确认失败，请重试')
         setConfirms((previous) =>
           previous.map((card) => (card.requestId === requestId ? { ...card, resolving: false } : card)),
         )
+        return false
       }
     },
     [],
@@ -690,12 +723,25 @@ export default function AgentPage() {
     setErrorText('')
     const id = sessionIdRef.current
     if (!id) {
+      if (loginActionRef.current) return
+      loginActionRef.current = true
+      const generation = authGenerationRef.current
       setBooting(true)
       void ensureLogin()
-        .then(() => setBooting(false))
+        .then(async (current) => {
+          if (!mountedRef.current || generation !== authGenerationRef.current) return
+          setUser(current)
+          ownerIdRef.current = current.id
+          refreshHistory()
+          await bootstrapSession()
+        })
         .catch((error) => {
+          if (!mountedRef.current || generation !== authGenerationRef.current) return
           setErrorText(error instanceof Error ? error.message : '登录失败，请稍后重试')
           setBooting(false)
+        })
+        .finally(() => {
+          if (generation === authGenerationRef.current) loginActionRef.current = false
         })
       return
     }
@@ -704,12 +750,16 @@ export default function AgentPage() {
     pollRef.current = null
     batcherRef.current?.flush()
     openStream(id, cursorRef.current)
-  }, [openStream])
+  }, [openStream, bootstrapSession, refreshHistory])
 
   const handleThinkingLevelChange = useCallback((level: AgentThinkingLevel) => {
+    const before = thinkingLevel
     setThinkingLevel(level)
-    void saveAgentThinkingLevel(level)
-  }, [])
+    void saveAgentThinkingLevel(level).catch((error) => {
+      setThinkingLevel(before)
+      setErrorText(error instanceof Error ? error.message : '保存失败，未生效')
+    })
+  }, [thinkingLevel])
 
   // D-26 首张锚定（AgentChatSurface.session-actions.ts:591-627）。
   const derivedAnchor = useMemo(() => deriveBatchAnchor(items), [items])
@@ -740,13 +790,16 @@ export default function AgentPage() {
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: string[][]): Promise<boolean> => {
       const id = sessionIdRef.current
+      const generation = bootSeqRef.current
       if (!id) return false
       try {
         await replyAgentQuestion(id, requestId, answers)
+        if (generation !== bootSeqRef.current || sessionIdRef.current !== id) return false
         // 权威收敛靠网关 question.replied / question.rejected；这里先乐观收起。
         setQuestions((previous) => previous.filter((item) => item.requestId !== requestId))
         return true
       } catch (error) {
+        if (generation !== bootSeqRef.current || sessionIdRef.current !== id) return false
         setErrorText(error instanceof Error ? error.message : '提交失败，请重试')
         return false
       }
@@ -776,7 +829,9 @@ export default function AgentPage() {
       try {
         // 开新＝回空态：旧会话留在服务端历史里可切回，本地加速存档清掉。
         clearPersisted(ownerIdRef.current)
+        const generation = authGenerationRef.current
         const id = await createSession()
+        if (generation !== authGenerationRef.current || ownerIdRef.current === null) return
         await bootstrapSession(id)
         refreshHistory()
       } catch (error) {
@@ -869,20 +924,56 @@ export default function AgentPage() {
   const handleLogout = useCallback(() => {
     void Taro.showModal({
       title: '退出登录',
-      content: '小程序使用微信登录，退出后将重新建立匿名会话。',
+      content: '退出当前设备的登录状态，对话和正在进行的任务会保留。',
       success: (result) => {
         if (!result.confirm) return
-        void ensureLogin()
-          .then((next) => {
-            setUser(next)
-            void Taro.showToast({ title: '已刷新登录态', icon: 'none' })
-          })
-          .catch((error) => {
-            setErrorText(error instanceof Error ? error.message : '登录失败，请稍后重试')
-          })
+        // 只断开本设备订阅；不向服务端发送 abort/delete，也不自动重新登录。
+        authGenerationRef.current += 1
+        bootSeqRef.current += 1
+        loginActionRef.current = false
+        clearSendWatch()
+        if (exampleTimerRef.current !== null) clearTimeout(exampleTimerRef.current)
+        exampleTimerRef.current = null
+        batcherRef.current?.drop()
+        streamRef.current?.close()
+        streamRef.current = null
+        pollRef.current?.stop()
+        pollRef.current = null
+        clearPersisted(ownerIdRef.current)
+        clearSession()
+        setTemporaryArmed(false)
+        ownerIdRef.current = null
+        sessionIdRef.current = ''
+        itemsRef.current = []
+        sendingRef.current = false
+        cursorRef.current = 0
+        fallbackRef.current = false
+        closedRef.current = true
+        setUser(null)
+        setSessionId('')
+        setItems([])
+        setConfirms([])
+        setQuestions([])
+        setHistorySessions(null)
+        setHistoryError(null)
+        setSwitchingTo(null)
+        setDraft('')
+        setPendingExample(null)
+        setTurnActive(false)
+        setTurnStatus(undefined)
+        setStopPending(false)
+        setSending(false)
+        setSessionStarting(false)
+        setBooting(false)
+        setConnection('idle')
+        setClosedReason(undefined)
+        setAnchorAskedFor(null)
+        setAnchorBusy(false)
+        setDrawerOpen(false)
+        setErrorText('')
       },
     })
-  }, [])
+  }, [clearSendWatch])
 
   const userName = user?.display_name || user?.username || 'Eimu 用户'
   const userSubtitle = user?.email || (user ? `ID ${user.id}` : '未登录')
@@ -893,13 +984,32 @@ export default function AgentPage() {
       <View
         className='agent-page-card'
         style={{
-          paddingTop: `calc(${statusBarHeight}px + 64px)`,
+          paddingTop: `${getNavbarHeight(statusBarHeight) + 4}px`,
           paddingLeft: '12px',
           paddingRight: '12px',
           paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        <AgentChatSurface
+        {!user && !booting ? (
+          <View className='flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6'>
+            <Text className='text-ios-title3 font-semibold text-foreground'>微信登录后继续</Text>
+            {errorText ? <Text className='text-ios-footnote text-destructive'>{errorText}</Text> : null}
+            <View className='flex min-h-11 items-center justify-center rounded-full bg-ios-blue px-5 text-white' onClick={handleRetry}>
+              <Text>重新微信登录</Text>
+            </View>
+          </View>
+        ) : <AgentChatSurface
+          sessionId={sessionId}
+          onSendText={sendText}
+          videoActions={{
+            onRerun: (item, count) => { const kind = item.mediaKind === 'film' ? '成片' : '影片'; void sendText(`把上一条${kind}按原参数再来 ${count} 组（第 ${item.seq} 段，${item.url}）`) },
+            onVariant: (item) => { const kind = item.mediaKind === 'film' ? '成片' : '影片'; setDraft(`微调第 ${item.seq} 段${kind}（${item.url}）：`) },
+          }}
+          audioActions={{
+            onRerun: (item, count) => { const kind = item.mediaKind === 'music' ? '音乐' : '音频'; void sendText(`把上一条${kind}按原参数再来 ${count} 组（第 ${item.seq} 段，${item.url}）`) },
+            onVariant: (item) => { const kind = item.mediaKind === 'music' ? '音乐' : '音频'; setDraft(`微调第 ${item.seq} 段${kind}（${item.url}）：`) },
+          }}
+          onStartTemporary={() => { setTemporaryArmed(true); handleStartNewSession() }}
           items={items}
           confirms={confirms}
           questions={questions}
@@ -917,7 +1027,7 @@ export default function AgentPage() {
           onDraftChange={setDraft}
           onSend={handleSend}
           onStop={() => void handleStop()}
-          onConfirm={(requestId, approved) => void handleConfirm(requestId, approved)}
+          onConfirm={handleConfirm}
           onAnswerQuestion={handleAnswerQuestion}
           onExampleSend={handleExampleSend}
           thinkingLevel={thinkingLevel}
@@ -941,11 +1051,12 @@ export default function AgentPage() {
             onStartNew: handleStartNewSession,
             onRowAction: handleSessionRowAction,
           }}
-        />
+        />}
       </View>
 
       <Navbar
         user={user}
+        loginPending={booting}
         statusBarHeight={statusBarHeight}
         onOpenDrawer={() => setDrawerOpen(true)}
         onTopUp={handleTopUp}

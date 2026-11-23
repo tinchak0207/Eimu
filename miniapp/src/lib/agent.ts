@@ -13,6 +13,7 @@
 // Taro（网络与定时器在全局可用），便于页面层复用。
 
 import Taro from '@tarojs/taro'
+import { consumeTemporaryArmed, markSessionTemporary, setTemporaryArmed } from './agent-temporary-chat'
 import { ApiError, BASE_URL, request } from './request'
 import { getToken, getUserId } from './storage'
 import { normalizeOpenCodeMessages, type OpenCodeMessage } from './agent-history-normalize'
@@ -21,6 +22,7 @@ import {
   getAgentSettings,
   readCachedAgentSettings,
   resolveAgentThinkingLevel,
+  serverAgentThinkingLevel,
   saveAgentSettings,
   writeCachedAgentThinkingLevel,
   type AgentThinkingLevel,
@@ -79,6 +81,33 @@ export interface AgentSessionSummary {
   updated_at?: string | number
 }
 
+/** 子代理日志与停止契约逐行复用网页版 session.ts，网络替换为 Taro request。 */
+export async function listAgentSubagents(sessionId: string): Promise<import('../components/agent-chat/types').AgentSubagentRunSummary[]> {
+  const data = await request<{ subagents?: unknown }>({ path: `/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents` })
+  if (!Array.isArray(data.subagents)) return []
+  return data.subagents.filter((item): item is import('../components/agent-chat/types').AgentSubagentRunSummary =>
+    !!item && typeof item === 'object' && typeof item.id === 'string')
+}
+
+export async function readAgentSubagentTranscript(sessionId: string, runId: string, offset?: number): Promise<import('../components/agent-chat/types').AgentSubagentTranscriptPage> {
+  const base = typeof offset === 'number' && Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0
+  const query = typeof offset === 'number' && Number.isFinite(offset) ? `?offset=${base}` : ''
+  const data = await request<Record<string, unknown>>({ path: `/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(runId)}${query}` })
+  if (!Array.isArray(data.entries)) throw new ApiError('服务器未返回有效的子代理日志。', 0, 'parse_error')
+  const number = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null
+  return {
+    object: typeof data.object === 'string' ? data.object : '',
+    run_id: typeof data.run_id === 'string' ? data.run_id : runId,
+    entries: data.entries as import('../components/agent-chat/types').AgentSubagentTranscriptEntry[],
+    next_offset: number(data.next_offset) ?? base + data.entries.length,
+    truncated: data.truncated === true, eof: data.eof === true, size: number(data.size) ?? 0,
+  }
+}
+
+export async function stopAgentSubagent(sessionId: string, runId: string): Promise<void> {
+  await request({ path: `/api/agent/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(runId)}/stop`, method: 'POST' })
+}
+
 /**
  * 列出当前用户的历史会话（服务端按 updated_at 降序，首个即最近会话）。
  * 服务端标题是真源；本地别名只在服务端标题缺失时补位（账号隔离，见 agent-persistence）。
@@ -101,13 +130,20 @@ export async function listAgentSessions(): Promise<AgentSessionSummary[]> {
 
 /** 建一个 agent 会话，回传 session_id（解析方式与网页端 session.ts:97 一致）。 */
 export async function createAgentSession(): Promise<string> {
-  const data = await request<Record<string, unknown>>({
-    path: '/api/agent/sessions',
-    method: 'POST',
-    data: {},
-  })
+  const temporary = consumeTemporaryArmed()
+  let data: Record<string, unknown>
+  try {
+    data = await request({ path: '/api/agent/sessions', method: 'POST', data: temporary ? { temporary: true } : {} })
+  } catch (error) {
+    if (temporary) setTemporaryArmed(true)
+    throw error
+  }
   const sessionId = typeof data?.session_id === 'string' ? data.session_id : ''
-  if (!sessionId) throw new ApiError('服务器未返回有效的会话 id', 0, 'parse_error')
+  if (!sessionId) {
+    if (temporary) setTemporaryArmed(true)
+    throw new ApiError('服务器未返回有效的会话 id', 0, 'parse_error')
+  }
+  if (temporary) markSessionTemporary(sessionId)
   return sessionId
 }
 
@@ -198,7 +234,7 @@ export async function sendAgentMessage(
   const opts: SendMessageOptions | undefined = typeof options === 'string' ? { skill: options } : options
   const trimmed = composeSkillContent(content, opts?.skill)
   if (!trimmed) return
-  const body: Record<string, unknown> = { content: trimmed }
+  const body: Record<string, unknown> = { content: trimmed, client_environment: { surface: 'web', local_capabilities: { window_eimu_local: false, local_save: false } } }
   if (typeof opts?.sessionDirective === 'string' && opts.sessionDirective.trim().length > 0) {
     body.session_directive = opts.sessionDirective
   }
@@ -207,6 +243,18 @@ export async function sendAgentMessage(
     method: 'POST',
     data: body,
   })
+}
+
+/** 回合中追加指引：queued 与 injected 由网关回执决定，未知响应绝不伪装成功。 */
+export type AgentSteerAck =
+  | { status: 'injected'; steer_id: string; injected_into?: string[] }
+  | { status: 'queued'; steer_id: string; position?: number; deduped?: boolean }
+export async function steerAgentSession(sessionId: string, content: string, options?: { steerId?: string }): Promise<AgentSteerAck> {
+  const data = await request<Record<string, unknown>>({ path: `/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, method: 'POST', data: { content: content.trim(), ...(options?.steerId ? { steer_id: options.steerId } : {}) } })
+  const steer_id = typeof data.steer_id === 'string' ? data.steer_id : options?.steerId ?? ''
+  if (data.status === 'injected') return { status: 'injected', steer_id, ...(Array.isArray(data.injected_into) ? { injected_into: data.injected_into.filter((x): x is string => typeof x === 'string') } : {}) }
+  if (data.status === 'queued') return { status: 'queued', steer_id, ...(typeof data.position === 'number' && Number.isFinite(data.position) ? { position: data.position } : {}), ...(data.deduped === true ? { deduped: true } : {}) }
+  throw new ApiError('服务器未返回有效的引导状态。', 0, 'parse_error')
 }
 
 // 对外导出名（另一路 agent 依赖的稳定签名）。
@@ -885,14 +933,18 @@ export function readCachedThinkingLevel(): AgentThinkingLevel {
 
 /** 挂载时回读网关设定并解析级别；任何失败回本地缓存/medium（永不 reject）。 */
 export async function fetchAgentThinkingLevel(): Promise<AgentThinkingLevel> {
-  const settings = await getAgentSettings()
-  return resolveAgentThinkingLevel(settings)
+  const result = await getAgentSettings()
+  if (!result.ok) throw new ApiError(result.message, 0, 'settings_unavailable')
+  const level = serverAgentThinkingLevel(result.settings)
+  writeCachedAgentThinkingLevel(level)
+  return level
 }
 
 /** 保存级别：本地缓存立即生效，再异步持久化到网关（合并现有设定，保留其它栏位）。 */
 export async function saveAgentThinkingLevel(level: AgentThinkingLevel): Promise<void> {
-  writeCachedAgentThinkingLevel(level)
-  await saveAgentSettings(agentThinkingLevelPatch(level))
+  const result = await saveAgentSettings(agentThinkingLevelPatch(level))
+  if (!result.ok) throw new ApiError(result.message, 0, 'settings_save_failed')
+  writeCachedAgentThinkingLevel(serverAgentThinkingLevel(result.settings))
 }
 
 // 设定 API 对外导出（另一路 agent 依赖）。
@@ -1552,6 +1604,8 @@ export function reduceAgentItems(items: AgentItem[], event: AgentSseEvent): Agen
       if (settled.some((it) => it.kind === 'image' && it.url === url)) return settled
       const costCoins = readNumber(data, 'cost_coins')
       const taskId = readString(data, 'task_id') || undefined
+      const rawRecipe = readObject(data, 'recipe')
+      const recipe = rawRecipe && typeof rawRecipe.prompt === 'string' && typeof rawRecipe.model === 'string' ? { prompt: rawRecipe.prompt, model: rawRecipe.model, ...(typeof rawRecipe.lora === 'string' ? { lora: rawRecipe.lora } : {}), ...(rawRecipe.loraModelVersionIds ? { loraModelVersionIds: rawRecipe.loraModelVersionIds } : {}), ...(typeof rawRecipe.size === 'string' ? { size: rawRecipe.size } : {}) } : undefined
       return [
         ...settled,
         {
@@ -1559,6 +1613,7 @@ export function reduceAgentItems(items: AgentItem[], event: AgentSseEvent): Agen
           id: eventItemId('image', eventId),
           url,
           seq: items.filter((it) => it.kind === 'image').length + 1,
+          ...(recipe ? { recipe } : {}),
           ...(costCoins !== undefined ? { costCoins } : {}),
           ...(taskId ? { taskId } : {}),
         },

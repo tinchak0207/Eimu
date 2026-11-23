@@ -2,8 +2,20 @@
 
 Eimu 的微信小程序客户端：以 Agent 聊天页为唯一入口（无 tabBar），另有直接生成、生成历史、
 我的资产、帐号、详情、模板与定价（web-view）页。Taro 4.3.0 + React 18 + TypeScript，直接对接网页版
-（`https://eimu.dev`）同一套生产后端。它不是网页版的套壳 web-view，而是逐层搬网页版手机端
+（`https://www.eimu.dev`）同一套生产后端。它不是网页版的套壳 web-view，而是逐层搬网页版手机端
 UI 与 Agent 交互的原生小程序渲染。本目录自包含，不引用仓库其他目录的源码。
+
+## 本轮状态（2026-11-23）
+
+本轮已同步现行模型与生成请求、聊天设置的读取失败/部分保存/失败回滚、账号隔离、
+记忆管理、临时对话、隐藏思维链、回合指引回执、子代理完整日志入口和媒体卡片操作。
+这些是源码与请求契约的同步范围，不代表已证明与网页版全部功能或视觉一致。
+
+**本轮开发者工具冷导入、模拟器截图及微信登录后的真实对话尚未验证。** 当前执行沙箱内，
+开发者工具 CLI 初始化写 `.cli` 被只读文件系统拒绝（`EROFS`），同时 IDE 端口
+`127.0.0.1:45847` 无法连接（curl 7 / HTTP 000）；CLI 虽返回退出码 0，输出明确为初始化失败。
+没有使用旧 `dist/` 或旧截图代替新版证据，也没有更改 IDE 设置、重启 IDE 或复制登录态。
+构建通过只证明可生成产物。OpenUI 和导演 3D 的平台差异见文末。
 
 ## 前置条件
 
@@ -53,9 +65,9 @@ lockfile 与 `package.json` 不一致时直接失败；`npm install` 可能悄�
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `TARO_APP_API_BASE_URL` | `https://image.tinchak0207.xyz` | 主 API 域名 |
+| `TARO_APP_API_BASE_URL` | `https://www.eimu.dev` | 主 API 域名 |
 | `TARO_APP_AGENT_ORIGIN` | `https://store.tinchak0207.xyz` | Agent 上传/媒体票据域名 |
-| `TARO_APP_WEB_ORIGIN` | `https://eimu.dev` | 定价页 web-view |
+| `TARO_APP_WEB_ORIGIN` | `https://www.eimu.dev` | 定价页 web-view |
 
 `.env` 已被 `.gitignore` 忽略；`.env.example` 必须保留可提交。
 
@@ -63,7 +75,7 @@ lockfile 与 `package.json` 不一致时直接失败；`npm install` 可能悄�
 
 测试号无法配置业务域名与服务器域名白名单，所以**真机上必须**在小程序内点右上角 `···` →
 「打开调试」（开发调试模式），否则第一条请求就会报
-`url not in domain list`（`image.tinchak0207.xyz` / `store.tinchak0207.xyz` 都不在白名单里）。
+`url not in domain list`（`www.eimu.dev` / `store.tinchak0207.xyz` 都不在白名单里）。
 
 开发者工具模拟器内不受影响：`project.config.json` 已设 `"urlCheck": false`。
 「预览」码能打开页面，但网络请求仍按域名白名单校验，真机跑通请用「真机调试」或打开调试。
@@ -71,7 +83,7 @@ lockfile 与 `package.json` 不一致时直接失败；`npm install` 可能悄�
 ## AppSecret 与后端配置
 
 小程序 AppSecret **不在本仓库、不在任何提交里**，需要向项目维护者索取；它只配置在服务端
-（Vercel → Environment Variables，Sensitive 类型），绝不写入小程序端或本地 `.env`。
+（现行服务端环境变量），绝不写入小程序端或本地 `.env`。
 
 服务端需要三个变量：
 
@@ -93,7 +105,7 @@ Taro.login() → code
 
 - 返回 **HTTP 503 `{ success:false, message:"not_configured" }`** ＝ 服务端没配上面三个变量。
 - 无效 code 会返回 `{ success:false, message:"wechat_login_failed", errcode:40029 }`；
-  40029 说明 appid/secret 本身有效（配错是 40013 / 40125）。
+  40029 只说明 code 无效，不能据此判断 AppID 或 AppSecret 有效。40163 表示 code 已使用，每次重试必须重新取得 code。
 
 ## 接口契约（最容易踩错的几条）
 
@@ -137,6 +149,8 @@ npm run dev:weapp     # = taro build --type weapp --watch
 
 ## 已知差异
 
+- 含 LoRA 的图卡配方保留原字段，但不提供小程序内原参数重跑入口，会提示前往网页版。
+- OpenUI 生成式界面保留源码查看与网页版提示，尚未移植 DOM 交互渲染。
 - director 的 3D 分镜视口只留同尺寸占位（小程序无 WebGL 管线），完整效果需网页版。
 - 生成中的粒子 canvas 换成同版式进度条。
 - Radix 下拉菜单换成底部浮层。
@@ -161,3 +175,11 @@ rm -rf dist && npm run build:weapp
   破坏与网页版手机端「固定 CSS px」的逐像素对齐。`designWidth: 375` 只影响未走 Tailwind 的样式。
 - 类名转义依赖 `weapp-tailwindcss`：`postcss.config.js` 生成/转换 CSS，
   `config/index.ts` 的 `UnifiedWebpackPluginV5` 同步 JSX 里的 class 字串，两边必须成对存在。
+
+## 本轮同步（2026-11-23）
+
+直接生成的模型目录、比例、分辨率、图片及视频费率、视频时长与声音选项来自当前网页版的 `generation-model-catalog`，不再只开放旧版三个图片模型。公开 `/api/model-pricing` 覆写与网页版同源；读取失败时展示目录基准价，实际费用以服务端账本为准。图生视频仍使用现有参考图上传契约，视频结果直接播放并可保存相册。改图、放大、历史收藏、删除、导出与模板入口均保留。
+
+主 API 默认改为现行站点 `https://www.eimu.dev`；Agent 媒体域仍使用 `https://store.tinchak0207.xyz`。本轮执行环境无法访问主 API 端点，因此登录与生成实网行为尚未验证，模型目录声明也不代表上游当前可用。发布包必须同时包含源码和本轮预构建 `dist/`，解压导入 `miniapp/`，不依赖接收方安装 Node。
+
+图卡的完整图片配方可通过“再来 N 组 / 微调变体”带入现有直接生成页（原提示词、模型、尺寸与父任务）。页面展示组数及预计总价，只有点击生成才提交；改图把原图带入既有编辑面板。配方按账号隔离并只消费一次，配方缺提示词或真实图片模型时不显示重跑入口。历史记录没有原始配方时保留缺失，不补造默认配方。

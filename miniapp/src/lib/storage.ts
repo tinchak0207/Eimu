@@ -44,6 +44,7 @@ export function saveUser(user: MiniUser): void {
 }
 
 export function clearSession(): void {
+  Taro.removeStorageSync('eimu_pending_agent_image_recipe')
   Taro.removeStorageSync(TOKEN_KEY)
   Taro.removeStorageSync(USER_ID_KEY)
   Taro.removeStorageSync(USER_KEY)

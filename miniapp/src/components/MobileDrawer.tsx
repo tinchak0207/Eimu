@@ -1,5 +1,6 @@
 import { Image, Input, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
+import { getNavbarTopInset } from './Navbar'
 import { useEffect, useRef, useState } from 'react'
 import { Icon, type IconName } from './agent-chat/icons'
 import { listAgentSessions, type AgentSessionSummary } from '../lib/agent'
@@ -140,21 +141,21 @@ export function MobileDrawer(props: MobileDrawerProps) {
   const [sessions, setSessions] = useState<AgentSessionSummary[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [insetTop, setInsetTop] = useState<number>(0)
+  const [insetTop, setInsetTop] = useState(() => getNavbarTopInset(props.statusBarHeight ?? 20))
 
-  // 状态栏内距（网页版＝env(safe-area-inset-top)，见 mobile-sidebar.css .mobile-sidebar-panel）。
+  // 与站点导航共用微信原生胶囊避让，首行账户和关闭按钮保持完整可点。
   useEffect(() => {
     if (!open) return
     const given = props.statusBarHeight
     if (typeof given === 'number' && Number.isFinite(given)) {
-      setInsetTop(Math.max(0, given))
+      setInsetTop(getNavbarTopInset(given))
       return
     }
     try {
       const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setInsetTop(Number(info.statusBarHeight ?? 0) || 0)
+      setInsetTop(getNavbarTopInset(Number(info.statusBarHeight ?? 20)))
     } catch {
-      setInsetTop(0)
+      setInsetTop(getNavbarTopInset(20))
     }
   }, [open, props.statusBarHeight])
 

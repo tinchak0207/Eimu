@@ -103,7 +103,7 @@ function authHeaders(): Record<string, string> {
 /** 提交生成任务：POST /api/generation-jobs（响应 202 {success, data: task}）。 */
 export async function submitGeneration(input: SubmitGenerationInput): Promise<GenerationTask> {
   const references = input.referenceImages ?? []
-  const idempotencyKey = `mp-${input.userId}-${Date.now()}`
+  const idempotencyKey = `mp-${input.userId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const payload = references.length
     ? await submitMultipartGeneration(input, references, idempotencyKey)
     : await request<{
@@ -120,6 +120,10 @@ export async function submitGeneration(input: SubmitGenerationInput): Promise<Ge
           aspectRatio: input.aspectRatio,
           outputResolution: input.outputResolution,
           qualityMode: input.qualityMode ?? 'fast',
+          durationSeconds: input.durationSeconds,
+          generateAudio: input.generateAudio,
+          workflow: input.workflow,
+          retryOfTaskId: input.retryOfTaskId,
         },
         header: {
           'Idempotency-Key': idempotencyKey,
@@ -626,7 +630,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-const TERMINAL_FAILED: GenerationTaskStatus[] = ['failed', 'cancelled', 'refunded', 'unknown']
+const TERMINAL_FAILED: GenerationTaskStatus[] = ['failed', 'cancelled', 'refunded']
 
 /**
  * 轮询单个任务。逻辑照抄网页端 src/hooks/use-image-generation.ts 的

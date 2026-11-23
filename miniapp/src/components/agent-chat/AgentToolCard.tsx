@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ScrollView, Text, View } from '@tarojs/components'
 import { cn } from '../../lib/cn'
+import { classifiedErrorStatus, sanitizeDisplayError } from '../../lib/agent-error-status'
 import { AgentParamDisclosure } from './AgentParamDisclosure'
 import { Icon, type IconName } from './icons'
 import { toolDisplayName } from './tool-names'
@@ -124,41 +125,6 @@ export function toolArgPreview(args: string): string | undefined {
     return undefined
   }
   return humanize(t.split('\n')[0])
-}
-
-/** 已分类上游错误 → 展示状态位（真源 src/lib/agent-error-status.ts，只做展示映射）。 */
-interface ClassifiedErrorStatus {
-  label: string
-  hint: string
-  retryable: boolean
-}
-
-const CLASSIFIED_ERROR_STATUS: Record<string, ClassifiedErrorStatus> = {
-  flowmusic_session_expired: {
-    label: '需要重新登录',
-    hint: '音乐账号登录已失效，需要重新登录后再试。',
-    retryable: false,
-  },
-  flowmusic_resource_insufficient: {
-    label: '额度或限流不足',
-    hint: '上游额度或限流不足，请稍后再试。',
-    retryable: true,
-  },
-  flowmusic_unreachable: {
-    label: '上游暂时不可达',
-    hint: '音乐上游暂时不可达，请稍后重试。',
-    retryable: true,
-  },
-  flowmusic_config_disabled: {
-    label: '配置被拒',
-    hint: '音乐通路的配置被上游拒绝，需管理员检查后恢复。',
-    retryable: false,
-  },
-}
-
-function classifiedErrorStatus(code: string | undefined): ClassifiedErrorStatus | null {
-  if (!code) return null
-  return CLASSIFIED_ERROR_STATUS[code] ?? null
 }
 
 const AUTH_SCOPE_LABELS: Record<AgentToolAuthScope, string> = {
@@ -297,10 +263,10 @@ export function AgentToolCard({ item, onAuthorize }: AgentToolCardProps) {
             ? (
                 <View className='ml-[22px] rounded-xl bg-destructive/10 px-2.5 py-1.5'>
                   {looksLikeJson(item.error) ? (
-                    <RawPayload text={item.error} />
+                    <RawPayload text={sanitizeDisplayError(item.error)} />
                   ) : (
                     <Text className='break-words text-ios-caption1 leading-relaxed text-destructive'>
-                      {item.error}
+                      {sanitizeDisplayError(item.error)}
                     </Text>
                   )}
                 </View>

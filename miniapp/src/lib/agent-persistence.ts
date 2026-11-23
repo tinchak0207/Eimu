@@ -68,7 +68,7 @@ export function sanitizeItemsForStorage(items: AgentItem[]): AgentItem[] {
   for (const it of items) {
     if (it == null || typeof it !== 'object') continue
     if (it.kind === 'image') {
-      out.push({ kind: 'image', id: it.id, seq: it.seq, url: it.url, costCoins: it.costCoins })
+      out.push({ kind: 'image', id: it.id, seq: it.seq, url: it.url, costCoins: it.costCoins, taskId: it.taskId, recipe: it.recipe })
       continue
     }
     if (it.kind === 'video') {

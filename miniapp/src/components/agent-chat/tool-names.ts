@@ -1,4 +1,4 @@
-// 逐行复制 src/components/agent-chat/AgentToolCard.tsx 的 TOOL_TITLES（工具名→人话）。
+// 同源 src/components/agent-chat/AgentToolCard.tsx 的工具名称表。
 const TOOL_TITLES: Record<string, string> = {
   // ── 内建 ──
   bash: "终端命令",
@@ -115,6 +115,7 @@ const TOOL_TITLES: Record<string, string> = {
   director_upsert_action: "更新分镜动作",
   director_project_control: "项目控制",
   director_prepare_export: "准备导出",
+  director_capture_previz: "截预演关键帧",
   // ── 资产与交付 ──
   asset_search: "搜索资产",
   asset_get: "读取资产",
@@ -125,9 +126,8 @@ const TOOL_TITLES: Record<string, string> = {
   detail_page_evidence_map: "卖点找图内证据",
   exhibition_delivery_manifest: "展陈交付清单",
   run_py: "运行 Python 脚本",
-}
+};
 
-/** 未知工具原样回落工具名——不假造名字（与网页版 toolDisplayName 同一语义）。 */
 export function toolDisplayName(tool: string): string {
-  return TOOL_TITLES[tool] ?? tool
+  return TOOL_TITLES[tool] ?? tool;
 }

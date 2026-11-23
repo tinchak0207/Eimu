@@ -11,6 +11,7 @@
 // 隐私模式同样可能抛错，读失败一律回默认值）。
 
 import Taro from '@tarojs/taro'
+import { getUserId } from './storage'
 import { request } from './request'
 
 export type AgentInterruptMode = 'steer' | 'queue'
@@ -25,6 +26,8 @@ export interface AgentSettings {
   cost_mode: AgentCostMode
   interaction_mode: AgentInteractionMode
   beast_mode: boolean
+  memory_use: boolean
+  memory_generate: boolean
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -33,6 +36,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   cost_mode: 'balanced',
   interaction_mode: 'preset',
   beast_mode: false,
+  memory_use: true,
+  memory_generate: true,
 }
 
 export const AGENT_SETTINGS_STORAGE_KEY = 'agent-settings-v1'
@@ -73,13 +78,15 @@ export function sanitizeAgentSettings(raw: unknown): AgentSettings {
       : DEFAULT_AGENT_SETTINGS.interaction_mode,
     // beast_mode：布尔白名单（=== true 才为 ON，其余脏数据一律默认 OFF）。
     beast_mode: d.beast_mode === true,
+    memory_use: d.memory_use !== false,
+    memory_generate: d.memory_generate !== false,
   }
 }
 
 /** 读本地设定缓存（无缓存 / 脏数据 / 读取抛错都回默认值）。 */
 export function readCachedAgentSettings(): AgentSettings {
   try {
-    const raw: unknown = Taro.getStorageSync(AGENT_SETTINGS_STORAGE_KEY)
+    const raw: unknown = Taro.getStorageSync(`${AGENT_SETTINGS_STORAGE_KEY}:${getUserId() ?? "guest"}`)
     if (raw == null || raw === '') return { ...DEFAULT_AGENT_SETTINGS }
     if (typeof raw === 'string') {
       try {
@@ -98,37 +105,57 @@ export function readCachedAgentSettings(): AgentSettings {
 /** 只写本地缓存（不触网）；隐私模式写失败只影响下次冷启动。 */
 export function writeCachedAgentSettings(settings: AgentSettings): void {
   try {
-    Taro.setStorageSync(AGENT_SETTINGS_STORAGE_KEY, JSON.stringify(sanitizeAgentSettings(settings)))
+    Taro.setStorageSync(`${AGENT_SETTINGS_STORAGE_KEY}:${getUserId() ?? "guest"}`, JSON.stringify(sanitizeAgentSettings(settings)))
   } catch {
     // 不挡聊天。
   }
 }
 
-/**
- * 挂载时回读网关设定：网关为准，缺项用默认。任何失败（未登录 / 网关不可达 /
- * 响应形状不对）静默回默认值。永不 reject。
- */
-export async function getAgentSettings(): Promise<AgentSettings> {
+/** 与网页版同源：失败不能伪装成默认设置，保存只发实际改动栏位。 */
+export type AgentSettingsResult =
+  | { ok: true; settings: AgentSettings }
+  | { ok: false; message: string }
+
+export async function getAgentSettings(): Promise<AgentSettingsResult> {
   try {
     const data = await request<unknown>({ path: '/api/agent/settings' })
-    return sanitizeAgentSettings(data)
-  } catch {
-    return { ...DEFAULT_AGENT_SETTINGS }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, message: '设置读取失败' }
+    return { ok: true, settings: sanitizeAgentSettings(data) }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : '设置读取失败' }
   }
 }
 
-/**
- * 保存设定：先把合并结果写进本地缓存（立即生效），再异步持久化到网关；
- * 网络失败静默——本地已经生效，不打扰对话。
- */
-export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<void> {
-  const merged = sanitizeAgentSettings({ ...readCachedAgentSettings(), ...patch })
-  writeCachedAgentSettings(merged)
-  try {
-    await request({ path: '/api/agent/settings', method: 'POST', data: merged })
-  } catch {
-    // 持久化失败不上抛：设定是体验增强，不是对话的前置条件。
+export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<AgentSettingsResult> {
+  const full = sanitizeAgentSettings(patch)
+  const clean: Partial<AgentSettings> = {}
+  for (const key of Object.keys(patch) as (keyof AgentSettings)[]) {
+    if (!(key in full) || patch[key] === undefined) continue
+    if (typeof full[key] === 'boolean' ? typeof patch[key] !== 'boolean' : full[key] !== patch[key]) continue
+    ;(clean as Record<string, unknown>)[key] = full[key]
   }
+  if (!Object.keys(clean).length) return { ok: false, message: '设置无效，未保存' }
+  const owner = getUserId()
+  const before = readCachedAgentSettings()
+  writeCachedAgentSettings({ ...before, ...clean })
+  try {
+    const data = await request<unknown>({ path: '/api/agent/settings', method: 'POST', data: clean })
+    const merged = sanitizeAgentSettings({ ...before, ...(data as object), ...clean })
+    writeCachedAgentSettings(merged)
+    return { ok: true, settings: merged }
+  } catch (error) {
+    if (getUserId() === owner) writeCachedAgentSettings(before)
+    return { ok: false, message: error instanceof Error ? error.message : '保存失败' }
+  }
+}
+
+export function serverAgentThinkingLevel(settings: AgentSettings): AgentThinkingLevel {
+  const exact = inferAgentThinkingLevel(settings)
+  if (exact) return exact
+  if (settings.beast_mode) return 'extreme'
+  if (settings.persona === 'thoughtful') return 'high'
+  if (settings.cost_mode === 'economy') return 'low'
+  return 'medium'
 }
 
 /** 级别 → 写入 AgentSettings 的 patch（经 saveAgentSettings 既有链路落地）。 */
@@ -154,7 +181,7 @@ export function inferAgentThinkingLevel(settings: AgentSettings): AgentThinkingL
 /** 读取显式保存的思考级别（无记录 / 脏数据 → null）。 */
 export function readCachedAgentThinkingLevel(): AgentThinkingLevel | null {
   try {
-    const raw: unknown = Taro.getStorageSync(AGENT_THINKING_LEVEL_STORAGE_KEY)
+    const raw: unknown = Taro.getStorageSync(`${AGENT_THINKING_LEVEL_STORAGE_KEY}:${getUserId() ?? "guest"}`)
     return typeof raw === 'string' && (AGENT_THINKING_LEVELS as readonly string[]).includes(raw)
       ? (raw as AgentThinkingLevel)
       : null
@@ -166,7 +193,7 @@ export function readCachedAgentThinkingLevel(): AgentThinkingLevel | null {
 /** 只写本地缓存（不触网）：改档立即生效，跨重载保留。 */
 export function writeCachedAgentThinkingLevel(level: AgentThinkingLevel): void {
   try {
-    Taro.setStorageSync(AGENT_THINKING_LEVEL_STORAGE_KEY, level)
+    Taro.setStorageSync(`${AGENT_THINKING_LEVEL_STORAGE_KEY}:${getUserId() ?? "guest"}`, level)
   } catch {
     // 不挡聊天。
   }

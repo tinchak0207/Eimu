@@ -46,11 +46,13 @@ function steerTone(status: AgentSteerStatus): { tone: string; icon: IconName } {
 
 export interface AgentMessageBubbleProps {
   item: BubbleItem
+  hideReasoning?: boolean
+  onSend?: (text: string) => void
   /** 当前会话 id：附件卡铸读取票的兜底（path 自带会话段时无需）。 */
   sessionId?: string | null
 }
 
-export function AgentMessageBubble({ item, sessionId }: AgentMessageBubbleProps) {
+export function AgentMessageBubble({ item, sessionId, hideReasoning = false, onSend }: AgentMessageBubbleProps) {
   const isUser = item.kind === 'user'
 
   // 罪状 1：用户消息里的 [ATTACHMENTS_BLOCK] 不再以裸文本示人。
@@ -95,6 +97,7 @@ export function AgentMessageBubble({ item, sessionId }: AgentMessageBubbleProps)
   // 内部注入（收件箱/后台命令通知）或摘不干净的脏正文：整段不回显，
   // 连气泡壳都不留——它本来就不是用户说的话。
   if (isUser && suppressed && !hasAttachments) return null
+  if (hideReasoning && item.kind === 'assistant' && item.reasoning && !displayText.trim()) return null
 
   return (
     <View className={cn('agent-rise flex w-full', isUser ? 'justify-end' : 'justify-start')}>
@@ -107,7 +110,7 @@ export function AgentMessageBubble({ item, sessionId }: AgentMessageBubbleProps)
             : 'text-foreground leading-[1.55]',
         )}
       >
-        {item.kind === 'assistant' && item.reasoning ? (
+        {item.kind === 'assistant' && item.reasoning && !hideReasoning ? (
           <View className='mb-1.5'>
             <View
               className='brain-summary flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground'
@@ -144,7 +147,7 @@ export function AgentMessageBubble({ item, sessionId }: AgentMessageBubbleProps)
         {/* 空文本时用零宽空格撑住气泡高度，避免 streaming 首帧内容突跳。 */}
         {displayText ? (
           item.kind === 'assistant' ? (
-            <AgentMarkdown text={displayText} isStreaming={item.streaming} />
+            <AgentMarkdown text={displayText} isStreaming={item.streaming} onSend={onSend} />
           ) : (
             <Text className='whitespace-pre-wrap break-words'>{displayText}</Text>
           )

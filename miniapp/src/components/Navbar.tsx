@@ -1,4 +1,5 @@
 import { Image, Text, View } from '@tarojs/components'
+import Taro from '@tarojs/taro'
 import { cn } from '../lib/cn'
 import { Icon } from './agent-chat/icons'
 import type { MiniUser } from '../lib/session'
@@ -6,6 +7,24 @@ import { quotaToCoins } from '../lib/quota'
 
 // 与 Navbar.tsx:392 同一个站点 icon；复制到小程序静态资源（Taro 需要可打包路径）。
 const LOGO = require('../assets/icon.png')
+
+/** 微信胶囊属于原生层，整行站点操作置于其下，不能只避开状态栏。 */
+export function getNavbarTopInset(statusBarHeight: number): number {
+  const status = Number.isFinite(statusBarHeight) && statusBarHeight >= 0 ? statusBarHeight : 20
+  try {
+    const capsule = Taro.getMenuButtonBoundingClientRect()
+    if (Number.isFinite(capsule.bottom) && capsule.bottom > status && capsule.height > 0) {
+      return capsule.bottom + 8
+    }
+  } catch {
+    // 平台尚未返回胶囊坐标时，保留微信标准导航区，不能退回与胶囊重叠。
+  }
+  return status + 44
+}
+
+export function getNavbarHeight(statusBarHeight: number): number {
+  return getNavbarTopInset(statusBarHeight) + 60
+}
 
 /**
  * 自绘顶栏。结构 / 类名逐行复制自 src/components/Navbar.tsx:349-548（手机登录态）：
@@ -15,6 +34,7 @@ const LOGO = require('../assets/icon.png')
 
 export interface NavbarProps {
   user: MiniUser | null
+  loginPending?: boolean
   statusBarHeight: number
   onOpenDrawer: () => void
   onTopUp: () => void
@@ -24,11 +44,11 @@ export interface NavbarProps {
   drawerOpen?: boolean
 }
 
-export function Navbar({ user, statusBarHeight, onOpenDrawer, onTopUp, onKey, onLogout, drawerOpen }: NavbarProps) {
+export function Navbar({ user, loginPending = false, statusBarHeight, onOpenDrawer, onTopUp, onKey, onLogout, drawerOpen }: NavbarProps) {
   const coins = user && Number.isFinite(user.quota) ? quotaToCoins(user.quota) : null
 
   return (
-    <View className='agent-page-nav' style={{ paddingTop: `${statusBarHeight}px` }}>
+    <View className='agent-page-nav' style={{ paddingTop: `${getNavbarTopInset(statusBarHeight)}px` }}>
       <View className='flex h-[60px] items-center justify-between gap-2 px-3 py-2'>
         {/* 左组（Navbar.tsx:369-397） */}
         <View className='flex min-w-0 shrink-0 items-center gap-2'>
@@ -87,7 +107,7 @@ export function Navbar({ user, statusBarHeight, onOpenDrawer, onTopUp, onKey, on
             </>
           ) : (
             <View className='rounded-full bg-[rgba(255,255,255,0.38)] px-3 py-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.52)]'>
-              <Text>登录中…</Text>
+              <Text>{loginPending ? '登录中…' : '未登录'}</Text>
             </View>
           )}
         </View>

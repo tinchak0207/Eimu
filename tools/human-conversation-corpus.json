@@ -157,29 +157,117 @@
       ]
     },
     {
-      "id": "ue-game-delivery",
+      "id": "deliver-link-plain",
       "phase": "post",
       "spend": false,
       "source": {
-        "session": "ses_ue_game_gate_20261111",
-        "note": "用户2026-11-11本轮确认的游戏目标原话；该session为语料来源占位，真实验收sid由runner回执填写。"
+        "session": "ses_4d9a0e"
       },
-      "constraints": ["本轮不额外生成付费参考图或提交其他付费生成；只使用已导入资产及后续明确交付的生成回执。每步保留真实检查点，缺少资产或授权时如实说明。"],
       "turns": [
-        "塔楼庭院：玩家能行走探索，保留现有塔楼作导入资产"
+        "这首歌我要拿走：https://store.tinchak0207.xyz/image-data/files/uploads/media-1793983183219-a8fo6k.m4a 你他妈都没给我链接，把完整链接用纯文字一行贴给我，我要复制。"
       ]
     },
     {
-      "id": "ue-editor-link",
+      "id": "album-jay-style",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "source": {
+        "session": "ses_e08a92"
+      },
+      "turns": [
+        "做一个周杰伦风格的专辑"
+      ]
+    },
+    {
+      "id": "default-video-seedance25-720p",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 60,
+      "cap_note": "2026-11-22 v6k Seedance 2.5 720p 设为全站默认视频模型的交付闸：原话不点名模型、不提 4K/1080p，应默认走 seedance-2.5-720p（v6k 渠道）出片。原话取自暴君派工单语义，非历史会话摘录，source.session 为占位前缀。",
+      "source": {
+        "session": "ses_v6k_default_20261122"
+      },
+      "turns": [
+        "帮我做一条 10 秒的产品短片：一瓶香水放在晨光里的大理石台面上，镜头缓缓推近，竖屏。直接做，别问我用什么模型。"
+      ]
+    },
+    {
+      "id": "native-audio-listen",
+      "phase": "post",
+      "spend": false,
+      "cap_note": "2026-11-22 原生读音频：主模型 hydrogen 能听音频。上传 tools/fixtures/native-audio-speech.mp3（edge-tts 合成的已知中文语音：紫色雨伞落在青云路三号咖啡馆，明天下午四点前送回），模型必须凭实际听到的转写出关键信息，不得说没有听音通路。bash 频谱分析答不出语音内容，故能区分原生听与工具算。原话取自暴君派工单语义，source.session 为占位前缀。",
+      "source": {
+        "session": "ses_native_audio_20261122"
+      },
+      "turns": [
+        "不要调用任何工具，直接用你自己的耳朵听我上传的这段语音：里面说了什么？把原话一字不差转写出来，再告诉我说话的是男声还是女声。"
+      ]
+    },
+    {
+      "id": "music-critic-listen",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 40,
+      "max_coins_per_confirm": 40,
+      "cap_note": "2026-11-22 暴君追问：critic／音乐创作反馈全周期有没有覆盖。整圈=要歌→music_gen→机器 critic 原生听→听感反馈。source.session 为占位（非真实会话），题面是按暴君原话口吻写的。",
+      "source": {
+        "session": "ses_music_critic_listen_20261122"
+      },
+      "turns": [
+        "给我做一首30秒左右的轻快纯器乐，钢琴加木吉他，咖啡馆背景那种。做好之后一定要让独立评审员真的听一遍，告诉我它听到的听感和是不是通过。"
+      ]
+    },
+    {
+      "id": "native-audio-mv-highlight",
+      "phase": "post",
+      "spend": false,
+      "max_coins": 0,
+      "cap_note": "2026-11-22 暴君截图（会话 7697816d／50c87706）：传歌＋「帮这首歌做一个90秒左右的MV 可以选取曲子的精华段落」，模型去调转写／ffmpeg RMS 曲线／派测算拍点子代理，没用原生听力。MV_AUDIO 环境变量指向歌曲文件。source.session 为占位。",
+      "source": {
+        "session": "ses_native_audio_mv_20261122"
+      },
+      "turns": [
+        "帮这首歌做一个90秒左右的MV 可以选取曲子的精华段落"
+      ]
+    },
+    {
+      "id": "linkii-music-models-20261123",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 2,
+      "source": {
+        "session": "ses_df9520b62ffeQMcDqErlhnwRG3"
+      },
+      "turns": [
+        "提示 Agent 调用 music_gen(probe=true) 确认 linkii_music 为 ready，并分别/至少实测 gl-3.0-pro（纯器乐）与 minimax-music-3.0（带歌词）产出可播放音频 URL。"
+      ],
+      "cap_note": "2026-11-23 Linkii交接文档原话片段；真实gw会话dfda8f61-9212-41d6-9277-a94c0d07f937。实际发送另附单账号串行及实时报价授权执行边界，完整载荷留存证据。使用原始curl真会话，不伪造source.session；通用runner尚无此scene.id处理器。"
+    },
+    {
+      "id": "linkii-minimax-vocal-20261123",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 1,
+      "source": {
+        "session": "ses_df93c9ff7ffe4gLDjacDeEL5wg"
+      },
+      "turns": [
+        "提示 Agent 调用 music_gen(probe=true) 确认 linkii_music 为 ready，并分别/至少实测 gl-3.0-pro（纯器乐）与 minimax-music-3.0（带歌词）产出可播放音频 URL。"
+      ],
+      "cap_note": "Linkii交接原话片段；本轮GL两次上游限流终态后，新会话仅验minimax。实际载荷另附只提交一次、复用已审歌词与1币报价授权边界；完整载荷留存。gw=564a2521-3a79-4a4e-abfb-92453ff319ea。通用runner尚无此scene.id分派。"
+    },
+    {
+      "id": "linkii-hunyuan3d-cabin-20261123",
       "phase": "post",
       "spend": false,
       "source": {
-        "session": "ses_e3a49c748ffefa2n1bGbCYLWjJ",
-        "note": "暴君 2026-11-10 原话，首发于该生产会话"
+        "session": "ses_df936645dffeUaHnWo1uEER4Yc"
       },
       "turns": [
-        "UE5 MCP联动呢？没有这个eimu就没有做游戏的能力"
-      ]
+        "提示 Agent 调用 model3d_generate(upstream=\"hunyuan3d\") 文生 3D（如「低多边形木质小木屋」），核对返回 glb_url 可下载且 asset_report.triangles > 0。"
+      ],
+      "cap_note": "Linkii交接文档原话片段；完整实际消息另附0币/现成10次配额/LowPoly/只投一次/不另生图/不换Blender边界，留存真实载荷。gw=6f32fc4b-17c2-46d5-88bb-bab607b341da。通用runner尚无此scene.id分派。"
     }
   ]
 }

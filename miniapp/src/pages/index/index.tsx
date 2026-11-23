@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Image, ScrollView, Text, Textarea, View } from '@tarojs/components'
+import { Image, ScrollView, Text, Textarea, View, Video } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { ApiError } from '../../lib/request'
+import { consumeAgentImageRecipe } from '../../lib/agent-image-actions'
+import { generationCoins } from '../../lib/generation-model-catalog/pricing'
+import type { OutputResolution } from '../../lib/generation-model-catalog/types'
 import { ensureLogin } from '../../lib/session'
+import { getUserId } from '../../lib/storage'
 import {
-  ASPECT_RATIOS,
+  syncModelPricing,
   IMAGE_MODELS,
   RESOLUTION_LABELS,
   allowedResolutions,
@@ -51,21 +55,10 @@ const EDIT_RATIO_SIZES: Record<Exclude<EditRatioKey, 'original'>, string> = {
   '9:16': '768x1365',
 }
 
-/** 网页版 ReferenceImageUpload 的上限（ReferenceImageUpload.tsx:12）；服务端上限 8。 */
-const MAX_REFERENCE_IMAGES = 6
+/** 与现行 generation-core/request-limits.ts 的服务端参考图上限一致。 */
+const MAX_REFERENCE_IMAGES = 5
 /** 服务端单图硬上限（generation-jobs/route.ts:49）。 */
 const MAX_REFERENCE_BYTES = 12 * 1024 * 1024
-
-/**
- * 三个开放模型是否支持参考图：真源 src/lib/generation-model-catalog/catalog.ts
- *   gpt-image-2:83 / gemini-3.1-flash-image:96 = true，pixai-tsubaki2:436 = false。
- * models.ts 不在本任务文件所有权内，因此展示开关放在页面层。
- */
-const REFERENCE_SUPPORTED: Record<string, boolean> = {
-  'gpt-image-2': true,
-  'gemini-3.1-flash-image': true,
-  'pixai-tsubaki2': false,
-}
 
 /** 展示用起价：catalog pixai-edit imageCredits 0.01 → 0.001 币；pixai-upscale fixedCoins 0.001 币。 */
 const PIXAI_EDIT_COIN_LABEL = '0.001'
@@ -114,6 +107,11 @@ export default function IndexPage() {
   const [ratio, setRatio] = useState<AspectRatio>('1:1')
   const [resolution, setResolution] = useState(IMAGE_MODELS[0].defaultResolution)
   const [styleKey, setStyleKey] = useState('none')
+  const [retryOfTaskId, setRetryOfTaskId] = useState<string | undefined>()
+  const [copies, setCopies] = useState(1)
+  const [durationSeconds, setDurationSeconds] = useState<number | undefined>(IMAGE_MODELS[0].defaultDuration)
+  const [generateAudio, setGenerateAudio] = useState(IMAGE_MODELS[0].defaultAudio)
+  const [, setPricingRevision] = useState(0)
   const [suggestions, setSuggestions] = useState<Suggestion[]>(SUGGESTIONS)
   const [modelSheetOpen, setModelSheetOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -140,6 +138,8 @@ export default function IndexPage() {
   const [historyPicks, setHistoryPicks] = useState<HistoryPickItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
 
+  const prefillEpochRef = useRef(0)
+  const pageOwnerRef = useRef(getUserId())
   const cancelledRef = useRef(false)
   const promptRef = useRef('')
   promptRef.current = prompt
@@ -156,7 +156,8 @@ export default function IndexPage() {
   const editBusy = editStage !== 'idle'
   const upscaleBusy = upscaleStage !== 'idle'
   const modeBusy = editBusy || upscaleBusy
-  const referenceSupported = REFERENCE_SUPPORTED[model.id] !== false
+  const referenceSupported = model.referenceImages
+  const isVideoResult = mode === 'generate' && Boolean(task?.results?.find(result => result.url === imageUrl)?.mimeType?.startsWith('video/'))
   /** 结果画布按模式取各自产物：生成 / 改图 / 放大互不覆盖。 */
   const displayedUrl = mode === 'edit' ? editUrl : mode === 'upscale' ? upscaleUrl : imageUrl
   const hasImage = Boolean(displayedUrl)
@@ -167,7 +168,8 @@ export default function IndexPage() {
     : 0
 
   function applyAspectRatio(next: AspectRatio) {
-    setRatio(next)
+    const supported = model.aspectRatios.includes(next) ? next : model.defaultAspectRatio
+    setRatio(supported)
     setResolution((current) => clampResolution(model, next, current))
   }
 
@@ -178,7 +180,50 @@ export default function IndexPage() {
     if (template.aspectRatio) applyAspectRatio(template.aspectRatio)
   }
 
+  useEffect(() => {
+    let alive = true
+    void syncModelPricing().then(() => { if (alive) setPricingRevision(value => value + 1) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [])
+
   useDidShow(() => {
+    const epoch = ++prefillEpochRef.current
+    if (pageOwnerRef.current !== getUserId()) {
+      pageOwnerRef.current = getUserId()
+      setPrompt(''); setEditSource(null); setReferences([]); setRetryOfTaskId(undefined); setTask(null); setImageUrl(''); setEditUrl(''); setUpscaleUrl('')
+      cancelledRef.current = true
+    }
+    const recipe = consumeAgentImageRecipe()
+    if (recipe) {
+      setPrompt(recipe.prompt)
+      setStyleKey('none')
+      setReferences([])
+      setRetryOfTaskId(recipe.retryOfTaskId)
+      setCopies(recipe.mode === 'rerun' ? 3 : 1)
+      const nextIndex = IMAGE_MODELS.findIndex(item => item.id === recipe.modelId && item.kind === 'image')
+      if (nextIndex >= 0) {
+        const nextModel = IMAGE_MODELS[nextIndex]
+        setModelIndex(nextIndex)
+        const dims = /^(\d+)x(\d+)$/.exec(recipe.size ?? '')
+        const target = dims ? Number(dims[1]) / Number(dims[2]) : 1
+        const nextRatio = nextModel.aspectRatios.reduce((best, candidate) => {
+          const value = (ratio: string) => { const [w, h] = ratio.split(':').map(Number); return Math.abs(w / h - target) }
+          return value(candidate) < value(best) ? candidate : best
+        }, nextModel.defaultAspectRatio)
+        setRatio(nextRatio)
+        const edge = dims ? Math.max(Number(dims[1]), Number(dims[2])) : 1024
+        setResolution(clampResolution(nextModel, nextRatio, edge > 3072 ? '4k' : edge >= 2048 ? '2k' : '1k'))
+      }
+      if (recipe.mode === 'edit' && recipe.referenceImage) {
+        setMode('edit')
+        void Taro.downloadFile({ url: recipe.referenceImage }).then(file => {
+          if (recipe.owner !== getUserId() || epoch !== prefillEpochRef.current) return
+          if (file.statusCode !== 200) throw new Error('原图下载失败')
+          setEditSource({ path: file.tempFilePath, name: '原图', size: 0 })
+        }).catch(error => { if (recipe.owner === getUserId() && epoch === prefillEpochRef.current) setError(error instanceof Error ? error.message : '原图下载失败') })
+      } else setMode('generate')
+      return
+    }
     let stored: unknown
     try {
       stored = Taro.getStorageSync('pending_template')
@@ -207,6 +252,7 @@ export default function IndexPage() {
     })
     return () => {
       cancelledRef.current = true
+      prefillEpochRef.current += 1
     }
   }, [])
 
@@ -223,9 +269,12 @@ export default function IndexPage() {
     if (index < 0) return
     const nextModel = IMAGE_MODELS[index]
     setModelIndex(index)
-    setResolution((current) => clampResolution(nextModel, ratio, current))
+    setRatio(nextModel.aspectRatios.includes(ratio) ? ratio : nextModel.defaultAspectRatio)
+    setResolution(nextModel.defaultResolution)
+    setDurationSeconds(nextModel.defaultDuration)
+    setGenerateAudio(nextModel.defaultAudio)
     // 与网页端同义：切到不支持参考图的模型时清空已选图（ReferenceImageUpload 不挂载）。
-    if (REFERENCE_SUPPORTED[nextModel.id] === false && references.length) {
+    if (!nextModel.referenceImages && references.length) {
       setReferences([])
       notify('该模型不支持参考图，已清空已选图片')
     }
@@ -304,7 +353,7 @@ export default function IndexPage() {
     }
   }
 
-  /** 参考图多选：chooseMedia count 随剩余槽位收窄（网页版同一上限 6 张）。 */
+  /** 参考图多选：chooseMedia count 随剩余槽位收窄（服务端同一上限 5 张）。 */
   async function handlePickReferences() {
     if (!referenceSupported) {
       notify('当前模型不支持参考图，换一个模型再试')
@@ -378,7 +427,7 @@ export default function IndexPage() {
 
   /** 「从作品/详情带入」：把本页刚生成的结果直接当改图 / 放大输入。 */
   function handleUseCurrentResult() {
-    if (!imageUrl) return
+    if (!imageUrl || task?.results?.find(result => result.url === imageUrl)?.mimeType?.startsWith('video/')) return
     const picked: LocalPickedImage = { path: imageUrl, name: '当前作品', size: 0 }
     setError('')
     setQuotaError(false)
@@ -555,17 +604,20 @@ export default function IndexPage() {
     setImageUrl('')
     setStartedAt(Date.now())
     setNow(Date.now())
+    let acceptedCount = 0
 
     try {
       const user = await ensureLogin()
       const finalPrompt = enhancePrompt(prompt, styleKey)
-      const submitted = await submitGeneration({
+      const generationInput = {
         prompt: finalPrompt,
         modelId: model.id,
         aspectRatio: ratio,
         outputResolution: resolution,
-        qualityMode: resolution === '1k' ? 'fast' : 'quality',
+        qualityMode: resolution === '1k' ? 'fast' as const : 'quality' as const,
         userId: user.id,
+        durationSeconds: model.kind === 'video' ? durationSeconds : undefined,
+        generateAudio: model.kind === 'video' && model.supportsAudio ? generateAudio : undefined,
         // 有参考图走 multipart（generation.ts submitGeneration 分支），无图仍是原 JSON 契约。
         referenceImages: references.map((image, index) => ({
           id: `mp-ref-${index}-${image.size}-${image.name}`,
@@ -574,21 +626,33 @@ export default function IndexPage() {
           path: image.path,
           size: image.size,
         })),
-      })
+        retryOfTaskId,
+      }
+      let submitted: GenerationTask | null = null
+      for (let index = 0; index < copies; index += 1) {
+        if (cancelledRef.current || getUserId() !== user.id) break
+        submitted = await submitGeneration(generationInput)
+        acceptedCount += 1
+        if (getUserId() !== user.id) return
+        setTask(submitted)
+      }
+      if (!submitted) return
+      if (copies > 1) void Taro.showToast({ title: `已提交 ${acceptedCount} 组，其余结果见历史`, icon: 'none' })
 
       setTask(submitted)
       const finished = submitted.status === 'succeeded'
         ? submitted
         : await waitForGenerationTask(
             submitted.taskId,
-            (nextTask) => setTask(nextTask),
-            () => cancelledRef.current,
+            (nextTask) => { if (getUserId() === user.id) setTask(nextTask) },
+            () => cancelledRef.current || getUserId() !== user.id,
           )
+      if (getUserId() !== user.id) return
       setTask(finished)
 
       const first = finished.results?.find((result) => result.url)
       if (!first?.url) {
-        throw new ApiError('任务已完成但没有取到图片地址', 0, 'missing_result')
+        throw new ApiError('任务已完成但没有取到作品地址', 0, 'missing_result')
       }
       setImageUrl(first.url)
     } catch (err) {
@@ -597,7 +661,7 @@ export default function IndexPage() {
         return
       }
       const message = err instanceof Error ? err.message : '生成失败，请稍后重试'
-      setError(message)
+      setError(acceptedCount > 0 ? `已提交 ${acceptedCount} 组，请到历史查看；后续处理：${message}` : message)
       setQuotaError(err instanceof ApiError && (err.status === 402 || err.code === 'insufficient_quota'))
     } finally {
       setSubmitting(false)
@@ -616,7 +680,8 @@ export default function IndexPage() {
       if (download.statusCode !== 200) {
         throw new Error(`图片下载失败（${download.statusCode}）`)
       }
-      await Taro.saveImageToPhotosAlbum({ filePath: download.tempFilePath })
+      if (isVideoResult) await Taro.saveVideoToPhotosAlbum({ filePath: download.tempFilePath })
+      else await Taro.saveImageToPhotosAlbum({ filePath: download.tempFilePath })
       Taro.showToast({ title: '已保存到相册', icon: 'success' })
     } catch (err) {
       const detail = (err as { errMsg?: string; message?: string } | null)
@@ -636,7 +701,7 @@ export default function IndexPage() {
   }
 
   function handlePreview() {
-    if (!displayedUrl) return
+    if (!displayedUrl || isVideoResult) return
     void Taro.previewImage({ urls: [displayedUrl], current: displayedUrl })
   }
 
@@ -802,7 +867,7 @@ export default function IndexPage() {
                 <Text className='w-8 shrink-0 text-ios-footnote font-medium text-[rgba(0,0,0,0.50)]'>比例</Text>
                 <ScrollView scrollX enableFlex className='min-w-0 flex-1'>
                   <View className='flex items-center gap-1.5'>
-                    {ASPECT_RATIOS.map((item) => (
+                    {model.aspectRatios.map((item) => (
                       <View
                         key={item}
                         className={`style-chip ${ratio === item ? 'active' : ''}`}
@@ -828,12 +893,34 @@ export default function IndexPage() {
                       >
                         <Text>{RESOLUTION_LABELS[item] ?? item}</Text>
                         <Text className='tabular-nums text-[rgba(0,0,0,0.52)]'>
-                          · {modelPriceLabel(model.id, item)}
+                          · {modelPriceLabel(model.id, item, generateAudio)}
                         </Text>
                       </View>
                     ))}
                   </View>
                 </ScrollView>
+              </View>
+
+              {model.kind === 'video' ? (
+                <>
+                  <View className='flex min-w-0 items-center gap-2'>
+                    <Text className='w-8 shrink-0 text-ios-footnote'>时长</Text>
+                    <ScrollView scrollX className='min-w-0 flex-1'>
+                      <View className='flex items-center gap-1.5'>
+                        {model.durations.map(seconds => (
+                          <View key={seconds} className={`style-chip ${durationSeconds === seconds ? 'active' : ''}`} onClick={() => setDurationSeconds(seconds)}><Text>{seconds} 秒</Text></View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                  {model.supportsAudio ? <View className={`style-chip ${generateAudio ? 'active' : ''}`} onClick={() => setGenerateAudio(value => !value)}><Text>同步生成声音：{generateAudio ? '开启' : '关闭'}</Text></View> : null}
+                </>
+              ) : null}
+
+              <View className='flex flex-wrap items-center gap-1.5'>
+                <Text className='text-ios-footnote'>组数</Text>
+                {[1, 2, 3, 5, 8].map(count => <View key={count} className={`style-chip ${copies === count ? 'active' : ''}`} onClick={() => setCopies(count)}><Text>{count}</Text></View>)}
+                <Text className='text-ios-caption1'>预计 {Math.round(generationCoins(model.id, { resolution: resolution as OutputResolution, durationSeconds, generateAudio }) * copies * 100000) / 100000} 币 · {copies} 组，点生成后提交</Text>
               </View>
 
               {/* 风格（StylePresets.tsx:14-32，inline 分支） */}
@@ -882,7 +969,7 @@ export default function IndexPage() {
                           <Text>从相册选择</Text>
                         </View>
                       )}
-                      {imageUrl ? (
+                      {imageUrl && !task?.results?.find(result => result.url === imageUrl)?.mimeType?.startsWith('video/') ? (
                         <View className='style-chip gap-1.5' onClick={handleUseCurrentResult}>
                           <Icon name='image-a40' className='h-3.5 w-3.5' />
                           <Text>用当前作品</Text>
@@ -949,7 +1036,7 @@ export default function IndexPage() {
                           <Text>从相册选择</Text>
                         </View>
                       )}
-                      {imageUrl ? (
+                      {imageUrl && !task?.results?.find(result => result.url === imageUrl)?.mimeType?.startsWith('video/') ? (
                         <View className='style-chip gap-1.5' onClick={handleUseCurrentResult}>
                           <Icon name='image-a40' className='h-3.5 w-3.5' />
                           <Text>用当前作品</Text>
@@ -1118,7 +1205,7 @@ export default function IndexPage() {
 
           {hasImage ? (
             <>
-              <Image
+              {isVideoResult ? <Video className='h-full w-full' src={displayedUrl} controls objectFit='contain' /> : <Image
                 className='h-full w-full'
                 src={displayedUrl}
                 mode='aspectFit'
@@ -1128,7 +1215,7 @@ export default function IndexPage() {
                   else setImageUrl('')
                   setError('图片加载失败，请重新生成，或到「生成历史」查看。')
                 }}
-              />
+              />}
               <View
                 className='pointer-events-none absolute inset-0'
                 style={{
@@ -1146,7 +1233,7 @@ export default function IndexPage() {
                 <Icon name='download-a45' className='h-4 w-4' />
               </View>
               <View className='absolute bottom-4 right-4 rounded-full bg-[rgba(255,255,255,0.18)] px-3 py-2 text-xs font-medium text-[rgba(255,255,255,0.90)]'>
-                <Text>点一下放大</Text>
+                <Text>{isVideoResult ? '点击播放视频' : '点一下放大'}</Text>
               </View>
             </>
           ) : rendering ? (

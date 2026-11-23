@@ -79,6 +79,9 @@ export interface HistoryQuery {
   imageSize?: string
   starredOnly?: boolean
   withImageOnly?: boolean
+  since?: number
+  until?: number
+  projectId?: string
 }
 
 export interface HistoryPage {
@@ -133,6 +136,9 @@ function buildHistoryParams(
   if (query.keyword) push('keyword', query.keyword)
   if (query.modelId) push('modelId', query.modelId)
   if (query.imageSize) push('imageSize', query.imageSize)
+  if (query.since !== undefined) push('since', String(query.since))
+  if (query.until !== undefined) push('until', String(query.until))
+  if (query.projectId) push('projectId', query.projectId)
   if (query.starredOnly) push('starred', '1')
   if (query.withImageOnly) push('withImage', '1')
   if (options.cursor) push('cursor', options.cursor)

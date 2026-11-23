@@ -4,9 +4,9 @@ const path = require('path')
 
 // TARO_APP_* 的 URL 默认值；归一化后为空时回退到这里（单一真源）。
 const DEFAULT_URLS = {
-  TARO_APP_API_BASE_URL: 'https://image.tinchak0207.xyz',
+  TARO_APP_API_BASE_URL: 'https://www.eimu.dev',
   TARO_APP_AGENT_ORIGIN: 'https://store.tinchak0207.xyz',
-  TARO_APP_WEB_ORIGIN: 'https://eimu.dev',
+  TARO_APP_WEB_ORIGIN: 'https://www.eimu.dev',
 }
 
 // URL 值归一化：trim → 去掉末尾所有 '/'；结果为空则回退默认值。

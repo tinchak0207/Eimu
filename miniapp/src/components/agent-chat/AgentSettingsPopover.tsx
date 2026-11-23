@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Slider, Text, View } from '@tarojs/components'
 import { cn } from '../../lib/cn'
 import {
@@ -12,6 +12,8 @@ import {
 } from '../../lib/agent'
 import { Icon } from './icons'
 import { MySkillsDialog } from './MySkillsDialog'
+import { MyMemoriesDialog } from './MyMemoriesDialog'
+import { setHideAgentReasoning, useHideAgentReasoning } from '../../lib/agent-display-preferences'
 
 /**
  * 助理设定弹层（照 src/components/agent-chat/AgentSettingsPopover.tsx 的 2026-10-03
@@ -46,30 +48,40 @@ export interface AgentSettingsPopoverProps {
 }
 
 export function AgentSettingsPopover({ className }: AgentSettingsPopoverProps) {
+  const hideReasoning = useHideAgentReasoning()
+  const [memoriesOpen, setMemoriesOpen] = useState(false)
   const [open, setOpen] = useState(false)
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error'>('loading')
+  const [saveError, setSaveError] = useState('')
+  const aliveRef = useRef(true)
   /** 「我的技能」管理面：同一入口再开一张 lg-sheet，不造第二个入口。 */
   const [skillsOpen, setSkillsOpen] = useState(false)
   // 初值直接吃本地缓存：弹层打开立即是用户上次的值，不等网络。
   const [settings, setSettings] = useState<AgentSettings>(() => readCachedAgentSettings())
 
-  // 挂载时 GET 回读合并：网关为准，缺项用默认；失败静默（设定不可用不能挡聊天）。
-  useEffect(() => {
-    let alive = true
-    void getAgentSettings().then((remote) => {
-      if (!alive) return
-      setSettings(remote)
-      writeCachedAgentSettings(remote)
+  const reload = useCallback(() => {
+    setLoadState('loading')
+    void getAgentSettings().then((result) => {
+      if (!aliveRef.current) return
+      if (!result.ok) { setLoadState('error'); return }
+      setSettings(result.settings)
+      writeCachedAgentSettings(result.settings)
+      setLoadState('ok')
     })
-    return () => {
-      alive = false
-    }
   }, [])
-
-  /** 改一项：本地立即生效（saveAgentSettings 内部先写缓存）+ 异步持久化到网关。 */
+  useEffect(() => { aliveRef.current = true; reload(); return () => { aliveRef.current = false } }, [reload])
+  useEffect(() => { if (open) { setSaveError(''); reload() } }, [open, reload])
   const update = useCallback((delta: Partial<AgentSettings>) => {
-    void saveAgentSettings(delta)
-    setSettings((prev) => ({ ...prev, ...delta }))
-  }, [])
+    if (loadState !== 'ok') return
+    const before = settings
+    setSettings({ ...before, ...delta })
+    setSaveError('')
+    void saveAgentSettings(delta).then((result) => {
+      if (!aliveRef.current) return
+      if (result.ok) setSettings(result.settings)
+      else { setSettings(before); setSaveError('保存失败，未生效') }
+    })
+  }, [loadState, settings])
 
   const interactionIndex = Math.max(0, INTERACTION_MODES.indexOf(settings.interaction_mode))
   const interactionMode = INTERACTION_MODES[interactionIndex] ?? 'preset'
@@ -109,6 +121,26 @@ export function AgentSettingsPopover({ className }: AgentSettingsPopoverProps) {
 
             <View className='h-px bg-black/[0.06]' />
 
+            <View className='px-2.5 py-2.5'>
+              <View className='flex items-center justify-between gap-3'>
+                <Text className='text-ios-footnote font-medium text-foreground'>我的记忆</Text>
+                <View className='rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue' onClick={() => setMemoriesOpen(true)}><Text>管理</Text></View>
+              </View>
+              <Text className='mt-1 block text-ios-caption2 leading-relaxed text-foreground/45'>看看助理记住了你什么，随时改、随时删</Text>
+            </View>
+            <View className='px-2.5 py-2.5'>
+              <View className='flex items-center justify-between gap-3'>
+                <Text className='text-ios-footnote font-medium text-foreground'>隐藏思维链</Text>
+                <View className='flex h-11 w-11 shrink-0 items-center rounded-lg' onClick={() => setHideAgentReasoning(!hideReasoning)}>
+                  <View className={cn('relative h-6 w-11 rounded-full', hideReasoning ? 'bg-ios-blue' : 'bg-black/15')}>
+                    <View className={cn('absolute top-1 h-4 w-4 rounded-full bg-white shadow', hideReasoning ? 'left-6' : 'left-1')} />
+                  </View>
+                </View>
+              </View>
+              <Text className='mt-1 block text-ios-caption2 leading-relaxed text-foreground/45'>只显示回答和任务进度</Text>
+            </View>
+            {loadState === 'error' ? <View className='px-2.5 text-ios-caption2 text-ios-red' onClick={reload}><Text>设置读取失败，暂不能修改 · 重试</Text></View> : null}
+            {saveError ? <Text className='block px-2.5 text-ios-caption2 text-ios-red'>{saveError}</Text> : null}
             {/* d) 互动模式：三档滑条，当前档位点亮刻度点。 */}
             <View className='px-2.5 py-2.5'>
               <View className='flex items-center justify-between gap-3'>
@@ -119,6 +151,7 @@ export function AgentSettingsPopover({ className }: AgentSettingsPopoverProps) {
               </View>
               <View className='mt-2'>
                 <Slider
+                  disabled={loadState !== 'ok'}
                   min={0}
                   max={2}
                   step={1}
@@ -152,6 +185,7 @@ export function AgentSettingsPopover({ className }: AgentSettingsPopoverProps) {
 
       {/* 管理面：无公开市集，只有「我自己的技能」。 */}
       {skillsOpen ? <MySkillsDialog onClose={() => setSkillsOpen(false)} /> : null}
+      {memoriesOpen ? <MyMemoriesDialog onClose={() => setMemoriesOpen(false)} /> : null}
     </View>
   )
 }

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import { cn } from '../../lib/cn'
-import { AgentAudioCard } from './AgentAudioCard'
+import { AgentAudioCard, type AgentAudioCardProps } from './AgentAudioCard'
 import { AgentDirectorCard } from './AgentDirectorCard'
 import { AgentImageCard, AgentImageGroup } from './AgentImageCard'
 import { AgentMessageBubble } from './AgentMessageBubble'
 import { AgentNoticeRow } from './AgentNoticeRow'
 import { AgentSubagentReportCard } from './AgentSubagentReportCard'
 import { AgentToolCard } from './AgentToolCard'
-import { AgentVideoCard } from './AgentVideoCard'
+import { AgentVideoCard, type AgentVideoCardProps } from './AgentVideoCard'
 import { Icon } from './icons'
 import type { AgentItem, AgentToolAuthScope } from './types'
 
@@ -111,6 +111,10 @@ function PlanCard({ item }: { item: Extract<AgentItem, { kind: 'plan' }> }) {
 
 export interface AgentTranscriptProps {
   items: AgentItem[]
+  videoActions?: Pick<AgentVideoCardProps, "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant">
+  audioActions?: Pick<AgentAudioCardProps, "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant">
+  hideReasoning?: boolean
+  onSend?: (text: string) => void
   /** 网关暂态状态行（turn.status）：新状态替换旧行，真实内容/turn.done 即清。 */
   turnStatus?: string
   /** 当前会话 id：透传给用户气泡的附件卡铸读取票。 */
@@ -127,7 +131,7 @@ export interface AgentTranscriptProps {
   onAuthorizeLocalFiles?: (scope: AgentToolAuthScope, root?: string) => void | Promise<void>
 }
 
-export function AgentTranscript({ items, turnStatus, sessionId, imageActions, onAuthorizeLocalFiles }: AgentTranscriptProps) {
+export function AgentTranscript({ items, turnStatus, sessionId, imageActions, videoActions, audioActions, hideReasoning, onSend, onAuthorizeLocalFiles }: AgentTranscriptProps) {
   const segments = segmentItems(items)
 
   return (
@@ -147,7 +151,7 @@ export function AgentTranscript({ items, turnStatus, sessionId, imageActions, on
         switch (item.kind) {
           case 'user':
           case 'assistant':
-            return <AgentMessageBubble key={item.id} item={item} sessionId={sessionId} />
+            return <AgentMessageBubble key={item.id} item={item} sessionId={sessionId} hideReasoning={hideReasoning} onSend={onSend} />
           case 'plan':
             return <PlanCard key={item.id} item={item} />
           case 'tool':
@@ -155,9 +159,9 @@ export function AgentTranscript({ items, turnStatus, sessionId, imageActions, on
           case 'image':
             return <AgentImageCard key={item.id} item={item} {...imageActions} />
           case 'video':
-            return <AgentVideoCard key={item.id} item={item} />
+            return <AgentVideoCard key={item.id} item={item} {...videoActions} />
           case 'audio':
-            return <AgentAudioCard key={item.id} item={item} />
+            return <AgentAudioCard key={item.id} item={item} {...audioActions} />
           case 'director':
             return <AgentDirectorCard key={item.id} item={item} />
           case 'notice':

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Image, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { cn } from '../../lib/cn'
+import { saveAgentMediaToHistory } from '../../lib/agent-media-history'
 import { Icon } from './icons'
 import type { AgentItem } from './types'
+import { canRerunAgentImage, openAgentImageRecipe } from '../../lib/agent-image-actions'
 
 /**
  * 出图卡（真源：src/components/agent-chat/AgentImageCard.tsx，702 行）。
@@ -125,10 +127,10 @@ function Dimensions({ size, className }: { size: { w: number; h: number } | null
 export function AgentImageCard({
   item,
   onSaveToLibrary,
-  onEdit,
+  onEdit = (image) => openAgentImageRecipe(image, 'edit'),
   onDownload,
-  onRerun,
-  onRerunVariant,
+  onRerun = canRerunAgentImage(item) ? (image) => { void openAgentImageRecipe(image, 'rerun') } : undefined,
+  onRerunVariant = canRerunAgentImage(item) ? (image) => { void openAgentImageRecipe(image, 'variant') } : undefined,
 }: AgentImageCardProps) {
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -169,7 +171,7 @@ export function AgentImageCard({
     setSaveState('loading')
     let ok = false
     try {
-      ok = onSaveToLibrary ? await onSaveToLibrary(item) : await saveImageToAlbum(item.url)
+      ok = onSaveToLibrary ? await onSaveToLibrary(item) : await saveAgentMediaToHistory(item)
     } catch {
       ok = false
     }
@@ -182,7 +184,7 @@ export function AgentImageCard({
       () => setSaveState((state) => (state === 'failed' ? 'idle' : state)),
       2000,
     )
-    void Taro.showToast({ title: '保存失败，请检查相册权限', icon: 'none' })
+    void Taro.showToast({ title: '未存入我的资产，请稍后重试', icon: 'none' })
   }, [item, onSaveToLibrary, saveState, flash])
 
   const handleEdit = useCallback(async () => {
@@ -315,6 +317,7 @@ export function AgentImageCard({
         <ImageAction label='原图链接' disabled={false} onClick={() => copyUrl(item.url)}>
           <Icon name='share-a45' className='h-3.5 w-3.5' />
         </ImageAction>
+        {item.recipe?.lora ? <Text className='text-ios-caption1 text-muted-foreground'>该配方包含 LoRA，请到网页版按原配方重跑。</Text> : null}
         {onRerun !== undefined ? (
           <ImageAction label='再来 N 组' disabled={false} onClick={() => onRerun(item)}>
             <Icon name='layers-a45' className='h-3.5 w-3.5' />
@@ -348,12 +351,12 @@ export function AgentImageGroup({ items, onSaveToLibrary }: AgentImageGroupProps
     async (item: ImageItem) => {
       let ok = false
       try {
-        ok = onSaveToLibrary ? await onSaveToLibrary(item) : await saveImageToAlbum(item.url)
+        ok = onSaveToLibrary ? await onSaveToLibrary(item) : await saveAgentMediaToHistory(item)
       } catch {
         ok = false
       }
       void Taro.showToast({
-        title: ok ? '已保存到相册' : '保存失败，请检查相册权限',
+        title: ok ? '已存入我的资产' : '未存入我的资产，请稍后重试',
         icon: none(ok),
       })
     },

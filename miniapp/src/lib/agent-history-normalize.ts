@@ -238,7 +238,7 @@ export function normalizeOpenCodeMessages(messages: readonly unknown[] | null | 
    * 落地一张媒体卡。返回 false＝URL 不合法或型别判不出（已计入丢弃）。
    * dedupe=true 时同 kind 同 url 只出一次（用户附件按原样重复上传也应只显示一张）。
    */
-  const pushMedia = (url: unknown, mime: string | undefined, filename: string | undefined): boolean => {
+  const pushMedia = (url: unknown, mime: string | undefined, filename: string | undefined, rawRecipe?: unknown, taskId?: string): boolean => {
     if (!isPublicUrl(url)) {
       drop('file-no-public-url')
       return false
@@ -253,7 +253,9 @@ export function normalizeOpenCodeMessages(messages: readonly unknown[] | null | 
     seenMedia.add(dedupeKey)
     if (kind === 'image') {
       imageSeq += 1
-      items.push({ kind: 'image', id: `image-h${items.length + 1}`, seq: imageSeq, url })
+      const raw = asRecord(rawRecipe)
+      const recipe = raw && typeof raw.prompt === 'string' && typeof raw.model === 'string' ? { prompt: raw.prompt, model: raw.model, ...(typeof raw.lora === 'string' ? { lora: raw.lora } : {}), ...(typeof raw.size === 'string' ? { size: raw.size } : {}) } : undefined
+      items.push({ kind: 'image', id: `image-h${items.length + 1}`, seq: imageSeq, url, ...(recipe ? { recipe } : {}), ...(taskId ? { taskId } : {}) })
     } else if (kind === 'video') {
       videoSeq += 1
       items.push({ kind: 'video', id: `video-h${items.length + 1}`, seq: videoSeq, url })
@@ -444,7 +446,7 @@ export function normalizeOpenCodeMessages(messages: readonly unknown[] | null | 
       if (type === 'file') {
         // 媒体卡会切断文字段落（同 tool 的处理）。
         flush()
-        pushMedia(part.url, asString(part.mime), asString(part.filename))
+        pushMedia(part.url, asString(part.mime), asString(part.filename), part.recipe ?? asRecord(part.metadata)?.recipe, asString(part.task_id) ?? asString(asRecord(part.metadata)?.task_id))
         continue
       }
       // step-start / step-finish / patch / snapshot 等 opencode 内部片段：跳过计数。

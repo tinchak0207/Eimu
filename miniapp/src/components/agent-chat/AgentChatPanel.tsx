@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { ScrollView, Text, View } from '@tarojs/components'
 import { cn } from '../../lib/cn'
 import { Icon } from './icons'
@@ -6,7 +7,10 @@ import { AgentBatchProgress } from './AgentBatchProgress'
 import { AgentComposer } from './AgentComposer'
 import { AgentQuestionCard } from './AgentQuestionCard'
 import { AgentSubagentBar } from './AgentSubagentBar'
-import { AgentTranscript } from './AgentTranscript'
+import { AgentTranscript, type AgentTranscriptProps } from './AgentTranscript'
+import { AgentConfirmCard } from './AgentConfirmCard'
+import { AgentSubagentView } from './AgentSubagentView'
+import { useHideAgentReasoning } from '../../lib/agent-display-preferences'
 import type { BatchAnchor } from './agent-batch-anchor'
 import type {
   AgentConnection,
@@ -30,69 +34,13 @@ export const AGENT_EXAMPLE_PROMPTS = [
   '把我这篇小说改成成片，先给我分镜表',
 ] as const
 
-function formatCoins(n: number): string {
-  if (!Number.isFinite(n)) return '0'
-  if (Number.isInteger(n)) return String(n)
-  if (Math.abs(n) >= 1) return n.toFixed(2)
-  return String(Math.max(0, Math.floor(n * 1e5) / 1e5))
-}
-
-function ConfirmCard({
-  confirm,
-  onConfirm,
-}: {
-  confirm: AgentPendingConfirm
-  onConfirm: (requestId: string, approved: boolean) => void
-}) {
-  const locked = confirm.resolving === true
-  const summary = confirm.description && confirm.description.trim() ? confirm.description.trim() : '将花费'
-
-  return (
-    <View className='agent-rise lg-sheet relative overflow-hidden rounded-[20px] p-4'>
-      <View className='pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80' />
-      <View className='flex items-baseline justify-between gap-3'>
-        <Text className='agent-turn-text min-w-0 text-[0.9375rem] leading-snug text-foreground'>
-          {summary}
-        </Text>
-        <Text className='shrink-0 text-ios-footnote font-medium text-[#b8860b]'>
-          {formatCoins(confirm.amountCoins)} 币
-        </Text>
-      </View>
-      <Text className='mt-1 text-ios-footnote text-muted-foreground'>
-        确认后开始生成，可随时补充要求。
-      </Text>
-      <View className='mt-3 flex flex-wrap items-center gap-2'>
-        <View
-          className={cn(
-            'flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-[#2d3142] px-5 text-ios-footnote font-medium text-white',
-            'shadow-[0_8px_20px_rgba(45,49,66,0.18)]',
-            locked && 'opacity-60',
-          )}
-          onClick={() => {
-            if (!locked) onConfirm(confirm.requestId, true)
-          }}
-        >
-          {confirm.resolving ? <Icon name='loader-2-white' className='ic-spin h-4 w-4' /> : null}
-          <Text>确认 · {formatCoins(confirm.amountCoins)} 币</Text>
-        </View>
-        <View
-          className={cn(
-            'flex min-h-11 items-center justify-center gap-1.5 rounded-full px-4 text-ios-footnote font-medium text-muted-foreground',
-            locked && 'opacity-50',
-          )}
-          onClick={() => {
-            if (!locked) onConfirm(confirm.requestId, false)
-          }}
-        >
-          <Text>拒绝这笔花费</Text>
-        </View>
-      </View>
-    </View>
-  )
-}
-
 export interface AgentChatPanelProps {
   items: AgentItem[]
+  sessionId?: string | null
+  onSendText?: (text: string) => void | Promise<void>
+  imageActions?: AgentTranscriptProps['imageActions']
+  videoActions?: AgentTranscriptProps['videoActions']
+  audioActions?: AgentTranscriptProps['audioActions']
   confirms: AgentPendingConfirm[]
   /** 待回答的 opencode question（AgentChatPanel.tsx:705-719）。 */
   questions: AgentPendingQuestion[]
@@ -110,7 +58,7 @@ export interface AgentChatPanelProps {
   onDraftChange: (value: string) => void
   onSend: () => void
   onStop: () => void
-  onConfirm: (requestId: string, approved: boolean) => void
+  onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>
   onAnswerQuestion: (requestId: string, answers: string[][]) => Promise<boolean | void>
   onExampleSend: (text: string) => void
   thinkingLevel: ThinkingLevel
@@ -126,6 +74,11 @@ export interface AgentChatPanelProps {
 
 export function AgentChatPanel({
   items,
+  sessionId,
+  onSendText,
+  imageActions,
+  videoActions,
+  audioActions,
   confirms,
   questions,
   connection,
@@ -154,6 +107,9 @@ export function AgentChatPanel({
   onAnchorDismiss,
   anchorBusy = false,
 }: AgentChatPanelProps) {
+  const hideReasoning = useHideAgentReasoning()
+  const [viewingRun, setViewingRun] = useState<Extract<AgentItem, { kind: 'subagent' }> | null>(null)
+  useEffect(() => setViewingRun(null), [sessionId])
   const isEmpty = items.length === 0 && connection !== 'reconnecting' && connection !== 'closed'
   const last = items[items.length - 1]
   const subagentItems = items.filter(
@@ -163,6 +119,8 @@ export function AgentChatPanel({
   const composer = (
     <View className='agent-composer-anchor max-sm:px-1'>
       <AgentComposer
+        sessionId={sessionId}
+        onSendText={onSendText}
         value={draft}
         onChange={onDraftChange}
         onSend={onSend}
@@ -178,6 +136,9 @@ export function AgentChatPanel({
   )
 
   const anchorId = `agent-bottom-${items.length}-${turnStatus ?? ''}-${turnActive ? 1 : 0}`
+
+  const activeViewingRun = subagentItems.find((item) => item.subagentId === viewingRun?.subagentId) ?? viewingRun
+  if (activeViewingRun) return <AgentSubagentView key={`${sessionId}:${activeViewingRun.subagentId}`} item={activeViewingRun} sessionId={sessionId} onBack={() => setViewingRun(null)} />
 
   return (
     <View className='agent-panel'>
@@ -216,7 +177,7 @@ export function AgentChatPanel({
 
       {/* 罪状 4：子代理状态栏，置顶于转录区之上（AgentChatPanel.tsx:512-516）。 */}
       <View className='pb-1 max-sm:px-1'>
-        <AgentSubagentBar items={subagentItems} />
+        <AgentSubagentBar items={subagentItems} sessionId={sessionId} onOpenRun={setViewingRun} />
       </View>
 
       <View className='relative flex min-h-0 min-w-0 flex-1 flex-col'>
@@ -272,7 +233,7 @@ export function AgentChatPanel({
             scrollIntoView={anchorId}
             scrollWithAnimation
           >
-            <AgentTranscript items={items} turnStatus={turnStatus} />
+            <AgentTranscript items={items} turnStatus={turnStatus} sessionId={sessionId} hideReasoning={hideReasoning} onSend={onSendText} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} />
 
             {turnActive && last?.kind !== 'assistant' ? (
               <View className='agent-thinking flex items-center gap-2 px-1 py-2 max-sm:px-0'>
@@ -323,7 +284,7 @@ export function AgentChatPanel({
         <View className='agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto px-0.5 pb-1.5 max-sm:px-1'>
           <View className='flex flex-col gap-2'>
             {confirms.map((confirm) => (
-              <ConfirmCard key={confirm.requestId} confirm={confirm} onConfirm={onConfirm} />
+              <AgentConfirmCard key={confirm.requestId} confirm={confirm} onConfirm={onConfirm} busy={confirm.resolving} contextText={[...items].reverse().find((item) => item.kind === 'assistant')?.kind === 'assistant' ? ([...items].reverse().find((item) => item.kind === 'assistant') as Extract<AgentItem, { kind: 'assistant' }>).text : ''} />
             ))}
           </View>
         </View>

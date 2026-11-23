@@ -51,12 +51,16 @@ export default function TemplatesPage() {
     if (previousRoute === 'pages/index/index') {
       Taro.navigateBack({
         fail: () => {
-          Taro.switchTab({ url: '/pages/index/index' })
+          void Taro.redirectTo({ url: '/pages/index/index' }).catch(() => {
+            void Taro.showToast({ title: '返回创作页失败，请重试', icon: 'none' })
+          })
         },
       })
       return
     }
-    Taro.switchTab({ url: '/pages/index/index' })
+    void Taro.redirectTo({ url: '/pages/index/index' }).catch(() => {
+      void Taro.showToast({ title: '打开创作页失败，请重试', icon: 'none' })
+    })
   }
 
   return (

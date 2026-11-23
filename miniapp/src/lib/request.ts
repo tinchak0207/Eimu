@@ -2,7 +2,7 @@ import Taro from '@tarojs/taro'
 import { getToken, getUserId } from './storage'
 
 // 从 .env 注入（TARO_APP_API_BASE_URL），默认生产域名
-export const BASE_URL = process.env.TARO_APP_API_BASE_URL || 'https://image.tinchak0207.xyz'
+export const BASE_URL = process.env.TARO_APP_API_BASE_URL || 'https://www.eimu.dev'
 export const REQUEST_TIMEOUT_MS = 30_000
 
 export class ApiError extends Error {
@@ -70,12 +70,14 @@ export async function request<T>(options: RequestOptions): Promise<T> {
     ...header,
   }
 
+  let requestOwner: number | null = null
   if (auth) {
     const token = getToken()
     const userId = getUserId()
     if (!token || !userId) {
       throw new ApiError('尚未登录，请先登录', 401, 'not_authenticated')
     }
+    requestOwner = userId
     headers.Authorization = `Bearer ${token}`
     headers['x-user-id'] = String(userId)
   }
@@ -94,6 +96,7 @@ export async function request<T>(options: RequestOptions): Promise<T> {
     throw new ApiError(`网络请求失败：${errMsg}`, 0, 'network_error')
   }
 
+  if (auth && requestOwner !== getUserId()) throw new ApiError('账号已切换，已忽略旧账号响应', 401, 'account_changed')
   const body = response.data
   if (response.statusCode >= 200 && response.statusCode < 300) {
     return body as T

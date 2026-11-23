@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button, Image, Text, View } from '@tarojs/components'
 import { useDidShow } from '@tarojs/taro'
 import { fetchMe, ensureLogin, relogin, type MiniUser } from '../../lib/session'
-import { QUOTA_PER_COIN, quotaToCoins } from '../../lib/quota'
+import { quotaToCoins } from '../../lib/quota'
 import './index.scss'
 
 export default function MinePage() {
@@ -42,7 +42,6 @@ export default function MinePage() {
   const nickname = user?.display_name || user?.username || (user ? `用户 ${user.id}` : '未登录')
   const initial = nickname.trim().slice(0, 1) || 'E'
   const coins = quotaToCoins(user?.quota)
-  const rawQuota = typeof user?.quota === 'number' ? user.quota : 0
 
   return (
     <View className='page mine'>
@@ -66,9 +65,6 @@ export default function MinePage() {
           <Text className='quota__value'>{user ? coins : '—'}</Text>
           <Text className='quota__unit'>金币</Text>
         </View>
-        <Text className='muted'>
-          原始额度 {rawQuota.toLocaleString()}（1 金币 = {QUOTA_PER_COIN.toLocaleString()} 单位）
-        </Text>
         <Text className='muted quota__note'>新账号首次登录会自动领取新人礼额度。</Text>
       </View>
 

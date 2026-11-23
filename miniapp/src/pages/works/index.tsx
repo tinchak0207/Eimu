@@ -28,6 +28,7 @@ import {
   type HistoryQuery,
 } from '../../lib/history'
 import { PageShell } from '../../components/pages/PageShell'
+import { getNavbarHeight } from '../../components/Navbar'
 import { PageBoundary } from '../../components/pages/PageBoundary'
 import { Icon, type IconName } from '../../components/agent-chat/icons'
 import './index.scss'
@@ -174,7 +175,7 @@ export default function WorksPage() {
   const [busyEntryId, setBusyEntryId] = useState('')
   const [exporting, setExporting] = useState<'' | 'json' | 'csv'>('')
   const [scrollTop, setScrollTop] = useState(0)
-  const [navHeight, setNavHeight] = useState(80)
+  const [navHeight, setNavHeight] = useState(() => getNavbarHeight(20))
 
   const aliveRef = useRef(true)
   const requestSeqRef = useRef(0)
@@ -191,9 +192,9 @@ export default function WorksPage() {
     aliveRef.current = true
     try {
       const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setNavHeight(Number(info.statusBarHeight ?? 20) + 60)
+      setNavHeight(getNavbarHeight(Number(info.statusBarHeight ?? 20)))
     } catch {
-      // 取不到就沿用 80px 兜底（20 状态栏 + 60 导航）。
+      // 沿用包含微信原生胶囊保留区的导航高度。
     }
     return () => {
       aliveRef.current = false
@@ -457,6 +458,15 @@ export default function WorksPage() {
     const media = mediaOf(entry)
     if (media?.kind === 'image') {
       void Taro.previewImage({ urls: [media.url], current: media.url })
+      return
+    }
+    if (media?.kind === 'video') {
+      void Taro.previewMedia({ sources: [{ url: media.url, type: 'video' }] })
+      return
+    }
+    if (media?.kind === 'audio') {
+      Taro.setStorageSync('eimu_history_audio_preview', { url: media.url, prompt: entry.prompt })
+      void Taro.navigateTo({ url: `${DETAIL_ROUTE}?historyAudio=1` })
       return
     }
     void Taro.showToast({ title: '这条记录没有可打开的详情', icon: 'none' })

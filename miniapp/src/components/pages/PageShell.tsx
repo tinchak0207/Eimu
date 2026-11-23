@@ -6,12 +6,12 @@
  * 本档只做「页面级接线」：状态栏高度、登录态、抽屉开合、四个顶栏动作；
  * 视觉与结构一律由既有的 Navbar / MobileDrawer 决定（本任务不改那两个档）。
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { View } from '@tarojs/components'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { Navbar } from '../Navbar'
 import { MobileDrawer } from '../MobileDrawer'
-import { ensureLogin, type MiniUser } from '../../lib/session'
+import { clearSession, ensureLogin, type MiniUser } from '../../lib/session'
 import './page-shared.scss'
 
 export interface PageShellProps {
@@ -22,9 +22,17 @@ export function PageShell({ children }: PageShellProps) {
   const [statusBarHeight, setStatusBarHeight] = useState(20)
   const [user, setUser] = useState<MiniUser | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [loginPending, setLoginPending] = useState(true)
+  const [loginError, setLoginError] = useState('')
+  const loginPendingRef = useRef(false)
+  const authGenerationRef = useRef(0)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     let disposed = false
+    const generation = authGenerationRef.current
+    mountedRef.current = true
+    loginPendingRef.current = true
     try {
       const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
       setStatusBarHeight(Number(info.statusBarHeight ?? 20))
@@ -33,17 +41,26 @@ export function PageShell({ children }: PageShellProps) {
     }
     void ensureLogin()
       .then((next) => {
-        if (!disposed) setUser(next)
+        if (!disposed && generation === authGenerationRef.current) setUser(next)
       })
-      .catch(() => {
-        // 登录失败由页面自身在提交/拉列表时给出可见错误。
+      .catch((error) => {
+        if (!disposed && generation === authGenerationRef.current) {
+          setLoginError(error instanceof Error ? error.message : '微信登录失败，请重试')
+        }
+      })
+      .finally(() => {
+        if (!disposed && generation === authGenerationRef.current) {
+          loginPendingRef.current = false
+          setLoginPending(false)
+        }
       })
     return () => {
       disposed = true
+      mountedRef.current = false
     }
   }, [])
 
-  // 顶栏动作与网页版 Navbar 同义：充值→定价页、钥匙→提示、登出→重新登录。
+  // 顶栏动作：充值→定价页、钥匙→提示、登出仅清除本设备身份。
   const handleTopUp = useCallback(() => {
     void Taro.navigateTo({ url: '/pages/pricing/index' })
   }, [])
@@ -52,16 +69,44 @@ export function PageShell({ children }: PageShellProps) {
     void Taro.showToast({ title: '请在网页版管理 API 密钥', icon: 'none' })
   }, [])
 
+  const handleLogin = useCallback(() => {
+    if (loginPendingRef.current) return
+    const generation = ++authGenerationRef.current
+    loginPendingRef.current = true
+    setLoginPending(true)
+    setLoginError('')
+    void ensureLogin()
+      .then((next) => {
+        if (mountedRef.current && generation === authGenerationRef.current) setUser(next)
+      })
+      .catch((error) => {
+        if (mountedRef.current && generation === authGenerationRef.current) {
+          const message = error instanceof Error ? error.message : '微信登录失败，请重试'
+          setLoginError(message)
+          void Taro.showToast({ title: message, icon: 'none' })
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current && generation === authGenerationRef.current) {
+          loginPendingRef.current = false
+          setLoginPending(false)
+        }
+      })
+  }, [])
+
   const handleLogout = useCallback(() => {
     void Taro.showModal({
       title: '退出登录',
-      content: '小程序使用微信登录，退出后将重新建立匿名会话。',
+      content: '退出当前设备的登录状态，对话和正在进行的任务会保留。',
       success: (result) => {
         if (!result.confirm) return
-        void ensureLogin().then((next) => {
-          setUser(next)
-          void Taro.showToast({ title: '已刷新登录态', icon: 'none' })
-        })
+        authGenerationRef.current += 1
+        clearSession()
+        loginPendingRef.current = false
+        setLoginPending(false)
+        setLoginError('')
+        setUser(null)
+        setDrawerOpen(false)
       },
     })
   }, [])
@@ -73,6 +118,7 @@ export function PageShell({ children }: PageShellProps) {
     <View className='min-h-screen' style={{ background: '#f5fbff' }}>
       <Navbar
         user={user}
+        loginPending={loginPending}
         statusBarHeight={statusBarHeight}
         drawerOpen={drawerOpen}
         onOpenDrawer={() => setDrawerOpen(true)}
@@ -80,7 +126,15 @@ export function PageShell({ children }: PageShellProps) {
         onKey={handleKey}
         onLogout={handleLogout}
       />
-      {children}
+      {!user ? (
+        <View className='flex min-h-screen flex-col items-center justify-center gap-4 px-6'>
+          <Text className='text-ios-title3 font-semibold text-foreground'>{loginPending ? '微信登录中…' : '微信登录后继续'}</Text>
+          {loginError ? <Text className='text-ios-footnote text-destructive'>{loginError}</Text> : null}
+          {!loginPending ? <View className='flex min-h-11 items-center justify-center rounded-full bg-ios-blue px-5 text-white' onClick={handleLogin}>
+            <Text>重新微信登录</Text>
+          </View> : null}
+        </View>
+      ) : children}
       <MobileDrawer
         open={drawerOpen}
         userName={userName}

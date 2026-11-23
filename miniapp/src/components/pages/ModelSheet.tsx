@@ -95,7 +95,7 @@ export function ModelSheet({ open, models, value, resolution, vendors, onSelect,
                             onClose()
                           }}
                         >
-                          <Text className='min-w-0 flex-1 truncate font-medium'>{model.name}</Text>
+                          <Text className='min-w-0 flex-1 truncate font-medium'>{model.name}{model.kind === 'video' ? ' · 视频' : ''}</Text>
                           <Text className='shrink-0 pl-1 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.52)]'>
                             {modelPriceLabel(model.id, resolution)}
                           </Text>

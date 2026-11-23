@@ -62,6 +62,10 @@ export const WELCOME_GIFT_STANDARD_IMAGE_COINS = imageGenerationCoins(DEFAULT_IM
 /** 新人礼币数。 */
 export const WELCOME_GIFT_COINS = WELCOME_GIFT_IMAGE_COUNT * WELCOME_GIFT_STANDARD_IMAGE_COINS;
 
+/** 小程序注册礼固定 50 币；只能由已完成微信 code 换取身份的服务端路径请求。 */
+export const MINIAPP_WELCOME_GIFT_COINS = 50;
+export const MINIAPP_WELCOME_GIFT_QUOTA = MINIAPP_WELCOME_GIFT_COINS * QUOTA_PER_COIN;
+
 /** 新人礼额度（new-api quota 单位）。 */
 export const WELCOME_GIFT_QUOTA = Math.round(WELCOME_GIFT_COINS * QUOTA_PER_COIN);
 
@@ -71,6 +75,12 @@ export function welcomeGiftRef(userId: number): string {
 }
 
 export const WELCOME_GIFT_LEDGER_SOURCE = "welcome-gift";
+
+/** 按实际赠币计算可生成的标准图张数，避免 50 币仍显示固定 5 张。 */
+export function welcomeGiftImageCount(coins: number): number {
+  return Number.isFinite(coins) && WELCOME_GIFT_STANDARD_IMAGE_COINS > 0
+    ? Math.max(0, Math.floor(coins / WELCOME_GIFT_STANDARD_IMAGE_COINS)) : 0;
+}
 
 /** 站内通知文案（简体中文、直白、无 emoji）。 */
 export function welcomeGiftNotice(
@@ -133,6 +143,8 @@ export interface WelcomeGiftResult {
 }
 
 export interface WelcomeClaim {
+  /** 已占位金额才是权威；不同入口重放不得把原礼金额改成自己的默认值。 */
+  amountQuota?: number;
   status: WelcomeClaimStatus;
   /** 站内通知是否已送达（noticed_at 非空）。 */
   noticed: boolean;
@@ -199,6 +211,7 @@ function result(
 }
 
 function claimToResult(claim: WelcomeClaim, userId: number, amountQuota: number): WelcomeGiftResult | null {
+  if (Number.isInteger(claim.amountQuota) && (claim.amountQuota ?? 0) > 0) amountQuota = claim.amountQuota!;
   if (claim.status === "applied") {
     return result("already_granted", userId, amountQuota, undefined, !claim.noticed, welcomeGiftModalPending(claim));
   }
@@ -212,12 +225,13 @@ function claimToResult(claim: WelcomeClaim, userId: number, amountQuota: number)
  * 发新人礼（控制面执行）。永不 throw：任何失败都只回 status，调用方（登录路径）不受影响。
  */
 export async function grantWelcomeGift(userId: number, deps: WelcomeGiftDeps): Promise<WelcomeGiftResult> {
-  const amountQuota = deps.amountQuota ?? WELCOME_GIFT_QUOTA;
+  let amountQuota = deps.amountQuota ?? WELCOME_GIFT_QUOTA;
   if (!Number.isInteger(userId) || userId <= 0) return result("unavailable", userId, amountQuota, "userId 非法");
 
   let claimed = false;
   try {
     const existing = await deps.store.readClaim(userId);
+    if (existing && Number.isInteger(existing.amountQuota) && (existing.amountQuota ?? 0) > 0) amountQuota = existing.amountQuota!;
     const settled = existing ? claimToResult(existing, userId, amountQuota) : null;
     if (settled) return settled;
 
@@ -429,12 +443,13 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
     async readClaim(userId) {
       await ensureSchema(sql);
       const rows = await sql<Row[]>`
-        SELECT status, noticed_at, modal_seen_at FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1
+        SELECT status, amount_quota, noticed_at, modal_seen_at FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1
       `;
       const status = rows[0]?.status;
       if (typeof status !== "string") return null;
       return {
         status: status as WelcomeClaimStatus,
+        amountQuota: Number(rows[0]?.amount_quota),
         noticed: rows[0]?.noticed_at != null,
         modalSeen: rows[0]?.modal_seen_at != null,
       };
@@ -531,7 +546,7 @@ export function productionWelcomeGiftDeps(sql: GenerationSql = getGenerationSql(
           billingUserId: userId,
           amountQuota,
           sourceRef,
-          note: `新人礼：${amountQuota / QUOTA_PER_COIN} 币（约 ${WELCOME_GIFT_IMAGE_COUNT} 张标准图）`,
+          note: `新人礼：${amountQuota / QUOTA_PER_COIN} 币（约 ${welcomeGiftImageCount(amountQuota / QUOTA_PER_COIN)} 张标准图）`,
           source: WELCOME_GIFT_LEDGER_SOURCE,
         },
         { sql, fetchUser },
@@ -584,24 +599,24 @@ async function postRelay(body: Record<string, unknown>, options: RelayOptions): 
   return data?.ok === true ? data : null;
 }
 
-/** 请控制面发新人礼。env 缺一或失败 → null（不挡登录）。 */
-export async function grantWelcomeGiftViaRelay(
-  userId: number,
-  options: RelayOptions = {},
-): Promise<WelcomeGiftResult | null> {
+/** 请控制面发网页新人礼；金额仍按既有标准图定价。 */
+export async function grantWelcomeGiftViaRelay(userId: number, options: RelayOptions = {}): Promise<WelcomeGiftResult | null> {
+  return grantGiftViaRelayOperation(userId, "grant", options);
+}
+
+/** 仅真实微信小程序登录路由调用；HMAC 覆盖操作名，不接受客户端金额或来源授权。 */
+export async function grantMiniappWelcomeGiftViaRelay(userId: number, options: RelayOptions = {}): Promise<WelcomeGiftResult | null> {
+  return grantGiftViaRelayOperation(userId, "grant_miniapp", options);
+}
+
+async function grantGiftViaRelayOperation(userId: number, op: "grant" | "grant_miniapp", options: RelayOptions): Promise<WelcomeGiftResult | null> {
   try {
-    const data = await postRelay({ op: "grant", userId }, options);
+    const data = await postRelay({ op, userId }, options);
     const payload = data?.result as Partial<WelcomeGiftResult> | undefined;
     if (!payload || !isWelcomeGiftStatus(payload.status)) return null;
     const amountQuota = Number(payload.amountQuota);
-    return result(
-      payload.status,
-      userId,
-      Number.isFinite(amountQuota) && amountQuota > 0 ? amountQuota : WELCOME_GIFT_QUOTA,
-      undefined,
-      payload.noticePending === true,
-      payload.modalPending === true,
-    );
+    if (!Number.isInteger(amountQuota) || amountQuota <= 0) return null;
+    return result(payload.status, userId, amountQuota, undefined, payload.noticePending === true, payload.modalPending === true);
   } catch (error) {
     console.error(`[welcome-gift] relay grant failed user=${userId}：${reasonOf(error)}`);
     return null;

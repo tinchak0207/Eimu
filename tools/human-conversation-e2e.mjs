@@ -434,6 +434,18 @@ async function sceneText(scene, reasons) {
   return { sid, reply_chars: turn.reply.length, seat: facts.seat, mediaDone: turn.mediaDone }
 }
 
+async function sceneLinkPlain(scene, reasons) {
+  // 2026-11-07 暴君：「你都他妈没给我 url」。成品链接必须完整明文出现在回复里，播放器不能替代。
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: false, maxCoins: 0 })
+  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
+  if (!turn.reply.includes("media-1793983183219-a8fo6k.m4a") || !/https:\/\/store\.tinchak0207\.xyz\/image-data\/files\/uploads\/media-1793983183219-a8fo6k\.m4a/.test(turn.reply)) fail(reasons, `${scene.id} 回复里没有完整明文链接：${turn.reply.slice(0, 200)}`)
+  if (/不会再重复|…\/media-/.test(turn.reply)) fail(reasons, `${scene.id} 回复里出现缩写链接或拒绝重贴话术`)
+  await sse.stop()
+  return { sid, reply: turn.reply.slice(0, 400) }
+}
+
 async function sceneGenerate(scene, reasons) {
   if (NO_SPEND) return { skipped: true }
   const sid = await createSession(`human-e2e-${scene.id}`)
@@ -468,6 +480,119 @@ async function sceneGenerate(scene, reasons) {
     seat: facts.seat,
     reply_chars: turn.reply.length,
   }
+}
+
+async function sceneDefaultVideo(scene, reasons) {
+  if (NO_SPEND) return { skipped: true }
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: true, maxCoins: scene.max_coins })
+  for (let i = 0; i < 200 && !eventNames(sse.frames, 0).includes("video.done") && !eventNames(sse.frames, 0).includes("video.failed"); i++) await sleep(3000)
+  const names = eventNames(sse.frames, 0)
+  const all = JSON.stringify(sse.frames)
+  if (names.includes("video.failed")) fail(reasons, `${scene.id} video.failed`)
+  if (!names.includes("video.done")) fail(reasons, `${scene.id} 没有 video.done 事件`)
+  if (/minimax-h3|seedance-2\.0/.test(all) && !/seedance-2\.5-720p/.test(all)) fail(reasons, `${scene.id} 默认没走 seedance-2.5-720p`)
+  if (!/seedance-2\.5-720p/.test(all)) fail(reasons, `${scene.id} 帧里没有 seedance-2.5-720p`)
+  if (/blender|渠道.{0,6}不可用|全部不可用/i.test(turn.reply)) fail(reasons, `${scene.id} 降级话术：${turn.reply.slice(0, 160)}`)
+  await sse.stop()
+  return { sid, names: [...new Set(names)].slice(0, 40), approved: turn.approved, maxQuoted: turn.maxQuoted, reply: turn.reply.slice(0, 400) }
+}
+
+async function sceneNativeAudio(scene, reasons) {
+  // 已知答案的中文语音（edge-tts 合成）：只能靠「听」得到内容，bash 频谱分析答不出来，才算原生读音频。
+  const mp3 = path.join(ROOT, "tools/fixtures/native-audio-speech.mp3")
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const tr = await fetch(`${BASE}/sessions/${sid}/uploads-ticket`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" })
+  const ticket = (await tr.json()).ticket
+  const form = new FormData()
+  // 2026-11-22 真会话坑：用户传的是 m4a（audio/x-m4a），AI SDK 只认 wav/mp3 → 报错 → 故障转移到听不了的模型。
+  // 所以这里必须是 m4a，才覆盖到出故障的那一步（防回退）。
+  const m4a = `/tmp/native-audio-${process.pid}.m4a`
+  const ff = spawnSync("ffmpeg", ["-loglevel", "error", "-y", "-i", mp3, "-c:a", "aac", m4a])
+  if (ff.status !== 0) throw new Error("ffmpeg 转 m4a 失败")
+  form.append("file", new Blob([fs.readFileSync(m4a)], { type: "audio/x-m4a" }), "media-1791646144272-2s4g67.m4a")
+  const up = await fetch(`${BASE}/sessions/${sid}/video-upload?t=${encodeURIComponent(ticket)}`, { method: "POST", body: form })
+  const upj = await up.json().catch(() => ({}))
+  if (!up.ok || !upj.path) { fail(reasons, `${scene.id} 上传失败 http=${up.status} ${JSON.stringify(upj).slice(0, 160)}`); await sse.stop(); return { sid } }
+  const content = `${scene.turns[0]}\n[ATTACHMENTS_BLOCK]\n[附件]\n1. ${upj.path} | ${upj.mime || "audio/x-m4a"} | ${upj.size ?? "?"}\n[/ATTACHMENTS_BLOCK]`
+  const turn = await runTurn(sid, content, { sse, spend: false, maxCoins: 0 })
+  const r = turn.reply
+  if (/没有.{0,6}(听音|音频|语音).{0,6}(通路|工具|能力)|无法(听|读取|解码|转写).{0,4}(音频|语音)|看不到.{0,4}音频|does not support audio/i.test(r)) fail(reasons, `${scene.id} 模型说听不到音频：${r.slice(0, 200)}`)
+  for (const [label, re] of [["紫色雨伞", /紫色.{0,3}雨伞|雨伞.{0,6}紫/], ["青云路", /青云路/], ["三号咖啡馆", /(3|三)号.{0,2}咖啡/], ["明天下午四点", /(下午|午后).{0,2}(4|四)点/]]) {
+    if (!re.test(r)) fail(reasons, `${scene.id} 转写缺「${label}」：${r.slice(0, 240)}`)
+  }
+  if (!/女(声|性|生)/.test(r) || /无法(直接)?(收听|判断|听)|不能(直接)?(收听|听)|没法(直接)?(收听|听)/.test(r)) fail(reasons, `${scene.id} 没听出女声或自称听不到：${r.slice(0, 240)}`)
+  const toolsUsed = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "tool.invoke").map((x) => x.obj?.tool)
+  const cheat = toolsUsed.filter((t) => /^(bash|video_transcribe|video_evidence|audio_|transcribe)/.test(t || ""))
+  if (cheat.length) fail(reasons, `${scene.id} 没走原生听，用了工具：${[...new Set(cheat)].join(",")}`)
+  await sse.stop()
+  return { sid, toolsUsed: [...new Set(toolsUsed)], reply: r.slice(0, 600) }
+}
+
+// 2026-11-22 暴君追问「critic／音乐创作反馈全周期有覆盖吗」：此前只测了「听用户上传的音频」。
+// 本场景走整圈：用户要一首歌 → 音乐席 music_gen → 机器 critic 复核 → 回执里必须是「原生听」（不是转写/ffprobe 蒙混）。
+// 断言：①music_gen 成功 ②出现 critic 复核的 subagent.done ③critic 子代理没有用 video_transcribe/bash 来「听」
+// ④回复里没有「复核通过」却无 critic 回执的假话。网关侧「critic audio parts: attached=1」要在 VPS 日志对帐（见报告）。
+async function sceneMusicCriticListen(scene, reasons) {
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: true, maxCoins: scene.max_coins })
+  const deadline = Date.now() + 14 * 60 * 1000
+  const criticDone = () => sse.frames.some((f) => { const { ev, obj } = parseFrame(f.raw); return ev === "subagent.done" && /复核|critic|评审/.test(`${obj?.label || ""}${obj?.agent || ""}`) })
+  while (Date.now() < deadline && !criticDone()) await sleep(5000)
+  const frames = sse.frames.map((f) => parseFrame(f.raw))
+  const musicOk = frames.some((x) => x.ev === "audio.done" || (x.ev === "tool.result" && x.obj?.tool === "music_gen" && !x.obj?.error))
+  if (!musicOk) fail(reasons, `${scene.id} 没有成功的音乐生成`)
+  if (!criticDone()) fail(reasons, `${scene.id} 14 分钟内没有 critic 复核的 subagent.done`)
+  const cheat = frames.filter((x) => x.ev === "tool.invoke" && /^(video_transcribe|video_evidence)$/.test(x.obj?.tool || "") && /critic|复核/.test(JSON.stringify(x.obj).slice(0, 400))).length
+  if (cheat) fail(reasons, `${scene.id} critic 用转写/ffprobe 工具「听」音乐`)
+  await sse.stop()
+  return { sid, musicOk, criticDone: criticDone(), reply: turn.reply.slice(0, 500) }
+}
+
+// 2026-11-22 暴君截图：用户传歌说「帮这首歌做90秒MV，挑精华段落」，模型却去调 video_transcribe、ffprobe、
+// ffmpeg 画 RMS 曲线、还派「测算拍点」子代理——明明音频已原生送进 hydrogen。挑精华天然要时间点，
+// 旧提示里「需要时间戳就可以用工具」的口子被它钻了。断言：第一个子代理派发之前，主会话没有任何
+// 「听歌类」工具（video_transcribe/video_evidence/bash/ffmpeg 系），且没派「测算／分析歌曲」子代理。
+// 歌用环境变量 MV_AUDIO 指向（暴君的私人歌曲不入库），缺省退回合成语音夹具（只测不用工具，不测结构）。
+async function sceneNativeAudioMv(scene, reasons) {
+  const src = process.env.MV_AUDIO && fs.existsSync(process.env.MV_AUDIO) ? process.env.MV_AUDIO : path.join(ROOT, "tools/fixtures/native-audio-speech.mp3")
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const tr = await fetch(`${BASE}/sessions/${sid}/uploads-ticket`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: "{}" })
+  const ticket = (await tr.json()).ticket
+  const form = new FormData()
+  form.append("file", new Blob([fs.readFileSync(src)], { type: src.endsWith(".m4a") ? "audio/x-m4a" : "audio/mpeg" }), `agent-1790968380473${src.endsWith(".m4a") ? ".m4a" : ".mp3"}`)
+  const up = await fetch(`${BASE}/sessions/${sid}/video-upload?t=${encodeURIComponent(ticket)}`, { method: "POST", body: form })
+  const upj = await up.json().catch(() => ({}))
+  if (!up.ok || !upj.path) { fail(reasons, `${scene.id} 上传失败 http=${up.status}`); await sse.stop(); return { sid } }
+  const content = `${scene.turns[0]}\n[ATTACHMENTS_BLOCK]\n[附件]\n1. ${upj.path} | ${upj.mime || "audio/x-m4a"} | ${upj.size ?? "?"}\n[/ATTACHMENTS_BLOCK]`
+  const sent = await fetch(`${BASE}/sessions/${sid}/messages`, { method: "POST", headers: { ...AUTH, "content-type": "application/json" }, body: JSON.stringify({ content }) })
+  if (!sent.ok && sent.status !== 202) throw new Error(`发消息 http=${sent.status}`)
+  // 看到第一个子代理派发（或 4 分钟）就够判了；之后中止会话，不烧钱。
+  const t0 = Date.now()
+  const dispatched = () => sse.frames.findIndex((f) => { const x = parseFrame(f.raw); return x.ev === "tool.invoke" && x.obj?.tool === "subagent_dispatch" })
+  while (Date.now() - t0 < 4 * 60 * 1000 && dispatched() < 0) await sleep(3000)
+  await sleep(4000)
+  const frames = sse.frames.map((f) => parseFrame(f.raw))
+  const cut = dispatched()
+  const before = cut < 0 ? frames : frames.slice(0, cut)
+  const toolsBefore = before.filter((x) => x.ev === "tool.invoke").map((x) => x.obj?.tool)
+  const cheat = toolsBefore.filter((t) => /^(video_transcribe|video_evidence|video_analyze|audio_)/.test(t || ""))
+  const bashAudio = before.filter((x) => x.ev === "tool.invoke" && x.obj?.tool === "bash" && /ffmpeg|ffprobe|\.m4a|\.wav|\.mp3|rms|wave/i.test(JSON.stringify(x.obj))).length
+  if (cheat.length) fail(reasons, `${scene.id} 派发前用了听歌工具：${[...new Set(cheat)].join(",")}`)
+  if (bashAudio) fail(reasons, `${scene.id} 派发前用 bash 分析音频 ${bashAudio} 次`)
+  const subs = frames.filter((x) => x.ev === "tool.invoke" && x.obj?.tool === "subagent_dispatch").map((x) => JSON.stringify(x.obj).slice(0, 600))
+  const badSub = subs.filter((t) => /(测算|解析|拆解|检测|分析).{0,6}(这首歌|该歌|歌曲(?!\s*的?(结构为|主题))|音频|拍点|节拍)|(歌曲|音频).{0,6}(测算|拍点|节拍)/.test(t))
+  if (badSub.length) fail(reasons, `${scene.id} 派了「分析歌曲」子代理（子代理听不到音频）：${badSub[0].slice(0, 200)}`)
+  const badModel = subs.filter((t) => /视频模型[^。\n]{0,24}(minimax-h3|seedance-2\.0)/i.test(t))
+  if (badModel.length) fail(reasons, `${scene.id} 选了非默认视频模型（默认 seedance-2.5-720p）：${badModel[0].slice(0, 220)}`)
+  if (cut < 0) fail(reasons, `${scene.id} 4 分钟内没有任何子代理派发，无法判定`)
+  await fetch(`${BASE}/sessions/${sid}/abort`, { method: "POST", headers: AUTH }).catch(() => {})
+  await sse.stop()
+  return { sid, toolsBefore: [...new Set(toolsBefore)], subs: subs.map((x) => x.slice(0, 160)) }
 }
 
 async function sceneImage(scene, reasons) {
@@ -976,27 +1101,23 @@ async function sceneViewerGate(scene, reasons) {
   return { sid, approved: [t1.approved, t2.approved], maxQuoted: [t1.maxQuoted, t2.maxQuoted], receipts: facts.receipts, seat: facts.seat, media, reply1: t1.reply.slice(0, 300), reply2: t2.reply.slice(0, 300) }
 }
 
-async function sceneUeEditor(scene, reasons) {
-  // UE 联动（2026-11-10）：必须真调 ue_editor 探本机编辑器，再照回执原文转告缺哪一步；不许空谈、不许拿 Blender 顶替。
+async function sceneAlbumStart(scene, reasons) {
+  // 用户 2026-11-20 截图：「做一个周杰伦风格的专辑」先出计划卡，随后卡在「重试中 (1/10)」。
+  // 断言：本回合能走到 turn.done、有正文、整条 SSE 里没有重试/上游错误帧。
   const sid = await createSession(`human-e2e-${scene.id}`)
   const sse = await attach(sid)
-  const turn = await runTurn(sid, [scene.turns[0], ...(scene.constraints ?? [])].join("\n"), { sse, spend: false, maxCoins: 0 })
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: false, maxCoins: 0 })
   if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
-  const raw = sse.frames.map((f) => f.raw).join("\n")
-  const called = /ue_editor/.test(raw)
-  if (!called) fail(reasons, `${scene.id} 没有调用 ue_editor 去探本机 UE`)
-  if (!/UE|Unreal|虚幻/i.test(turn.reply)) fail(reasons, `${scene.id} 回复没提 UE`)
-  if (scene.id === "ue-editor-link" && called && !/StartServer|插件|MCP|桌面端|完全访问|工具清单|toolset/i.test(turn.reply)) fail(reasons, `${scene.id} 回复没照回执说清 UE 链路现状`)
-  if (/blender/i.test(turn.reply)) fail(reasons, `${scene.id} 回复拿 Blender 顶替 UE`)
-  // 2026-11-10 首发会话的真缺陷：world/model3d 上游未开通，回复却说「可走进去的场景、单件道具和角色模型都能先做出来」。
-  if (/(都能|可以|能够)先做出来|都能先做/.test(turn.reply)) fail(reasons, `${scene.id} 回复承诺了未开通的 3D/世界生成能力`)
-  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), raw)
-  const facts = await sessionFacts(sid)
+  if ((turn.reply || "").length < 20) fail(reasons, `${scene.id} 回合没有正文（${(turn.reply || "").length} 字）`)
+  const bad = sse.frames.filter((f) => /session\.error|"retry|重试中|upstream error/i.test(f.raw || "")).length
+  if (bad > 0) fail(reasons, `${scene.id} SSE 里有 ${bad} 帧重试/上游错误`)
+  fs.writeFileSync(path.join(OUT, `${scene.id}.sse`), sse.frames.map((f) => f.raw).join("\n\n"))
   await sse.stop()
-  return { sid, called, seat: facts.seat, reply: turn.reply.slice(0, 1200) }
+  return { sid, reply_chars: (turn.reply || "").length, retryFrames: bad, mediaDone: turn.mediaDone, reply: (turn.reply || "").slice(0, 300) }
 }
 
 const runners = {
+  "album-jay-style": sceneAlbumStart,
   "viewer-gate-image-then-music": sceneViewerGate,
   "layer-revision-still": sceneLayerRevision,
   "layer-revision-mv-text": sceneLayerRevision,
@@ -1007,13 +1128,13 @@ const runners = {
   "quote-before-generate": sceneQuote,
   "same-turn-text": sceneText,
   "generate-then-receipt": sceneGenerate,
-  "ue-editor-link": sceneUeEditor,
-  "ue-game-delivery": sceneUeEditor,
+  "native-audio-listen": sceneNativeAudio,
+  "music-critic-listen": sceneMusicCriticListen,
+  "native-audio-mv-highlight": sceneNativeAudioMv,
+  "default-video-seedance25-720p": sceneDefaultVideo,
+  "deliver-link-plain": sceneLinkPlain,
 }
 
-export { createSession, attach, runTurn, sessionFacts, OUT }
-
-if (import.meta.main ?? (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname)) {
 const selected = corpus.scenes.filter((scene) => !ONLY.size || ONLY.has(scene.id))
 const results = await Promise.all(selected.map(async (scene) => {
   const reasons = []
@@ -1033,4 +1154,3 @@ const summary = { out: OUT, pass: results.every((r) => r.pass), results: results
 fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2))
 console.log(summary.pass ? `PASS ${OUT}` : `FAIL ${OUT}`)
 process.exit(summary.pass ? 0 : 1)
-}
