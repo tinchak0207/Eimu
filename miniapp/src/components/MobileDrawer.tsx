@@ -1,6 +1,5 @@
 import { Image, Input, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
-import { getNavbarTopInset } from './Navbar'
 import { useEffect, useRef, useState } from 'react'
 import { Icon, type IconName } from './agent-chat/icons'
 import { listAgentSessions, type AgentSessionSummary } from '../lib/agent'
@@ -110,6 +109,12 @@ const CLAMP_2 = {
   maxWidth: '100%',
 }
 
+/** 侧栏是 78% 宽的侧边面板，不会盖到右上角胶囊，只需避开状态栏。 */
+function sheetTopInset(statusBarHeight: number): number {
+  const status = Number.isFinite(statusBarHeight) && statusBarHeight >= 0 ? statusBarHeight : 20
+  return status + 10
+}
+
 export interface MobileDrawerProps {
   open: boolean
   userName: string
@@ -128,6 +133,8 @@ export interface MobileDrawerProps {
   /** dock 齿轮。缺省＝打开既有的「我的」帐号页（网版 fallback 语义，见
    *  MobileSidebar.tsx:347「帐号设置仍可经 dock 齿轮的 fallback 到达」）。 */
   onOpenSettings?: () => void
+  /** 退出登录（顶栏已不放，收在侧栏底部）。 */
+  onLogout?: () => void
   /** 状态栏高度：网版面板靠 env(safe-area-inset-top)（mobile-sidebar.css），
    *  小程序 env 取不到，改由页面传入；缺省时自行读 getWindowInfo。 */
   statusBarHeight?: number
@@ -141,21 +148,21 @@ export function MobileDrawer(props: MobileDrawerProps) {
   const [sessions, setSessions] = useState<AgentSessionSummary[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [insetTop, setInsetTop] = useState(() => getNavbarTopInset(props.statusBarHeight ?? 20))
+  const [insetTop, setInsetTop] = useState(() => sheetTopInset(props.statusBarHeight ?? 20))
 
   // 与站点导航共用微信原生胶囊避让，首行账户和关闭按钮保持完整可点。
   useEffect(() => {
     if (!open) return
     const given = props.statusBarHeight
     if (typeof given === 'number' && Number.isFinite(given)) {
-      setInsetTop(getNavbarTopInset(given))
+      setInsetTop(sheetTopInset(given))
       return
     }
     try {
       const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setInsetTop(getNavbarTopInset(Number(info.statusBarHeight ?? 20)))
+      setInsetTop(sheetTopInset(Number(info.statusBarHeight ?? 20)))
     } catch {
-      setInsetTop(getNavbarTopInset(20))
+      setInsetTop(sheetTopInset(20))
     }
   }, [open, props.statusBarHeight])
 
@@ -252,24 +259,28 @@ export function MobileDrawer(props: MobileDrawerProps) {
         {/* 内层材质（MobileSidebar.tsx:234） */}
         <View className='mobile-sidebar-bg' />
 
-        {/* 顶部身份（MobileSidebar.tsx:236-256） */}
-        <View className='relative z-[1] flex shrink-0 items-center gap-3 px-4 pb-1'>
-          <View className='lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full'>
+        {/* 顶部身份：整块可点，进「我的」；关闭靠点右侧遮罩 */}
+        <View className='relative z-[1] flex shrink-0 items-center gap-3 px-4 pb-2 pt-1' onClick={handleSettings}>
+          <View className='flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[rgba(0,0,0,0.04)]'>
             <Image src={LOGO} className='h-full w-full object-cover' mode='aspectFill' />
           </View>
           <View className='min-w-0 flex-1'>
-            <Text className='block truncate text-ios-body font-semibold text-[rgba(0,0,0,0.85)]'>
+            <Text className='block truncate text-[17px] font-semibold leading-tight text-[rgba(0,0,0,0.88)]'>
               {userName}
             </Text>
-            <Text className='block truncate text-ios-footnote text-[rgba(0,0,0,0.45)]'>
-              {userSubtitle}
-            </Text>
+            <Text className='block truncate text-[13px] text-[rgba(0,0,0,0.45)]'>{userSubtitle}</Text>
           </View>
+        </View>
+
+        {/* 主操作：新对话 */}
+        <View className='relative z-[1] shrink-0 px-4 pb-1 pt-2'>
           <View
-            className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.56)]'
-            onClick={onClose}
+            className='flex h-11 items-center justify-center gap-2 rounded-full bg-black text-white'
+            aria-label='新对话'
+            onClick={handleStartNew}
           >
-            <Icon name='x-a56' className='h-5 w-5' />
+            <Text className='text-[22px] font-light leading-none'>+</Text>
+            <Text className='text-[15px] font-semibold'>新对话</Text>
           </View>
         </View>
 
@@ -285,15 +296,15 @@ export function MobileDrawer(props: MobileDrawerProps) {
                   <View
                     key={item.label}
                     className={
-                      'flex min-h-[52px] items-center gap-3.5 rounded-[14px] px-3 font-medium ' +
+                      'flex min-h-[48px] items-center gap-3.5 rounded-[12px] px-3 font-medium ' +
                       (active
                         ? 'bg-black/[0.05] text-[rgba(0,0,0,0.85)]'
                         : 'text-[rgba(0,0,0,0.72)]')
                     }
                     onClick={() => (item.url ? go(item.url) : handleAssets())}
                   >
-                    <Icon name={item.icon} className='h-5 w-5 shrink-0' />
-                    <Text className='truncate text-ios-body'>{item.label}</Text>
+                    <Icon name={item.icon} className='h-[22px] w-[22px] shrink-0' />
+                    <Text className='truncate text-[16px]'>{item.label}</Text>
                   </View>
                 )
               })}
@@ -384,23 +395,25 @@ export function MobileDrawer(props: MobileDrawerProps) {
           </View>
         </View>
 
-        {/* 底部浮动玻璃条（MobileSidebar.tsx:383-407） */}
+        {/* 底部：我的 / 退出登录（原顶栏钥匙与登出移到这里） */}
         <View className='mobile-sidebar-dock'>
-          <View className='lg-bar flex items-center justify-between gap-2 rounded-full p-2'>
-            <View
-              className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)]'
-              aria-label='设置'
-              onClick={handleSettings}
-            >
-              <Icon name='circle-user-a72' className='h-5 w-5' />
+          <View className='flex flex-col overflow-hidden rounded-[16px] bg-[rgba(0,0,0,0.04)]'>
+            <View className='flex h-12 items-center gap-3 px-4' onClick={handleSettings}>
+              <Icon name='circle-user-a72' className='h-5 w-5 shrink-0' />
+              <Text className='text-[15px] font-medium text-[rgba(0,0,0,0.78)]'>我的账号</Text>
             </View>
-            <View
-              className='flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-black text-white'
-              aria-label='新对话'
-              onClick={handleStartNew}
-            >
-              <Icon name='plus-a50' className='h-5 w-5' style={{ filter: 'invert(1)' }} />
-            </View>
+            {props.onLogout ? (
+              <View
+                className='flex h-12 items-center gap-3 border-t border-[rgba(0,0,0,0.06)] px-4'
+                onClick={() => {
+                  onClose()
+                  props.onLogout?.()
+                }}
+              >
+                <Icon name='log-out-a44' className='h-5 w-5 shrink-0' />
+                <Text className='text-[15px] font-medium text-[rgba(0,0,0,0.55)]'>退出登录</Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </View>

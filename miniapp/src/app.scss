@@ -329,10 +329,12 @@ image {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 100%;
+  width: 78%;
+  max-width: 312px;
   height: 100%;
   padding-top: env(safe-area-inset-top, 0px);
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  border-radius: 0 22px 22px 0;
   box-shadow: 18px 0 48px rgba(45, 49, 66, 0.16);
   overscroll-behavior: contain;
   touch-action: manipulation;
@@ -346,15 +348,15 @@ image {
   pointer-events: none;
 }
 .mobile-sidebar-scroll {
-  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px));
 }
 .mobile-sidebar-dock {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   z-index: 1;
-  padding: 0 0.5rem;
+  padding: 0 1rem;
 }
 @keyframes mobile-sidebar-scrim-in {
   from { opacity: 0; }

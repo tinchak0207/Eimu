@@ -1076,6 +1076,7 @@ export default function AgentPage() {
         onOpenAssets={handleOpenAssets}
         onOpenSettings={handleOpenSettings}
         onOpenPricing={handleTopUp}
+        onLogout={handleLogout}
       />
       </View>
     </PageBoundary>
