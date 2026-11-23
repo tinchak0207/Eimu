@@ -354,9 +354,11 @@ image {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  bottom: 0;
   z-index: 1;
-  padding: 0 1rem;
+  /* 实底＋顶部渐隐：会话列表滚到底部时不会和「我的账号 / 退出登录」叠字。 */
+  padding: 1.25rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, #fff 72%, rgba(255, 255, 255, 0));
 }
 @keyframes mobile-sidebar-scrim-in {
   from { opacity: 0; }

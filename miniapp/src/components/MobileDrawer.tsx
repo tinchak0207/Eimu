@@ -1,3 +1,4 @@
+import { readWindow } from '../lib/system'
 import { Image, Input, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
 import { useEffect, useRef, useState } from 'react'
@@ -159,8 +160,7 @@ export function MobileDrawer(props: MobileDrawerProps) {
       return
     }
     try {
-      const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setInsetTop(sheetTopInset(Number(info.statusBarHeight ?? 20)))
+      setInsetTop(sheetTopInset(readWindow().statusBarHeight))
     } catch {
       setInsetTop(sheetTopInset(20))
     }
@@ -397,7 +397,7 @@ export function MobileDrawer(props: MobileDrawerProps) {
 
         {/* 底部：我的 / 退出登录（原顶栏钥匙与登出移到这里） */}
         <View className='mobile-sidebar-dock'>
-          <View className='flex flex-col overflow-hidden rounded-[16px] bg-[rgba(0,0,0,0.04)]'>
+          <View className='flex flex-col overflow-hidden rounded-[16px] bg-[#f4f4f5]'>
             <View className='flex h-12 items-center gap-3 px-4' onClick={handleSettings}>
               <Icon name='circle-user-a72' className='h-5 w-5 shrink-0' />
               <Text className='text-[15px] font-medium text-[rgba(0,0,0,0.78)]'>我的账号</Text>

@@ -1,3 +1,4 @@
+import { readWindow } from '../../lib/system'
 import { useCallback, useRef, useState } from 'react'
 import { Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
@@ -38,9 +39,7 @@ import type { AgentComposerProps } from './AgentComposer.types'
 
 function readWindowWidth(): number {
   try {
-    const info =
-      typeof Taro.getWindowInfo === 'function' ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-    return Number(info?.windowWidth ?? 0)
+    return readWindow().windowWidth
   } catch {
     return 0
   }

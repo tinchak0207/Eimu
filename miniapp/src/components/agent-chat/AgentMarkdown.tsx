@@ -1,3 +1,4 @@
+import { readWindow } from '../../lib/system'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, ScrollView, Text, Video, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
@@ -37,8 +38,7 @@ let cachedContentWidth: number | null = null
 function contentWidth(): number {
   if (cachedContentWidth !== null) return cachedContentWidth
   try {
-    const info = Taro.getSystemInfoSync()
-    cachedContentWidth = Math.max(160, (info.windowWidth ?? 375) - 64)
+    cachedContentWidth = Math.max(160, readWindow().windowWidth - 64)
   } catch {
     cachedContentWidth = 311
   }

@@ -97,6 +97,70 @@ function describeLoginError(error: unknown): ApiError {
   return new ApiError(`${message}，请稍后重试`, 0, 'wechat_login_failed')
 }
 
+
+// ───────────────────────── 游客登录（兼容“别人的机器/别的 AppID”）
+
+const GUEST_DEVICE_KEY = 'eimu_guest_device_id'
+
+/** 当前是否游客 AppID（开发者工具“游客模式”导入）。取不到信息时按非游客处理。 */
+function isTouristApp(): boolean {
+  try {
+    const info = Taro.getAccountInfoSync?.()
+    return info?.miniProgram?.appId === 'touristappid'
+  } catch {
+    return false
+  }
+}
+
+/** 微信这条路在本环境走不通（区别于网络抖动/服务端 5xx，那些不该悄悄换成游客身份）。 */
+function isWechatIdentityUnavailable(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false
+  if (error.code === 'wechat_login_failed' && error.status === 0) return true // Taro.login 抛错 / 无 code
+  return error.status === 401 && typeof error.errcode === 'number'
+}
+
+function randomHex(length: number): string {
+  let out = ''
+  while (out.length < length) out += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0')
+  return out.slice(0, length)
+}
+
+/** 每台设备一个稳定随机 id（清缓存后会变成新游客账号，可接受）。 */
+function guestDeviceId(): string {
+  try {
+    const saved = String(Taro.getStorageSync(GUEST_DEVICE_KEY) || '')
+    if (/^[a-f0-9]{32}$/.test(saved)) return saved
+  } catch {
+    // 存储不可用时退化为内存内临时 id。
+  }
+  const created = randomHex(32)
+  try {
+    Taro.setStorageSync(GUEST_DEVICE_KEY, created)
+  } catch {
+    // 忽略
+  }
+  return created
+}
+
+async function loginGuest(): Promise<MiniUser> {
+  const payload = await request<WechatLoginResponse>({
+    path: '/api/auth/wechat-mini/guest',
+    method: 'POST',
+    data: { deviceId: guestDeviceId() },
+    auth: false,
+  })
+  if (!payload?.success || !payload.token || !payload.user?.id) {
+    throw new ApiError(payload?.message || '游客登录失败', 401, payload?.code || 'guest_login_failed')
+  }
+  const loginUser = normalizeUser(payload.user)
+  saveSession(payload.token, loginUser)
+  try {
+    return await fetchMe()
+  } catch {
+    return loginUser
+  }
+}
+
 export function login(): Promise<MiniUser> {
   if (!loginPromise) {
     loginPromise = doLogin().finally(() => {
@@ -111,6 +175,9 @@ export function login(): Promise<MiniUser> {
  * 已被消费的 code，复用旧 code 只会连发 401。
  */
 async function doLogin(): Promise<MiniUser> {
+  // 游客模式（touristappid）/ 无 AppID 权限导入：wx.login 换不到可用 code，直接走游客登录。
+  if (isTouristApp()) return loginGuest()
+
   let noErrcodeRetried = false
 
   for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt += 1) {
@@ -119,6 +186,14 @@ async function doLogin(): Promise<MiniUser> {
       return await loginOnce()
     } catch (error) {
       if (!isRetryableLoginError(error) || attempt >= MAX_LOGIN_ATTEMPTS) {
+        // 微信侧明确拒绝（code 无效等）或本机根本取不到 code：这台环境换不到微信身份，改走游客登录。
+        if (isWechatIdentityUnavailable(error)) {
+          try {
+            return await loginGuest()
+          } catch {
+            // 游客也失败时，报原始的微信登录错误。
+          }
+        }
         throw describeLoginError(error)
       }
       if (error instanceof ApiError && typeof error.errcode !== 'number') {

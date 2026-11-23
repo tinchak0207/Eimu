@@ -6,6 +6,7 @@
  * 本档只做「页面级接线」：状态栏高度、登录态、抽屉开合、四个顶栏动作；
  * 视觉与结构一律由既有的 Navbar / MobileDrawer 决定（本任务不改那两个档）。
  */
+import { readWindow } from '../../lib/system'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
@@ -34,8 +35,7 @@ export function PageShell({ children }: PageShellProps) {
     mountedRef.current = true
     loginPendingRef.current = true
     try {
-      const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setStatusBarHeight(Number(info.statusBarHeight ?? 20))
+      setStatusBarHeight(readWindow().statusBarHeight)
     } catch {
       // 取不到就沿用 20px 兜底，不挡页面渲染。
     }

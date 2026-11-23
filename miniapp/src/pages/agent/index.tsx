@@ -1,3 +1,4 @@
+import { readWindow } from '../../lib/system'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import Taro, { useUnload } from '@tarojs/taro'
@@ -547,8 +548,7 @@ export default function AgentPage() {
     let disposed = false
     const authGeneration = authGenerationRef.current
 
-    const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-    setStatusBarHeight(Number(info.statusBarHeight ?? 20))
+    setStatusBarHeight(readWindow().statusBarHeight)
 
     async function boot(): Promise<void> {
       try {

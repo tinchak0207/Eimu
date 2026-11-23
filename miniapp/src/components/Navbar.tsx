@@ -1,3 +1,4 @@
+import { readWindow } from '../lib/system'
 import { Image, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { Icon } from './agent-chat/icons'
@@ -32,8 +33,7 @@ export function getNavbarHeight(statusBarHeight: number): number {
 export function getCapsuleReserve(): number {
   try {
     const capsule = Taro.getMenuButtonBoundingClientRect()
-    const win = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-    const width = Number(win.windowWidth)
+    const width = readWindow().windowWidth
     if (Number.isFinite(capsule.left) && capsule.left > 0 && Number.isFinite(width) && width > capsule.left) {
       return Math.round(width - capsule.left + 8)
     }

@@ -1,3 +1,4 @@
+import { readWindow } from '../../lib/system'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, Input, ScrollView, Text, View } from '@tarojs/components'
 import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
@@ -191,8 +192,7 @@ export default function WorksPage() {
   useEffect(() => {
     aliveRef.current = true
     try {
-      const info = Taro.getWindowInfo ? Taro.getWindowInfo() : Taro.getSystemInfoSync()
-      setNavHeight(getNavbarHeight(Number(info.statusBarHeight ?? 20)))
+      setNavHeight(getNavbarHeight(readWindow().statusBarHeight))
     } catch {
       // 沿用包含微信原生胶囊保留区的导航高度。
     }
