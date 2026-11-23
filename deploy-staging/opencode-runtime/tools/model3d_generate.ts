@@ -421,8 +421,13 @@ export default tool({
       }
       return ok({ ...receipt, checkpoint })
     } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      // Linkii 同一账号同时只允许 1 个建模任务（C9999「還有一個AI建模任務正在生成中」）；一单约 7 分钟，别让 agent 连点重试。
+      if (/C9999|建模任務正在生成|建模任务正在生成/.test(msg)) {
+        return fail("upstream_busy", "混元3D 同一时间只能跑一个建模任务，上一个还在生成（单件约 7 分钟）。如实告诉使用者在排队，几分钟后再发起一次；不要连续重试，也不要改用 Blender 冒充。", { stages, upstream })
+      }
       const code = e instanceof GradioSpaceError ? e.code : typeof e?.code === "string" && e.code ? e.code : "model3d_failed"
-      return fail(code, String(e?.message ?? e).slice(0, 600), { stages, upstream })
+      return fail(code, msg.slice(0, 600), { stages, upstream })
     }
   },
 })
