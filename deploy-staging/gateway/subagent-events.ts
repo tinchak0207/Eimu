@@ -2,6 +2,7 @@ import { appendTranscript } from "./subagent-transcript.ts"
 import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
 import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
 import { toolOutputMusicRef } from "./events-translate-emit.ts"
+import { isAcceptedLinkiiMusicPending } from "./events-translate-canvas.ts"
 import { saveDurableSubagentRun } from "./job-store"
 import { shouldTriggerCriticPass, buildCriticPassSpec, CRITIC_PASS_MAX_TARGETS, DELIVERY_CONTRACTS, scrubSubagentPayload, CriticPassTarget } from "./delivery-gate"
 import { markCriticPass, hasCriticPass, deleteCriticPass } from "./persistence"
@@ -165,7 +166,8 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // 工具名原样送（前端用既有 toolDisplayName() 转人话），不在此造中文、
           // 不送 state.title/input（可能含内部路径与命令原文，属于泄漏面）。
           if (callId && st) {
-            const frameStatus = st === "pending" || st === "running" ? "running" : st === "completed" ? "ok" : "failed"
+            const acceptedMusicPending = part.tool === "music_gen" && st === "completed" && isAcceptedLinkiiMusicPending(parseToolOutput(part.state?.output))
+            const frameStatus = acceptedMusicPending || st === "pending" || st === "running" ? "running" : st === "completed" ? "ok" : "failed"
             // 2026-10-14 协作总线（X8 工具三段）：工具时间线在有界表里就地维护
             // （Begin=首次见到该 callID，End=状态落终；同一 part 会多次 updated，故就地更新
             // 而不是追加），父模型不必再靠 SSE 帧拼装才知道子代理在跑什么工具。
@@ -197,7 +199,8 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
                 boundSet(run.canvasCalls, 200)
                 void autoCreateCanvasUnit(parentState, toolName, canvasInput, canvasKey)
               }
-              if (frameStatus !== "running" && !run.canvasSettled?.has(canvasKey)) {
+              // 已接受未终态的回执也已完成本次投影，子代理收尾不能再把它改成 aborted。
+              if ((acceptedMusicPending || frameStatus !== "running") && !run.canvasSettled?.has(canvasKey)) {
                 if (!run.canvasSettled) run.canvasSettled = new Set()
                 run.canvasSettled.add(canvasKey)
                 boundSet(run.canvasSettled, 200)
@@ -224,7 +227,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // 的 callID 不在父会话表里 ⇒ 此处等价于「只登记任务」。
           const childCallId =
             typeof part.callID === "string" ? part.callID : typeof part.id === "string" ? part.id : ""
-          if (parsedOut && typeof parsedOut.task_id === "string" && parsedOut.task_id) {
+          if (parsedOut && !isAcceptedLinkiiMusicPending(parsedOut) && typeof parsedOut.task_id === "string" && parsedOut.task_id) {
             attachCanvasTask(parentState, childCallId, parsedOut.task_id)
           }
           const media = collectToolOutputMediaUrls(parsedOut)

@@ -326,6 +326,21 @@ function patchCanvasNode(state: SessionState, unitId: string, nodeId: string, pa
 }
 
 // music_gen completed → 音频节点终态（成功＝url＋cost_coins；失败＝error＋人话原因），配置节点补实际通路。
+/** 仅识别运行时明确回报的已接受、未交付状态；普通失败不因 task_id 存在而变等待。 */
+export function isAcceptedLinkiiMusicPending(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object") return false
+  const receipt = value as Record<string, unknown>
+  const error = receipt.error && typeof receipt.error === "object" ? receipt.error as Record<string, unknown> : null
+  return receipt.ok === false && error?.code === "linkii_accepted_pending" &&
+    receipt.status === "accepted_pending" && receipt.submission_status === "accepted" &&
+    receipt.upstream_terminal === false && receipt.delivered === false && receipt.charged === false &&
+    receipt.retryable === false && receipt.safe_to_resubmit === false && receipt.cost_coins === 0 &&
+    typeof receipt.task_id === "string" && !!receipt.task_id.trim() &&
+    typeof receipt.creation_id === "string" && !!receipt.creation_id.trim() &&
+    !(typeof receipt.url === "string" && receipt.url) &&
+    !(Array.isArray(receipt.audios) && receipt.audios.length > 0)
+}
+
 export async function settleMusicCanvasUnit(
   state: SessionState,
   callID: string,
@@ -335,6 +350,17 @@ export async function settleMusicCanvasUnit(
 ): Promise<void> {
   const unitId = await canvasUnitForCall(state, callID)
   if (!unitId) return
+  if (isAcceptedLinkiiMusicPending(parsed)) {
+    patchCanvasNode(state, unitId, `${unitId}-audio`, {
+      status: "loading",
+      upstream_status: "accepted_pending",
+      upstream_task_id: parsed.task_id,
+      upstream_creation_id: parsed.creation_id,
+      status_message: "上游已接受，等待最终结果",
+    })
+    markDirty(state)
+    return
+  }
   const url = typeof parsed?.url === "string" ? parsed.url : ""
   const channel = typeof parsed?.channel === "string" ? parsed.channel : ""
   if (channel) patchCanvasNode(state, unitId, `${unitId}-config`, { model: channel, ...(typeof parsed?.fallback_from === "string" ? { fallback_from: parsed.fallback_from } : {}) })

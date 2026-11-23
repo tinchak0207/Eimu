@@ -26,7 +26,7 @@ import { canvasResultNodeId } from "./canvas-cascade-state.ts"
 import { MODEL_SELF_FIX_CODE, isModelSelfFixError } from "./user-facing-error.ts"
 import { boundSet, parseToolOutput, collectToolOutputMediaUrls } from "./events-translate-core.ts"
 import { emitImageDone, emitVideoDone, emitAudioDone, toolOutputMusicRef } from "./events-translate-emit.ts"
-import { readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, wantsAutoCanvas, settleMusicCanvasUnit, settleCanvasUnitWithoutTask } from "./events-translate-canvas.ts"
+import { readGenerateInput, autoCreateCanvasUnit, attachCanvasTask, wantsAutoCanvas, settleMusicCanvasUnit, settleCanvasUnitWithoutTask, isAcceptedLinkiiMusicPending } from "./events-translate-canvas.ts"
 import { bashDenyAttribution, bashDenyProvenance, appendDenyAudit } from "./events-translate-deny.ts"
 import type { DenyProvenance } from "./events-translate-types.ts"
 /**
@@ -307,6 +307,7 @@ if (status === "pending" || status === "running") {
     const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
     const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
     const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
+    const acceptedMusicPending = toolName === "music_gen" && isAcceptedLinkiiMusicPending(parsed)
     // 2026-10-21 完成主张闸：只有**成功**的 completed 回执才算交付证据
     //（URL / task_id / 落盘路径），供 session.idle 判定「有主张无回执」。
     if (ok) recordDeliveryEvidence(state, toolName, parsed ?? st.output)
@@ -337,7 +338,7 @@ if (status === "pending" || status === "running") {
         : null
     // artifact_pending：已提交、成品未到——回包给了 task_id 但还没有成品 url。
     const artifactPending =
-      ok && typeof parsed?.task_id === "string" && !!parsed.task_id && !(typeof parsed?.url === "string" && parsed.url.length > 0)
+      (ok || acceptedMusicPending) && typeof parsed?.task_id === "string" && !!parsed.task_id && !(typeof parsed?.url === "string" && parsed.url.length > 0)
     if (toolName.startsWith("image_")) {
       // 自动制画布：submit 完成后把 task_id 挂回 unit，完成事件才够关联。
       if (ok && typeof parsed?.task_id === "string" && parsed.task_id) {
@@ -431,12 +432,13 @@ if (status === "pending" || status === "running") {
       const subagentTimeout = toolName === "subagent_dispatch" && !ok && /超过预定时间/.test(toolErr?.message ?? "")
       emitToSession(state, "tool.result", {
         tool: toolName,
-        ok,
-        ...(toolErr ? { error: toolErr } : {}),
+        // 仅展示层复用既有已提交等待态；内部 ok 仍为 false，不登记交付证据。
+        ok: ok || acceptedMusicPending,
+        ...(toolErr && !acceptedMusicPending ? { error: toolErr } : {}),
         // 报价类的 total_coins 是估价不是扣费：不挂 cost_coins（前端会当「已用/消耗」累加，
         // 2026-09-29 e2e 实锤「已用 614 币」而帐户只有 7 币）；金额已在 summary 里。
         ...(typeof costCoins === "number" && !/quote/i.test(toolName) ? { cost_coins: costCoins } : {}),
-        ...(quoteSummary ? { summary: quoteSummary } : {}),
+        ...(acceptedMusicPending ? { summary: "上游已接受，等待最终结果；请勿重复提交。" } : quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
         // 缺陷 A：授权请求的载荷原样带进 SSE（前端 needs_auth 态渲染三选一）。
