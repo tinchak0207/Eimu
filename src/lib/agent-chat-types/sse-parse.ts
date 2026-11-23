@@ -231,6 +231,12 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const mk = d.media_kind === "film" ? "film" : d.media_kind === "video" ? "video" : undefined;
       return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), ...(mk ? { media_kind: mk } : {}) } };
     }
+    case "model3d.done": {
+      const url = str(d.url);
+      if (!url) return null;
+      const title = str(d.title);
+      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), ...(title ? { title } : {}) } };
+    }
     case "audio.done": {
       const url = str(d.url);
       if (!url) return null;

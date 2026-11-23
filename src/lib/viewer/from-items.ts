@@ -1,7 +1,7 @@
 // 赏阅：把站内既有的成品形状（agent 媒体卡 item / 历史条目）投影成 ViewAsset。
 // 纯函式、零 React。只搬真实有的字段：没有的就不写，不编造标题/封面/来历。
 
-import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentAudioItem, AgentImageItem, AgentModel3dItem, AgentVideoItem } from "@/lib/agent-chat-types";
 import type { HistoryEntry, HistoryResult } from "@/lib/history-types";
 import {
   DELIVERABLE_KINDS,
@@ -96,6 +96,18 @@ export function viewAssetFromVideoItem(item: AgentVideoItem): ViewAsset {
     ...(item.mediaKind === "film" ? { title: "成片" } : {}),
   };
   return withProvenance(asset, { taskId: item.taskId, costCoins: item.costCoins });
+}
+
+export function viewAssetFromModel3dItem(item: AgentModel3dItem): ViewAsset {
+  const title = clean(item.title);
+  const asset: ViewAsset = {
+    id: stableAssetId(item.url),
+    kind: "scene3d",
+    url: item.url,
+    mime: "model/gltf-binary",
+    ...(title ? { title } : {}),
+  };
+  return withProvenance(asset, { costCoins: item.costCoins });
 }
 
 export function viewAssetFromAudioItem(item: AgentAudioItem): ViewAsset {

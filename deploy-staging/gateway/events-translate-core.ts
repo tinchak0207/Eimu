@@ -65,20 +65,26 @@ export function parseToolOutput(
 export function collectToolOutputMediaUrls(parsed: unknown): {
   video: { url: string; cost_coins?: number; title?: string }[]
   audio: { url: string; cost_coins?: number; title?: string; cover?: string; duration_s?: number }[]
+  model: { url: string; cost_coins?: number; title?: string }[]
 } {
+  const model: { url: string; cost_coins?: number; title?: string }[] = []
   const video: { url: string; cost_coins?: number; title?: string }[] = []
   const audio: { url: string; cost_coins?: number; title?: string; cover?: string }[] = []
-  if (parsed === null || typeof parsed !== "object") return { video, audio }
+  if (parsed === null || typeof parsed !== "object") return { video, audio, model }
   const isVideoUrl = (u: unknown): u is string =>
     typeof u === "string" && u.length > 0 && /\.(mp4|mov|webm|m4v)(\?|$)/i.test(u)
   const isAudioUrl = (u: unknown): u is string =>
     typeof u === "string" && u.length > 0 && /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?|$)/i.test(u)
+  // 3D 成品（model3d_generate 回执的 glb_url 等）：只认 .glb/.gltf 副档名。
+  const isModelUrl = (u: unknown): u is string =>
+    typeof u === "string" && u.length > 0 && /\.(glb|gltf)(\?|$)/i.test(u)
   // 候选键：顶层 url/video_url/audio_url 保留，新增 mp4_url/output_url；容器项再收 file_url。
-  const CANDIDATE_URL_KEYS = new Set(["url", "video_url", "mp4_url", "output_url", "audio_url", "file_url"])
+  const CANDIDATE_URL_KEYS = new Set(["url", "video_url", "mp4_url", "output_url", "audio_url", "file_url", "glb_url", "model_url"])
   const MAX_SCAN_DEPTH = 3
   const MAX_SCAN_NODES = 200
   const vidCands: { url: string; cost_coins?: number; title?: string }[] = []
   const audCands: { url: string; cost_coins?: number; title?: string; cover?: string; duration_s?: number }[] = []
+  const modCands: { url: string; cost_coins?: number; title?: string }[] = []
   let visited = 0
   const walk = (node: unknown, depth: number): void => {
     if (node === null || depth > MAX_SCAN_DEPTH || visited >= MAX_SCAN_NODES) return
@@ -101,6 +107,7 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
           // 真歌名/封面：候选物件自己带 title/cover 才认（缺省不带键，事件形状不变）。
           const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : undefined
           const cover = typeof obj.cover === "string" && obj.cover.trim() ? obj.cover.trim() : undefined
+          if (isModelUrl(v)) modCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}) })
           if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc, ...(title ? { title } : {}) })
           // 真实时长（秒）：候选物件自带 duration_seconds（music_gen audios[] / 顶层 ffprobe 实测）才认。
           const dur = typeof obj.duration_seconds === "number" && obj.duration_seconds > 0 ? obj.duration_seconds : undefined
@@ -118,5 +125,11 @@ export function collectToolOutputMediaUrls(parsed: unknown): {
       : undefined
   for (const c of vidCands) video.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}) })
   for (const c of audCands) audio.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}), ...(c.cover ? { cover: c.cover } : {}), ...(c.duration_s !== undefined ? { duration_s: c.duration_s } : {}) })
-  return { video, audio }
+  const seenModel = new Set<string>()
+  for (const c of modCands) {
+    if (seenModel.has(c.url)) continue
+    seenModel.add(c.url)
+    model.push({ url: c.url, cost_coins: c.cost_coins ?? topCost, ...(c.title ? { title: c.title } : {}) })
+  }
+  return { video, audio, model }
 }

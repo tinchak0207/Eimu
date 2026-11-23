@@ -11,6 +11,7 @@ export type AgentTranscriptItem =
   | AgentToolCallItem
   | AgentImageItem
   | AgentVideoItem
+  | AgentModel3dItem
   | AgentAudioItem
   | AgentDirectorItem
   | AgentNoticeItem
@@ -149,6 +150,14 @@ export interface AgentVideoItem extends TranscriptItemBase {
   taskId?: string;
   /** "film"=成片（剪接汇出）、"video"=单段影片生成。缺当 "video" 展示。 */
   mediaKind?: "video" | "film";
+}
+
+/** 3D 成品（GLB）。卡内联可旋转预览，点开进赏阅。 */
+export interface AgentModel3dItem extends TranscriptItemBase {
+  kind: "model3d";
+  url: string;
+  costCoins?: number;
+  title?: string;
 }
 
 /** 出音频结果（音乐 / 语音）。卡上挂「存图库／下载」。 */

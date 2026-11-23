@@ -20,6 +20,7 @@ import type { AgentSseEvent } from "./agent-chat-types/types-events";
 import type { AgentChatState } from "./agent-chat-types/types-core";
 import {
   reduceAudioDone,
+  reduceModel3dDone,
   reduceAudioFailed,
   reduceConfirmRequest,
   reduceConfirmResolved,
@@ -93,6 +94,8 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceImageDone(base, event);
     case "video.done":
       return reduceVideoDone(base, event);
+    case "model3d.done":
+      return reduceModel3dDone(base, event);
     case "audio.done":
       return reduceAudioDone(base, event);
     case "director.done":

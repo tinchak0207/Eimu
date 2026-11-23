@@ -1,6 +1,6 @@
 import { appendTranscript } from "./subagent-transcript.ts"
 import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
-import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
+import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitModel3dDone, emitAudioDone, attachCanvasTask, autoCreateCanvasUnit, wantsAutoCanvas, settleMusicCanvasUnit } from "./events-translate.ts"
 import { toolOutputMusicRef } from "./events-translate-emit.ts"
 import { isAcceptedLinkiiMusicPending } from "./events-translate-canvas.ts"
 import { saveDurableSubagentRun, generationParent, generationWorkControl } from "./job-store"
@@ -261,6 +261,13 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
               appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "video", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
             }
             void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
+          }
+          for (const c of media.model) {
+            if (!run.artifacts.some((a) => a.url === c.url)) {
+              run.artifacts.push({ kind: "model", url: c.url, task_id: parsedOut?.task_id, cost_coins: c.cost_coins })
+              appendTranscript(run.id, { t: Date.now(), k: "artifact", kind: "model", url: c.url, ...(parsedOut?.task_id ? { task_id: parsedOut.task_id } : {}) })
+            }
+            void emitModel3dDone(parentState, c.url, { cost_coins: c.cost_coins, title: c.title })
           }
           for (const c of media.audio) {
             if (!run.artifacts.some((a) => a.url === c.url)) {

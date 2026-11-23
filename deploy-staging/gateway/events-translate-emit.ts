@@ -106,6 +106,24 @@ export function registerSessionArtifact(
   flushPendingCompact(state)
 }
 
+/** 3D 成品（GLB）出卡：与 video.done 同构；聊天卡内联可旋转预览，点开进赏阅。 */
+export async function emitModel3dDone(
+  state: SessionState,
+  url: string,
+  opts?: { cost_coins?: number; title?: string },
+): Promise<void> {
+  if (!url) return
+  if (state.announcedUrls.has(url)) return
+  state.announcedUrls.add(url)
+  boundSet(state.announcedUrls, IMAGE_URL_DEDUP_CAP)
+  registerSessionArtifact(state, { url, kind: "model" })
+  emitToSession(state, "model3d.done", {
+    url,
+    ...(typeof opts?.cost_coins === "number" ? { cost_coins: opts.cost_coins } : {}),
+    ...(opts?.title ? { title: opts.title } : {}),
+  })
+}
+
 export async function emitVideoDone(
   state: SessionState,
   url: string,

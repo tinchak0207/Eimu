@@ -31,6 +31,7 @@ export const AGENT_EVENT_NAMES = [
   "image.failed",
   "video.done",
   "video.failed",
+  "model3d.done",
   "audio.done",
   "audio.failed",
   "director.done",
@@ -173,6 +174,13 @@ export interface AgentImageDone {
  * 网关按 url 在 session 内去重。media_kind："film"=成片（剪接汇出）、
  * "video"=单段影片生成；缺当 "video"。
  */
+/** gateway —— 3D 成品（GLB）完成：聊天内联可旋转预览，点开进赏阅。 */
+export interface AgentModel3dDone {
+  url: string;
+  cost_coins?: number;
+  title?: string;
+}
+
 export interface AgentVideoDone {
   url: string;
   cost_coins?: number;
@@ -487,6 +495,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "image.done"; data: AgentImageDone }
     | { name: "image.failed"; data: AgentImageFailed }
     | { name: "video.done"; data: AgentVideoDone }
+    | { name: "model3d.done"; data: AgentModel3dDone }
     | { name: "video.failed"; data: AgentVideoFailed }
     | { name: "audio.done"; data: AgentAudioDone }
     | { name: "audio.failed"; data: AgentAudioFailed }

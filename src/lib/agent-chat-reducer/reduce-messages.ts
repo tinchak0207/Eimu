@@ -1,6 +1,6 @@
 import type { AgentSseEvent } from "../agent-chat-types/types-events";
 import { detectBinaryText, parseAuthOptions } from "../agent-chat-types/sse-parse";
-import type { AgentAudioItem, AgentChatState, AgentDirectorItem, AgentImageItem, AgentNoticeItem, AgentPendingConfirm, AgentPendingQuestion, AgentPlanItem, AgentToolCallItem, AgentVideoItem } from "../agent-chat-types/types-core";
+import type { AgentAudioItem, AgentChatState, AgentDirectorItem, AgentImageItem, AgentModel3dItem, AgentNoticeItem, AgentPendingConfirm, AgentPendingQuestion, AgentPlanItem, AgentToolCallItem, AgentVideoItem } from "../agent-chat-types/types-core";
 import type { AgentTaskStatus } from "../agent-task-status";
 import { eventItemId, settleItems, settlePendingToolItems, settleReasoningMs } from "./reduce-core";
 import { retireSubagentItems } from "./reduce-runs";
@@ -252,6 +252,21 @@ export function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { 
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
   return { ...state, items, turnActive: true, turnStatus: undefined };
+}
+
+export function reduceModel3dDone(state: AgentChatState, event: AgentSseEvent & { name: "model3d.done" }): AgentChatState {
+  const { url, cost_coins, title } = event.data;
+  const exists = state.items.some((it) => it.kind === "model3d" && it.url === url);
+  if (exists) return { ...state, turnActive: true, turnStatus: undefined };
+  const item: AgentModel3dItem = {
+    kind: "model3d",
+    id: eventItemId("model3d", event.event_id),
+    seq: state.items.filter((it) => it.kind === "model3d").length + 1,
+    url,
+    costCoins: cost_coins,
+    ...(title ? { title } : {}),
+  };
+  return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
 }
 
 export function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
