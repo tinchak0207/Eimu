@@ -1,0 +1,136 @@
+.tpl-page {
+  padding: 24rpx 24rpx 64rpx;
+}
+
+.tpl-head {
+  padding: 8rpx 8rpx 20rpx;
+}
+
+.tpl-head__title {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 700;
+  letter-spacing: -0.5rpx;
+  color: #111318;
+}
+
+.tpl-head__subtitle {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 26rpx;
+  color: #8a8f99;
+}
+
+.tpl-cats {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.tpl-cats__inner {
+  display: flex;
+  padding: 4rpx 4rpx 22rpx;
+}
+
+.tpl-chip {
+  flex-shrink: 0;
+  margin-right: 16rpx;
+  padding: 12rpx 30rpx;
+  border-radius: 999rpx;
+  background: #ffffff;
+  color: #5b616b;
+  font-size: 26rpx;
+  box-shadow: 0 4rpx 16rpx rgba(17, 19, 24, 0.04);
+}
+
+.tpl-chip--active {
+  background: #17191d;
+  color: #ffffff;
+  box-shadow: 0 8rpx 24rpx rgba(23, 25, 29, 0.24);
+}
+
+.tpl-columns {
+  display: flex;
+  align-items: flex-start;
+  margin-top: 4rpx;
+}
+
+.tpl-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.tpl-column + .tpl-column {
+  margin-left: 20rpx;
+}
+
+.tpl-card {
+  margin-bottom: 20rpx;
+  padding: 26rpx 24rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 32rpx rgba(17, 19, 24, 0.05);
+}
+
+.tpl-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.tpl-card__title {
+  flex: 1;
+  margin-right: 12rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #17191d;
+}
+
+.tpl-card__category {
+  flex-shrink: 0;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: #eef0f3;
+  font-size: 21rpx;
+  color: #6b717c;
+}
+
+.tpl-card__summary {
+  display: block;
+  margin-top: 14rpx;
+  font-size: 25rpx;
+  line-height: 1.55;
+  color: #6b717c;
+  word-break: break-all;
+}
+
+.tpl-card__action {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #2456b3;
+}
+
+.tpl-empty {
+  margin-top: 40rpx;
+  padding: 64rpx 32rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  text-align: center;
+  box-shadow: 0 8rpx 32rpx rgba(17, 19, 24, 0.05);
+}
+
+.tpl-empty__title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #2c3138;
+}
+
+.tpl-empty__hint {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 25rpx;
+  color: #8a8f99;
+}

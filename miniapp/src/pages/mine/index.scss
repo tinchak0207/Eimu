@@ -1,0 +1,88 @@
+.profile {
+  display: flex;
+  align-items: center;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #17191d;
+  flex-shrink: 0;
+}
+
+.avatar__image {
+  width: 100%;
+  height: 100%;
+}
+
+.avatar__initial {
+  font-size: 44rpx;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.profile__info {
+  flex: 1;
+  min-width: 0;
+  margin-left: 24rpx;
+}
+
+.profile__name {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #111318;
+  margin-bottom: 4rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota {
+  margin-top: 24rpx;
+}
+
+.quota__row {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 12rpx;
+}
+
+.quota__value {
+  font-size: 68rpx;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -1rpx;
+  color: #111318;
+}
+
+.quota__unit {
+  margin-left: 12rpx;
+  font-size: 28rpx;
+  color: #8a8f99;
+}
+
+.quota__note {
+  display: block;
+  margin-top: 8rpx;
+}
+
+.mine__error {
+  margin-top: 24rpx;
+}
+
+.mine__action {
+  margin-top: 24rpx;
+  width: 100%;
+}
+
+.mine__foot {
+  display: block;
+  margin-top: 48rpx;
+  text-align: center;
+}

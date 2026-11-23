@@ -1,0 +1,9 @@
+/* 直接生成页：只放 Tailwind 表达不了的平台细节。
+   版面一律走 Tailwind（与网页版手机端同一套 class），颜色/圆角/字级与网页同源。 */
+
+/* Textarea 原生 placeholder：网页版 placeholder:text-[rgba(0,0,0,0.44)]（PromptInput.tsx:555）。 */
+.pg-placeholder {
+  color: rgba(0, 0, 0, 0.44);
+  font-size: 16px;
+  line-height: 24px;
+}

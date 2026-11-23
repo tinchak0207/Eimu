@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+# 根 .gitignore 的 .env* 会误伤模板档，这里显式放行
+!.env.example
+.swc/
+.temp/
+.rn_temp/
+.DS_Store
+*.log
+project.private.config.json
