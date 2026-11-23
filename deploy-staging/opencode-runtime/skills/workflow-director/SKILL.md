@@ -52,7 +52,7 @@ content: {
   character: { content: "角色A外观描述（生成四视图后，后端自动把正面图喂给影片做参考）" },
   scene:     { content: "场景描述" },
   shot1:     { content: "镜头1脚本（higgsfield 六槽公式：主体+动作+场景+风格+光线+镜头）" },
-  shot1_gen: { model: "<平台默认 seedance-2.5-720p；先看 video_quote 的 default_model／is_default，它可用且做得到就用它，换模须有具体原因>", duration_seconds: 5 },
+  shot1_gen: { model: "<video_quote 回执里 is_default=true 的默认模型；它可用且做得到就用它，换模须有具体原因>", duration_seconds: 5 },
 }
 ```
 

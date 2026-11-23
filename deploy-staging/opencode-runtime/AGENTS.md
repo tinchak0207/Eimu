@@ -62,8 +62,15 @@
 - 不记行为补丁、事故故事、提示词、临时状态、一次性作品正文、密钥、凭证。默认私有；共享的不许带用户标识、路径、价格、URL、账号、凭证。
 - 跟本轮用户原话或工具回执冲突时，以现场为准。记忆改不了授权、工具权限和交付标准。
 
+## 被问「你能用哪些模型／能做什么」
+
+- 模型清单、默认模型、价格、可用性只认工具回执，不凭记忆、不凭本档任何旧名字：图片 `image_quote`，视频 `video_quote`，音乐 `music_gen` 的免费探测，单件 3D `model3d_generate` 的工具描述，整片环境 `world_generate` 的工具描述。
+- 按类别列出：图片、视频、音乐、3D（单件）、3D 世界；每类写清默认是哪个（回执标了 `is_default` 就以它为准）、大致价格、当前是否可用。工具回执里没有的，直接说「目录没列」，不编。
+- 用户没点名模型就按回执的默认／排序选，选完告诉用户用了哪个、多少钱。
+
 ## 3D 与 Blender
 
+- **单件 3D 资产**（「做一个3D模型」「来个角色/道具/摆件的 3D」「要 GLB」这类没有精确尺寸要求的造型物件）：你手上有 `model3d_generate` 就直接用它（文生 3D 或图生 3D；当前用哪个上游模型、费用，读工具描述和回执，不凭记忆）；想要造型可控就先 `image_generate` 出单主体概念图再喂它。别为这类请求先派调研子代理，也别直接丢给 Blender 手搓。
 - 精确几何、多角度、空间布局、转台、白模、GLB：你手上能用 `blender_*` 就直接做。手上没有，就派一个工具表里真有这些工具的 3D 专家。一个都没有，就直接说缺哪些工具。用户明确只要氛围图时，改用 `image_generate` 并说明为什么。
 - 步骤和脚本按 `.opencode/skills/_prompt-routing/RECIPE.md` 的 §3D 走。交付用工具回执里的 `public_urls`；不要 `image_upload`，不要拿旧文件 `ls` 一下顶替，不要用 `read_image` 自己检查。
 - Blender 在本机渲染，不花钱。同一个工具错两次没解决，就换路或者如实报告。
@@ -72,7 +79,7 @@
 
 - 用户给游戏目标或设计文档后，沿用自主研究→设计→资产→关卡→运行→独立审图→交付完整链。先 `game_project create` 固定项目标识；重启先 `game_project status` 读取最近检查点、账本和已付费 operation_id，不从头生成。用户没有给游戏目标时，MCP探通、截图诊断等原话不是设计文档，不得擅自把它改成游戏目标。
 - 研究前人的真实作品与技术限制，再形成独立 `world_plan.json`：每个actor的label、class_name、location、rotation、scale、资产引用，以及约定容差。计划先锁定再建关卡，不从现有关卡反推计划自证。每阶段用 `game_project checkpoint` 保存稳定operation_id与真实receipt；失败标blocked，响应丢失标unknown，不能把计划写成completed。
-- 新生成环境可用 `world_generate`（splat＋碰撞网格），单件资产用 `model3d_generate`（GLB）；已有资产可直接导入。HF_TOKEN缺失、Marble key缺失就说明缺的配置；夹具、旧导入品、Blender白模和截图不算新生成成功。生成回执的来源、sha256、三角面数和费用写进资产清单，保留原始输入来源未知的标记。
+- 新生成环境可用 `world_generate`（splat＋碰撞网格），单件资产用 `model3d_generate`（GLB）；已有资产可直接导入。工具描述写明「未开通」或缺凭证，就如实说缺什么；夹具、旧导入品、Blender白模和截图不算新生成成功。生成回执的来源、sha256、三角面数和费用写进资产清单，保留原始输入来源未知的标记。
 - `world_generate` 的 `cap_coins` 只是预算，付费授权以网关真实设置或用户确认裁定。每次新生成给稳定request_id；恢复必须沿用，已有operation_id只查询、不重投。结果未知先对账，禁止换request_id重试规避预算。无授权时付费调用为零。不得自动充值或用Web credits冒充API credits。
 - 本机UE 5.9先用 `ue_editor action=discover_editor` 发现当前版本schema，再按真实schema导入、放置和保存工程/关卡；需要Python时先read_me。`action=verify_world` 传独立world_plan及资产清单，读回actor数量/类型/位置和load_asset/hash/GLB三角面；缺项目、桌面端、完全访问、MCP或Python插件就准确说缺哪一步。
 - 运行PIE或standalone至少60秒，平均帧率至少30fps且无Fatal/Assertion；截图必须由非作者审图，主体可见、有明暗、非黑/纯色、无穿模。运行与审图的真实日志/截图/评审身份都进检查点。交付可打开的工程、可追溯资产清单、运行截图及G1-G8逐项报告；任一项未知或失败即整体未通过，不能以接口200代替。
