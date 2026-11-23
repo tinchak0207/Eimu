@@ -52,6 +52,18 @@ export function generationParent(child: string): { parent_gw: string; parent_oc:
   return db().query("SELECT parent_gw,parent_oc,consumer_agent,intent_version FROM generation_consumers WHERE child_oc=?").get(child) as any ?? undefined
 }
 
+/** 仅供已验证的终态续跑入口使用；旧工具是否属于新轮仍由真实工具起始时间裁定。 */
+export function rebindGenerationConsumerForResume(child: string, parentGw: string, parentOc: string): void {
+  db().transaction(() => {
+    const binding = generationParent(child)
+    if (binding?.parent_gw !== parentGw || binding.parent_oc !== parentOc) throw new Error("consumer ownership is immutable")
+    const work = generationWorkControl(parentGw)
+    if (work.cancelled) throw new Error("generation_work_cancelled: 当前工作已撤销")
+    db().query("UPDATE generation_consumers SET intent_version=? WHERE child_oc=? AND parent_gw=? AND parent_oc=?")
+      .run(work.version, child, parentGw, parentOc)
+  }).immediate()
+}
+
 // 工作控制与既有生成回执共用一个耐久数据库。停止模型不等于撤销外部副作用。
 export function generationWorkControl(parentGw: string): { version: number; cancelled: boolean; reason?: string } {
   const row = db().query("SELECT value FROM generation_runtime_control WHERE name=?").get(`intent:${parentGw}`) as { value: string } | null

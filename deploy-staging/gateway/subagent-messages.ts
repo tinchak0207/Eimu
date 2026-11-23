@@ -1,4 +1,4 @@
-import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, clearGenerationProducerCancel } from "./job-store"
+import { saveDurableSubagentRun, durableSubagentRun, durableSubagentRuns, clearGenerationProducerCancel, rebindGenerationConsumerForResume } from "./job-store"
 import { currentKernelFingerprint, decideKernelResume } from "./agent-kernel.ts"
 import type { SubagentRun, ResumeOutcome } from "./subagent-types.ts"
 import { maxActivePerParent, HARD_TIMEOUT_MS, ASYNC_HARD_TIMEOUT_MS, SUBAGENT_BUSY_MESSAGE, subagentResumeTtlMs, SUBAGENT_CHILD_QUEUE_MAX, SUBAGENT_BUS_MAX_CHARS, partialBodyOf, isOpenCodeSessionId, readJsonObject, childFacingFrame } from "./subagent-types.ts"
@@ -183,6 +183,11 @@ async function resumeTerminalRun(
   // 各占一个并发槽、32s 后被 stale 判 error 谎报失败）。resumable 索引＋resumeInFlight 双闸。
   if (resumeInFlight.has(old.id) || !resumable.has(old.id)) {
     return { ok: false, code: "resume_in_flight", error: "该终态子代理的续跑正在投递中，请用 subagent_status 复核后再试。", status: 409 }
+  }
+  try {
+    rebindGenerationConsumerForResume(old.opencodeSessionId, old.parentGatewaySessionId, old.parentOpencodeSessionId)
+  } catch {
+    return { ok: false, code: "resume_work_unavailable", error: "当前工作已撤销或子会话归属无法确认，未投递续跑。", status: 409 }
   }
   resumeInFlight.add(old.id)
   const savedResumeUntil = old.resumeUntil
@@ -536,4 +541,3 @@ export function resolveQuestionOnAnswer(run: SubagentRun, questionId: string | u
   console.log(`[gateway] subagent question answered: id=${run.id} question=${questionId}`)
   return true
 }
-

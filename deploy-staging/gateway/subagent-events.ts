@@ -17,9 +17,13 @@ import { recordToolTimeline, writeLiveLog, ensureTranscript } from "./subagent-l
 import { flushPendingChildMessages } from "./subagent-messages.ts"
 
 /** 音乐回调只能更新实际所属父会话的当前工作；原资产和账本不在这里改写。 */
-function isCurrentMusicProducer(run: SubagentRun, parent: { sessionId: string; opencodeSessionId: string }, child: string, partSession: unknown): boolean {
-  if (run.opencodeSessionId !== child || partSession !== child ||
+function isCurrentMusicProducer(run: SubagentRun, parent: { sessionId: string; opencodeSessionId: string }, child: string, part: any): boolean {
+  if (run.opencodeSessionId !== child || part?.sessionID !== child ||
       run.parentGatewaySessionId !== parent.sessionId || run.parentOpencodeSessionId !== parent.opencodeSessionId) return false
+  // 同一 child 的终态续跑是新 run。刷新 binding 不能把旧 call 的迟到终态洗成新产物。
+  if (run.resumedFrom && (typeof part.messageID !== "string" || run.messageRole.get(part.messageID) !== "assistant" ||
+      typeof part.state?.time?.start !== "number" || !Number.isFinite(part.state.time.start) ||
+      part.state.time.start < run.startedAt)) return false
   const binding = generationParent(child)
   const work = generationWorkControl(parent.sessionId)
   return binding?.parent_gw === parent.sessionId && binding.parent_oc === parent.opencodeSessionId &&
@@ -177,7 +181,7 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // 工具名原样送（前端用既有 toolDisplayName() 转人话），不在此造中文、
           // 不送 state.title/input（可能含内部路径与命令原文，属于泄漏面）。
           // 旧工作/错归属音乐回调不写当前画布、卡片或交付凭据；在途工具 bookkeeping 已在上方收尾。
-          if (part.tool === "music_gen" && !isCurrentMusicProducer(run, parentState, opencodeSessionId, part.sessionID)) break
+          if (part.tool === "music_gen" && !isCurrentMusicProducer(run, parentState, opencodeSessionId, part)) break
           if (callId && st) {
             const completedOutput = st === "completed" ? parseToolOutput(part.state?.output) : null
             const acceptedMusicPending = part.tool === "music_gen" && isAcceptedLinkiiMusicPending(completedOutput)
