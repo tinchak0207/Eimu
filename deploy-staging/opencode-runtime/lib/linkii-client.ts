@@ -27,6 +27,23 @@ export class LinkiiClientError extends Error {
   }
 }
 
+/** 本地停止等待不能把已接受的上游任务判成失败，更不能据此安全重投。 */
+export class LinkiiTaskPendingError extends LinkiiClientError {
+  readonly taskId: string
+  readonly creationId: string
+  readonly lastState: string
+  constructor(taskId: string | number, creationId: string | number, lastState: string) {
+    super(
+      "linkii_accepted_pending",
+      `Linkii 已接受任务，等待窗口结束时仍未取得终态（taskId=${taskId}, creationId=${creationId}, 最后状态=${lastState}）。这不是生成失败；不得自动回落或重新提交，应先核对同一任务。`,
+    )
+    this.name = "LinkiiTaskPendingError"
+    this.taskId = String(taskId)
+    this.creationId = String(creationId)
+    this.lastState = lastState
+  }
+}
+
 interface TokenCacheRecord {
   credHash: string
   token?: string
@@ -673,10 +690,7 @@ export async function pollLinkiiTaskAndWork(
 
     const remain = deadline - Date.now()
     if (remain <= 0) {
-      throw new LinkiiClientError(
-        "linkii_task_timeout",
-        `Linkii 任务轮询超时（>${Math.round(timeoutMs / 1000)}s，taskId=${taskId}, 最后状态=${String(task?.status ?? "unknown")}）。`,
-      )
+      throw new LinkiiTaskPendingError(taskId, creationId, String(task?.status ?? "unknown"))
     }
     await sleepWithAbort(Math.min(pollMs, remain), signal)
   }

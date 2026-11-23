@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { FLOWMUSIC_MODELS, generateFlowMusicTrack, isFlowMusic2ApiEnabled, type GenerateFlowMusicTrackResult } from "./music_flowmusic"
 import { generateLinkiiMusicTrack, isLinkiiMusicEnabled, isLinkiiMusicModelId, type GenerateLinkiiMusicTrackResult, type LinkiiMusicModelId } from "./music_linkii"
+import { LinkiiTaskPendingError } from "./linkii-client"
 import { LYRIA_MODELS, generateLyriaTrack, hasGeminiStudioApiKey, type GenerateLyriaTrackResult } from "./music_lyria"
 import { YUE2_MODEL_ID, YUE2_TRANSCRIBE_ABC_MISSING_CODE, Yue2TranscribeError, isYue2ModalEnabled, transcribeYue2Score, type GenerateYue2TrackResult, type Yue2CotMode } from "./music_yue2"
 import { describeRetainedParts, directMusicPrompt, stripLyricsTimestamps } from "./music_prompt_director"
@@ -447,6 +448,25 @@ export const musicGenTool: MusicToolDef = {
                   : await generateLyriaTrack({ prompt: finalPrompt, lyrics: lyricsForChannel("lyria"), model: lyriaModel, imagesBase64 })
           break
         } catch (e) {
+          // 已接受但终态未知：保留原身份，不能进入普通失败的通路回落链。
+          // ok:false 避免被网关当成交付证据或最终音频登记；无音频、不计费。
+          if (e instanceof LinkiiTaskPendingError) {
+            return fail(e.code, e.message, {
+              title: "音乐已提交，尚未取得结果",
+              human_message: "上游已接受音乐任务，目前还没有最终结果；本次未交付、未扣费，请勿重复提交。",
+              status: "accepted_pending",
+              submission_status: "accepted",
+              upstream_terminal: false,
+              task_id: e.taskId,
+              creation_id: e.creationId,
+              last_upstream_state: e.lastState,
+              retryable: false,
+              safe_to_resubmit: false,
+              delivered: false,
+              cost_coins: 0,
+              charged: false,
+            })
+          }
           // YuE2 瞬时失败：带乐谱语义（abc／翻唱）或已无下一通路 → 如实 fail（未扣费）；
           // 否则与硬失败一样并入回落链（记 channelFailures／fallbackFrom／fallbackReason）。
           if (e instanceof Yue2TransientExhaustedError && (hasScoreSemantics || i === channelChain.length - 1)) {
