@@ -266,6 +266,16 @@ const PRECHECK_PATH = "/internal/tool/precheck"
 const PRECHECK_HTTP_TIMEOUT_MS = GATE_HTTP_TIMEOUT_MS + HOOK_HTTP_TIMEOUT_MS
 const PRECHECK_RETRY_TIMEOUT_MS = 6000
 
+// 网关整体不可达（2 核 VPS 被 ffmpeg/渲染压满、事件循环卡住）时，用「该会话最近一次成功查到的计划状态」兜底：
+// 最近 30 分钟内确认过「不在计划模式」就不再把写/执行类工具 fail-closed 拒掉（11-22 00:35 一分钟内 6 次 subagent_dispatch
+// 被拒，11-23 14:04–18:55 又 8 次，整条链路卡成断点）；没有近期已知状态、或最后已知是计划模式 → 仍 fail-closed。
+const PLAN_STATE_FALLBACK_TTL_MS = 30 * 60 * 1000
+const lastKnownPlanState = new Map<string, { inPlanMode: boolean; at: number }>()
+function planKnownNotInPlanRecently(sessionID: string): boolean {
+  const known = lastKnownPlanState.get(sessionID)
+  return Boolean(known && !known.inPlanMode && Date.now() - known.at < PLAN_STATE_FALLBACK_TTL_MS)
+}
+
 /** 合并端点里的单个检查：status 是等价 HTTP 状态；0 = 网关侧超时/不可判定。 */
 interface PrecheckChild {
   status: number
@@ -919,6 +929,9 @@ export const EimuGuard: Plugin = async ({ client }) => {
           const plan = (await planRes.json().catch(() => null)) as
             | { inPlanMode?: unknown; read_only_tools?: unknown; planFilePath?: unknown; plan_file_path?: unknown }
             | null
+          if (typeof plan?.inPlanMode === "boolean") {
+            lastKnownPlanState.set(input.sessionID, { inPlanMode: plan.inPlanMode, at: Date.now() })
+          }
           if (typeof plan?.inPlanMode !== "boolean") {
             if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
               throw new Error("计划模式状态不可解析：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
@@ -950,7 +963,11 @@ export const EimuGuard: Plugin = async ({ client }) => {
             planFileBySession.delete(input.sessionID)
           }
         }
-      } else if (!PLAN_READ_ONLY_FALLBACK.has(lowerTool) && !PLAN_EXEMPT_TOOLS.has(lowerTool)) {
+      } else if (
+        !PLAN_READ_ONLY_FALLBACK.has(lowerTool) &&
+        !PLAN_EXEMPT_TOOLS.has(lowerTool) &&
+        !planKnownNotInPlanRecently(input.sessionID)
+      ) {
         throw new Error("计划模式状态查询超时/不可达：已按 fail-closed 拒绝写/执行类工具；只读工具仍可用。")
       }
 

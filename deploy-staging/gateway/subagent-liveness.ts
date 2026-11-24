@@ -83,6 +83,49 @@ export async function reclaimExpiredIdleRun(run: SubagentRun): Promise<void> {
   } finally { livenessChecks.delete(run) }
 }
 
+function subagentLlmHungMs(): number {
+  const n = Number.parseInt(process.env.SUBAGENT_LLM_HUNG_MS || "", 10)
+  return Number.isFinite(n) && n >= 60_000 ? n : 480_000
+}
+
+/** 子会话 busy 却长时间零事件：判上游流挂住，中止旧子会话并换下一个模型重投（与 session.error 换模路径同款清理）。 */
+async function failoverHungChild(run: SubagentRun, silentS: number): Promise<void> {
+  if (livenessChecks.has(run) || !deps) return
+  livenessChecks.add(run)
+  const child = run.opencodeSessionId
+  const activity = run.lastActivityAt
+  try {
+    if (run.status !== "running" || run.stopped || run.pendingTools.size > 0 || byChildOc.get(child) !== run ||
+      resumeInFlight.has(run.id) || run.attempt >= run.modelChain.length) return
+    const parentState = parentStateOf(run)
+    if (!parentState) return
+    console.error(
+      `[gateway] subagent LLM hung ${silentS}s (child busy, no events): id=${run.id} label="${run.label}" attempt=${run.attempt}/${run.modelChain.length} — 中止并换模重投`,
+    )
+    if (isOpenCodeSessionId(child)) {
+      await fetch(`${deps.openCodeUrl}/session/${child}/abort`, {
+        method: "POST", headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(5000),
+      }).catch(() => {})
+    }
+    // await 窗内状态变化（收尾/停止/被别处推进）则放弃，不双重推进。
+    if (run.status !== "running" || run.stopped || run.opencodeSessionId !== child || run.lastActivityAt !== activity ||
+      byChildOc.get(child) !== run) return
+    run.attempt += 1
+    byChildOc.delete(child)
+    if (isOpenCodeSessionId(child)) {
+      void fetch(`${deps.openCodeUrl}/session/${child}`, {
+        method: "DELETE", headers: deps.openCodeHeaders(), signal: AbortSignal.timeout(5000),
+      }).catch(() => {})
+    }
+    run.messageRole.clear()
+    run.partEmitted.clear()
+    run.partKind.clear()
+    run.suppressedParts.clear()
+    run.lastActivityAt = Date.now()
+    void retryWithNextModel(run, `上游模型 ${silentS} 秒无任何输出（流挂住），已中止并换模重试`)
+  } finally { livenessChecks.delete(run) }
+}
+
 export function startLivenessWatch(): void {
   if (livenessTimer) return
   livenessTimer = setInterval(livenessTick, subagentLivenessPollMs())
@@ -153,6 +196,13 @@ function livenessTick(): void {
     console.warn(
       `[gateway] subagent stale detected (no child activity ${silentS}s, no in-flight tool): id=${run.id} label="${run.label}" child=${run.opencodeSessionId}`,
     )
+    // 2026-11-24：子会话「忙但整段静默」（上游模型流挂住：opencode 仍 busy、无 token/part/工具）此前只会
+    // 每 15s 刷一条 stale 日志（11-23 16:50 审片 BatchA 刷 101 次、挂满 30 分钟硬顶才 error，父会话白等）。
+    // 静默超过 SUBAGENT_LLM_HUNG_MS（默认 8 分钟，env 可覆写）且还有备选模型 → 中止挂住的子会话并换模重投。
+    if (silentS * 1000 >= subagentLlmHungMs() && !run.isFork && run.attempt < run.modelChain.length) {
+      void failoverHungChild(run, silentS)
+      continue
+    }
     // 逾时先落盘已累积的 partial（同一行为与硬顶路径一致），再 error 收尾。
     void confirmSilentRunIdle(run, SUBAGENT_STALE_MESSAGE)
   }
