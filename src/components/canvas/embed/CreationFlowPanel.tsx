@@ -58,6 +58,17 @@ export interface VoiceoverFlowView {
   reason?: string;
 }
 
+/** 分镜门禁检查的面板视图：只回失败的门（名＋原因）与缺项，不报「完成度」。 */
+export interface QcFlowView {
+  status: "idle" | "checking" | "done" | "error";
+  ready?: boolean;
+  passed?: number;
+  total?: number;
+  failing?: { id: string; detail: string }[];
+  missing?: string[];
+  reason?: string;
+}
+
 export interface CreationFlowPanelProps {
   summary: CreationFlowSummary;
   /**
@@ -76,6 +87,10 @@ export interface CreationFlowPanelProps {
   focusEpisodeId?: string | null;
   /** 点集行＝只看这一集；再点同一集（或点「全部集」）＝回到全作品。 */
   onSelectEpisode?: (episodeId: string | null) => void;
+  /** 分镜门禁检查结果（宿主请求 `/api/canvas/storyboard-qc` 后回填；缺席＝未检查）。 */
+  qc?: QcFlowView;
+  /** 点「检查为什么过不了」：宿主按当前聚焦集发起检查。 */
+  onRunQc?: () => void;
   /** 配音流程状态（宿主 state；缺席＝本面板不渲染配音报价区）。 */
   voiceover?: VoiceoverFlowView;
   /** 确认键：使用者同意报价后才真跑（`dryRun: false`）。 */
@@ -98,6 +113,8 @@ export function CreationFlowPanel({
   onNextAction,
   focusEpisodeId,
   onSelectEpisode,
+  qc,
+  onRunQc,
   voiceover,
   onVoiceoverConfirm,
   onClose,
@@ -316,6 +333,42 @@ export function CreationFlowPanel({
               已落画布 {storyboard.shots} 镜
               {storyboard.plannedShots > 0 ? ` · 场景计划 ${storyboard.plannedShots} 镜` : ""}
             </p>
+            {onRunQc ? (
+              <button
+                type="button"
+                onClick={onRunQc}
+                disabled={qc?.status === "checking"}
+                className="mt-2 cursor-pointer text-ios-footnote text-ios-blue disabled:cursor-default disabled:opacity-50"
+              >
+                {qc?.status === "checking" ? "检查中…" : `检查${focusEpisodeId ? "这一集" : "全作品"}为什么过不了`}
+              </button>
+            ) : null}
+            {qc?.status === "done" ? (
+              qc.failing && qc.failing.length > 0 ? (
+                <ul className="mt-1.5 space-y-1">
+                  {qc.failing.slice(0, 6).map((gate) => (
+                    <li key={gate.id} className="text-ios-footnote leading-snug text-destructive">
+                      {gate.id}：{gate.detail}
+                    </li>
+                  ))}
+                  {qc.failing.length > 6 ? (
+                    <li className="text-ios-caption2 text-foreground/45">另有 {qc.failing.length - 6} 项未过</li>
+                  ) : null}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-ios-footnote text-ios-green">
+                  {qc.passed}/{qc.total} 项门禁全部通过
+                </p>
+              )
+            ) : null}
+            {qc?.status === "done" && qc.missing && qc.missing.length > 0 ? (
+              <p className="mt-1 text-ios-caption2 leading-snug text-foreground/45">
+                桥接缺项（不等于门禁过了）：{qc.missing.slice(0, 4).join("、")}
+              </p>
+            ) : null}
+            {qc?.status === "error" ? (
+              <p className="mt-1.5 text-ios-footnote text-destructive">检查失败：{qc.reason}</p>
+            ) : null}
           </div>
         </>
       )}

@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { LineageDrawer } from "@/components/lineage/LineageDrawer";
 import { cardToLineageView } from "@/lib/lineage-view";
 import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
-import { CreationFlowPanel, type VoiceoverFlowView } from "./CreationFlowPanel";
+import { CreationFlowPanel, type QcFlowView, type VoiceoverFlowView } from "./CreationFlowPanel";
 import { formatRelative, toDvh } from "./embed-helpers";
 import type { ReviewPanelKind } from "@/components/assets/AssetReviewPanel";
 import { openReviewPanel } from "@/components/assets/AssetReviewPanel";
@@ -301,6 +301,44 @@ export function CanvasEmbedOverlays({
   const focusEpisodeNo = focusEpisodeId
     ? (canvas.episodes ?? []).find((episode) => episode.id === focusEpisodeId)?.episodeNo
     : undefined;
+  // 分镜门禁：按聚焦集（缺席＝全作品）跑本地门禁，回「哪几项没过」。零上游、零付费。
+  const [qc, setQc] = useState<QcFlowView>({ status: "idle" });
+  const runQc = async () => {
+    const projectId = canvas.getProjectId();
+    if (!projectId) {
+      setQc({ status: "error", reason: "画布还没有项目号" });
+      return;
+    }
+    setQc({ status: "checking" });
+    try {
+      const res = await fetch("/api/canvas/storyboard-qc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId, ...(focusEpisodeNo ? { episode: focusEpisodeNo } : {}) }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        gates?: { id?: string; passed?: boolean; detail?: string }[];
+        gates_passed?: number;
+        ready?: boolean;
+        missing?: unknown;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.gates) {
+        setQc({ status: "error", reason: data?.error ?? `检查服务返回 ${res.status}` });
+        return;
+      }
+      setQc({
+        status: "done",
+        ready: data.ready === true,
+        passed: data.gates_passed ?? data.gates.filter((g) => g.passed).length,
+        total: data.gates.length,
+        failing: data.gates.filter((g) => !g.passed).map((g) => ({ id: String(g.id ?? "?"), detail: String(g.detail ?? "") })),
+        missing: Array.isArray(data.missing) ? data.missing.map(String) : [],
+      });
+    } catch {
+      setQc({ status: "error", reason: "网络错误" });
+    }
+  };
   // 成片收据：面板打开时查一次（站点成片索引），成功＝流程收口为「预览成片」而不是再叫人去剪辑。
   const [cutReceipt, setCutReceipt] = useState<{ hasCut: boolean } | null>(null);
   useEffect(() => {
@@ -580,7 +618,10 @@ export function CanvasEmbedOverlays({
               onSelectEpisode={(id) => {
                 setFocusEpisodeId(id);
                 setVoiceover({ status: "idle" });
+                setQc({ status: "idle" });
               }}
+              qc={qc}
+              onRunQc={() => void runQc()}
               voiceover={voiceover}
               onVoiceoverConfirm={() => void confirmVoiceover()}
               onClose={() => {
