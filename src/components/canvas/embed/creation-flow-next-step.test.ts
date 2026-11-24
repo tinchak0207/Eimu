@@ -242,7 +242,7 @@ test("配音请求：确认后才发 dryRun:false，实扣币数用伺服器回�
   const applied = await requestVoiceover({ projectId: "p-1", dryRun: false }, mock.impl);
   assert.deepEqual(
     applied,
-    { status: "applied", lineCount: 1, totalChars: 10, costCoins: 4 },
+    { status: "applied", lineCount: 1, totalChars: 10, costCoins: 4, reusedLines: 0 },
     "costCoins 照伺服器，与报价 3 不同也不改写",
   );
   assert.equal(mock.calls.filter((c) => c.body.dryRun === false).length, 1, "确认后恰好 1 笔真跑");
