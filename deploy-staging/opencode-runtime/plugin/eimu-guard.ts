@@ -771,7 +771,10 @@ export const EimuGuard: Plugin = async ({ client }) => {
   // D6：sessionID → filePath → {mtimeMs,size}（重读未变更档案时省略全文）。
   const readSeen = new Map<string, Map<string, { mtimeMs: number; size: number }>>()
   // 目标卡：sessionID → 已见过的用户原话（跨压缩留存；压缩后从会话全量历史水合一次）。
-  const goalUsers = new Map<string, { entries: Map<string, GoalEntry>; hydrated: boolean; seq: number; triedAt: number }>()
+  // placed：已贴过目标卡的用户讯息 id → 当时贴的卡全文。卡一旦贴上就原位、原文重贴（2026-11-24 缓存修复）：
+  // 旧做法每轮把卡搬到「最新一条用户讯息」，子代理回执/收件箱也是 user 讯息 ⇒ 每来一条回执，上一条讯息的卡被
+  // 拿掉，前缀从那里起全部失效（生产 7 天：新 user 讯息后 71% 步骤缓存大面积未命中，平均 4.6 万 token）。
+  const goalUsers = new Map<string, { entries: Map<string, GoalEntry>; hydrated: boolean; seq: number; triedAt: number; placed: Map<string, string> }>()
   // 压缩请求自身的 transform 不注入目标卡：sessionID → compacting hook 触发时刻（一次性消费）。
   const compactingAt = new Map<string, number>()
   const pollKey = globalThis as { __eimuBgPoll?: ReturnType<typeof setInterval> }
@@ -835,7 +838,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
   function goalState(sessionID: string) {
     let st = goalUsers.get(sessionID)
     if (!st) {
-      st = { entries: new Map(), hydrated: false, seq: 0, triedAt: 0 }
+      st = { entries: new Map(), hydrated: false, seq: 0, triedAt: 0, placed: new Map() }
       goalUsers.set(sessionID, st)
       boundMap(goalUsers, 200)
     }
@@ -1275,22 +1278,36 @@ export const EimuGuard: Plugin = async ({ client }) => {
             st.hydrated = true
           }
         }
+        const hasCard = (m: PluginMsg) =>
+          Array.isArray(m?.parts) && m.parts.some((p) => p?.type === "text" && typeof p.text === "string" && p.text.startsWith(GOAL_CARD_TAG))
+        const attach = (m: PluginMsg, text: string) =>
+          m.parts!.push({ id: `prt_goalcard_${String(m.info!.id ?? "")}`, sessionID, messageID: m.info!.id, type: "text", text, synthetic: true })
+        // ① 先把以前贴过的卡原位、原文重贴，保证前缀逐字不变（缓存命中的前提）。
+        for (const m of msgs) {
+          const id = m?.info?.id
+          if (m?.info?.role !== "user" || !Array.isArray(m.parts) || typeof id !== "string") continue
+          const prev = st.placed.get(id)
+          if (prev !== undefined && !hasCard(m)) attach(m, prev)
+        }
         // 只有一条用户原话且就在眼前时，卡片是逐字重复，不加。
         if (st.entries.size < 2 && !compacted) return
         const card = renderGoalCard([...st.entries.values()], GOAL_CARD_MAX_TOKENS)
         if (!card) return
+        // ② 只在「本轮可见讯息里还没有任何卡」或「最新一条是用户真实新发言（计入了 entries）」时贴新卡；
+        //    子代理回执/收件箱等系统注入 user 讯息不计入 entries ⇒ 不贴、不搬，前缀保持不动。
+        let anyVisible = msgs.some(hasCard)
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i]
           if (m?.info?.role !== "user" || !Array.isArray(m.parts)) continue
-          if (m.parts.some((p) => p?.type === "text" && typeof p.text === "string" && p.text.startsWith(GOAL_CARD_TAG))) return
-          m.parts.push({
-            id: `prt_goalcard_${String(m.info.id ?? "")}`,
-            sessionID,
-            messageID: m.info.id,
-            type: "text",
-            text: card,
-            synthetic: true,
-          })
+          if (hasCard(m)) return
+          const id = typeof m.info.id === "string" ? m.info.id : ""
+          if (anyVisible && !st.entries.has(id)) return
+          attach(m, card)
+          if (id) {
+            st.placed.set(id, card)
+            if (st.placed.size > 64) st.placed.delete(st.placed.keys().next().value as string)
+          }
+          anyVisible = true
           return
         }
       } catch {
