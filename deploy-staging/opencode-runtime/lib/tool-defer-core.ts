@@ -31,6 +31,8 @@ const CORE = new Set(
     "artifact_publish", "artifact_verify", "ue_editor", "canvas_get_state", "schedule_wakeup",
     "video_transcribe", "video_fetch", "video_evidence", "video_result_fetch", "video_quote",
     "run_py", "model3d_generate", "workflow_write", "workflow_history", "workflow_status", "search_web",
+    // 记忆要当场记、当面说（2026-11-24 用户裁定），不能被折叠成「首次调用先挡一次」
+    "memory_note", "user_memory_recall", "memory_forget", "chat_history_search",
     ...(process.env.TOOL_DEFER_CORE_EXTRA ?? "").split(/[\s,]+/).filter(Boolean),
   ],
 )
