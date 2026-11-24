@@ -5,6 +5,7 @@ import type { GenerationWorkflowMetadata } from "../image-types";
 import { decryptGenerationPrompt } from "./crypto";
 import { failureClassToApiErrorCode } from "../api-error-codes";
 import { taskStatus } from "./task-response";
+import { taskOutcome } from "./task-outcome";
 import type { GenerationJob } from "./types";
 
 /**
@@ -78,6 +79,7 @@ export function generationTaskProjection(job: GenerationJob, options: { includeP
     ...(job.startedAt ? { startedAt: job.startedAt.toISOString() } : {}),
     ...(job.finishedAt ? { finishedAt: job.finishedAt.toISOString() } : {}),
     ...(job.retryOfTaskId ? { retryOfTaskId: job.retryOfTaskId } : {}),
+    outcome: taskOutcome(job),
     ...(status === "failed" || status === "cancelled" || status === "refunded" || status === "unknown"
       ? {
           errorCode: failureClassToApiErrorCode(job.failureClass ?? "unknown"),

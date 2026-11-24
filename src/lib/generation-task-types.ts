@@ -40,6 +40,14 @@ export interface GenerationTaskProjection {
   retryOfTaskId?: string;
   errorCode?: string;
   errorMessage?: string;
+  /** 结局的人话投影（四种结局＋工单号；见 generation-core/task-outcome）。 */
+  outcome?: {
+    state: "succeeded" | "waiting" | "unknown_upstream" | "failed_refunded" | "failed" | "cancelled";
+    headline: string;
+    detail: string;
+    safeToRetry: boolean;
+    supportRef: string;
+  };
 }
 
 export function mergeGenerationTaskProjections(
