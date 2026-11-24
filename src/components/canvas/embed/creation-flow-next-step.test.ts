@@ -217,7 +217,7 @@ test("配音请求：干跑只发一次 dryRun:true，未经确认不发 dryRun:
 
   const quote = await requestVoiceover({ projectId: "p-1", dryRun: true }, mock.impl);
 
-  assert.deepEqual(quote, { status: "quote", lineCount: 3, totalChars: 42, estimatedCoins: 7 });
+  assert.deepEqual(quote, { status: "quote", lineCount: 3, totalChars: 42, estimatedCoins: 7, reusedLines: 0 });
   assert.equal(mock.calls.length, 1, "干跑只发一次");
   assert.equal(mock.calls[0].url, "/api/canvas/storyboard-voiceover");
   assert.equal(mock.calls[0].body.projectId, "p-1");
@@ -298,7 +298,7 @@ test("面板：干跑报价显示行数／字数／约币数 ＋ 确认键（币
     nextStep: VOICEOVER_STEP,
     voiceover: { status: "quoted", lineCount: 12, totalChars: 340, estimatedCoins: 26 },
   });
-  assert.match(html, /共 12 句 · 340 字 · 约 26 币/);
+  assert.match(html, /共 12 句 · 待合成 340 字 · 约 26 币/);
   assert.match(html, /确认生成（约 26 币）/);
 });
 

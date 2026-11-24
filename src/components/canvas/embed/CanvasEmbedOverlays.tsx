@@ -3,11 +3,12 @@
  * 本组件必须「无条件挂载」：<style> 的 .ce-embed-* 选择器同时作用于组件壳的顶栏/根容器，
  * 浮层全关时仍渲染样式块，否则壳层样式失效。
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import {
   deriveNextStep,
+  scopeNodesToEpisode,
   summarizeCreationFlow,
   type CreationFlowSnapshot,
   type CreationFlowSummary,
@@ -90,12 +91,13 @@ function shotMediaCounts(nodes: readonly CanvasNode[]): {
  * 零持久化 onboarding 标记。推不出来的栏位一律不填（fail-closed：`deriveNextStep`
  * 回 `unknown`，不补假进度）。
  *
- * `hasCut`：本站无剪辑产物栏位、也无任何产生剪辑的路径 ⇒ 成片恒不存在（站点能力事实，
- * 非猜测）。取保守值 `false`——永不冒充「已完成」；`deriveNextStep` 的 cut 分支正为此现况而写。
+ * `hasCut`：来自成片索引的**收据**（`GET /api/canvas/masters`：本人名下、probe 过档的成片），
+ * 查不到／未配置控制面＝保守 `false`，永不冒充「已完成」。
  */
 function creationFlowSnapshot(
   summary: CreationFlowSummary,
   nodes: readonly CanvasNode[],
+  hasCut: boolean = false,
 ): CreationFlowSnapshot {
   const media = shotMediaCounts(nodes);
   return {
@@ -106,7 +108,7 @@ function creationFlowSnapshot(
     shotsWithImage: media.withImage,
     shotsWithVideo: media.withVideo,
     shotsWithAudio: media.withAudio,
-    hasCut: false,
+    hasCut,
   };
 }
 
@@ -152,8 +154,8 @@ export const VOICEOVER_ENDPOINT = "/api/canvas/storyboard-voiceover";
  * `refused` ＝ 伺服器明确拒收（附原因）、`error` ＝ 传输／回应不完整。
  */
 export type VoiceoverOutcome =
-  | { status: "quote"; lineCount: number; totalChars: number; estimatedCoins: number }
-  | { status: "applied"; lineCount: number; totalChars: number; costCoins: number }
+  | { status: "quote"; lineCount: number; totalChars: number; estimatedCoins: number; reusedLines: number }
+  | { status: "applied"; lineCount: number; totalChars: number; costCoins: number; reusedLines: number }
   | { status: "refused"; reason: string }
   | { status: "error"; reason: string };
 
@@ -183,7 +185,7 @@ function refusedReason(refused: unknown): string | null {
  * `fetchImpl` 可注入（测试全程用假 fetch，禁任何真实付费呼叫）。
  */
 export async function requestVoiceover(
-  input: { projectId: string; dryRun: boolean },
+  input: { projectId: string; dryRun: boolean; episode?: number },
   fetchImpl: typeof fetch = fetch,
 ): Promise<VoiceoverOutcome> {
   let response: Response;
@@ -191,20 +193,37 @@ export async function requestVoiceover(
     response = await fetchImpl(VOICEOVER_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: input.projectId, dryRun: input.dryRun }),
+      body: JSON.stringify({
+        projectId: input.projectId,
+        dryRun: input.dryRun,
+        ...(input.episode ? { episode: input.episode } : {}),
+      }),
     });
   } catch {
     return { status: "error", reason: "无法连接配音服务（网络错误）" };
-  }
-  if (!response.ok) {
-    // 非 2xx 一律当失败：不把错误回应当成功（HTTP 200 都 ≠ 可用，更何况非 200）。
-    return { status: "error", reason: `配音服务返回 ${response.status}` };
   }
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
-    return { status: "error", reason: "配音服务返回的不是 JSON" };
+    return {
+      status: "error",
+      reason: response.ok ? "配音服务返回的不是 JSON" : `配音服务返回 ${response.status}`,
+    };
+  }
+  if (!response.ok) {
+    // 非 2xx 一律当失败（不当成功）。409＝某行失败但已成功的行已保留：把「保留了几句、续做只补缺口」
+    // 如实告诉使用者，而不是一句干巴巴的状态码。
+    const bag = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+    const why = refusedReason(bag.refused);
+    const kept = asServerNumber(bag.persistedLines);
+    if (why && response.status === 409) {
+      return {
+        status: "refused",
+        reason: `${why}${kept ? `（已保留 ${kept} 句，再点一次只补缺口、已有的不重复计费）` : ""}`,
+      };
+    }
+    return { status: "error", reason: `配音服务返回 ${response.status}` };
   }
   if (!payload || typeof payload !== "object") return { status: "error", reason: "配音服务返回空回应" };
   const data = payload as Record<string, unknown>;
@@ -221,11 +240,11 @@ export async function requestVoiceover(
   if (input.dryRun) {
     const estimatedCoins = asServerNumber(data.estimatedCoins);
     if (estimatedCoins === null) return { status: "error", reason: "服务端未回报报价币数" };
-    return { status: "quote", lineCount, totalChars, estimatedCoins };
+    return { status: "quote", lineCount, totalChars, estimatedCoins, reusedLines: asServerNumber(data.reusedLines) ?? 0 };
   }
   const costCoins = asServerNumber(data.costCoins);
   if (costCoins === null) return { status: "error", reason: "服务端未回报实扣币数" };
-  return { status: "applied", lineCount, totalChars, costCoins };
+  return { status: "applied", lineCount, totalChars, costCoins, reusedLines: asServerNumber(data.reusedLines) ?? 0 };
 }
 
 /** 伺服器结果 → 面板显示状态（唯一的映射点，面板不再自行解读回应）。 */
@@ -236,6 +255,7 @@ function voiceoverView(outcome: VoiceoverOutcome): VoiceoverFlowView {
       lineCount: outcome.lineCount,
       totalChars: outcome.totalChars,
       estimatedCoins: outcome.estimatedCoins,
+      reusedLines: outcome.reusedLines,
     };
   }
   if (outcome.status === "applied") {
@@ -244,6 +264,7 @@ function voiceoverView(outcome: VoiceoverOutcome): VoiceoverFlowView {
       lineCount: outcome.lineCount,
       totalChars: outcome.totalChars,
       costCoins: outcome.costCoins,
+      reusedLines: outcome.reusedLines,
     };
   }
   return { status: outcome.status, reason: outcome.reason };
@@ -275,6 +296,26 @@ export function CanvasEmbedOverlays({
   // 补齐配音（`shot-audio`）：主动作＝干跑报价（不扣费），确认键才真跑；在途时锁住防重复送出。
   const [voiceover, setVoiceover] = useState<VoiceoverFlowView>({ status: "idle" });
   const voiceoverBusyRef = useRef(false);
+  // 选集：只看某一集的缺口，配音范围随之收窄到这一集（缺席＝全作品）。
+  const [focusEpisodeId, setFocusEpisodeId] = useState<string | null>(null);
+  const focusEpisodeNo = focusEpisodeId
+    ? (canvas.episodes ?? []).find((episode) => episode.id === focusEpisodeId)?.episodeNo
+    : undefined;
+  // 成片收据：面板打开时查一次（站点成片索引），成功＝流程收口为「预览成片」而不是再叫人去剪辑。
+  const [cutReceipt, setCutReceipt] = useState<{ hasCut: boolean } | null>(null);
+  useEffect(() => {
+    if (!creationFlowOpen) return;
+    const projectId = canvas.getProjectId();
+    if (!projectId) return;
+    const controller = new AbortController();
+    fetch(`/api/canvas/masters?projectId=${encodeURIComponent(projectId)}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { known?: boolean; hasCut?: boolean } | null) => {
+        if (data?.known) setCutReceipt({ hasCut: data.hasCut === true });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [creationFlowOpen, canvas]);
 
   const startVoiceoverQuote = async () => {
     if (voiceoverBusyRef.current) return;
@@ -286,7 +327,7 @@ export function CanvasEmbedOverlays({
     voiceoverBusyRef.current = true;
     try {
       setVoiceover({ status: "quoting" });
-      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: true })));
+      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: true, episode: focusEpisodeNo })));
     } finally {
       voiceoverBusyRef.current = false;
     }
@@ -302,7 +343,7 @@ export function CanvasEmbedOverlays({
     voiceoverBusyRef.current = true;
     try {
       setVoiceover({ status: "applying" });
-      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: false })));
+      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: false, episode: focusEpisodeNo })));
     } finally {
       voiceoverBusyRef.current = false;
     }
@@ -527,8 +568,19 @@ export function CanvasEmbedOverlays({
           return (
             <CreationFlowPanel
               summary={summary}
-              nextStep={deriveNextStep(creationFlowSnapshot(summary, canvas.nodes))}
+              nextStep={deriveNextStep(
+                creationFlowSnapshot(
+                  summary,
+                  focusEpisodeId ? scopeNodesToEpisode(canvas.nodes, focusEpisodeId) : canvas.nodes,
+                  cutReceipt?.hasCut === true,
+                ),
+              )}
               onNextAction={handleNextAction}
+              focusEpisodeId={focusEpisodeId}
+              onSelectEpisode={(id) => {
+                setFocusEpisodeId(id);
+                setVoiceover({ status: "idle" });
+              }}
               voiceover={voiceover}
               onVoiceoverConfirm={() => void confirmVoiceover()}
               onClose={() => {
