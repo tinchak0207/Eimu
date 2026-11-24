@@ -10,6 +10,7 @@ import {
 import { describeEnvChannels } from "../src/lib/sub2api";
 import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-core/filmera-upstream";
 import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
+import { readLinkiiAccounts } from "../src/lib/generation-core/linkii-upstream";
 import { MODEL_ROUTES, NEWAPI_ROUTE_LABEL, NEWAPI_SUPERSEDED_LABELS, modelsRoutedTo, routeSupplierId } from "../src/lib/model-routes.config";
 
 // reblood：这些渠道的调度已整体切到 new-api。
@@ -360,6 +361,8 @@ function channelConcurrency(label: string): number {
   if (label === NEWAPI_ROUTE_LABEL) return newApiConcurrency();
   if (label === "dmc" || label === "xiaoyxiao" || label === "gway" || label === "miaowuai") return 4;
   if (label === "pixai") return 2;
+  // Linkii 同一账号同时只能 1 个绘画/建模任务（C9999），号池有 N 个账号就能并发 N 个（linkii-upstream 按在途最少挑号）。
+  if (label === "linkii") return Math.max(1, readLinkiiAccounts().length);
   return Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1));
 }
 
@@ -467,7 +470,9 @@ async function main() {
     const capabilities = channelCapabilities(channel.label);
     const capabilityConcurrency = channel.label === NEWAPI_ROUTE_LABEL
       ? newApiConcurrency()
-      : Math.max(1, Number(process.env.GENERATION_CAPABILITY_CONCURRENCY ?? 1));
+      : channel.label === "linkii"
+        ? channelConcurrency("linkii")
+        : Math.max(1, Number(process.env.GENERATION_CAPABILITY_CONCURRENCY ?? 1));
     for (const capability of capabilities) {
       await upsertCapability(sql, id, capability, capabilityConcurrency);
       seededClaims.add(`${capability.modelId} ${channel.label}`);
