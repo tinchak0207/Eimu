@@ -195,11 +195,22 @@ function sseNote(sse) {
 }
 
 async function createSession(title) {
-  const res = await fetch(`${BASE}/sessions`, {
-    method: "POST",
-    headers: { ...AUTH, "content-type": "application/json" },
-    body: JSON.stringify({ title }),
-  })
+  // 本机出口偶发抖动（连接超时/fetch failed）：建会话是幂等前的第一步，重试几次再认输。
+  let res
+  for (let i = 0; ; i++) {
+    try {
+      res = await fetch(`${BASE}/sessions`, {
+        method: "POST",
+        headers: { ...AUTH, "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+        signal: AbortSignal.timeout(20000),
+      })
+      break
+    } catch (e) {
+      if (i >= 8) throw e
+      await sleep(3000)
+    }
+  }
   const body = await res.json().catch(() => ({}))
   if (!res.ok || !body.session_id) throw new Error(`建会话失败 http=${res.status}`)
   return body.session_id
@@ -1116,6 +1127,48 @@ async function sceneAlbumStart(scene, reasons) {
   return { sid, reply_chars: (turn.reply || "").length, retryFrames: bad, mediaDone: turn.mediaDone, reply: (turn.reply || "").slice(0, 300) }
 }
 
+// Linkii 号池真会话：原话驱动 agent 调 model3d_generate / music_gen，断言工具真出了结果，
+// 并从 opencode 工具回执取实际用的 Linkii 账号（linkii_account；单账号时无此字段）。
+async function sceneLinkiiTool(scene, reasons) {
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: scene.spend === true, maxCoins: scene.max_coins ?? 0 })
+  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
+  const is3d = /hunyuan3d/.test(scene.id)
+  const code = `
+import json, sqlite3
+sid = ${JSON.stringify(sid)}
+db = sqlite3.connect("file:/opt/agent-harness/workspace/.local/share/opencode/opencode.db?mode=ro", uri=True)
+gw = sqlite3.connect("file:/opt/agent-harness/state/sessions.db?mode=ro", uri=True)
+row = gw.execute("SELECT data FROM sessions WHERE id=?", (sid,)).fetchone()
+d = json.loads(row[0]) if row else {}
+ids = {d.get("opencodeSessionId")} - {None}
+ids |= {r[0] for r in gw.execute("SELECT producer_oc FROM generation_receipts WHERE parent_gw=?", (sid,)).fetchall()}
+for oid in list(ids):
+    ids |= {r[0] for r in db.execute("SELECT id FROM session WHERE parent_id=?", (oid,)).fetchall()}
+rows = []
+for oid in ids:
+    rows += db.execute("SELECT data FROM part WHERE session_id=? ORDER BY time_created", (oid,)).fetchall()
+out = []
+for (raw,) in rows:
+    try: d = json.loads(raw)
+    except Exception: continue
+    if d.get("type") == "tool" and d.get("tool") in ("model3d_generate", "music_gen"):
+        st = d.get("state") or {}
+        out.append({"tool": d["tool"], "status": st.get("status"), "output": str(st.get("output"))[:1500]})
+print(json.dumps(out, ensure_ascii=False))
+`
+  let tools = []
+  try { tools = JSON.parse((await sshPy(code)).trim().split("\n").pop()) } catch (e) { fail(reasons, `${scene.id} 读不到工具回执：${e.message}`) }
+  const hit = tools.filter((t) => t.status === "completed" && (is3d ? t.tool === "model3d_generate" : t.tool === "music_gen"))
+  if (!hit.length) fail(reasons, `${scene.id} 没有 completed 的 ${is3d ? "model3d_generate" : "music_gen"} 工具回执（${JSON.stringify(tools).slice(0, 300)}）`)
+  const account = hit.map((t) => (t.output.match(/linkii_account["':\s]+([A-Za-z0-9_]+)/) || [])[1]).find(Boolean) || null
+  const media = hit.some((t) => (is3d ? /glb/i : /https?:\/\/\S+\.(mp3|wav|m4a)|audio/i).test(t.output))
+  if (hit.length && !media) fail(reasons, `${scene.id} 回执里没有 ${is3d ? "glb" : "音频"} 产物`)
+  await sse.stop()
+  return { sid, tools: tools.map((t) => ({ tool: t.tool, status: t.status })), linkii_account: account, reply_chars: turn.reply.length }
+}
+
 const runners = {
   "album-jay-style": sceneAlbumStart,
   "viewer-gate-image-then-music": sceneViewerGate,
@@ -1133,6 +1186,9 @@ const runners = {
   "native-audio-mv-highlight": sceneNativeAudioMv,
   "default-video-seedance25-720p": sceneDefaultVideo,
   "deliver-link-plain": sceneLinkPlain,
+  "linkii-hunyuan3d-cabin-20261123": sceneLinkiiTool,
+  "linkii-minimax-vocal-20261123": sceneLinkiiTool,
+  "linkii-music-models-20261123": sceneLinkiiTool,
 }
 
 const selected = corpus.scenes.filter((scene) => !ONLY.size || ONLY.has(scene.id))
