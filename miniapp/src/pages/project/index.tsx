@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react'
-import { Image, ScrollView, Text, Video, View } from '@tarojs/components'
+import { useCallback, useRef, useState } from 'react'
+import { Image, ScrollView, Text, Textarea, Video, View } from '@tarojs/components'
 import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
 import { ensureLogin } from '../../lib/session'
 import { PageShell } from '../../components/pages/PageShell'
 import {
-  adoptVersion, fetchMaster, fetchProjects, fetchReview, type MasterReceipt, saveToAlbum, stashAgentDraft, STATE_LABEL,
+  adoptVersion, fetchMaster, importScript, fetchProjects, fetchReview, type MasterReceipt, saveToAlbum, stashAgentDraft, STATE_LABEL,
   type ProjectReview, type ProjectSummary, type ReviewShot,
 } from '../../lib/project-review'
 
@@ -25,6 +25,8 @@ export default function ProjectPage() {
   const [openShot, setOpenShot] = useState<string | null>(null)
   const [compare, setCompare] = useState<string | null>(null)
   const [master, setMaster] = useState<MasterReceipt | null>(null)
+  const backToList = useRef(false)
+  const [scriptText, setScriptText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -39,7 +41,7 @@ export default function ProjectPage() {
       const list = await fetchProjects()
       setProjects(list)
       // 只有一个项目＝直接进去，不让人多点一下。
-      if (list.length === 1) { const [r, m] = await Promise.all([fetchReview(list[0].id), fetchMaster(list[0].id)]); setReview(r); setMaster(m) }
+      if (list.length === 1 && !backToList.current) { const [r, m] = await Promise.all([fetchReview(list[0].id), fetchMaster(list[0].id)]); setReview(r); setMaster(m) }
     } catch (err) {
       setError(err instanceof Error ? err.message : '读取作品失败')
     } finally { Taro.stopPullDownRefresh() }
@@ -61,6 +63,19 @@ export default function ProjectPage() {
     } catch (err) { flash(err instanceof Error ? err.message : '没有改成，原样保留') } finally { setBusy(false) }
   }
 
+  async function doImport() {
+    if (!scriptText.trim() || busy) return
+    setBusy(true)
+    try {
+      const result = await importScript(scriptText)
+      setScriptText('')
+      if (result.sampleDraft) stashAgentDraft(result.sampleDraft)
+      flash(result.policy === 'finished' ? `已按原文切成 ${result.shotCount} 镜，台词一字不改` : `已建好项目（${result.shotCount} 镜）`)
+      await load(result.projectId)
+      backToList.current = false
+    } catch (err) { flash(err instanceof Error ? err.message : '导入失败，没有创建任何东西') } finally { setBusy(false) }
+  }
+
   function sayAboutShot(shot: ReviewShot) {
     stashAgentDraft(`第 ${shot.shotNumber} 镜（${shot.summary}）：`)
     void Taro.navigateTo({ url: '/pages/agent/index' }).catch(() => Taro.reLaunch({ url: '/pages/agent/index' }))
@@ -80,8 +95,14 @@ export default function ProjectPage() {
           <View className='space-y-2'>
             <Text className='text-ios-title3 font-semibold text-foreground'>我的作品</Text>
             {projects.length === 0 && !error ? <Text className='block text-ios-subhead text-foreground/50'>还没有作品。回到对话说出想拍的片子，做出来后会出现在这里。</Text> : null}
+            <View className='lg-sheet rounded-ios-2xl px-4 py-3'>
+              <Text className='block text-ios-subhead font-medium text-foreground'>已有剧本？直接导入</Text>
+              <Text className='mt-0.5 block text-ios-caption2 text-foreground/45'>按原文切镜，台词不改；导入不花钱。之后可先只试第 1 镜的风格。</Text>
+              <Textarea value={scriptText} onInput={e => setScriptText(e.detail.value)} maxlength={20000} autoHeight placeholder='场1 天台 黄昏&#10;她：你来晚了。' className='mt-2 min-h-24 w-full rounded-ios-xl bg-black/[0.04] p-3 text-ios-subhead' />
+              <View className={`mt-2 flex min-h-11 items-center justify-center rounded-full ${scriptText.trim() ? 'bg-ios-blue text-white' : 'bg-black/[0.06] text-foreground/40'}`} onClick={() => void doImport()}><Text>{busy ? '导入中…' : '导入并开始'}</Text></View>
+            </View>
             {projects.map(p => (
-              <View key={p.id} className='lg-sheet rounded-ios-2xl px-4 py-3' onClick={() => void load(p.id)}>
+              <View key={p.id} className='lg-sheet rounded-ios-2xl px-4 py-3' onClick={() => { backToList.current = false; void load(p.id) }}>
                 <Text className='block text-ios-subhead font-medium text-foreground'>{p.title || '未命名作品'}</Text>
                 <Text className='block text-ios-caption2 text-foreground/45'>{p.nodeCount} 个节点</Text>
               </View>
@@ -89,11 +110,14 @@ export default function ProjectPage() {
           </View>
         ) : (
           <View className='space-y-3'>
-            <Text className='block text-ios-title3 font-semibold text-foreground'>{review.title || '未命名作品'}</Text>
+            <View className='flex items-center justify-between'>
+              <Text className='text-ios-title3 font-semibold text-foreground'>{review.title || '未命名作品'}</Text>
+              <Text className='text-ios-footnote text-ios-blue' onClick={() => { backToList.current = true; setReview(null); setMaster(null); setEpisode(null); void load() }}>全部作品 / 导入剧本</Text>
+            </View>
             {/* 做完了没有：一句话说清手里有什么、缺什么 */}
             <View className='lg-sheet rounded-ios-2xl px-4 py-3'>
               <Text className='block text-ios-subhead text-foreground'>{review.summary.headline}</Text>
-              {review.summary.nextAction ? <Text className='mt-1 block text-ios-footnote text-ios-blue'>下一步：{review.summary.nextAction.label}（对我说「{review.summary.nextAction.label}」即可）</Text> : <Text className='mt-1 block text-ios-footnote text-ios-green'>全部镜头都可直接用</Text>}
+              {review.summary.nextAction ? <View className='mt-2 flex min-h-11 items-center justify-center rounded-full bg-ios-blue text-white' onClick={() => { stashAgentDraft(review.summary.nextAction!.label); void Taro.navigateTo({ url: '/pages/agent/index' }).catch(() => Taro.reLaunch({ url: '/pages/agent/index' })) }}><Text>下一步：{review.summary.nextAction.label}</Text></View> : <Text className='mt-1 block text-ios-footnote text-ios-green'>全部镜头都可直接用</Text>}
               {review.continuity.cardCount > 0 || review.continuity.narrationVoice ? (
                 <Text className='mt-1 block text-ios-caption2 text-foreground/45'>
                   已留存：{review.continuity.cardCount} 张角色/场景卡{review.continuity.narrationVoice ? ` · 旁白音色 ${review.continuity.narrationVoice}` : ''}，接着做下一集会沿用

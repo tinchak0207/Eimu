@@ -201,6 +201,7 @@ export function buildProjectReview(project: CanvasProject): ProjectReview {
   else if (summary.failed) summary.nextAction = { kind: "rerun_failed", nodeIds: ids("failed"), label: `补跑失败的 ${summary.failed} 镜` };
   else if (summary.pending) summary.nextAction = { kind: "wait", nodeIds: ids("pending"), label: "等生成完成" };
   else if (summary.stale) summary.nextAction = { kind: "refresh_stale", nodeIds: ids("stale"), label: `重做改过的 ${summary.stale} 镜` };
+  else if (summary.empty && summary.ready === 0 && summary.total > 1) summary.nextAction = { kind: "generate_missing", nodeIds: shots.slice(0, 1).map((x) => x.nodeId), label: "先试第 1 镜的风格，满意再做整集" };
   else if (summary.empty) summary.nextAction = { kind: "generate_missing", nodeIds: ids("empty"), label: `生成还没出的 ${summary.empty} 镜` };
 
   return {

@@ -70,3 +70,9 @@ export interface MasterReceipt { known: boolean; hasCut: boolean; latest?: { del
 export async function fetchMaster(projectId: string): Promise<MasterReceipt> {
   try { return await request<MasterReceipt>({ path: `/api/canvas/masters?projectId=${encodeURIComponent(projectId)}` }) } catch { return { known: false, hasCut: false } }
 }
+
+export interface ImportScriptResult { projectId: string; policy: 'finished' | 'seed'; shotCount: number; sampleNodeId: string | null; sampleDraft: string; fidelity: { sourceLines: number; coveredLines: number; verbatim: boolean } }
+/** 导入定稿剧本（＋参考图 https 链接）：直接得到分镜项目，零花费。 */
+export async function importScript(script: string, references: { url: string; name?: string }[] = []): Promise<ImportScriptResult> {
+  return request<ImportScriptResult>({ path: '/api/canvas/projects/import-script', method: 'POST', data: { script, references } })
+}
