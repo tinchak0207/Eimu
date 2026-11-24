@@ -490,10 +490,43 @@ async function performLogin(baseUrl: string): Promise<string> {
   return accessToken;
 }
 
+// 号池冷启动（控面刚换装、token 缓存为空）时三个账号会同时登录，Linkii 对同源短时多次登录回
+// 「您的請求過於頻繁」（非 C1015）→ 11-24 实测 3 并发里 2 个直接失败且各账号互相failover 也全撞同一限流。
+// 全池登录串行化（相邻两次登录起点至少间隔 LOGIN_MIN_GAP_MS），遇到该瞬时限流再退避重试一次。
+const LOGIN_MIN_GAP_MS = 1_500;
+const LOGIN_TRANSIENT_RETRY_MS = 3_000;
+let loginGate: Promise<unknown> = Promise.resolve();
+let lastLoginStartMs = 0;
+function isTransientLoginThrottle(error: unknown): boolean {
+  if (!(error instanceof SupplierRequestError)) return false;
+  if (error.status === 429) return false; // C1015 走 5 分钟冷却，不在这里重试
+  return /頻繁|频繁|too frequent|too many/i.test(error.message);
+}
+function serializedLogin(baseUrl: string): Promise<string> {
+  const run = loginGate.then(async () => {
+    for (let attempt = 0; ; attempt++) {
+      const wait = lastLoginStartMs + LOGIN_MIN_GAP_MS - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      lastLoginStartMs = Date.now();
+      try {
+        return await performLogin(baseUrl);
+      } catch (error) {
+        if (attempt === 0 && isTransientLoginThrottle(error)) {
+          await new Promise((r) => setTimeout(r, LOGIN_TRANSIENT_RETRY_MS));
+          continue;
+        }
+        throw error;
+      }
+    }
+  });
+  loginGate = run.catch(() => undefined);
+  return run;
+}
+
 async function singleFlightLogin(baseUrl: string): Promise<string> {
   const st = acctState();
   if (!st.loginInFlight) {
-    st.loginInFlight = performLogin(baseUrl).finally(() => {
+    st.loginInFlight = serializedLogin(baseUrl).finally(() => {
       st.loginInFlight = null;
     });
   }
