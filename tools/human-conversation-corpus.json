@@ -268,6 +268,20 @@
         "提示 Agent 调用 model3d_generate(upstream=\"hunyuan3d\") 文生 3D（如「低多边形木质小木屋」），核对返回 glb_url 可下载且 asset_report.triangles > 0。"
       ],
       "cap_note": "Linkii交接文档原话片段；完整实际消息另附0币/现成10次配额/LowPoly/只投一次/不另生图/不换Blender边界，留存真实载荷。gw=6f32fc4b-17c2-46d5-88bb-bab607b341da。通用runner尚无此scene.id分派。"
+    },
+    {
+      "id": "memory-visible-note",
+      "phase": "post",
+      "spend": false,
+      "cap_note": "2026-11-24 暴君：「记忆无感」「写入记忆的时候我压根就看不到」。第一句要求当轮 memory_note＋回复说记住了什么；第二句在新会话问，验证跨会话召回。不花钱。",
+      "source": {
+        "session": "claude-code-2026-11-24",
+        "note": "暴君在本地对比：本地模型会显式调用 mem 工具并回报记住了什么"
+      },
+      "turns": [
+        "记住：以后给我做图默认用竖版 9:16，我不喜欢高饱和的颜色。",
+        "你还记得我做图有什么偏好吗？"
+      ]
     }
   ]
 }

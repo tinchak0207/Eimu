@@ -445,6 +445,26 @@ async function sceneText(scene, reasons) {
   return { sid, reply_chars: turn.reply.length, seat: facts.seat, mediaDone: turn.mediaDone }
 }
 
+async function sceneMemoryVisible(scene, reasons) {
+  // 2026-11-24 暴君：「记忆系统我常常都感觉无感」「写入记忆的时候我压根就看不到」——要像本地那样当场调记忆工具、当面说记住了什么。
+  const sid = await createSession(`human-e2e-${scene.id}`)
+  const sse = await attach(sid)
+  const turn = await runTurn(sid, scene.turns[0], { sse, spend: false, maxCoins: 0 })
+  if (!turn.done) fail(reasons, `${scene.id} 没有 turn.done${sseNote(sse)}`)
+  const tools = sse.frames.map((f) => parseFrame(f.raw)).filter((x) => x.ev === "tool.invoke").map((x) => x.obj?.tool)
+  if (!tools.includes("memory_note")) fail(reasons, `${scene.id} 当轮没有调用 memory_note（调用了：${[...new Set(tools)].join(",") || "无"}）`)
+  if (!/记住|记下/.test(turn.reply)) fail(reasons, `${scene.id} 回复没有告诉用户记住了什么：${turn.reply.slice(0, 200)}`)
+  await sse.stop()
+  // 换一个新会话问，验证真的能被召回，而不是只在本会话上下文里
+  const sid2 = await createSession(`human-e2e-${scene.id}-recall`)
+  const sse2 = await attach(sid2)
+  const turn2 = await runTurn(sid2, scene.turns[1], { sse: sse2, spend: false, maxCoins: 0 })
+  if (!turn2.done) fail(reasons, `${scene.id} 第二个会话没有 turn.done${sseNote(sse2)}`)
+  if (!/9\s*[:：比]\s*16|竖/.test(turn2.reply) || !/饱和/.test(turn2.reply)) fail(reasons, `${scene.id} 新会话没有答出记住的偏好：${turn2.reply.slice(0, 240)}`)
+  await sse2.stop()
+  return { sid, sid2, tools: [...new Set(tools)], reply: turn.reply.slice(0, 300), recall: turn2.reply.slice(0, 300) }
+}
+
 async function sceneLinkPlain(scene, reasons) {
   // 2026-11-07 暴君：「你都他妈没给我 url」。成品链接必须完整明文出现在回复里，播放器不能替代。
   const sid = await createSession(`human-e2e-${scene.id}`)
@@ -1186,6 +1206,7 @@ const runners = {
   "native-audio-mv-highlight": sceneNativeAudioMv,
   "default-video-seedance25-720p": sceneDefaultVideo,
   "deliver-link-plain": sceneLinkPlain,
+  "memory-visible-note": sceneMemoryVisible,
   "linkii-hunyuan3d-cabin-20261123": sceneLinkiiTool,
   "linkii-minimax-vocal-20261123": sceneLinkiiTool,
   "linkii-music-models-20261123": sceneLinkiiTool,
