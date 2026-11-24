@@ -113,6 +113,10 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
       stale: !!entry.inputSig && entry.inputSig !== currentSig[kind],
     };
   });
+  // 存量作品（本版本之前落地的成果）没有 taskVersions：把节点自己的成果当作唯一一版，保证老作品也能审阅、存走。
+  if (versions.length === 0 && typeof bag.content === "string" && /^https?:\/\//.test(bag.content)) {
+    versions.push({ version: "legacy", kind: node.type === "video" ? "video" : "image", url: bag.content, status: "success", adopted: true, stale: false });
+  }
   const candidateViews: ShotReviewCandidate[] = (candidates?.items ?? []).map((item) => ({
     id: item.id,
     ...(item.url ? { url: item.url } : {}),
@@ -122,9 +126,10 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
 
   const readiness = shotMediaReadiness(bag);
   const adoptedEntry = versions.find((v) => v.adopted);
-  const newVersionWaiting =
-    versions.some((v) => !v.adopted && !v.stale && !!v.url && v.status !== "error" && v.status !== "loading") &&
-    (!adoptedEntry || adoptedEntry.stale);
+  // 比当前采用稿更新、对应当前输入、已出成果的版本＝「新版等你选」（再来一版、改镜头后重生成都算）。
+  const newVersionWaiting = versions.some(
+    (v) => !v.adopted && !v.stale && !!v.url && v.status !== "error" && v.status !== "loading" && v.version !== "legacy" && (!adoptedEntry || v.version > adoptedEntry.version || adoptedEntry.stale),
+  );
   const adoptedVersion = versions.find((v) => v.adopted && v.url);
   const adoptedCandidate = candidateViews.find((c) => c.adopted && c.url);
   const adoptedUrl = adoptedVersion?.url ?? adoptedCandidate?.url;
@@ -132,7 +137,7 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
 
   const anyLoading = versions.some((v) => v.status === "loading") || candidateViews.some((c) => c.status === "loading") || node.metadata?.status === "loading";
   const latest = versions[versions.length - 1];
-  const delivered = readiness.hasImage || readiness.hasVideo;
+  const delivered = readiness.hasImage || readiness.hasVideo || versions.some((v) => v.version === "legacy");
   let state: ShotReviewState;
   if (delivered && !anyLoading) state = "ready";
   else if (anyLoading) state = "pending";

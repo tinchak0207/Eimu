@@ -18,6 +18,8 @@ import type {
   CanvasUnit,
 } from "./types";
 import { CanvasNodeType } from "./types";
+import { shotInputSignature, shotNumberOf } from "./storyboard-shots";
+import { appendTaskVersion, normalizeTaskVersions } from "./task-versions";
 import {
   appendNodeVersion,
   applyNodeVersion,
@@ -305,6 +307,21 @@ export function reduceCanvasNodeUpdated(state: CanvasReducerState, data: CanvasN
       ...(typeof data.cost_coins === "number" ? { cost_coins: data.cost_coins } : {}),
     },
   };
+  // 分镜节点每落地一份新成果＝登记一版（append-only，旧版留着；首版自动采用，后续版不抢星标——
+  // 「改完这一镜」得到的新版等用户点「用这条」或回旧版）。本处是全库唯一的 taskVersions 写入口。
+  if (data.url && shotNumberOf(nextNode) && nextNode.metadata) {
+    const kind = node.type === CanvasNodeType.Video ? "video" : "image";
+    const bag = nextNode.metadata as Record<string, unknown>;
+    const appended = appendTaskVersion(normalizeTaskVersions(bag.taskVersions), {
+      version: new Date().toISOString(),
+      taskId: nextNode.metadata.imageTaskId,
+      status: "success",
+      tags: [kind === "video" ? "main_video" : "main_image"],
+      url: data.url,
+      inputSig: shotInputSignature(bag, kind),
+    });
+    if (appended.accepted) nextNode.metadata = { ...nextNode.metadata, taskVersions: appended.set };
+  }
   const nodes = state.nodes.map((n) => (n.id === data.node_id ? nextNode : n));
   const units = state.units.map((u) =>
     u.unitId === data.unit_id
