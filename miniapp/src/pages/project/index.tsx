@@ -4,7 +4,7 @@ import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
 import { ensureLogin } from '../../lib/session'
 import { PageShell } from '../../components/pages/PageShell'
 import {
-  adoptVersion, fetchProjects, fetchReview, saveToAlbum, stashAgentDraft, STATE_LABEL,
+  adoptVersion, fetchMaster, fetchProjects, fetchReview, type MasterReceipt, saveToAlbum, stashAgentDraft, STATE_LABEL,
   type ProjectReview, type ProjectSummary, type ReviewShot,
 } from '../../lib/project-review'
 
@@ -24,6 +24,7 @@ export default function ProjectPage() {
   const [episode, setEpisode] = useState<number | null>(null)
   const [openShot, setOpenShot] = useState<string | null>(null)
   const [compare, setCompare] = useState<string | null>(null)
+  const [master, setMaster] = useState<MasterReceipt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -34,11 +35,11 @@ export default function ProjectPage() {
     setError('')
     try {
       await ensureLogin()
-      if (projectId) { setReview(await fetchReview(projectId)); return }
+      if (projectId) { const [r, m] = await Promise.all([fetchReview(projectId), fetchMaster(projectId)]); setReview(r); setMaster(m); return }
       const list = await fetchProjects()
       setProjects(list)
       // 只有一个项目＝直接进去，不让人多点一下。
-      if (list.length === 1) setReview(await fetchReview(list[0].id))
+      if (list.length === 1) { const [r, m] = await Promise.all([fetchReview(list[0].id), fetchMaster(list[0].id)]); setReview(r); setMaster(m) }
     } catch (err) {
       setError(err instanceof Error ? err.message : '读取作品失败')
     } finally { Taro.stopPullDownRefresh() }
@@ -99,6 +100,18 @@ export default function ProjectPage() {
                 </Text>
               ) : null}
             </View>
+            {/* 整片：做完了就能直接播、存走；没有就如实说没有 */}
+            <View className='lg-sheet rounded-ios-2xl px-4 py-3'>
+              {master?.hasCut && master.latest ? (
+                <View>
+                  <Text className='block text-ios-subhead font-medium text-foreground'>整片已导出{master.latest.durationSec ? ` · ${Math.round(master.latest.durationSec)} 秒` : ''}</Text>
+                  <Video src={master.latest.deliveryUrl} controls className='mt-2 h-44 w-full rounded-ios-xl bg-black' />
+                  <View className='mt-2 flex min-h-11 items-center justify-center rounded-full bg-ios-blue text-white' onClick={async () => flash((await saveToAlbum(master.latest!.deliveryUrl, 'video')) ? '整片已存到相册' : '没存成，请在授权后重试')}><Text>存整片到相册</Text></View>
+                </View>
+              ) : (
+                <Text className='block text-ios-footnote text-foreground/55'>{master?.known === false ? '暂时查不到整片状态' : '还没有导出整片：镜头都满意后对我说「合成整片」'}</Text>
+              )}
+            </View>
             {review.episodes.length > 1 ? (
               <ScrollView scrollX className='whitespace-nowrap'>
                 {[{ id: 'all', episodeNo: null as number | null, title: '全部' }, ...review.episodes.map(e => ({ id: e.id, episodeNo: e.episodeNo as number | null, title: `第 ${e.episodeNo} 集 ${e.ready}/${e.shots}` }))].map(e => (
@@ -113,7 +126,7 @@ export default function ProjectPage() {
                 <View key={shot.nodeId} className='lg-sheet rounded-ios-2xl p-2' onClick={() => { setOpenShot(shot.nodeId); setCompare(null) }}>
                   <Thumb url={shot.adoptedUrl} kind={shot.adoptedKind} />
                   <Text className='mt-1.5 block text-ios-footnote font-medium text-foreground'>{`${shot.episodeNo ? `第${shot.episodeNo}集 ` : ''}第 ${shot.shotNumber} 镜`}</Text>
-                  <Text className={`block text-ios-caption2 ${STATE_TONE[shot.state]}`}>{STATE_LABEL[shot.state]}{shot.versions.length > 1 ? ` · ${shot.versions.length} 版` : ''}</Text>
+                  <Text className={`block text-ios-caption2 ${STATE_TONE[shot.state]}`}>{shot.newVersionWaiting ? '新版等你选' : STATE_LABEL[shot.state]}{shot.versions.length > 1 ? ` · ${shot.versions.length} 版` : ''}</Text>
                 </View>
               ))}
             </View>

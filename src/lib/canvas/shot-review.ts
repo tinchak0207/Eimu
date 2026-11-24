@@ -44,6 +44,8 @@ export interface ShotReviewShot {
   adoptedUrl?: string;
   adoptedKind?: "image" | "video";
   hasAudio: boolean;
+  /** 有一版新稿（对应当前输入）还没被采用、当前采用的是旧稿或没有——等用户点「用这条」。 */
+  newVersionWaiting: boolean;
   versions: ShotReviewVersion[];
   candidates: ShotReviewCandidate[];
 }
@@ -55,10 +57,12 @@ export interface ProjectReviewSummary {
   pending: number;
   failed: number;
   empty: number;
+  /** 有新版待选的镜数。 */
+  waitingChoice: number;
   /** 一句人话：现在手里有什么、缺什么。 */
   headline: string;
   /** 下一步该点什么（给手机端主按钮）；全部可用＝null。 */
-  nextAction: null | { kind: "rerun_failed" | "wait" | "refresh_stale" | "generate_missing"; nodeIds: string[]; label: string };
+  nextAction: null | { kind: "choose_version" | "rerun_failed" | "wait" | "refresh_stale" | "generate_missing"; nodeIds: string[]; label: string };
 }
 
 export interface ProjectReview {
@@ -117,6 +121,10 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
   }));
 
   const readiness = shotMediaReadiness(bag);
+  const adoptedEntry = versions.find((v) => v.adopted);
+  const newVersionWaiting =
+    versions.some((v) => !v.adopted && !v.stale && !!v.url && v.status !== "error" && v.status !== "loading") &&
+    (!adoptedEntry || adoptedEntry.stale);
   const adoptedVersion = versions.find((v) => v.adopted && v.url);
   const adoptedCandidate = candidateViews.find((c) => c.adopted && c.url);
   const adoptedUrl = adoptedVersion?.url ?? adoptedCandidate?.url;
@@ -143,6 +151,7 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
     ...(adoptedUrl ? { adoptedUrl } : {}),
     ...(adoptedKind ? { adoptedKind } : {}),
     hasAudio: readiness.hasAudio,
+    newVersionWaiting,
     versions,
     candidates: candidateViews,
   };
@@ -166,6 +175,7 @@ export function buildProjectReview(project: CanvasProject): ProjectReview {
     pending: count("pending"),
     failed: count("failed"),
     empty: count("empty"),
+    waitingChoice: shots.filter((s) => s.newVersionWaiting).length,
     headline: "",
     nextAction: null,
   };
@@ -174,13 +184,16 @@ export function buildProjectReview(project: CanvasProject): ProjectReview {
   if (summary.total === 0) parts.push("还没有分镜");
   else {
     parts.push(`${summary.ready}/${summary.total} 镜可直接用`);
+    if (summary.waitingChoice) parts.push(`${summary.waitingChoice} 镜有新版等你选`);
     if (summary.pending) parts.push(`${summary.pending} 镜生成中`);
     if (summary.failed) parts.push(`${summary.failed} 镜失败（已成的不受影响，可单独补跑）`);
     if (summary.stale) parts.push(`${summary.stale} 镜改过内容、旧稿待重做`);
     if (summary.empty) parts.push(`${summary.empty} 镜还没出`);
   }
   summary.headline = parts.join(" · ");
-  if (summary.failed) summary.nextAction = { kind: "rerun_failed", nodeIds: ids("failed"), label: `补跑失败的 ${summary.failed} 镜` };
+  const waitingIds = shots.filter((s) => s.newVersionWaiting).map((s) => s.nodeId);
+  if (summary.waitingChoice) summary.nextAction = { kind: "choose_version", nodeIds: waitingIds, label: `看看 ${summary.waitingChoice} 镜的新版，选用哪一条` };
+  else if (summary.failed) summary.nextAction = { kind: "rerun_failed", nodeIds: ids("failed"), label: `补跑失败的 ${summary.failed} 镜` };
   else if (summary.pending) summary.nextAction = { kind: "wait", nodeIds: ids("pending"), label: "等生成完成" };
   else if (summary.stale) summary.nextAction = { kind: "refresh_stale", nodeIds: ids("stale"), label: `重做改过的 ${summary.stale} 镜` };
   else if (summary.empty) summary.nextAction = { kind: "generate_missing", nodeIds: ids("empty"), label: `生成还没出的 ${summary.empty} 镜` };

@@ -9,14 +9,14 @@ export interface ShotVersion { version: string; kind: 'image' | 'video'; url?: s
 export interface ShotCandidate { id: string; url?: string; status?: string; adopted: boolean }
 export interface ReviewShot {
   nodeId: string; shotNumber: string; episodeId?: string; episodeNo?: number; title: string; summary: string
-  state: ShotState; adoptedUrl?: string; adoptedKind?: 'image' | 'video'; hasAudio: boolean
+  state: ShotState; newVersionWaiting: boolean; adoptedUrl?: string; adoptedKind?: 'image' | 'video'; hasAudio: boolean
   versions: ShotVersion[]; candidates: ShotCandidate[]
 }
 export interface ProjectReview {
   projectId: string; title: string
   episodes: { id: string; episodeNo: number; title: string; shots: number; ready: number }[]
   shots: ReviewShot[]
-  summary: { total: number; ready: number; stale: number; pending: number; failed: number; empty: number; headline: string; nextAction: null | { kind: string; nodeIds: string[]; label: string } }
+  summary: { total: number; ready: number; stale: number; pending: number; failed: number; empty: number; waitingChoice: number; headline: string; nextAction: null | { kind: string; nodeIds: string[]; label: string } }
   continuity: { cardCount: number; narrationVoice?: string; styleId?: string }
 }
 export interface ProjectSummary { id: string; title: string; updatedAt: string; nodeCount: number }
@@ -63,4 +63,10 @@ export function consumeAgentDraft(): string | null {
   Taro.removeStorageSync(DRAFT_KEY)
   if (!value || value.owner !== getUserId() || typeof value.text !== 'string' || !value.text.trim()) return null
   return value.text
+}
+
+export interface MasterReceipt { known: boolean; hasCut: boolean; latest?: { deliveryUrl: string; coverUrl?: string | null; durationSec?: number | null; createdAt: string } }
+/** 整片收据：有验过的成片才说「已出片」，查不到就如实说未知。 */
+export async function fetchMaster(projectId: string): Promise<MasterReceipt> {
+  try { return await request<MasterReceipt>({ path: `/api/canvas/masters?projectId=${encodeURIComponent(projectId)}` }) } catch { return { known: false, hasCut: false } }
 }
