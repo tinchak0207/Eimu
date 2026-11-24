@@ -361,6 +361,8 @@ function channelConcurrency(label: string): number {
   if (label === NEWAPI_ROUTE_LABEL) return newApiConcurrency();
   if (label === "dmc" || label === "xiaoyxiao" || label === "gway" || label === "miaowuai") return 4;
   if (label === "pixai") return 2;
+  // v6k（seedance 2.5 默认渠道）：并发 1 时第二单起被调度器当「满载」直接落到 xiaoyxiao/gway，而它们不出 2.5（11-23 16:25–16:27 四单全退款）。
+  if (label === "v6k") return 3;
   // Linkii 同一账号同时只能 1 个绘画/建模任务（C9999），号池有 N 个账号就能并发 N 个（linkii-upstream 按在途最少挑号）。
   if (label === "linkii") return Math.max(1, readLinkiiAccounts().length);
   return Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1));
