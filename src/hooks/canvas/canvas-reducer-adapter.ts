@@ -17,7 +17,8 @@ import {
 } from "@/lib/canvas/reducer";
 import { normalizeCanvasEvent } from "@/lib/canvas/layout";
 import { isNodeContentChange } from "@/lib/canvas/node-versions";
-import { clearShotMediaLinks, invalidatedShotMediaLinks } from "@/lib/canvas/storyboard-invalidation";
+import { applyShotMetadataPatch } from "@/lib/canvas/storyboard-invalidation";
+import { stampTaskVersionSignatures } from "@/lib/canvas/storyboard-shots";
 import { CANVAS_NODE_DEFAULT_SIZE, CanvasNodeType } from "@/lib/canvas/types";
 import type {
   CanvasAgentOp,
@@ -292,11 +293,14 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       // 版本帐仍由既有节点版本机制承载（`recordCanvasNodeVersion`），此处只补关联失效。
       // 两次宽化是形状事实：`CanvasNodeMetadata` 是 interface，无 index signature，
       // 音轨关联键（dialogueAudioId/…）刻意不在其内（同 WS-审查 approval 的写法）。
-      const mediaBefore = (prev.metadata ?? {}) as Record<string, unknown>;
-      const invalidated = invalidatedShotMediaLinks(mediaBefore, action.patch as Record<string, unknown>);
+      const { metadata: mergedMeta } = applyShotMetadataPatch(
+        (prev.metadata ?? {}) as Record<string, unknown>,
+        action.patch as Record<string, unknown>,
+        stampTaskVersionSignatures,
+      );
       const patched: CanvasNode = {
         ...prev,
-        metadata: { ...clearShotMediaLinks(mediaBefore, invalidated), ...action.patch } as CanvasNodeMetadata,
+        metadata: mergedMeta as CanvasNodeMetadata,
       };
       const next: CanvasReducerState = {
         ...state,
@@ -365,7 +369,16 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
               ...(typeof patch.height === "number" ? { height: Math.max(90, patch.height) } : {}),
               // 契约：patch.metadata 原样并入（不过白名单）——2026-09-25 逐键清点后
               // 确认收紧会剥掉被读键，维持直通，理由见 agent_ops 开头注释。
-              ...(patch.metadata ? { metadata: { ...prevNode.metadata, ...patch.metadata } } : {}),
+              // 分镜节点走同一写入漏斗（与 patch_metadata 同语义：内容变→旧关联失效＋版本盖章）。
+              ...(patch.metadata
+                ? {
+                    metadata: applyShotMetadataPatch(
+                      (prevNode.metadata ?? {}) as Record<string, unknown>,
+                      patch.metadata as Record<string, unknown>,
+                      stampTaskVersionSignatures,
+                    ).metadata as CanvasNodeMetadata,
+                  }
+                : {}),
             };
             next = {
               ...next,
