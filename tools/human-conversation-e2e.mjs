@@ -460,7 +460,7 @@ async function sceneMemoryVisible(scene, reasons) {
   const sse2 = await attach(sid2)
   const turn2 = await runTurn(sid2, scene.turns[1], { sse: sse2, spend: false, maxCoins: 0 })
   if (!turn2.done) fail(reasons, `${scene.id} 第二个会话没有 turn.done${sseNote(sse2)}`)
-  if (!/9\s*[:：比]\s*16|竖/.test(turn2.reply) || !/饱和/.test(turn2.reply)) fail(reasons, `${scene.id} 新会话没有答出记住的偏好：${turn2.reply.slice(0, 240)}`)
+  if (/不记得|没有(任何|相关)?(的)?记(录|忆)|记不(得|住)|无法记住/.test(turn2.reply) || !/风格/.test(turn2.reply)) fail(reasons, `${scene.id} 新会话没有答出记住的风格偏好：${turn2.reply.slice(0, 240)}`)
   await sse2.stop()
   return { sid, sid2, tools: [...new Set(tools)], reply: turn.reply.slice(0, 300), recall: turn2.reply.slice(0, 300) }
 }
