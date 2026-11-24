@@ -307,6 +307,10 @@ export interface CanvasNodeMetadata {
    * `audio_anchor_present`/`dialogue_alignment` 逐镜读它。白名单规则同 `dialogueAudioId`。
    */
   audioAnchorId?: string;
+  /** 对白音轨的合成指纹（音色＋台词文本）；与当前台词一致才允许续做时复用该音轨。 */
+  dialogueAudioSig?: string;
+  /** 旁白音轨的合成指纹（同上）。 */
+  narrationAudioSig?: string;
   // ── 分镜实体（2026-09-15 刀 2；AID 21 栏契约，MIT）──
   /**
    * 一镜（AID 21 栏契约，`src/lib/storyboard-contract.ts`）：挂在 Group 节点的子节点。

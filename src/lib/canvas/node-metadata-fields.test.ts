@@ -117,6 +117,8 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   dialogueAudioId: { dialogueAudioId: "https://cdn.example.com/line-007.mp3" },
   narrationAudioId: { narrationAudioId: "https://cdn.example.com/vo-007.mp3" },
   audioAnchorId: { audioAnchorId: "https://cdn.example.com/line-007.mp3" },
+  dialogueAudioSig: { dialogueAudioSig: "a1b2c3d4" },
+  narrationAudioSig: { narrationAudioSig: "e5f6a7b8" },
   storyboardScene: { storyboardScene: { sceneName: "旧宅", shotCount: 1 } },
   characterCardIds: { characterCardIds: ["card-a"] },
   sceneCardIds: { sceneCardIds: ["card-b"] },

@@ -514,7 +514,7 @@ function readInputField(bag: Record<string, unknown>, field: string): string {
 }
 
 /** FNV-1a 32 位（非密码学；只做「输入是否变过」的稳定指纹）。 */
-function fnv1a(text: string): string {
+export function stableSig(text: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);
@@ -530,7 +530,7 @@ export function shotInputSignature(
 ): string {
   const fields = kind === "image" ? IMAGE_INPUT_FIELDS : VIDEO_INPUT_FIELDS;
   const bag = metadata ?? {};
-  return fnv1a(fields.map((field) => `${field}=${readInputField(bag, field)}`).join("\u0001"));
+  return stableSig(fields.map((field) => `${field}=${readInputField(bag, field)}`).join("\u0001"));
 }
 
 /**

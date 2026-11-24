@@ -5,7 +5,7 @@
 //
 // body：`{ projectId: string; episode?: number; dryRun?: boolean }`
 //   · `dryRun: true`  → **不发任何生成呼叫**，回行数／字数／预估币（付费前的报备口径）。
-//   · `dryRun: false` → 逐行真 TTS → 整批成功才回写双音轨与锚；失败整批拒写、分镜原样。
+//   · `dryRun: false` → 逐行真 TTS → 每行成功即回写（带指纹）；某行失败时已成功的行保留、其后各行未送，续做只补缺口（同文本同音色的行沿用、不重复计费）。
 //   · `dryRun` 缺席 ⇒ **视为 true**（安全预设：不经明确 opt-in 不花钱）。
 //
 // ── 照抄的既有范式（同目录）────────────────────────────────────────────────
@@ -27,7 +27,7 @@
 //      服务端无 ffmpeg，见 `video-frames` 档头）⇒ 每行 `duration_ms` 一律 `null`，
 //      由服务层如实带进 `unmeasuredDurations`，**不估算冒充实测**。
 //   ④ **时长上限**：逐行序列（禁并发）在 `maxDuration` 内跑；单行轮询预算见常数，
-//      行数很多时可能撞墙——撞墙即该行失败、整批拒写（不做半成品）。
+//      行数很多时可能撞墙——撞墙即该行失败、后续行未送；已成功的行保留，续做只补缺口。
 
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -93,6 +93,7 @@ function createSiteTtsLineClient(options: {
         billingUserId: options.billingUserId,
         source: "web",
         // 幂等键逐行、绑本次呼叫的 runId：同一次请求重送不重复建单；新的一次请求是新单。
+        // 逐次 runId＋行号（失败行续做必须能开新单；已成功行靠画布上的音轨指纹复用，不会再进这里）。
         idempotencyKey: `canvas-voiceover:${options.runId}:${line.index}`,
         kind: "tts",
         modelId: VOICEOVER_TTS_MODEL_ID,
@@ -223,6 +224,7 @@ export async function POST(req: NextRequest) {
         lines: plan.lines,
         totalChars: plan.totalChars,
         estimatedCoins: plan.estimatedCoins,
+        reusedLines: plan.reusedLines ?? 0,
         ...(plan.refused ? { refused: plan.refused } : {}),
       },
       { status: 200, headers: { "Cache-Control": "no-store" } },
@@ -231,6 +233,22 @@ export async function POST(req: NextRequest) {
 
   const execution = outcome.execution;
   const result = execution.result;
+  // 失败但前面已有成功行：先把已付费成果落盘（带回执逐行核对台词未变），再回 409 告知失败行。
+  let persistedRows = 0;
+  let staleRows: unknown[] = [];
+  if (!result.applied && execution.partial && execution.ledger.length > 0) {
+    try {
+      await mutateCanvasProject(caller.user.id, projectId, (current) => {
+        const merged = applyVoiceoverShotsToNodes(current.nodes, execution.entries, execution.shots, execution.ledger);
+        if (merged.missingNodeIds.length) return null;
+        persistedRows = execution.ledger.length - merged.staleRows.length;
+        staleRows = merged.staleRows.map((row) => ({ shotNumber: row.shotNumber, field: row.field }));
+        return { ...current, nodes: merged.nodes };
+      });
+    } catch (error) {
+      console.error("[canvas] voiceover partial write-back failed:", error);
+    }
+  }
   if (!result.applied) {
     // 整批拒写：分镜原样（服务层已保证未部分写入）。409＝状态冲突（回写不可完成），
     // 但 body 仍带完整拒收原因与（未执行的）行列资讯，供对帐。
@@ -242,6 +260,10 @@ export async function POST(req: NextRequest) {
         totalChars: result.totalChars,
         costCoins: result.costCoins,
         drift: result.drift,
+        reusedLines: result.reusedLines ?? 0,
+        synthesizedLines: result.synthesizedLines ?? 0,
+        persistedLines: persistedRows,
+        ...(staleRows.length ? { staleRows } : {}),
         ...(result.refused ? { refused: result.refused } : {}),
         ...(result.unmeasuredDurations ? { unmeasuredDurations: result.unmeasuredDurations } : {}),
       },
@@ -252,9 +274,10 @@ export async function POST(req: NextRequest) {
   let wrote = false;
   try {
     const updated = await mutateCanvasProject(caller.user.id, projectId, (current) => {
-      const merged = applyVoiceoverShotsToNodes(current.nodes, execution.entries, execution.shots);
-      // 目标节点在读取与落盘之间消失 ⇒ 整批不写（不做部分写入）。
+      const merged = applyVoiceoverShotsToNodes(current.nodes, execution.entries, execution.shots, execution.ledger);
+      // 目标节点在读取与落盘之间消失 ⇒ 整批不写；台词在合成期间被改的行单独不绑（回执里报 staleRows）。
       if (merged.missingNodeIds.length) return null;
+      staleRows = merged.staleRows.map((row) => ({ shotNumber: row.shotNumber, field: row.field }));
       return { ...current, nodes: merged.nodes };
     });
     wrote = updated !== null;
@@ -275,6 +298,9 @@ export async function POST(req: NextRequest) {
       totalChars: result.totalChars,
       costCoins: result.costCoins,
       drift: result.drift,
+      reusedLines: result.reusedLines ?? 0,
+      synthesizedLines: result.synthesizedLines ?? 0,
+      ...(staleRows.length ? { staleRows } : {}),
       ...(result.refused ? { refused: result.refused } : {}),
       ...(result.unmeasuredDurations ? { unmeasuredDurations: result.unmeasuredDurations } : {}),
     },

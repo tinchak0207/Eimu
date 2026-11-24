@@ -47,7 +47,7 @@ import {
 } from "./storyboard-audio-bridge";
 import { effectiveNarrationVoice } from "./project-narration";
 import { storyboardShotsOfEpisode } from "./storyboard-episode-batch";
-import { shotNumberOf } from "./storyboard-shots";
+import { shotNumberOf, stableSig } from "./storyboard-shots";
 import type { CanvasNode, CanvasProject } from "./types";
 
 // ─────────────────────────────────────────── 成本
@@ -82,6 +82,12 @@ export interface StoryboardVoiceoverLine {
   text: string;
   /** 字数（`String.length`；中文在 BMP 内，一字＝1）。 */
   chars: number;
+  /** 所属分镜节点（跨集同镜号时的唯一身份）。 */
+  nodeId?: string;
+  /** 合成指纹＝音色＋文本；已绑音轨且指纹一致＝可复用。 */
+  sig?: string;
+  /** 本行已有可用音轨且文本／音色未变：续做时不重配、不再计费。 */
+  reuse?: boolean;
 }
 
 /** 分镜节点 → 扁平分镜的投影结果（`nodeId` 供回写时对回节点）。 */
@@ -140,6 +146,8 @@ export interface StoryboardVoiceoverDryRunPlan {
   estimatedCoins: number;
   /** 本次会用的旁白音色（专案绑定失效时＝`DEFAULT_TTS_VOICE`，见 `resolveVoiceoverVoice`）。 */
   voice: string;
+  /** 已有可用音轨、续做时直接沿用（不重配不计费）的行数。 */
+  reusedLines?: number;
   /** 分批计画（具名边界；供报备与分批型 client 对帐）。 */
   batches: StoryboardVoiceoverBatch[];
   /** 每一行请求应显式带上的 `maxLines`（逐批值，永远 ≥ 该批行数；见 `planVoiceoverBatches`）。 */
@@ -161,6 +169,10 @@ export interface StoryboardVoiceoverRunResult {
   drift: AudioDurationDrift[];
   refused?: StoryboardVoiceoverRefusal;
   unmeasuredDurations?: string[];
+  /** 本次沿用既有音轨、没重配也没再计费的行数。 */
+  reusedLines?: number;
+  /** 本次真正新合成成功的行数（失败时＝失败前已成功、将被保留的行数）。 */
+  synthesizedLines?: number;
 }
 
 /** 真跑结果 ＋ 回写后的分镜（后者只在 `applied:true` 时可落盘）＋ 投影溯源（回写节点时对回 nodeId）。 */
@@ -169,6 +181,25 @@ export interface StoryboardVoiceoverExecution {
   shots: StoryboardAudioShot[];
   /** 与 `shots` 同索引的节点溯源（`applyVoiceoverShotsToNodes` 的唯一输入）。 */
   entries: StoryboardVoiceoverShotEntry[];
+  /** 本次真正合成成功的行（回写时逐行核对「台词还是合成时那一版」）。 */
+  ledger: VoiceoverLedgerRow[];
+  /**
+   * 失败时已成功的行也要保住（已付费的成果不因后面一行失败而作废）：
+   * `shots` 是只含这些行回写后的分镜；路由据此落盘，失败行与其后各行下次续做。
+   */
+  partial?: boolean;
+}
+
+/** 一条合成成功的回执（回写依据＋续做时的复用依据）。 */
+export interface VoiceoverLedgerRow {
+  nodeId: string;
+  shotNumber: string;
+  field: ShotAudioField;
+  /** 合成时的台词原文（trim 后）；写回前与节点现文比对。 */
+  text: string;
+  sig: string;
+  audioUrl: string;
+  costCoins?: number | null;
 }
 
 /** 逐行 TTS 请求（**一行一次呼叫**；禁并发、禁 retry、禁回圈试探由呼叫端保证）。 */
@@ -177,6 +208,10 @@ export interface StoryboardVoiceoverLineRequest {
   index: number;
   shotNumber: string;
   field: ShotAudioField;
+  /** 所属分镜节点 id；与 `sig` 一起可组成跨请求稳定的幂等键（同文本同音色永不重复开单）。 */
+  nodeId?: string;
+  /** 合成指纹（音色＋文本）。 */
+  sig?: string;
   /** 逐字照送的文本（本层不改写）。 */
   text: string;
   voice: string;
@@ -271,6 +306,12 @@ export function projectStoryboardShots(
         ...(typeof narration === "string" && narration.trim() ? { narration } : {}),
         ...(dialogueAudioId ? { dialogueAudioId } : {}),
         ...(narrationAudioId ? { narrationAudioId } : {}),
+        ...(typeof metadata.dialogueAudioSig === "string" && metadata.dialogueAudioSig
+          ? { dialogueAudioSig: metadata.dialogueAudioSig }
+          : {}),
+        ...(typeof metadata.narrationAudioSig === "string" && metadata.narrationAudioSig
+          ? { narrationAudioSig: metadata.narrationAudioSig }
+          : {}),
       },
     });
   }
@@ -336,9 +377,15 @@ export function planVoiceoverBatches(
 }
 
 /** 台词表 + 分批（本层内部；`lines` 对外报备、`maxLinesByLine` 逐行带给 client）。 */
+/** 合成指纹：音色＋文本（任一变＝旧音轨不再对应当前台词）。 */
+export function voiceoverSig(voice: string, text: string): string {
+  return stableSig(`${voice}\u0001${text}`);
+}
+
 function buildLinesAndPlan(
   entries: readonly StoryboardVoiceoverShotEntry[],
   maxLinesPerBatch: number,
+  voice: string,
 ):
   | {
       lines: StoryboardVoiceoverLine[];
@@ -353,7 +400,19 @@ function buildLinesAndPlan(
   const rows = JSON.parse(plan.script) as Array<{ role?: string; text?: string }>;
   const lines: StoryboardVoiceoverLine[] = plan.source.map((ref, i) => {
     const text = typeof rows[i]?.text === "string" ? (rows[i]!.text as string) : "";
-    return { shotNumber: ref.shotNumber, field: ref.field, text, chars: text.length };
+    const entry = ref.shotIndex === undefined ? undefined : entries[ref.shotIndex];
+    const sig = voiceoverSig(voice, text);
+    const existingId = ref.field === "dialogue" ? entry?.shot.dialogueAudioId : entry?.shot.narrationAudioId;
+    const existingSig = ref.field === "dialogue" ? entry?.shot.dialogueAudioSig : entry?.shot.narrationAudioSig;
+    return {
+      shotNumber: ref.shotNumber,
+      field: ref.field,
+      text,
+      chars: text.length,
+      ...(entry ? { nodeId: entry.nodeId } : {}),
+      sig,
+      ...(existingId && existingSig === sig ? { reuse: true } : {}),
+    };
   });
   // 硬上限 50：桥接层已具名拒（`source` 仍是完整未截断的内容）——原样透传，不代为截断。
   if (plan.refused) {
@@ -399,7 +458,7 @@ export function planStoryboardVoiceoverDryRun(
       refused: projection.refused,
     };
   }
-  const built = buildLinesAndPlan(projection.entries, options.maxLinesPerBatch ?? AUDIO_TOOL_MAX_LINES);
+  const built = buildLinesAndPlan(projection.entries, options.maxLinesPerBatch ?? AUDIO_TOOL_MAX_LINES, voice);
   if ("refused" in built) {
     return {
       ok: true,
@@ -413,12 +472,14 @@ export function planStoryboardVoiceoverDryRun(
       refused: built.refused,
     };
   }
-  const totalChars = built.lines.reduce((sum, line) => sum + line.chars, 0);
+  // 已有且未过期的音轨不再计费：只对待合成行算字数与预估币。
+  const totalChars = built.lines.reduce((sum, line) => sum + (line.reuse ? 0 : line.chars), 0);
   return {
     ok: true,
     dryRun: true,
     lines: built.lines,
     totalChars,
+    reusedLines: built.lines.filter((line) => line.reuse).length,
     estimatedCoins: estimateVoiceoverCoins(totalChars),
     voice,
     batches: built.batches,
@@ -465,11 +526,12 @@ export async function runStoryboardVoiceover(
     },
     shots: fallbackShots,
     entries: projection.entries,
+    ledger: [],
   });
 
   if (projection.refused) return refuse(projection.refused);
 
-  const built = buildLinesAndPlan(projection.entries, options.maxLinesPerBatch ?? AUDIO_TOOL_MAX_LINES);
+  const built = buildLinesAndPlan(projection.entries, options.maxLinesPerBatch ?? AUDIO_TOOL_MAX_LINES, voice);
   if ("refused" in built) return refuse(built.refused);
 
   if (built.lines.length === 0) {
@@ -481,16 +543,28 @@ export async function runStoryboardVoiceover(
 
   const batchCount = built.batches.length;
   const timeline: AudioTimelineEntry[] = [];
+  const doneSource: AudioSourceRef[] = [];
+  const ledger: VoiceoverLedgerRow[] = [];
+  const reusedLines = built.lines.filter((line) => line.reuse).length;
   let costSum = 0;
   let costAllKnown = true;
+  const costOut = () => (costAllKnown ? Math.round(costSum * 1e6) / 1e6 : null);
+
+  /** 把「已成功的行」回写成分镜（失败时也要保住已付费成果；成功时即全量）。 */
+  const applyDone = () => applyAudioTimelineToShots(fallbackShots, timeline, doneSource);
+
   for (let index = 0; index < built.lines.length; index++) {
     const line = built.lines[index];
     const source = built.source[index];
+    // 已有可用音轨且文本／音色没变：沿用，不重配、不再计费（续做只补缺口）。
+    if (line.reuse) continue;
     const batch = built.batches.find((item) => index >= item.fromLine && index < item.toLine) ?? built.batches[0];
     const response = await options.client({
       index,
       shotNumber: line.shotNumber,
       field: line.field,
+      nodeId: line.nodeId,
+      sig: line.sig,
       text: line.text,
       voice,
       maxLines: built.maxLinesByLine[index],
@@ -500,21 +574,30 @@ export async function runStoryboardVoiceover(
     const audioUrl = usableAudioUrl(response?.audioUrl);
     if (response?.error || !audioUrl) {
       const reason = response?.error ?? "未回可用音档 URL";
+      // 第 k 行失败：立即停手（不送后续行），但前 k-1 行已合成、已付费——保住它们，下次只补失败行及其后。
+      const keptAny = timeline.length > 0;
+      const kept = keptAny ? applyDone() : null;
       return {
         result: {
           ok: false,
           applied: false,
           lines: built.lines,
           totalChars: built.lines.reduce((sum, item) => sum + item.chars, 0),
-          costCoins: costAllKnown ? Math.round(costSum * 1e6) / 1e6 : null,
+          costCoins: costOut(),
           drift: [],
+          reusedLines,
+          synthesizedLines: ledger.length,
           refused: {
             code: "tts_line_failed",
-            note: `第 ${index + 1} 行（镜 ${line.shotNumber}·${line.field}）TTS 失败：${reason}；已立即停手，后续行未送，整批拒写（分镜原样）。`,
+            note: `第 ${index + 1} 行（镜 ${line.shotNumber}·${line.field}）TTS 失败：${reason}；已立即停手，后续行未送。${
+              keptAny ? `前 ${ledger.length} 行已合成并保留，续做只补失败行及其后各行。` : ""
+            }`,
           },
         },
-        shots: fallbackShots,
+        shots: kept?.applied ? kept.shots : fallbackShots,
         entries: projection.entries,
+        ledger: kept?.applied ? ledger : [],
+        partial: !!kept?.applied,
       };
     }
     const rawCost = response?.costCoins;
@@ -531,10 +614,29 @@ export async function runStoryboardVoiceover(
         : null,
       ...(costKnown ? { cost_coins: rawCost as number } : {}),
     });
+    doneSource.push(source);
+    ledger.push({
+      nodeId: line.nodeId ?? "",
+      shotNumber: line.shotNumber,
+      field: line.field,
+      text: line.text,
+      sig: line.sig ?? voiceoverSig(voice, line.text),
+      audioUrl,
+      costCoins: costKnown ? (rawCost as number) : null,
+    });
   }
 
   const totalChars = built.lines.reduce((sum, item) => sum + item.chars, 0);
-  const applied = applyAudioTimelineToShots(fallbackShots, timeline, built.source);
+  // 全部行都是沿用的（没有任何新合成）：无需回写，也不花钱。
+  if (timeline.length === 0) {
+    return {
+      result: { ok: true, applied: true, lines: built.lines, totalChars, costCoins: 0, drift: [], reusedLines, synthesizedLines: 0 },
+      shots: fallbackShots,
+      entries: projection.entries,
+      ledger: [],
+    };
+  }
+  const applied = applyDone();
   if (!applied.applied) {
     return {
       result: {
@@ -542,8 +644,10 @@ export async function runStoryboardVoiceover(
         applied: false,
         lines: built.lines,
         totalChars,
-        costCoins: costAllKnown ? Math.round(costSum * 1e6) / 1e6 : null,
+        costCoins: costOut(),
         drift: [],
+        reusedLines,
+        synthesizedLines: 0,
         refused: {
           code: applied.refused?.code ?? "invalid_source",
           note: applied.refused?.note ?? "回写被拒（桥接层未给原因）。",
@@ -551,6 +655,7 @@ export async function runStoryboardVoiceover(
       },
       shots: applied.shots,
       entries: projection.entries,
+      ledger: [],
     };
   }
 
@@ -560,12 +665,15 @@ export async function runStoryboardVoiceover(
       applied: true,
       lines: built.lines,
       totalChars,
-      costCoins: costAllKnown ? Math.round(costSum * 1e6) / 1e6 : null,
-      drift: audioDurationDrift(fallbackShots, timeline, built.source),
+      costCoins: costOut(),
+      drift: audioDurationDrift(fallbackShots, timeline, doneSource),
       unmeasuredDurations: applied.unmeasuredDurations,
+      reusedLines,
+      synthesizedLines: ledger.length,
     },
     shots: applied.shots,
     entries: projection.entries,
+    ledger,
   };
 }
 
@@ -623,14 +731,57 @@ export function applyVoiceoverShotsToNodes(
   nodes: readonly CanvasNode[],
   entries: readonly StoryboardVoiceoverShotEntry[],
   appliedShots: readonly StoryboardAudioShot[],
-): { nodes: CanvasNode[]; missingNodeIds: string[] } {
+  ledger?: readonly VoiceoverLedgerRow[],
+): { nodes: CanvasNode[]; missingNodeIds: string[]; staleRows: VoiceoverLedgerRow[] } {
   const copy = [...nodes];
   if (entries.length !== appliedShots.length) {
-    return { nodes: copy, missingNodeIds: entries.map((entry) => entry.nodeId) };
+    return { nodes: copy, missingNodeIds: entries.map((entry) => entry.nodeId), staleRows: [] };
   }
   const known = new Set(copy.map((node) => node.id));
   const missingNodeIds = entries.filter((entry) => !known.has(entry.nodeId)).map((entry) => entry.nodeId);
-  if (missingNodeIds.length) return { nodes: copy, missingNodeIds };
+  if (missingNodeIds.length) return { nodes: copy, missingNodeIds, staleRows: [] };
+
+  // 带回执：逐行写回，且只写「台词仍是合成时那一版」的行（合成期间被改词＝旧音轨不绑，进 staleRows）。
+  if (ledger) {
+    const byId = new Map(copy.map((node) => [node.id, node]));
+    const patchByNodeId = new Map<string, Record<string, string>>();
+    const staleRows: VoiceoverLedgerRow[] = [];
+    for (const row of ledger) {
+      const node = byId.get(row.nodeId);
+      if (!node) continue;
+      const metadata = (node.metadata ?? {}) as Record<string, unknown>;
+      const currentRaw = row.field === "dialogue"
+        ? (metadata.storyboardShot as { dialogue?: unknown } | undefined)?.dialogue
+        : metadata.narration;
+      const current = typeof currentRaw === "string" ? currentRaw.trim() : "";
+      if (current !== row.text) {
+        staleRows.push(row);
+        continue;
+      }
+      const patch = patchByNodeId.get(row.nodeId) ?? {};
+      if (row.field === "dialogue") {
+        patch.dialogueAudioId = row.audioUrl;
+        patch.dialogueAudioSig = row.sig;
+      } else {
+        patch.narrationAudioId = row.audioUrl;
+        patch.narrationAudioSig = row.sig;
+      }
+      patchByNodeId.set(row.nodeId, patch);
+    }
+    return {
+      nodes: copy.map((node) => {
+        const patch = patchByNodeId.get(node.id);
+        if (!patch) return node;
+        const merged = { ...node.metadata, ...patch } as Record<string, unknown>;
+        // 锚＝对白优先（与桥接层 `bindShotAudioTrack` 同口径）。
+        const anchor = (merged.dialogueAudioId as string | undefined) || (merged.narrationAudioId as string | undefined);
+        if (anchor) merged.audioAnchorId = anchor;
+        return { ...node, metadata: merged as typeof node.metadata };
+      }),
+      missingNodeIds: [],
+      staleRows,
+    };
+  }
 
   const patchByNodeId = new Map<string, Record<string, string>>();
   entries.forEach((entry, index) => {
@@ -651,5 +802,6 @@ export function applyVoiceoverShotsToNodes(
       return { ...node, metadata: { ...node.metadata, ...patch } };
     }),
     missingNodeIds: [],
+    staleRows: [],
   };
 }
