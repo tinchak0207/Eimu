@@ -1,5 +1,6 @@
 import * as fsp from "node:fs/promises"
 import * as nodePath from "node:path"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { createCipheriv, createHash, randomBytes } from "node:crypto"
 
 const DEFAULT_LINKII_BASE_URL = "https://www.linkii.tech/api/admin"
@@ -32,7 +33,9 @@ export class LinkiiTaskPendingError extends LinkiiClientError {
   readonly taskId: string
   readonly creationId: string
   readonly lastState: string
-  constructor(taskId: string | number, creationId: string | number, lastState: string) {
+  /** 任务所属号池账号（只有 >1 个账号时有值）；核对同一任务必须用这个号。 */
+  readonly account?: string
+  constructor(taskId: string | number, creationId: string | number, lastState: string, account?: string) {
     super(
       "linkii_accepted_pending",
       `Linkii 已接受任务，等待窗口结束时仍未取得终态（taskId=${taskId}, creationId=${creationId}, 最后状态=${lastState}）。这不是生成失败；不得自动回落或重新提交，应先核对同一任务。`,
@@ -41,6 +44,7 @@ export class LinkiiTaskPendingError extends LinkiiClientError {
     this.taskId = String(taskId)
     this.creationId = String(creationId)
     this.lastState = lastState
+    this.account = account
   }
 }
 
@@ -52,10 +56,10 @@ interface TokenCacheRecord {
   updatedAt: string
 }
 
-let memTokenCache: { credHash: string; token: string; expiresAtMs: number | null } | null = null
+const memTokenCacheByCred = new Map<string, { credHash: string; token: string; expiresAtMs: number | null }>()
 let memRateLimitedUntilByCred = new Map<string, number>()
 let invalidatedEnvToken: string | null = null
-let inflightLogin: { credHash: string; promise: Promise<string> } | null = null
+const inflightLoginByCred = new Map<string, { credHash: string; promise: Promise<string> }>()
 
 export function linkiiBaseUrl(): string {
   const raw = (process.env.LINKII_BASE_URL ?? "").trim()
@@ -74,22 +78,63 @@ export function resolveLinkiiMediaUrl(raw: string): string {
   return `${linkiiMediaBaseUrl()}${s.replace(/^\/+/, "")}`
 }
 
+export interface LinkiiAccount {
+  username: string
+  password: string
+}
+
+const accountScope = new AsyncLocalStorage<{ username: string }>()
+const accountInflight = new Map<string, number>()
+const accountPenaltyUntil = new Map<string, number>()
+let accountRoundRobin = 0
+const POOL_BUSY_PENALTY_MS = 45_000
+
+/**
+ * 号池账号：旧单账号 LINKII_USERNAME/LINKII_PASSWORD 永远是主账号（第 0 个），
+ * LINKII_ACCOUNTS（`user:pass`，逗号/分号/换行分隔）追加其后，按用户名去重。
+ */
+export function readLinkiiAccounts(): LinkiiAccount[] {
+  const out: LinkiiAccount[] = []
+  const seen = new Set<string>()
+  const push = (username: string, password: string) => {
+    const u = username.trim()
+    if (!u || !password || seen.has(u)) return
+    seen.add(u)
+    out.push({ username: u, password })
+  }
+  push(process.env.LINKII_USERNAME ?? "", process.env.LINKII_PASSWORD ?? "")
+  for (const part of (process.env.LINKII_ACCOUNTS ?? "").split(/[,;\n]+/)) {
+    const idx = part.indexOf(":")
+    if (idx > 0) push(part.slice(0, idx), part.slice(idx + 1).trim())
+  }
+  return out
+}
+
 function linkiiCredentials(): { username: string; password: string; envToken: string } {
+  const accounts = readLinkiiAccounts()
+  const scoped = accountScope.getStore()?.username
+  const acct = (scoped ? accounts.find((a) => a.username === scoped) : undefined) ?? accounts[0]
+  const isPrimary = !acct || acct.username === accounts[0]?.username
   return {
-    username: (process.env.LINKII_USERNAME ?? "").trim(),
-    password: process.env.LINKII_PASSWORD ?? "",
-    envToken: (process.env.LINKII_AUTH_TOKEN ?? "").trim(),
+    username: acct?.username ?? (process.env.LINKII_USERNAME ?? "").trim(),
+    password: acct?.password ?? process.env.LINKII_PASSWORD ?? "",
+    // LINKII_AUTH_TOKEN 只属于主账号
+    envToken: isPrimary ? (process.env.LINKII_AUTH_TOKEN ?? "").trim() : "",
   }
 }
 
 export function isLinkiiConfigured(): boolean {
   const { username, password, envToken } = linkiiCredentials()
-  return Boolean(envToken || (username && password))
+  return Boolean(envToken || (username && password) || readLinkiiAccounts().length > 0)
 }
 
 function tokenCacheFilePath(): string {
   const raw = (process.env.LINKII_TOKEN_CACHE_FILE ?? "").trim()
-  return raw || DEFAULT_LINKII_TOKEN_CACHE_FILE
+  const base = raw || DEFAULT_LINKII_TOKEN_CACHE_FILE
+  const { username } = linkiiCredentials()
+  const primary = readLinkiiAccounts()[0]?.username
+  if (!username || username === primary) return base
+  return `${base}.${createHash("sha256").update(username).digest("hex").slice(0, 12)}`
 }
 
 function currentCredHash(): string {
@@ -170,7 +215,8 @@ export async function isLinkiiAuthRateLimited(): Promise<{ limited: boolean; rem
 
 export async function hasLinkiiCachedToken(): Promise<boolean> {
   const credHash = currentCredHash()
-  if (memTokenCache && memTokenCache.credHash === credHash && isTokenFresh(memTokenCache.expiresAtMs)) {
+  const memHit = memTokenCacheByCred.get(credHash)
+  if (memHit && isTokenFresh(memHit.expiresAtMs)) {
     return true
   }
   const disk = await readDiskCache(credHash)
@@ -183,7 +229,7 @@ export async function hasLinkiiCachedToken(): Promise<boolean> {
 }
 
 async function clearCachedToken(credHash: string): Promise<void> {
-  if (memTokenCache?.credHash === credHash) memTokenCache = null
+  memTokenCacheByCred.delete(credHash)
   const { envToken } = linkiiCredentials()
   if (envToken) invalidatedEnvToken = envToken
   const existingRateLimit = memRateLimitedUntilByCred.get(credHash)
@@ -424,7 +470,7 @@ async function performLogin(credHash: string): Promise<string> {
   }
 
   const expiresAtMs = parseJwtExpMs(accessToken)
-  memTokenCache = { credHash, token: accessToken, expiresAtMs }
+  memTokenCacheByCred.set(credHash, { credHash, token: accessToken, expiresAtMs })
   memRateLimitedUntilByCred.delete(credHash)
   await writeDiskCache({
     credHash,
@@ -442,12 +488,13 @@ export async function getLinkiiToken(signal?: AbortSignal, forceRefresh?: boolea
   const credHash = currentCredHash()
 
   if (!forceRefresh) {
-    if (memTokenCache && memTokenCache.credHash === credHash && isTokenFresh(memTokenCache.expiresAtMs)) {
-      return memTokenCache.token
+    const memHit = memTokenCacheByCred.get(credHash)
+    if (memHit && isTokenFresh(memHit.expiresAtMs)) {
+      return memHit.token
     }
     const disk = await readDiskCache(credHash)
     if (disk?.token && isTokenFresh(disk.expiresAtMs)) {
-      memTokenCache = { credHash, token: disk.token, expiresAtMs: disk.expiresAtMs ?? null }
+      memTokenCacheByCred.set(credHash, { credHash, token: disk.token, expiresAtMs: disk.expiresAtMs ?? null })
       return disk.token
     }
     const { envToken } = linkiiCredentials()
@@ -458,14 +505,15 @@ export async function getLinkiiToken(signal?: AbortSignal, forceRefresh?: boolea
     await clearCachedToken(credHash)
   }
 
-  if (inflightLogin && inflightLogin.credHash === credHash) {
-    return raceWithSignal(inflightLogin.promise, signal)
+  const pendingLogin = inflightLoginByCred.get(credHash)
+  if (pendingLogin) {
+    return raceWithSignal(pendingLogin.promise, signal)
   }
 
   const promise = performLogin(credHash).finally(() => {
-    if (inflightLogin?.promise === promise) inflightLogin = null
+    if (inflightLoginByCred.get(credHash)?.promise === promise) inflightLoginByCred.delete(credHash)
   })
-  inflightLogin = { credHash, promise }
+  inflightLoginByCred.set(credHash, { credHash, promise })
   return raceWithSignal(promise, signal)
 }
 
@@ -690,8 +738,76 @@ export async function pollLinkiiTaskAndWork(
 
     const remain = deadline - Date.now()
     if (remain <= 0) {
-      throw new LinkiiTaskPendingError(taskId, creationId, String(task?.status ?? "unknown"))
+      throw new LinkiiTaskPendingError(taskId, creationId, String(task?.status ?? "unknown"), accounts().length > 1 ? linkiiCredentials().username : undefined)
     }
     await sleepWithAbort(Math.min(pollMs, remain), signal)
   }
+}
+
+function accounts(): LinkiiAccount[] {
+  return readLinkiiAccounts()
+}
+
+/** 当前号池作用域内的账号（无池或未进入作用域＝主账号）。 */
+export function currentLinkiiAccountName(): string {
+  return linkiiCredentials().username
+}
+
+/** 在指定账号作用域内运行（核对既有任务时用）。 */
+export function runInLinkiiAccount<T>(username: string, fn: () => Promise<T>): Promise<T> {
+  return accountScope.run({ username }, fn)
+}
+
+function isPoolFailoverError(e: unknown): boolean {
+  if (!(e instanceof LinkiiClientError)) return false
+  if (e instanceof LinkiiTaskPendingError) return false
+  if (e.code === "linkii_task_failed") return false
+  if (e.code === "linkii_auth_rate_limited" || e.code === "linkii_auth_expired" || e.code === "linkii_auth_failed") return true
+  if (e.upstreamCode === "C9999" && /(正在生成中|請等待完成|请等待完成|等待完成後再提交|等待完成后再提交|already generating|in progress)/i.test(e.message)) return true
+  return /(配额|額度|额度不足|余额不足|次数不足|次數|quota|已用完|用尽)/i.test(e.message)
+}
+
+/**
+ * 号池入口：把「创建任务＋轮询到终态」整段放进 fn。按在途任务最少挑号；
+ * 创建阶段遇到忙/限流/额度/鉴权失败就换下一个号。fn 一旦抛出 LinkiiTaskPendingError
+ * 或任务终态失败，说明任务已在该号创建，不换号、原样抛出（Pending 带 account）。
+ * 只有一个账号时等价于直接 fn。
+ */
+export async function withLinkiiAccountPool<T>(fn: (account: string) => Promise<T>): Promise<T> {
+  const all = readLinkiiAccounts()
+  if (all.length <= 1) return fn(all[0]?.username ?? "")
+  const now = Date.now()
+  const start = accountRoundRobin++ % all.length
+  const ordered = all
+    .map((_, i) => all[(start + i) % all.length])
+    .map((a, order) => ({
+      a,
+      order,
+      load: (accountInflight.get(a.username) ?? 0) + ((accountPenaltyUntil.get(a.username) ?? 0) > now ? 1000 : 0),
+    }))
+    .sort((x, y) => x.load - y.load || x.order - y.order)
+    .map((x) => x.a)
+  let lastError: unknown
+  for (const acct of ordered) {
+    accountInflight.set(acct.username, (accountInflight.get(acct.username) ?? 0) + 1)
+    try {
+      return await accountScope.run({ username: acct.username }, () => fn(acct.username))
+    } catch (e) {
+      if (!isPoolFailoverError(e)) throw e
+      lastError = e
+      accountPenaltyUntil.set(acct.username, Date.now() + POOL_BUSY_PENALTY_MS)
+    } finally {
+      accountInflight.set(acct.username, Math.max(0, (accountInflight.get(acct.username) ?? 1) - 1))
+    }
+  }
+  throw lastError
+}
+
+export function linkiiPoolStatus(): Array<{ username: string; inflight: number; penalized: boolean }> {
+  const now = Date.now()
+  return readLinkiiAccounts().map((a) => ({
+    username: a.username,
+    inflight: accountInflight.get(a.username) ?? 0,
+    penalized: (accountPenaltyUntil.get(a.username) ?? 0) > now,
+  }))
 }

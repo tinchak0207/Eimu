@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -76,9 +77,63 @@ interface LinkiiTokenCacheEntry {
   expMs: number | null;
 }
 
-let memoryTokenCache: LinkiiTokenCacheEntry | null = null;
-let loginInFlight: Promise<string> | null = null;
-let c1015CooldownUntilMs = 0;
+// 号池：每个账号一份独立状态（token 内存缓存 / 登录单飞 / C1015 冷却）；当前账号由 AsyncLocalStorage 决定。
+interface LinkiiAccountState {
+  memoryTokenCache: LinkiiTokenCacheEntry | null;
+  loginInFlight: Promise<string> | null;
+  c1015CooldownUntilMs: number;
+  inflight: number;
+  penaltyUntilMs: number;
+}
+const accountStates = new Map<string, LinkiiAccountState>();
+const accountScope = new AsyncLocalStorage<{ username: string }>();
+let accountRoundRobin = 0;
+
+export interface LinkiiAccount {
+  username: string;
+  password: string;
+}
+
+/**
+ * 号池账号列表：`LINKII_ACCOUNTS`（`user:pass`，逗号/分号/换行分隔，密码可含冒号——按第一个冒号切）
+ * 追加在旧单账号 `LINKII_USERNAME`/`LINKII_PASSWORD`（主账号）之后；按用户名去重，顺序即主次。
+ */
+export function readLinkiiAccounts(): LinkiiAccount[] {
+  const out: LinkiiAccount[] = [];
+  const seen = new Set<string>();
+  const push = (username: string, password: string) => {
+    const u = username.trim();
+    if (!u || !password || seen.has(u)) return;
+    seen.add(u);
+    out.push({ username: u, password });
+  };
+  // 旧单账号永远是主账号（第 0 个）：存量无后缀的 providerTaskId 都按主账号轮询，加号池不能改变它的归属。
+  push(process.env.LINKII_USERNAME ?? "", process.env.LINKII_PASSWORD ?? "");
+  for (const part of (process.env.LINKII_ACCOUNTS ?? "").split(/[,;\n]+/)) {
+    const idx = part.indexOf(":");
+    if (idx > 0) push(part.slice(0, idx), part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+function currentAccount(): LinkiiAccount {
+  const accounts = readLinkiiAccounts();
+  const scoped = accountScope.getStore()?.username;
+  return (scoped ? accounts.find((a) => a.username === scoped) : undefined) ?? accounts[0] ?? { username: "", password: "" };
+}
+
+function stateFor(username: string): LinkiiAccountState {
+  let st = accountStates.get(username);
+  if (!st) {
+    st = { memoryTokenCache: null, loginInFlight: null, c1015CooldownUntilMs: 0, inflight: 0, penaltyUntilMs: 0 };
+    accountStates.set(username, st);
+  }
+  return st;
+}
+
+function acctState(): LinkiiAccountState {
+  return stateFor(currentAccount().username);
+}
 
 function readLinkiiBaseUrl(supplier?: SupplierRecord): string {
   const raw = (process.env.LINKII_BASE_URL ?? supplier?.baseUrl ?? DEFAULT_LINKII_BASE_URL).trim();
@@ -93,13 +148,15 @@ function readLinkiiMediaBaseUrl(): string {
 
 function readLinkiiTokenCacheFile(): string {
   const raw = (process.env.LINKII_TOKEN_CACHE_FILE ?? "").trim();
-  return raw || DEFAULT_LINKII_TOKEN_CACHE_FILE;
+  const base = raw || DEFAULT_LINKII_TOKEN_CACHE_FILE;
+  const { username } = currentAccount();
+  const primary = readLinkiiAccounts()[0]?.username;
+  if (!username || username === primary) return base;
+  return `${base}.${createHash("sha256").update(username).digest("hex").slice(0, 12)}`;
 }
 
 function readLinkiiCredentials(): { username: string; password: string } {
-  const username = (process.env.LINKII_USERNAME ?? "").trim();
-  const password = process.env.LINKII_PASSWORD ?? "";
-  return { username, password };
+  return currentAccount();
 }
 
 function computeAccountHash(baseUrl: string, username: string): string {
@@ -162,7 +219,7 @@ function saveDiskTokenCache(entry: LinkiiTokenCacheEntry): void {
 }
 
 function clearTokenCache(): void {
-  memoryTokenCache = null;
+  acctState().memoryTokenCache = null;
   const cacheFile = readLinkiiTokenCacheFile();
   try {
     writeFileSync(cacheFile, "{}", { encoding: "utf8", mode: 0o600 });
@@ -300,8 +357,9 @@ function encryptLinkiiPassword(password: string, secretKey: string): { encrypted
 }
 
 async function performLogin(baseUrl: string): Promise<string> {
-  if (Date.now() < c1015CooldownUntilMs) {
-    const remainingSec = Math.max(1, Math.ceil((c1015CooldownUntilMs - Date.now()) / 1000));
+  const cooldownUntilMs = acctState().c1015CooldownUntilMs;
+  if (Date.now() < cooldownUntilMs) {
+    const remainingSec = Math.max(1, Math.ceil((cooldownUntilMs - Date.now()) / 1000));
     throw new SupplierRequestError(
       "Linkii login rate limited (C1015 cooldown active).",
       429,
@@ -342,7 +400,7 @@ async function performLogin(baseUrl: string): Promise<string> {
   }
 
   if (challengePayload?.code === "C1015" || challengeRes.status === 429) {
-    c1015CooldownUntilMs = Date.now() + C1015_COOLDOWN_MS;
+    acctState().c1015CooldownUntilMs = Date.now() + C1015_COOLDOWN_MS;
     throw new SupplierRequestError(
       extractMessage(challengePayload) || "Linkii login requests exceeded maximum limit (C1015).",
       429,
@@ -402,7 +460,7 @@ async function performLogin(baseUrl: string): Promise<string> {
   }
 
   if (loginPayload?.code === "C1015" || loginRes.status === 429) {
-    c1015CooldownUntilMs = Date.now() + C1015_COOLDOWN_MS;
+    acctState().c1015CooldownUntilMs = Date.now() + C1015_COOLDOWN_MS;
     throw new SupplierRequestError(
       extractMessage(loginPayload) || "Linkii login rate limited (C1015).",
       429,
@@ -427,35 +485,37 @@ async function performLogin(baseUrl: string): Promise<string> {
   const accountHash = computeAccountHash(baseUrl, username);
   const expMs = parseJwtExpMs(accessToken) ?? Date.now() + 30 * 60_000;
   const entry: LinkiiTokenCacheEntry = { accountHash, accessToken, expMs };
-  memoryTokenCache = entry;
+  acctState().memoryTokenCache = entry;
   saveDiskTokenCache(entry);
   return accessToken;
 }
 
 async function singleFlightLogin(baseUrl: string): Promise<string> {
-  if (!loginInFlight) {
-    loginInFlight = performLogin(baseUrl).finally(() => {
-      loginInFlight = null;
+  const st = acctState();
+  if (!st.loginInFlight) {
+    st.loginInFlight = performLogin(baseUrl).finally(() => {
+      st.loginInFlight = null;
     });
   }
-  return loginInFlight;
+  return st.loginInFlight;
 }
 
 async function getValidAccessToken(baseUrl: string): Promise<string> {
   const { username } = readLinkiiCredentials();
   const accountHash = computeAccountHash(baseUrl, username);
+  const st = acctState();
 
   if (
-    memoryTokenCache &&
-    memoryTokenCache.accountHash === accountHash &&
-    isTokenFresh(memoryTokenCache.expMs)
+    st.memoryTokenCache &&
+    st.memoryTokenCache.accountHash === accountHash &&
+    isTokenFresh(st.memoryTokenCache.expMs)
   ) {
-    return memoryTokenCache.accessToken;
+    return st.memoryTokenCache.accessToken;
   }
 
   const disk = loadDiskTokenCache(accountHash);
   if (disk) {
-    memoryTokenCache = disk;
+    st.memoryTokenCache = disk;
     return disk.accessToken;
   }
 
@@ -464,7 +524,7 @@ async function getValidAccessToken(baseUrl: string): Promise<string> {
     const envExpMs = parseJwtExpMs(envAuthToken);
     if (isTokenFresh(envExpMs)) {
       const entry: LinkiiTokenCacheEntry = { accountHash, accessToken: envAuthToken, expMs: envExpMs };
-      memoryTokenCache = entry;
+      st.memoryTokenCache = entry;
       return envAuthToken;
     }
   }
@@ -475,15 +535,16 @@ async function getValidAccessToken(baseUrl: string): Promise<string> {
 async function refreshAccessTokenAfterAuthFailure(baseUrl: string, failedToken: string): Promise<string> {
   const { username } = readLinkiiCredentials();
   const accountHash = computeAccountHash(baseUrl, username);
+  const st = acctState();
   if (
-    memoryTokenCache &&
-    memoryTokenCache.accountHash === accountHash &&
-    memoryTokenCache.accessToken !== failedToken &&
-    isTokenFresh(memoryTokenCache.expMs)
+    st.memoryTokenCache &&
+    st.memoryTokenCache.accountHash === accountHash &&
+    st.memoryTokenCache.accessToken !== failedToken &&
+    isTokenFresh(st.memoryTokenCache.expMs)
   ) {
-    return memoryTokenCache.accessToken;
+    return st.memoryTokenCache.accessToken;
   }
-  if (memoryTokenCache?.accessToken === failedToken) {
+  if (st.memoryTokenCache?.accessToken === failedToken) {
     clearTokenCache();
   }
   return singleFlightLogin(baseUrl);
@@ -1034,7 +1095,7 @@ async function submitVideo(supplier: SupplierRecord, input: SupplierGenerationIn
   );
 }
 
-export async function generateWithLinkii(
+async function generateWithLinkiiSingle(
   supplier: SupplierRecord,
   input: SupplierGenerationInput,
 ): Promise<SupplierGenerationOutput> {
@@ -1047,7 +1108,7 @@ export async function generateWithLinkii(
   throw new SupplierRequestError(`Linkii does not support generation kind "${input.kind}".`, 400);
 }
 
-export async function pollLinkiiTask(
+async function pollLinkiiTaskSingle(
   supplier: SupplierRecord,
   providerTaskId: string,
 ): Promise<ProviderTaskPollResult> {
@@ -1103,6 +1164,103 @@ export async function pollLinkiiTask(
   }
 
   return { state: "failed", reason: `Unrecognized Linkii providerTaskId: ${providerTaskId}` };
+}
+
+// ───────────────────────── 号池调度 ─────────────────────────
+// 同一 Linkii 账号同一时间只能跑 1 个建模/绘图任务（C9999），所以按「在途任务数最少」挑号，
+// 创建阶段遇到忙/限流/额度/鉴权失败就换下一个号；任务一旦创建，后续轮询必须回到同一个号（作品属于账号），
+// 因此非主账号的 providerTaskId 带 `@用户名` 后缀。
+
+const POOL_BUSY_PENALTY_MS = 45_000;
+
+function orderAccountsForSubmit(accounts: LinkiiAccount[]): LinkiiAccount[] {
+  const now = Date.now();
+  const start = accountRoundRobin++ % Math.max(1, accounts.length);
+  const rotated = accounts.map((_, i) => accounts[(start + i) % accounts.length]);
+  return rotated
+    .map((account, order) => {
+      const st = stateFor(account.username);
+      return { account, order, load: st.inflight + (st.penaltyUntilMs > now ? 1000 : 0) };
+    })
+    .sort((a, b) => a.load - b.load || a.order - b.order)
+    .map((x) => x.account);
+}
+
+function tagProviderTaskId(id: string, username: string, primary: string): string {
+  return username === primary ? id : `${id}@${username}`;
+}
+
+function splitProviderTaskAccount(providerTaskId: string): { id: string; username: string | null } {
+  const at = providerTaskId.lastIndexOf("@");
+  if (at <= 0) return { id: providerTaskId, username: null };
+  const username = providerTaskId.slice(at + 1).trim();
+  if (!readLinkiiAccounts().some((a) => a.username === username)) return { id: providerTaskId, username: null };
+  return { id: providerTaskId.slice(0, at), username };
+}
+
+function isPoolFailoverError(error: unknown): boolean {
+  if (!(error instanceof SupplierRequestError)) return false;
+  if (error.providerTaskId) return false; // 任务已在该账号创建，不能换号重提
+  const cls = error.explicitClass;
+  return cls === "overloaded" || cls === "rate_limited" || cls === "quota_exhausted" || cls === "authentication";
+}
+
+export async function generateWithLinkii(
+  supplier: SupplierRecord,
+  input: SupplierGenerationInput,
+): Promise<SupplierGenerationOutput> {
+  const accounts = readLinkiiAccounts();
+  if (accounts.length <= 1) return generateWithLinkiiSingle(supplier, input);
+  const primary = accounts[0].username;
+  let lastError: unknown;
+  for (const account of orderAccountsForSubmit(accounts)) {
+    const st = stateFor(account.username);
+    st.inflight += 1;
+    try {
+      return await accountScope.run({ username: account.username }, async () => {
+        const out = await generateWithLinkiiSingle(supplier, {
+          ...input,
+          onProviderTaskSubmitted: input.onProviderTaskSubmitted
+            ? (id, ...rest) => input.onProviderTaskSubmitted!(tagProviderTaskId(id, account.username, primary), ...rest)
+            : undefined,
+        });
+        return out.providerTaskId
+          ? { ...out, providerTaskId: tagProviderTaskId(out.providerTaskId, account.username, primary) }
+          : out;
+      });
+    } catch (error) {
+      if (error instanceof SupplierRequestError && error.providerTaskId) {
+        const tagged = tagProviderTaskId(error.providerTaskId, account.username, primary);
+        throw tagged === error.providerTaskId
+          ? error
+          : new SupplierRequestError(error.message, error.status, error.retryAfter, error.responseBody, error.explicitClass, tagged, error.upstreamStatus);
+      }
+      if (!isPoolFailoverError(error)) throw error;
+      lastError = error;
+      st.penaltyUntilMs = Date.now() + POOL_BUSY_PENALTY_MS;
+      console.warn(`[linkii-upstream] pool failover: ${account.username} -> next (${(error as SupplierRequestError).explicitClass})`);
+    } finally {
+      st.inflight -= 1;
+    }
+  }
+  throw lastError;
+}
+
+export async function pollLinkiiTask(
+  supplier: SupplierRecord,
+  providerTaskId: string,
+): Promise<ProviderTaskPollResult> {
+  const { id, username } = splitProviderTaskAccount(providerTaskId);
+  if (!username) return pollLinkiiTaskSingle(supplier, id);
+  return accountScope.run({ username }, () => pollLinkiiTaskSingle(supplier, id));
+}
+
+export function linkiiPoolStatus(): Array<{ username: string; inflight: number; penalized: boolean }> {
+  const now = Date.now();
+  return readLinkiiAccounts().map((a) => {
+    const st = stateFor(a.username);
+    return { username: a.username, inflight: st.inflight, penalized: st.penaltyUntilMs > now };
+  });
 }
 
 export const linkiiAdapter: SupplyAdapter = {

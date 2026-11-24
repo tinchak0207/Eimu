@@ -6,6 +6,7 @@ import {
   linkiiJson,
   pollLinkiiTaskAndWork,
   resolveLinkiiMediaUrl,
+  withLinkiiAccountPool,
 } from "./linkii-client"
 import { MusicToolError } from "./music-tools-impl-core"
 
@@ -345,44 +346,48 @@ export async function generateLinkiiMusicTrack(
   const spec = LINKII_MUSIC_MODELS[model]
   const composedPrompt = hasLyrics ? `${prompt.trim()}\n\n[歌词]\n${lyrics!.trim()}` : prompt.trim()
 
-  const created = await linkiiJson<Record<string, unknown>>(
-    "/web/ai/music/create",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        deploymentId: spec.deploymentId,
-        prompt: composedPrompt,
-        params: JSON.stringify({
-          instrument: "樂器不限",
-          style: "風格不限",
-          instrumental: !hasLyrics,
-          imageUrls: [],
-          audioUrls: [],
+  // 号池：创建＋轮询整段在一个账号作用域内；创建阶段忙/限流/额度/鉴权失败换号，已创建的任务不换号。
+  const { work, taskId, creationId } = await withLinkiiAccountPool(async () => {
+    const created = await linkiiJson<Record<string, unknown>>(
+      "/web/ai/music/create",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          deploymentId: spec.deploymentId,
+          prompt: composedPrompt,
+          params: JSON.stringify({
+            instrument: "樂器不限",
+            style: "風格不限",
+            instrumental: !hasLyrics,
+            imageUrls: [],
+            audioUrls: [],
+          }),
         }),
-      }),
-      timeoutMs: 30_000,
-    },
-    signal,
-  )
-
-  const taskId = created?.id ?? created?.taskId
-  const creationId = created?.creationId ?? created?.workId
-  if (
-    (typeof taskId !== "string" && typeof taskId !== "number") ||
-    taskId === "" ||
-    (typeof creationId !== "string" && typeof creationId !== "number") ||
-    creationId === ""
-  ) {
-    throw new MusicToolError(
-      "linkii_bad_response",
-      `Linkii /web/ai/music/create 未返回有效的 id 与 creationId：${JSON.stringify(created).slice(0, 400)}`,
+        timeoutMs: 30_000,
+      },
+      signal,
     )
-  }
 
-  const { work } = await pollLinkiiTaskAndWork(taskId, creationId, {
-    timeoutMs: LINKII_MUSIC_TIMEOUT_MS,
-    pollMs: LINKII_MUSIC_POLL_MS,
-    signal,
+    const taskId = created?.id ?? created?.taskId
+    const creationId = created?.creationId ?? created?.workId
+    if (
+      (typeof taskId !== "string" && typeof taskId !== "number") ||
+      taskId === "" ||
+      (typeof creationId !== "string" && typeof creationId !== "number") ||
+      creationId === ""
+    ) {
+      throw new MusicToolError(
+        "linkii_bad_response",
+        `Linkii /web/ai/music/create 未返回有效的 id 与 creationId：${JSON.stringify(created).slice(0, 400)}`,
+      )
+    }
+
+    const polled = await pollLinkiiTaskAndWork(taskId, creationId, {
+      timeoutMs: LINKII_MUSIC_TIMEOUT_MS,
+      pollMs: LINKII_MUSIC_POLL_MS,
+      signal,
+    })
+    return { work: polled.work, taskId, creationId }
   })
 
   const extracted =

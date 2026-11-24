@@ -7,7 +7,9 @@ import {
   linkiiJson,
   linkiiUpload,
   pollLinkiiTaskAndWork,
+  readLinkiiAccounts,
   resolveLinkiiMediaUrl,
+  withLinkiiAccountPool,
 } from "../lib/linkii-client"
 import { createHash } from "node:crypto"
 import { gameCheckpoint, gameProject } from "../lib/game-project"
@@ -222,11 +224,13 @@ export default tool({
       const scope = args.project ? await productionScope(context.sessionID, args.project, context.abort) : null
       if (scope && args.project) gameProject(scope, args.project, context.sessionID)
 
-      let glb: Uint8Array
-      let sourceMeta: Record<string, unknown>
-      let receiptExtra: Record<string, unknown>
+      let glb!: Uint8Array
+      let sourceMeta!: Record<string, unknown>
+      let receiptExtra!: Record<string, unknown>
 
       if (upstream === "hunyuan3d") {
+        // 号池：同一账号同时只能跑 1 个建模任务（C9999），上传＋创建＋轮询整段在一个账号作用域内，忙则换号。
+        await withLinkiiAccountPool(async (linkiiAccount) => {
         let capability: "文生3D" | "圖生3D" | "多視圖生3D"
         let frontUrl: string | undefined
         let promptToSend = ""
@@ -319,6 +323,7 @@ export default tool({
           uri: LINKII_URI,
           task_id: taskId,
           creation_id: creationId,
+          ...(readLinkiiAccounts().length > 1 ? { linkii_account: linkiiAccount } : {}),
           ...(inputHashes.length === 1 ? { input_image_sha256: inputHashes[0] } : {}),
           ...(inputHashes.length > 1 ? { input_image_sha256s: inputHashes } : {}),
           ...(promptToSend ? { prompt: promptToSend } : {}),
@@ -331,7 +336,9 @@ export default tool({
           enable_pbr: enablePbr,
           task_id: taskId,
           creation_id: creationId,
+          ...(readLinkiiAccounts().length > 1 ? { linkii_account: linkiiAccount } : {}),
         }
+        })
       } else {
         const input = await fetchInputImage(frontInputUrl, context.abort)
         const space = new GradioSession(TRELLIS_SPACE, token)
