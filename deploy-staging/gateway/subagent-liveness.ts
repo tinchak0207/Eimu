@@ -35,7 +35,7 @@ async function childIsIdle(run: SubagentRun): Promise<boolean> {
   } catch { return false }
 }
 
-export async function confirmSilentRunIdle(run: SubagentRun, message: string): Promise<void> {
+export async function confirmSilentRunIdle(run: SubagentRun, message: string, recoverResult = false): Promise<void> {
   if (livenessChecks.has(run)) return
   livenessChecks.add(run)
   const child = run.opencodeSessionId
@@ -45,6 +45,15 @@ export async function confirmSilentRunIdle(run: SubagentRun, message: string): P
     if (run.status !== "running" || run.stopped || run.opencodeSessionId !== child ||
       run.lastActivityAt !== activity || byChildOc.get(child) !== run || resumeInFlight.has(run.id)) return
     run.partialPersist = true
+    // 2026-11-24：stale 且子会话已确认 idle＝子会话其实早已跑完，只是 SSE 断连窗口里丢了 session.idle
+    // （11-22/23/24 共 8 路「这一路子代理中途断开了」都与 SSE 重连时刻吻合，结果实际在 opencode 里）。
+    // 此时回 opencode 取最后一条 assistant 文本收尾（同 session.idle 路径），不再直接判 error 丢结果；
+    // 零文本才走原有换模/如实报错链。
+    if (recoverResult) {
+      console.warn(`[gateway] subagent stale+idle: 回取子会话结果而非判死: id=${run.id} label="${run.label}"`)
+      await summarizeChild(run)
+      return
+    }
     await finishRun(run, "error", partialBodyOf(run), message)
   } finally { livenessChecks.delete(run) }
 }
@@ -204,7 +213,7 @@ function livenessTick(): void {
       continue
     }
     // 逾时先落盘已累积的 partial（同一行为与硬顶路径一致），再 error 收尾。
-    void confirmSilentRunIdle(run, SUBAGENT_STALE_MESSAGE)
+    void confirmSilentRunIdle(run, SUBAGENT_STALE_MESSAGE, true)
   }
   // ── 2026-10-14 协作总线：接续窗口（X7）与阻塞式提问（X5）的到期回收 ──────────────
   // 顺手做在同一个 tick 上（单一定时器，unref）：不新增计时器生命周期，不与既有
