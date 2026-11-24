@@ -31,6 +31,8 @@ const DRAWER_NAV: readonly { label: string; icon: IconName; url?: string; neverA
   { label: '直接生成', icon: 'layout-grid-a72', url: '/pages/index/index', neverActive: true },
   // 生成历史 /history → pages/works/index。
   { label: '生成历史', icon: 'folder-kanban-a45', url: '/pages/works/index' },
+  // 我的作品：按镜头审阅、换版本、存走成片（对应 /api/canvas/projects/review）。
+  { label: '我的作品', icon: 'folder-kanban-a45', url: '/pages/project/index' },
   // 我的资产：网版走动作桥（AgentChatSurface 的资产面板），小程序未实现 → 占位。
   { label: '我的资产', icon: 'images-a72' },
 ]

@@ -5,6 +5,7 @@ export default {
     // 以下页面仅从顶栏汉堡抽屉进入（不再是入口，也不再挂 tabBar）。
     'pages/index/index',
     'pages/works/index',
+    'pages/project/index',
     'pages/mine/index',
     'pages/detail/index/index',
     'pages/templates/index/index',

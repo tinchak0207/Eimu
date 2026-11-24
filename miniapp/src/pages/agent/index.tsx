@@ -1,7 +1,8 @@
 import { readWindow } from '../../lib/system'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Text, View } from '@tarojs/components'
-import Taro, { useUnload } from '@tarojs/taro'
+import Taro, { useDidShow, useUnload } from '@tarojs/taro'
+import { consumeAgentDraft } from '../../lib/project-review'
 import {
   abortAgentSession,
   connectAgentStream,
@@ -117,6 +118,8 @@ export default function AgentPage() {
   const [sessionStarting, setSessionStarting] = useState(false)
   const [pendingExample, setPendingExample] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // 从「我的作品」点「说一句改这镜」带过来的草稿：只预填输入框，不替用户送出（不替用户开一轮扣费）。
+  useDidShow(() => { const handoff = consumeAgentDraft(); if (handoff) setDraft(handoff) })
   const [thinkingLevel, setThinkingLevel] = useState<AgentThinkingLevel>('medium')
   // 历史会话目录（null＝未加载；[]＝已加载但为空）。服务端目录是真源。
   const [historySessions, setHistorySessions] = useState<AgentSessionSummary[] | null>(null)
