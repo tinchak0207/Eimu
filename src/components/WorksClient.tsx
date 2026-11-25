@@ -3,6 +3,7 @@
 // 「我的作品」网页版：与小程序 pages/project/index 同一组接口、同一套话术。
 // 做完了没有 → 整片 → 镜头墙 → 点一镜对照新旧 → 用这条（只动这一镜）→ 说一句改这镜（带镜号去助理）。
 import Link from "next/link";
+import { WorksTabs } from "@/components/WorksTabs";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -125,6 +126,7 @@ export function WorksClient() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 pb-28 pt-8 sm:px-6">
+      {sharedId ? null : <WorksTabs active="works" />}
       {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
 
       {sharedId ? (

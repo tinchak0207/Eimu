@@ -33,6 +33,7 @@ import { filterByProjectTag } from "@/lib/asset-scope";
 import type { AssetLibraryItem } from "@/lib/asset-scope";
 import { ProjectAssetsOverview } from "@/components/history/ProjectAssetsOverview";
 import { text } from "@/lib/ui-strings";
+import { WorksTabs } from "@/components/WorksTabs";
 import "@/components/history/history.css";
 
 /**
@@ -514,6 +515,7 @@ export function HistoryClient() {
   return (
     <div className="min-h-screen bg-transparent px-4 pb-28 pt-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1440px]">
+        <WorksTabs active="history" />
         <div className="mb-4 lg:mb-5 lg:flex lg:items-center lg:gap-4">
           {/* 移动端：标题左、计数+多选右同一行；桌面端 lg:contents 拆散进同一条水平工具栏。
               两份计数/多选各在对方断点 display:none，无障碍树里只暴露一份。 */}

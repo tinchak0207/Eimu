@@ -34,7 +34,6 @@ import {
   BadgeDollarSign,
   Clapperboard,
   History,
-  Images,
   Menu,
   Search,
   Settings,
@@ -144,9 +143,7 @@ export interface MobileSidebarNavItem {
  */
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
   { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
-  { href: "/history", label: "生成历史", icon: History },
-  { href: "/works", label: "我的作品", icon: Clapperboard },
-  { href: "/?agent=1", label: "我的资产", icon: Images, action: "assets" },
+  { href: "/works", label: "作品库", icon: Clapperboard },
   { href: "/pricing", label: "定价", icon: BadgeDollarSign },
 ];
 
