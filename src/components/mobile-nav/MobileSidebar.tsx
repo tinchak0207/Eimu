@@ -32,6 +32,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BadgeDollarSign,
+  Clapperboard,
   History,
   Images,
   Menu,
@@ -144,6 +145,7 @@ export interface MobileSidebarNavItem {
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
   { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
   { href: "/history", label: "生成历史", icon: History },
+  { href: "/works", label: "我的作品", icon: Clapperboard },
   { href: "/?agent=1", label: "我的资产", icon: Images, action: "assets" },
   { href: "/pricing", label: "定价", icon: BadgeDollarSign },
 ];

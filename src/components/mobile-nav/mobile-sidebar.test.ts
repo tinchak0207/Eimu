@@ -197,12 +197,13 @@ function routeFileExists(href: string): boolean {
 const NAV_TABLE = [
   { href: "/", label: "直接生成", bridge: "exit", tag: "button" },
   { href: "/history", label: "生成历史", bridge: null, tag: "link" },
+  { href: "/works", label: "我的作品", bridge: null, tag: "link" },
   { href: "/?agent=1", label: "我的资产", bridge: "assets", tag: "button" },
   { href: "/pricing", label: "定价", bridge: null, tag: "link" },
 ] as const;
 
-test("导览列只剩 4 列且顺序固定（技能/工作流/状态/帮助已下放页尾）", () => {
-  assert.equal(MOBILE_SIDEBAR_NAV.length, 4, "第三轮：7 列 → 4 列");
+test("导览列 5 列且顺序固定（技能/工作流/状态/帮助已下放页尾；11-25 加「我的作品」）", () => {
+  assert.equal(MOBILE_SIDEBAR_NAV.length, 5, "第三轮 4 列 + 我的作品");
   assert.deepEqual(
     MOBILE_SIDEBAR_NAV.map((it) => it.href),
     NAV_TABLE.map((it) => it.href),

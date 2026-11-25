@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/lib/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
 import { useAuth } from "@/hooks/use-auth";
+import { consumeAgentDraft } from "@/lib/canvas/review-client";
 import { setCurrentAgentSession } from "@/lib/agent-current-session";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
@@ -94,6 +95,11 @@ export function AgentChatSurface({
   const [draft, setDraft] = useState(initialPrompt.trim());
   // 交给输入区的续写信号（D-24）。输入区吃掉后回调清空，避免重复注入。
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  // 「我的作品」点选镜头后带来的半句话（如「第 3 镜（…）：」）：一次消费，账号不符即销毁。
+  useEffect(() => {
+    const text = consumeAgentDraft();
+    if (text) setPrefill({ text, nonce: Date.now() });
+  }, []);
   // 图卡的 payload 级重跑对话框（entry 由媒体条目即时合成；null = 未开）。
   const [rerunDialog, setRerunDialog] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
   const [contentOwnerId, setContentOwnerId] = useState(chatHistoryUser?.id ?? null);
