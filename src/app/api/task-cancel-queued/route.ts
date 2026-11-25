@@ -1,4 +1,4 @@
-// POST /api/generation-jobs/cancel-queued —— 「停掉还没跑的，跑起来的继续」（项目级一键停排队）。
+// POST /api/task-cancel-queued —— 「停掉还没跑的，跑起来的继续」（项目级一键停排队）。
 //
 // 吸收 AID 批量停止：一次最多 100 个任务，只取消**还在排队、尚未交给上游**的（pending_billing／queued／leased）；
 // 已经在跑（submitting／running）的不动——它们的钱已经花在上游，停下只会浪费；提交结果未知的（*_unknown）

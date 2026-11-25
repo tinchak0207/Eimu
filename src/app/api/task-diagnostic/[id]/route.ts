@@ -1,4 +1,4 @@
-// GET /api/generation-jobs/:id/diagnostic —— 用户自助的脱敏诊断（客服无需再要提示词／密钥／截图）。
+// GET /api/task-diagnostic/:id —— 用户自助的脱敏诊断（客服无需再要提示词／密钥／截图）。
 // 只认本租户的任务；回结局四态、钱的去向、关键步骤的人话时间线，和一句可直接粘贴给客服的工单文字。
 
 import { NextRequest, NextResponse } from "next/server";
