@@ -76,3 +76,18 @@ export interface ImportScriptResult { projectId: string; policy: 'finished' | 's
 export async function importScript(script: string, references: { url: string; name?: string }[] = []): Promise<ImportScriptResult> {
   return request<ImportScriptResult>({ path: '/api/canvas/projects/import-script', method: 'POST', data: { script, references } })
 }
+
+export interface SharedView { ok: boolean; shareId: string; title: string; summary: string; shots: { shotNumber: string; episodeNo?: number; summary: string; state: ShotState; adoptedUrl?: string; adoptedKind?: 'image' | 'video' }[] }
+export async function fetchShared(shareId: string): Promise<SharedView> {
+  return request<SharedView>({ path: `/api/canvas/projects/share?shareId=${encodeURIComponent(shareId)}`, auth: false })
+}
+export async function publishShare(projectId: string): Promise<string> {
+  return (await request<{ shareId: string }>({ path: '/api/canvas/projects/share', method: 'POST', data: { projectId } })).shareId
+}
+export async function revokeShare(shareId: string): Promise<void> {
+  await request({ path: `/api/canvas/projects/share?shareId=${encodeURIComponent(shareId)}`, method: 'DELETE' })
+}
+/** 把别人公开的作品复制成自己的可续作项目（已采用版本一并带走）。 */
+export async function forkShared(shareId: string): Promise<string> {
+  return (await request<{ projectId: string }>({ path: '/api/canvas/projects/fork', method: 'POST', data: { shareId } })).projectId
+}

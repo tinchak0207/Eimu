@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from 'react'
 import { Image, ScrollView, Text, Textarea, Video, View } from '@tarojs/components'
-import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
+import Taro, { useDidShow, usePullDownRefresh, useRouter, useShareAppMessage } from '@tarojs/taro'
 import { ensureLogin } from '../../lib/session'
 import { PageShell } from '../../components/pages/PageShell'
 import {
-  adoptVersion, fetchMaster, importScript, fetchProjects, fetchReview, type MasterReceipt, saveToAlbum, stashAgentDraft, STATE_LABEL,
+  adoptVersion, fetchMaster, fetchShared, forkShared, importScript, publishShare, revokeShare, type SharedView, fetchProjects, fetchReview, type MasterReceipt, saveToAlbum, stashAgentDraft, STATE_LABEL,
   type ProjectReview, type ProjectSummary, type ReviewShot,
 } from '../../lib/project-review'
 
@@ -19,6 +19,11 @@ function Thumb({ url, kind }: { url?: string; kind?: 'image' | 'video' }) {
 }
 
 export default function ProjectPage() {
+  const router = useRouter()
+  const sharedId = typeof router.params?.shareId === 'string' ? router.params.shareId : ''
+  const [shared, setShared] = useState<SharedView | null>(null)
+  const [myShareId, setMyShareId] = useState('')
+  useShareAppMessage(() => ({ title: review?.title || 'Eimu 作品', path: myShareId ? `/pages/project/index?shareId=${myShareId}` : '/pages/project/index' }))
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [review, setReview] = useState<ProjectReview | null>(null)
   const [episode, setEpisode] = useState<number | null>(null)
@@ -47,7 +52,12 @@ export default function ProjectPage() {
     } finally { Taro.stopPullDownRefresh() }
   }, [])
 
-  useDidShow(() => { void load(review?.projectId) })
+  useDidShow(() => {
+    const openId = typeof router.params?.open === 'string' ? router.params.open : ''
+    if (openId && !review) { void load(openId); return }
+    if (sharedId) { void fetchShared(sharedId).then(setShared).catch(() => setError('这个分享不存在或已被撤销')); return }
+    void load(review?.projectId)
+  })
   usePullDownRefresh(() => { void load(review?.projectId) })
 
   const shots = (review?.shots ?? []).filter(s => episode === null || s.episodeNo === episode)
@@ -61,6 +71,30 @@ export default function ProjectPage() {
       flash(`${label}，其余镜头、台词、配乐没有动`)
       setCompare(null)
     } catch (err) { flash(err instanceof Error ? err.message : '没有改成，原样保留') } finally { setBusy(false) }
+  }
+
+  async function share() {
+    if (!review || busy) return
+    setBusy(true)
+    try {
+      const id = await publishShare(review.projectId)
+      setMyShareId(id)
+      flash('已发布这一刻的版本：点右上角「…」转发给朋友；之后你再改，不影响已发布的这份')
+    } catch (err) { flash(err instanceof Error ? err.message : '发布失败') } finally { setBusy(false) }
+  }
+  async function unshare() {
+    if (!myShareId) return
+    try { await revokeShare(myShareId); setMyShareId(''); flash('已撤销，对方再打开会看到「已撤销」') } catch (err) { flash(err instanceof Error ? err.message : '撤销失败') }
+  }
+  async function copyShared() {
+    if (!sharedId || busy) return
+    setBusy(true)
+    try {
+      await ensureLogin()
+      const id = await forkShared(sharedId)
+      flash('已复制成你的项目，可以接着做')
+      await Taro.redirectTo({ url: `/pages/project/index?open=${encodeURIComponent(id)}` }).catch(() => undefined)
+    } catch (err) { flash(err instanceof Error ? err.message : '复制失败，没有创建任何东西') } finally { setBusy(false) }
   }
 
   async function doImport() {
@@ -91,7 +125,23 @@ export default function ProjectPage() {
       <View className='min-h-[100dvh] bg-background px-4 pb-24 pt-3'>
         {error ? <Text className='text-ios-footnote text-destructive'>{error}</Text> : null}
 
-        {!review ? (
+        {sharedId && shared ? (
+          <View className='space-y-3'>
+            <Text className='block text-ios-title3 font-semibold text-foreground'>{shared.title || '分享的作品'}</Text>
+            <Text className='block text-ios-footnote text-foreground/55'>{shared.summary}（这是作者发布的版本，只读）</Text>
+            <View className='flex min-h-11 items-center justify-center rounded-full bg-ios-blue text-white' onClick={() => void copyShared()}><Text>{busy ? '复制中…' : '复制成我的项目，接着做'}</Text></View>
+            <View className='grid grid-cols-2 gap-2'>
+              {shared.shots.map(shot => (
+                <View key={`${shot.episodeNo ?? 0}-${shot.shotNumber}`} className='lg-sheet rounded-ios-2xl p-2'>
+                  <Thumb url={shot.adoptedUrl} kind={shot.adoptedKind} />
+                  <Text className='mt-1.5 block text-ios-footnote font-medium text-foreground'>{`${shot.episodeNo ? `第${shot.episodeNo}集 ` : ''}第 ${shot.shotNumber} 镜`}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {sharedId ? null : !review ? (
           <View className='space-y-2'>
             <Text className='text-ios-title3 font-semibold text-foreground'>我的作品</Text>
             {projects.length === 0 && !error ? <Text className='block text-ios-subhead text-foreground/50'>还没有作品。回到对话说出想拍的片子，做出来后会出现在这里。</Text> : null}
@@ -135,6 +185,10 @@ export default function ProjectPage() {
               ) : (
                 <Text className='block text-ios-footnote text-foreground/55'>{master?.known === false ? '暂时查不到整片状态' : '还没有导出整片：镜头都满意后对我说「合成整片」'}</Text>
               )}
+            </View>
+            <View className='flex gap-2'>
+              <View className='flex min-h-11 flex-1 items-center justify-center rounded-full bg-black/[0.06]' onClick={() => void share()}><Text>{myShareId ? '重新发布当前版本' : '发布给朋友（可接着做）'}</Text></View>
+              {myShareId ? <View className='flex min-h-11 items-center justify-center rounded-full bg-black/[0.06] px-4' onClick={() => void unshare()}><Text>撤销</Text></View> : null}
             </View>
             {review.episodes.length > 1 ? (
               <ScrollView scrollX className='whitespace-nowrap'>
