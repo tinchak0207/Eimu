@@ -129,7 +129,7 @@ export function WorksClient() {
 
       {sharedId ? (
         <section className="space-y-3">
-          <h1 className="text-xl font-semibold">{shared?.title || "分享的作品"}</h1>
+          {shared ? <h1 className="text-xl font-semibold">{shared.title || "分享的作品"}</h1> : null}
           {shared ? <p className="text-sm text-foreground/55">{shared.summary}（这是作者发布的版本，只读）</p> : null}
           {shared ? <button type="button" className={btnPrimary} disabled={busy} onClick={() => void copyShared()}>{busy ? "复制中…" : "复制成我的项目，接着做"}</button> : null}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
