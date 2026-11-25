@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Clapperboard, History, KeyRound, LogOut, Users } from "lucide-react";
+import { BookOpen, Clapperboard, History, LayoutGrid, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -439,35 +439,46 @@ export default function Navbar({ className }: NavbarProps) {
                     导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
-                {/* Nav links — icons only, text stays hidden for screen readers.
-                    「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
-                <Link
-                  href="/history"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
-                  aria-label="历史"
-                >
-                  <History className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">历史</span>
-                </Link>
-                <Link
-                  href="/works"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
-                  aria-label="我的作品"
-                >
-                  <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">我的作品</span>
-                </Link>
+                {/* 个人导航收进一个二级菜单（2026-11-25 暴君裁定「header 太多东西，整合进二级目录」）：
+                    我的作品／生成历史／文档同属「我的」，不再各占一个图标。
+                    「文档」手机端也在菜单里（原先 ≥sm 才显示的约束随之消失，入口只剩一个）。 */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="我的"
+                      title="我的"
+                      className={cn(
+                        "hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:flex sm:h-9 sm:w-8 sm:hover:text-ios-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                        FLAT_CHROME,
+                      )}
+                    >
+                      <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" sideOffset={8}>
+                    <DropdownMenuItem asChild>
+                      <Link href="/works" className="cursor-pointer">
+                        <Clapperboard className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        我的作品
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/history" className="cursor-pointer">
+                        <History className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        生成历史
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/docs" className="cursor-pointer">
+                        <BookOpen className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        文档
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
-                    AI 助理是首页卡片上的一个 toggle，不是一个去处。
-                    导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
-                <Link
-                  href="/docs"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
-                  aria-label="文档"
-                >
-                  <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">文档</span>
-                </Link>
+                    AI 助理是首页卡片上的一个 toggle，不是一个去处。 */}
 
                 {/* 钥匙（2026-08-27 暴君裁定）：专属小菜单只放 key 相关动作。 */}
                 <DropdownMenu>
