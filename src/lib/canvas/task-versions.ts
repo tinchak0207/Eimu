@@ -100,6 +100,11 @@ export interface TaskVersionEntry {
    * 旧稿因此可回看、不会被默认当成交付（AID 采用稿＋输入指纹的语义）。
    */
   inputSig?: string;
+  /**
+   * 产出本版时所依据的 3D 白模（导演台 scene_3d 节点 sceneCard）指纹。
+   * 机位改了＝白模变了＝这一版对应旧白模：版本仍留着可看，但在审阅里标「旧稿」，不当成交付。
+   */
+  motionSig?: string;
 }
 
 /** 一格的任务版本史 ＋ 星标选中的那一版。 */
@@ -194,6 +199,7 @@ export function normalizeTaskVersionEntry(raw: unknown): TaskVersionEntry | null
   const taskId = trimmed(raw.taskId, TASK_ID_MAX);
   const url = trimmed(raw.url, TASK_URL_MAX);
   const inputSig = trimmed(raw.inputSig, INPUT_SIG_MAX);
+  const motionSig = trimmed(raw.motionSig, INPUT_SIG_MAX);
   const status = TASK_STATUSES.includes(raw.status as CanvasNodeStatus)
     ? (raw.status as CanvasNodeStatus)
     : undefined;
@@ -204,6 +210,7 @@ export function normalizeTaskVersionEntry(raw: unknown): TaskVersionEntry | null
     tags: normalizeTaskTags(raw.tags),
     ...(url ? { url } : {}),
     ...(inputSig ? { inputSig } : {}),
+    ...(motionSig ? { motionSig } : {}),
   };
 }
 

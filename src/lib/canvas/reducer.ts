@@ -18,7 +18,7 @@ import type {
   CanvasUnit,
 } from "./types";
 import { CanvasNodeType } from "./types";
-import { shotInputSignature, shotNumberOf } from "./storyboard-shots";
+import { motionReferenceSig, shotInputSignature, shotNumberOf } from "./storyboard-shots";
 import { appendTaskVersion, normalizeTaskVersions } from "./task-versions";
 import {
   appendNodeVersion,
@@ -319,6 +319,10 @@ export function reduceCanvasNodeUpdated(state: CanvasReducerState, data: CanvasN
       tags: [kind === "video" ? "main_video" : "main_image"],
       url: data.url,
       inputSig: shotInputSignature(bag, kind),
+      // 视频版绑定产出时的白模：机位之后再改，这一版就对应旧白模（审阅里标旧稿，不删）。
+      ...(kind === "video" && nextNode.metadata.directorStageId
+        ? { motionSig: motionReferenceSig(state.nodes.find((n) => n.id === nextNode.metadata?.directorStageId)) }
+        : {}),
     });
     if (appended.accepted) nextNode.metadata = { ...nextNode.metadata, taskVersions: appended.set };
   }

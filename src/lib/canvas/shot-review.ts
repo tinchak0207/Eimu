@@ -7,7 +7,7 @@
 //   ③说得清「做完了没有」：每镜四态（可直接用／旧稿待补跑／生成中／失败可补跑／还没出），
 //     汇总给出「现在手里有什么、缺什么、下一步」，失败的一段不拖累已成的。
 
-import { shotMediaReadiness, shotNumberOf, selectShotCandidate, shotInputSignature, normalizeShotCandidates } from "./storyboard-shots";
+import { motionReferenceSig, shotMediaReadiness, shotNumberOf, selectShotCandidate, shotInputSignature, normalizeShotCandidates } from "./storyboard-shots";
 import { normalizeTaskVersions, selectTaskVersion, type TaskTag } from "./task-versions";
 import type { CanvasNode, CanvasProject } from "./types";
 
@@ -94,12 +94,13 @@ function summaryOf(node: CanvasNode): string {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
-export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot | null {
+export function reviewShot(node: CanvasNode, episodeNo?: number, stageNode?: CanvasNode): ShotReviewShot | null {
   const shotNumber = shotNumberOf(node);
   if (!shotNumber) return null;
   const bag = shotBag(node);
   const set = normalizeTaskVersions(bag.taskVersions);
   const candidates = normalizeShotCandidates(bag.shotCandidates);
+  const motionNow = motionReferenceSig(stageNode);
   const currentSig = { image: shotInputSignature(bag, "image"), video: shotInputSignature(bag, "video") };
 
   const versions: ShotReviewVersion[] = (set?.items ?? []).map((entry) => {
@@ -110,7 +111,10 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
       ...(entry.url ? { url: entry.url } : {}),
       ...(entry.status ? { status: entry.status } : {}),
       adopted: set?.selectedVersion === entry.version,
-      stale: !!entry.inputSig && entry.inputSig !== currentSig[kind],
+      // 输入改过，或产出时依据的白模（机位）已被改：都是旧稿——可看可回，不当交付。
+      stale:
+        (!!entry.inputSig && entry.inputSig !== currentSig[kind]) ||
+        (kind === "video" && !!entry.motionSig && !!motionNow && entry.motionSig !== motionNow),
     };
   });
   // 存量作品（本版本之前落地的成果）没有 taskVersions：把节点自己的成果当作唯一一版，保证老作品也能审阅、存走。
@@ -137,7 +141,9 @@ export function reviewShot(node: CanvasNode, episodeNo?: number): ShotReviewShot
 
   const anyLoading = versions.some((v) => v.status === "loading") || candidateViews.some((c) => c.status === "loading") || node.metadata?.status === "loading";
   const latest = versions[versions.length - 1];
-  const delivered = readiness.hasImage || readiness.hasVideo || versions.some((v) => v.version === "legacy");
+  const withUrl = versions.filter((v) => !!v.url);
+  const allStale = withUrl.length > 0 && withUrl.every((v) => v.stale);
+  const delivered = !allStale && (readiness.hasImage || readiness.hasVideo || versions.some((v) => v.version === "legacy"));
   let state: ShotReviewState;
   if (delivered && !anyLoading) state = "ready";
   else if (anyLoading) state = "pending";
@@ -167,7 +173,8 @@ export function buildProjectReview(project: CanvasProject): ProjectReview {
   const shots = project.nodes
     .map((node) => {
       const epId = typeof node.metadata?.episodeId === "string" ? node.metadata.episodeId : undefined;
-      return reviewShot(node, epId ? episodeNoById.get(epId) : undefined);
+      const stageId = typeof node.metadata?.directorStageId === "string" ? node.metadata.directorStageId : undefined;
+      return reviewShot(node, epId ? episodeNoById.get(epId) : undefined, stageId ? project.nodes.find((n) => n.id === stageId) : undefined);
     })
     .filter((shot): shot is ShotReviewShot => shot !== null)
     .sort((a, b) => (a.episodeNo ?? 0) - (b.episodeNo ?? 0) || a.shotNumber.localeCompare(b.shotNumber, undefined, { numeric: true }));

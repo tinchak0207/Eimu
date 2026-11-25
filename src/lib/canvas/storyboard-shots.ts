@@ -722,3 +722,13 @@ export function cloneShotNode(node: CanvasNode, options: CloneShotNodeOptions): 
     ...(metadata ? { metadata } : {}),
   };
 }
+/** 导演台白模（scene_3d 节点 sceneCard）的指纹：机位／舞台任一变化都会变。无 sceneCard＝undefined（没有白模就没有绑定）。 */
+export function motionReferenceSig(stageNode: CanvasNode | undefined): string | undefined {
+  const card = stageNode?.metadata?.sceneCard;
+  if (!card) return undefined;
+  try {
+    return stableSig(JSON.stringify(card));
+  } catch {
+    return undefined;
+  }
+}
