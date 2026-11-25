@@ -19,13 +19,11 @@ import { createPortal } from "react-dom";
 import {
   Bot,
   Boxes,
-  History,
   Loader2,
   Ghost,
   LogIn,
   Search,
   Settings,
-  SlidersHorizontal,
   SquarePen,
   X,
 } from "lucide-react";
@@ -37,6 +35,7 @@ import { consumeAgentDraft } from "@/lib/canvas/review-client";
 import { setCurrentAgentSession } from "@/lib/agent-current-session";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
+import { AgentLibraryTabs, type LibraryTab } from "@/components/agent-chat/AgentLibraryTabs";
 import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
@@ -207,6 +206,23 @@ export function AgentChatSurface({
     void startLoginThenRetry(retry);
   }, [retry]);
 
+  // 资料库三段切换：对话 / 资产在面板间换，作品是独立页（作品|生成记录），直接进。
+  const pickLibraryTab = (tab: LibraryTab): void => {
+    if (tab === "works") {
+      setShowHistory(false);
+      setShowAssets(false);
+      window.location.assign("/works");
+      return;
+    }
+    if (tab === "assets") {
+      setShowHistory(false);
+      if (!showAssets) void toggleAssets();
+      return;
+    }
+    setShowAssets(false);
+    if (!showHistory) void toggleHistory();
+  };
+
   // 开著的 dropdown：点外面就收——浮层不该把人锁在原地。
   // （窄屏抽屉已 portal 到 document.body，节点不在 historyRef 子树内，所以
   //   列与搜寻框的点击改由 historyDrawerRef 放行，不误收；
@@ -376,29 +392,17 @@ export function AgentChatSurface({
               outside-click；图示即「logo」，不再挂文字标签。 */}
           <div className="flex items-center gap-0.5 max-sm:contents">
             <button
+              ref={historyTriggerRef}
               type="button"
-              onClick={() => void toggleAssets()}
-              onPointerEnter={prefetchAssets}
-              onFocus={prefetchAssets}
-              aria-expanded={showAssets}
-              aria-label="我的资产"
-              title="我的资产"
+              onClick={() => (showAssets ? setShowAssets(false) : void toggleHistory())}
+              onPointerEnter={() => { prefetchHistory(); prefetchAssets(); }}
+              onFocus={() => { prefetchHistory(); prefetchAssets(); }}
+              aria-expanded={showHistory || showAssets}
+              aria-label="资料库"
+              title="资料库：对话 · 作品 · 资产"
               className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
-            </button>
-            <button
-              ref={historyTriggerRef}
-              type="button"
-              onClick={() => void toggleHistory()}
-              onPointerEnter={prefetchHistory}
-              onFocus={prefetchHistory}
-              aria-expanded={showHistory}
-              aria-label="对话历史"
-              title="对话历史"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
-            >
-              <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
           </div>
           {/* 右簇靠 ml-auto 顶到最右（中间没有 flex-1 的标题块可撑了）。
@@ -447,17 +451,7 @@ export function AgentChatSurface({
                 <SquarePen className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               )}
             </button>
-            {onExit && (
-              <button
-                type="button"
-                onClick={onExit}
-                aria-label="精确控制"
-                title="精确控制（二级入口）：自己选模型和参数出图"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-ios-blue/[0.12] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
-              >
-                <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
-              </button>
-            )}
+            {/* 精确控制入口已撤（2026-11-25 暴君裁定）：模型／比例／清晰度／时长／音频／参考图／改图／放大全部由助理工具承接，说一句即可。 */}
             {/* 设置：原本是 ⋯（MoreHorizontal）＋选单，2026-09-27 暴君纠正后
                 历史与资产已直接站上顶栏，这颗就只剩设定一件事，所以换成齿轮。
                 弹层本体仍是 AgentSettingsPopover 的自足渲染（0×0 容器里的
@@ -520,6 +514,7 @@ export function AgentChatSurface({
                           <X className="h-5 w-5" aria-hidden="true" />
                         </button>
                       </div>
+                      <div className="px-3"><AgentLibraryTabs active="chat" onPick={pickLibraryTab} /></div>
                       {/* 搜索（仅窄屏抽屉；宽屏 w-56 放不下）：lg-float 框＋放大镜，
                           16px 字级防 iOS 聚焦自动放大。 */}
                       <div className="px-4 pb-2">
@@ -558,6 +553,7 @@ export function AgentChatSurface({
                   <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
                     {/* DESIGN.md §5：每张 sheet 都要有一条顶缘高光线。 */}
                     <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+                    <AgentLibraryTabs active="chat" onPick={pickLibraryTab} />
                     <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
                       <AgentSessionList
                         sessions={historyList}
@@ -583,7 +579,7 @@ export function AgentChatSurface({
                 <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
                   {/* DESIGN.md §5：每张 sheet 都要有一条顶缘高光线。 */}
                   <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-                  <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
+                  <AgentLibraryTabs active="assets" onPick={pickLibraryTab} />
                   <div className="relative px-2.5 pb-1">
                     <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
                     <input

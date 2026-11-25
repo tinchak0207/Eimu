@@ -195,13 +195,12 @@ function routeFileExists(href: string): boolean {
 
 /** 第三轮定案的 4 列（顺序固定）；bridge＝null 表示纯连结。 */
 const NAV_TABLE = [
-  { href: "/", label: "直接生成", bridge: "exit", tag: "button" },
   { href: "/works", label: "作品库", bridge: null, tag: "link" },
   { href: "/pricing", label: "定价", bridge: null, tag: "link" },
 ] as const;
 
-test("导览列 3 列且顺序固定（11-25：生成历史/我的作品/我的资产 并入「作品库」）", () => {
-  assert.equal(MOBILE_SIDEBAR_NAV.length, 3, "直接生成／作品库／定价");
+test("导览列 2 列且顺序固定（11-25：精确控制撤销；历史/作品/资产 并入「作品库」）", () => {
+  assert.equal(MOBILE_SIDEBAR_NAV.length, 2, "作品库／定价");
   assert.deepEqual(
     MOBILE_SIDEBAR_NAV.map((it) => it.href),
     NAV_TABLE.map((it) => it.href),
@@ -374,19 +373,6 @@ test("底部 dock 齿轮＝button（情境感知动作桥），aria-label 仍是
     sidebarCode,
     /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent-surface-actions"/,
   );
-});
-
-test("『直接生成』/ 不冒充当前页（neverActive），只有不带 query 的纯连结才亮", () => {
-  const navItem = MOBILE_SIDEBAR_NAV.find((it) => it.href === "/");
-  assert.equal(navItem?.neverActive, true, "/ 这列必须标 neverActive");
-  // 纯函式语意不变：/ 对 / 仍回 true（元件端靠 neverActive 关掉）。
-  assert.equal(isSidebarNavActive("/", "/"), true);
-  // 首页渲染：直接生成那颗 button 不得亮 aria-current。
-  const exitBtn = renderPanel({ pathname: "/" }).find(
-    (el) => el.props["data-agent-action"] === "exit",
-  );
-  assert.ok(exitBtn);
-  assert.equal(exitBtn.props["aria-current"], undefined, "首页不得亮『直接生成』");
 });
 
 test("active 态只认不带 query 的路径连结", () => {

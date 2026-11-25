@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Clapperboard, KeyRound, LogOut, Users } from "lucide-react";
+import { BookOpen, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -439,17 +439,7 @@ export default function Navbar({ className }: NavbarProps) {
                     导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
-                {/* 作品库（2026-11-25 暴君裁定）：生成历史／作品／项目／资产本质是同一件东西，
-                    导航只留这一个入口；作品↔生成记录在页内切换（WorksTabs）。文档独立，不并入。 */}
-                <Link
-                  href="/works"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
-                  aria-label="作品库"
-                  title="作品库"
-                >
-                  <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">作品库</span>
-                </Link>
+                {/* 作品库／对话历史／资产已并入助理面板左上角「资料库」按钮（2026-11-25 暴君裁定），header 不再单设入口；文档独立。 */}
                 <Link
                   href="/docs"
                   className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}

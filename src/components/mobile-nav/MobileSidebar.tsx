@@ -37,7 +37,6 @@ import {
   Menu,
   Search,
   Settings,
-  SlidersHorizontal,
   SquarePen,
   X,
 } from "lucide-react";
@@ -142,7 +141,6 @@ export interface MobileSidebarNavItem {
  *   定价     /pricing      — src/app/pricing/page.tsx；纯连结
  */
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
-  { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
   { href: "/works", label: "作品库", icon: Clapperboard },
   { href: "/pricing", label: "定价", icon: BadgeDollarSign },
 ];
