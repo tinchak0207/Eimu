@@ -97,6 +97,9 @@ jobs:
           #    - src/components/canvas-workstation/panels/migration.test.ts
           #
           # 本机基线（2026-10-20 快照 worktree、排除上列 11 档）：tests 4377 / pass 4363 / fail 0 / skipped 14
+          # 2026-11-26 追加（A 类）：依赖 gitignored 的 deploy-staging/ 本地夹具、已删的 pro-workstation/ 源，
+          # 或本机 .local 档；干净 checkout 必缺，结构性失效，与被测产品行为零因果。档保留不删，
+          # 真修法＝把夹具入库（需授权）或改写为不依赖夹具的测试。
           EXCLUDE_FILES=(
             "src/lib/agent/blender-e2e.test.ts"
             "src/lib/agent/orchestrator-beast-frame.test.ts"
@@ -108,6 +111,17 @@ jobs:
             "src/lib/agent/kunpeng-assets.test.ts"
             "src/lib/media/lora-user-state.test.ts"
             "src/components/canvas-workstation/panels/migration.test.ts"
+            "src/components/agent-chat/agent-steer-ui.test.ts"
+            "src/lib/agent/agent-output-cards.test.ts"
+            "src/lib/agent/agent-templates.test.ts"
+            "src/lib/agent/expert-gateway-assets.test.ts"
+            "src/lib/generation-core/generation-workflow.test.ts"
+            "src/lib/mcp/expert-delivery-contracts.test.ts"
+            "src/lib/mcp/harness-guide.test.ts"
+            "src/lib/openui/openui-rich.test.ts"
+            "src/lib/openui/openui-tolerance.test.ts"
+            "src/lib/workflow-dsl/project-ops.test.ts"
+            "src/vendor-bridges/gateway/director-r3.test.ts"
           )
 
           # 排除清单腐化守门：清单里的档必须存在。若某档被删/改名而清单没更新，
