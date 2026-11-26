@@ -243,7 +243,8 @@ test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、�
   // 可 Tab 到、Enter/Space 可开（真 button）＋ Esc 可关 ＋ 点击外部收起。
   assert.match(code, /aria-haspopup="listbox"/);
   assert.match(code, /aria-expanded=\{open\}/);
-  assert.match(code, /aria-label=\{`思考级别：\$\{label\}（低\/中\/高\/极限）`\}/);
+  // 提示条（notice）在场时会把文案追加进 aria-label。
+  assert.match(code, /aria-label=\{`思考级别：\$\{label\}（低\/中\/高\/极限）\$\{notice \? `，\$\{notice\.text\}` : ""\}`\}/);
   assert.match(code, /event\.key === "Escape"/);
   assert.match(code, /addEventListener\("pointerdown"/);
   // 焦点环走 --ring 主题 token。

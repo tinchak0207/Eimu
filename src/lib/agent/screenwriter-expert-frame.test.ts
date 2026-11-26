@@ -16,6 +16,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { loadBundledExpertConstitution } from "./expert-gateway-assets.ts";
 import { readFileSync } from "node:fs";
 import * as nodePath from "node:path";
 
@@ -260,13 +261,13 @@ test("ON：beastMode 布林由 caller 传入（readBeastMode true → 默认 loa
   if (!composed.ok) return;
   // 默认 loader = fs 读 EXPERT_CONSTITUTION_PATH（落位稿存在性本档不假设，
   // 仅当档案可读时校验逐字注入；不可读走下一条拒绝裸奔分支）。
-  let constitution: string | null = null;
+  // 默认 loader 已改读静态 import 的 expert-gateway-assets.json 镜像（非 fs 读落位稿），对照同一来源。
+  let constitution: string;
   try {
-    constitution = readFileSync(nodePath.resolve(process.cwd(), EXPERT_CONSTITUTION_PATH), "utf8");
+    constitution = loadBundledExpertConstitution();
   } catch {
-    constitution = null;
+    return; // 镜像为空资产时默认 loader 同样抛错，走拒绝裸奔分支（另有测试覆盖）
   }
-  if (constitution === null) return;
   const r = assembleScreenwriterPrompt(composed.delegation, {
     beastMode: readBeastMode({ beast_mode: true }),
   });

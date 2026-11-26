@@ -44,7 +44,9 @@ import { grantSubscriptionTermFromRedemption, ingestSubscriptionRedemptions, rea
 import { checkQuotaAvailable, enforceQuotaGate, SURGERY_QUOTA_PRECHECK_ENV } from "./quota-precheck.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const T0 = Date.UTC(2026, 8, 23, 0, 0, 0); // 开通时刻（假时钟起点）
+// 开通时刻（假时钟起点）：取「今天 UTC 零点」。写路径用真实 Date.now() 判期次是否过期，
+// 固定日期会随时间推移让 30 天期自然过期，测试在 2026-10-23 之后全红（时间炸弹，非生产回归）。
+const T0 = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000;
 const CONTROL_PLANE_ENV = {
   GENERATION_DATABASE_URL: "postgres://fake:fake@127.0.0.1:1/fake",
   GENERATION_CONTROL_PLANE_ENABLED: "true",

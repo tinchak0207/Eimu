@@ -21,7 +21,8 @@ test("history card and lightbox both carry the 溯源 entry", () => {
 
   assert.match(card, /label="溯源"/);
   assert.match(card, /onShowLineage\?: \(entry: HistoryEntry\) => void/);
-  assert.match(lightbox, /label="溯源"/);
+  // 灯箱动作已改成 extraActions 对象（label: "溯源"），不再是 JSX 属性。
+  assert.match(lightbox, /label: "溯源"/);
   assert.match(lightbox, /onShowLineage\?: \(entry: HistoryEntry\) => void/);
   // 入口对所有记录常驻（来源不明的存量也要点进来看到「来源不明」，不能藏）。
   assert.match(card, /\{onShowLineage && \(/);

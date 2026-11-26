@@ -4,53 +4,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * SplitLoginButton 三段斜切（Google → GitHub → 微信）契约测试。
- * 组件是 client component（JSX + useState），单测只做源码级断言，
+ * SplitLoginButton 契约测试（2026-11-26 按 55a867597 改版后重写）。
+ * 现形态：单颗渐变「登录」胶囊 + 下拉三种方式（微信 → Google → GitHub）；
+ * 旧的「三段斜切」形态已废。组件是 client component，单测只做源码级断言（变更探针，非行为 oracle），
  * 与 Navbar.auth-ui.test.ts 同一风格。
  */
 const source = readFileSync(join(process.cwd(), "src/components/SplitLoginButton.tsx"), "utf8");
 
-/** 取某个 aria-label 所属的 <button> 片段（到下一个 <button 为止）。 */
-function segment(label: string): string {
-  const start = source.indexOf(`aria-label="${label}"`);
-  assert.notEqual(start, -1, `缺少按钮 aria-label="${label}"`);
-  const end = source.indexOf("<button", start);
-  return end === -1 ? source.slice(start) : source.slice(start, end);
-}
-
-const DIAGONAL_PX = "${DIAGONAL}px";
-
-test("three segments are ordered Google → GitHub → 微信 with their own clip-path", () => {
-  const google = segment("使用 Google 登录");
-  const github = segment("使用 GitHub 登录");
-  const wechat = segment("使用微信登录");
-
-  // 斜切几何：DIAGONAL = 12，斜线自上而下向左倾（与原 2 段同向）。
-  assert.match(source, /const DIAGONAL = 12;/);
-  // 段 0（最左）：左边界贴齐容器左缘，右边界斜切。
-  assert.ok(
-    google.includes(`polygon(0 0, calc(100% + ${DIAGONAL_PX}) 0, calc(100% - ${DIAGONAL_PX}) 100%, 0 100%)`),
-    "段 0 clipPath 必须是左缘垂直、右缘斜切",
-  );
-  // 段 1（中）：左右两条斜边都与邻段公共边重合。
-  assert.ok(
-    github.includes(
-      `polygon(${DIAGONAL_PX} 0, calc(100% + ${DIAGONAL_PX}) 0, calc(100% - ${DIAGONAL_PX}) 100%, -${DIAGONAL_PX} 100%)`,
-    ),
-    "段 1 clipPath 必须两侧斜切",
-  );
-  // 段 2（最右）：左边界必须是「底 -12px」——与段 1 右边界的「底 100%-12px」
-  // 在容器座标重合；写成 12px（垂直左缘）会在交界底部留 24px 透明楔形缺口。
-  assert.ok(
-    wechat.includes(`polygon(${DIAGONAL_PX} 0, 100% 0, 100% 100%, -${DIAGONAL_PX} 100%)`),
-    "段 2 clipPath 左边界必须与段 1 右边界共线（斜切，非垂直）",
-  );
-
-  // 叠序沿用「右压左」：z-0 / z-10 / z-20，且三段各占 1/3、逐段右移。
-  assert.ok(google.includes("absolute inset-y-0 left-0 z-0 flex w-[33.333%]"));
-  assert.ok(github.includes("absolute inset-y-0 left-[33.333%] z-10 flex w-[33.333%]"));
-  assert.ok(wechat.includes("absolute inset-y-0 left-[66.667%] z-20 flex w-[33.333%]"));
-  assert.match(source, /h-10 w-\[196px\] overflow-hidden rounded-full shadow-\[0_4px_14px_rgba\(0,0,0,0\.16\)\] sm:w-\[330px\]/);
+test("trigger is one 登录 pill and the menu lists 微信 → Google → GitHub in order", () => {
+  assert.match(source, /aria-label="登录"/);
+  assert.equal((source.match(/<DropdownMenuItem /g) ?? []).length, 3, "下拉里恰好三种登录方式");
+  const wechat = source.indexOf("微信登录");
+  const google = source.indexOf("Google 登录");
+  const github = source.indexOf("GitHub 登录");
+  assert.ok(wechat !== -1 && google !== -1 && github !== -1, "三种方式文案都必须在");
+  assert.ok(wechat < google && google < github, "顺序必须是 微信 → Google → GitHub");
 });
 
 test("SplitLoginButton exposes onGoogle / onGithub / onWechat and keeps githubBusy", () => {
@@ -58,28 +26,21 @@ test("SplitLoginButton exposes onGoogle / onGithub / onWechat and keeps githubBu
   assert.match(source, /onGithub: \(\) => void;/);
   assert.match(source, /onWechat: \(\) => void;/);
   assert.match(source, /githubBusy\?: string \| null;/);
-  assert.match(source, /onClick=\{onGoogle\}/);
-  assert.match(source, /onClick=\{onGithub\}/);
-  assert.match(source, /onClick=\{onWechat\}/);
-  // 「连接中…」只在 GitHub 段出现。
-  assert.match(source, /githubBusy \? "连接中…" : "GitHub"/);
+  assert.match(source, /onSelect=\{onGoogle\}/);
+  assert.match(source, /onSelect=\{onGithub\}/);
+  assert.match(source, /onSelect=\{onWechat\}/);
+  // 「连接中…」只在 GitHub 项出现。
+  assert.match(source, /githubBusy \? "连接中…" : "GitHub 登录"/);
   const busyMentions = source.match(/连接中…/g) ?? [];
-  assert.equal(busyMentions.length, 1, "连接中… 只允许出现在 GitHub 段");
-});
-
-test("segment labels hide below sm (icon-only on phones)", () => {
-  const labels = source.match(/className="hidden sm:inline"/g) ?? [];
-  assert.equal(labels.length, 3, "三段文字都必须带 hidden sm:inline");
-  assert.match(source, /<span className="hidden sm:inline">Google<\/span>/);
-  assert.match(source, /<span className="hidden sm:inline">微信<\/span>/);
+  assert.equal(busyMentions.length, 1, "连接中… 只允许出现在 GitHub 项");
 });
 
 test("provider marks are inlined: WechatLogo kept, Google uses the official 4-color G", () => {
   assert.match(source, /function WechatLogo/);
-  assert.match(source, /<WechatLogo className="h-4 w-4 shrink-0" \/>/);
-  assert.match(source, /<Github className="h-4 w-4 shrink-0" aria-hidden="true" \/>/);
+  assert.match(source, /<WechatLogo className="h-2\.5 w-2\.5" \/>/);
+  assert.match(source, /<Github className="h-4 w-4 shrink-0 text-\[#1f2328\]" aria-hidden="true" \/>/);
 
-  const google = source.slice(source.indexOf("function GoogleLogo"), source.indexOf("const DIAGONAL"));
+  const google = source.slice(source.indexOf("function GoogleLogo"), source.indexOf("export function SplitLoginButton"));
   assert.match(google, /viewBox="0 0 24 24"/);
   assert.match(google, /aria-hidden="true"/);
   for (const hex of ["#4285F4", "#34A853", "#FBBC05", "#EA4335"]) {
@@ -87,11 +48,8 @@ test("provider marks are inlined: WechatLogo kept, Google uses the official 4-co
   }
 });
 
-test("hover swap keeps the existing per-segment palette", () => {
-  assert.match(source, /hover === "google" \? "bg-\[#3367D6\]" : "bg-\[#4285F4\]"/);
-  assert.match(source, /hover === "github" \? "bg-\[#16181c\]" : "bg-\[#1f2328\]"/);
-  assert.match(source, /hover === "wechat" \? "bg-\[#06ad56\]" : "bg-\[#07c160\]"/);
-  assert.match(source, /onMouseLeave=\{\(\) => setHover\(null\)\}/);
-  const rings = source.match(/focus-visible:ring-2 focus-visible:ring-white\/70 focus-visible:ring-inset/g) ?? [];
-  assert.equal(rings.length, 3, "三段都要保留 focus-visible ring");
+test("menu keeps brand colors only on the icons (wechat green badge, flat trigger)", () => {
+  assert.match(source, /bg-\[#07c160\]/);
+  assert.match(source, /bg-\[linear-gradient\(135deg,#e9f2ff_0%,#f2eaff_100%\)\]/);
+  assert.doesNotMatch(source, /clipPath|polygon\(/, "旧三段斜切几何不得回流");
 });

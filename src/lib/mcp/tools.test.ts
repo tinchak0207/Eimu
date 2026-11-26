@@ -115,6 +115,7 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   run_agent: { prompt: "画一只猫", session_id: "sess-1", timeout_seconds: 30, session_directive: "简短回复" },
   abort_agent_session: { session_id: "sess-1" },
   get_agent_generation_task: { session_id: "sess-1", task_id: "task-1" },
+  save_agent_settings: { thinking_level: "high" },
   check_delivery_contract: {
     expert_id: "music",
     kind: "music_track",

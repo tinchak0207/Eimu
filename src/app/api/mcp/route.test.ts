@@ -80,10 +80,10 @@ test("initialize：capabilities 同时含 tools / resources / prompts", async ()
   assert.equal(status, 200);
   const capabilities = body.result.capabilities;
   assert.deepEqual(capabilities, { tools: {}, resources: {}, prompts: {} });
-  // instructions 必须点出 harness 指南的存在（否则 agent 不会去读）。
+  // 默认只暴露导演工具；instructions 必须点出原子工具（含 harness 指南）要显式 toolset=expert 才可见。
   const instructions = body.result.instructions as string;
-  assert.match(instructions, /eimu:\/\/harness\/guide/);
-  assert.match(instructions, /eimu-harness/);
+  assert.match(instructions, /toolset=expert/);
+  assert.match(instructions, /eimu_direct/);
 });
 
 // ─────────────────────────────────────────── resources

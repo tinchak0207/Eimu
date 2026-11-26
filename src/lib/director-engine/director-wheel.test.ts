@@ -116,8 +116,8 @@ test("CAMERA_TEMPLATES 恰 28 条，逐一 createCameraKeyframes 返回非空关
   }
 });
 
-test("MOTION_TEMPLATES 恰 58 条，逐一 createMotionKeyframes 返回非空关键帧", () => {
-  assert.equal(MOTION_TEMPLATES.length, 58);
+test("MOTION_TEMPLATES 恰 85 条，逐一 createMotionKeyframes 返回非空关键帧", () => {
+  assert.equal(MOTION_TEMPLATES.length, 85);
   for (const template of MOTION_TEMPLATES) {
     const frames = createMotionKeyframes(template.id, template.defaultDurationSec, v(), v(2, 0, 0));
     assert.ok(frames.length >= 1, `${template.id} 应产生关键帧`);

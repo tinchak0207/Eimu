@@ -17,6 +17,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { loadBundledExpertConstitution } from "./expert-gateway-assets.ts";
 import { existsSync, readFileSync } from "node:fs";
 import * as nodePath from "node:path";
 
@@ -336,13 +337,13 @@ test("motion ON：beastMode 布林由 caller 传入（readBeastMode true → 默
   if (!composed.ok) return;
   // 默认 loader = fs 读 EXPERT_CONSTITUTION_PATH（落位稿存在性本档不假设，
   // 仅当档案可读时校验逐字注入；不可读走下一条拒绝裸奔分支）。
-  let constitution: string | null = null;
+  // 默认 loader 已改读静态 import 的 expert-gateway-assets.json 镜像（非 fs 读落位稿），对照同一来源。
+  let constitution: string;
   try {
-    constitution = readFileSync(nodePath.resolve(process.cwd(), EXPERT_CONSTITUTION_PATH), "utf8");
+    constitution = loadBundledExpertConstitution();
   } catch {
-    constitution = null;
+    return; // 镜像为空资产时默认 loader 同样抛错，走拒绝裸奔分支（另有测试覆盖）
   }
-  if (constitution === null) return;
   const r = assembleMotionPrompt(composed.delegation, {
     beastMode: readBeastMode({ beast_mode: true }),
   });
@@ -679,13 +680,13 @@ test("web3d ON：beastMode 布林由 caller 传入（readBeastMode true → 默�
   const composed = composeWeb3dDelegation(WEB3D_VALID_INPUT);
   assert.ok(composed.ok);
   if (!composed.ok) return;
-  let constitution: string | null = null;
+  // 默认 loader 已改读静态 import 的 expert-gateway-assets.json 镜像（非 fs 读落位稿），对照同一来源。
+  let constitution: string;
   try {
-    constitution = readFileSync(nodePath.resolve(process.cwd(), WEB3D_CONSTITUTION_PATH), "utf8");
+    constitution = loadBundledExpertConstitution();
   } catch {
-    constitution = null;
+    return; // 镜像为空资产时默认 loader 同样抛错，走拒绝裸奔分支（另有测试覆盖）
   }
-  if (constitution === null) return;
   const r = assembleWeb3dPrompt(composed.delegation, {
     beastMode: readBeastMode({ beast_mode: true }),
   });

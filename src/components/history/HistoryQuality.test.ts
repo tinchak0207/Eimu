@@ -115,12 +115,13 @@ test("history lightbox never uses a non-multiple-of-5 opacity modifier", () => {
 });
 
 test("the lightbox backdrop is a real arbitrary color, not a dead scale lookup", () => {
-  const source = read("src/components/history/HistoryLightbox.tsx");
-  const className = source.match(/className="hist-lightbox-enter[^"]*"/)?.[0] ?? "";
-
-  assert.ok(className, "lightbox root className not found");
-  assert.doesNotMatch(className, /bg-\[#1f2230\]\/74/);
-  assert.match(className, /bg-\[rgba\(31,34,48,0\.74\)\]/);
+  // 历史灯箱已改走赏阅（Viewer）壳，不再自带背景层；死 scale 写法在历史灯箱与共用 ImageLightbox 都不得出现，
+  // 且 ImageLightbox 的遮罩必须是真实任意色值。
+  const history = read("src/components/history/HistoryLightbox.tsx");
+  assert.doesNotMatch(history, /bg-\[#1f2230\]\/74/);
+  const shared = read("src/components/ImageLightbox.tsx");
+  assert.doesNotMatch(shared, /bg-\[#1f2230\]\/74/);
+  assert.match(shared, /bg-\[rgba\(31,34,48,0\.74\)\]/);
 });
 
 test("the header count matches what the grid actually renders below it", () => {

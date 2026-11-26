@@ -24,7 +24,8 @@ function read(relPath: string) {
 
 test("navbar exposes wallet, history and top-up controls on mobile", () => {
   const source = read("src/components/Navbar.tsx");
-  assert.match(source, /href="\/history"/);
+  // 2026-11 起历史并入左上角「资料库」单钮（bda292e43），Navbar 不再自带 /history 直链。
+  assert.doesNotMatch(source, /href="\/history"/);
   assert.match(source, /SplitLoginButton/);
   assert.doesNotMatch(source, /openAuth|openLogin|openRegister/);
   assert.match(source, /mobile-nav-actions/);

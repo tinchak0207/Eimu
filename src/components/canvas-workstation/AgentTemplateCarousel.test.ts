@@ -191,7 +191,8 @@ test("playground resets template-gallery dismissal on a new agent session and re
   // hook 端：回填走 fromCanvasProject 校验，空快照拒绝落地，不进撤销栈。
   assert.match(hook, /const restoreAgentSnapshot = useCallback/);
   assert.match(hook, /fromCanvasProject\(snapshot\)/);
-  assert.match(hook, /restored\.nodes\.length === 0\) return false/);
+  // allowEmpty 仅供「服务端权威回放」显式放行（见 664 行）；默认空快照仍拒绝落地。
+  assert.match(hook, /restored\.nodes\.length === 0 && !allowEmpty\) return false/);
 });
 
 test("template data carries accent gradient and glow for the poster card", () => {
