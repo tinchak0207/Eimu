@@ -327,7 +327,8 @@ function patchCanvasNode(state: SessionState, unitId: string, nodeId: string, pa
 
 // music_gen completed → 音频节点终态（成功＝url＋cost_coins；失败＝error＋人话原因），配置节点补实际通路。
 /** 仅识别运行时明确回报的已接受、未交付状态；普通失败不因 task_id 存在而变等待。 */
-export function isAcceptedLinkiiMusicPending(value: unknown): value is Record<string, unknown> {
+// 返回 boolean 而非类型谓词：谓词在否定分支把 parsedOut 收窄成 never，调用点读不了 task_id/url 等字段。
+export function isAcceptedLinkiiMusicPending(value: unknown): boolean {
   if (!value || typeof value !== "object") return false
   const receipt = value as Record<string, unknown>
   const error = receipt.error && typeof receipt.error === "object" ? receipt.error as Record<string, unknown> : null

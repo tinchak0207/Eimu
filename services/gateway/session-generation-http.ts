@@ -25,7 +25,8 @@ export async function handleSessionGeneration(key: string, sessionId: string, ta
     })
     if (upstream.status === 404) return unavailable(404, "task_not_found")
     if (!upstream.ok) return unavailable(503, "task_lookup_unavailable")
-    const task = await upstream.json()
+    // Response.json() 在新版 TS 库里是 unknown；上游回包形状由下面的 task_id/id/status 校验兜底。
+    const task = (await upstream.json()) as Record<string, any> | null
     if (task?.task_id !== taskId || task?.id !== taskId || typeof task.status !== "string") {
       return unavailable(503, "task_lookup_unavailable")
     }
