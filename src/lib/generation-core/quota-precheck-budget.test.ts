@@ -14,7 +14,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fetchGatewayUser } from "@/lib/gateway-admin";
+import { fetchGatewayUser } from "@/lib/accounts/gateway-admin";
 import type { GenerationSql } from "./database.ts";
 import {
   SURGERY_QUOTA_PRECHECK_ENV,

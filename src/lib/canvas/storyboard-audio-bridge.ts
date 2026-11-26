@@ -37,7 +37,7 @@
 //     （`@/lib/agent-output-cards`），`audioAnchorId` 的重算走既有轮子 `bindShotAudioTrack`
 //     （`./storyboard-shots`）——键名与锚规则只准一份。
 
-import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
 import { bindShotAudioTrack, type ShotAudioTrackRole } from "./storyboard-shots";
 import type { CanvasNodeMetadata } from "./types";
 

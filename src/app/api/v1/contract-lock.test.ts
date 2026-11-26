@@ -44,7 +44,7 @@ import {
 } from "../../../lib/generation-core/job-repository.ts";
 import type { GenerationSql } from "../../../lib/generation-core/database.ts";
 import type { CreateGenerationJobInput, GenerationJob } from "../../../lib/generation-core/types.ts";
-import { addRateLimitHeaders } from "../../../lib/biz-rate-limit-response-headers.ts";
+import { addRateLimitHeaders } from "../../../lib/accounts/biz-rate-limit-response-headers.ts";
 import { getOrCreateTraceId, withTraceId } from "../../../lib/request-trace.ts";
 
 // ─────────────────────────────────────────── fixtures
@@ -392,7 +392,7 @@ test("铁律①：各端点实际抛出的错误码与路由一一对应（摘�
 });
 
 test("铁律①：认证错误码四件套（store 权威，路由原样透传）", () => {
-  const store = code("src/lib/biz-api-key-store.ts");
+  const store = code("src/lib/accounts/biz-api-key-store.ts");
   for (const [codeName, status] of [
     ["missing_api_key", "401"],
     ["invalid_api_key", "401"],

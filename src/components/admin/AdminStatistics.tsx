@@ -18,7 +18,7 @@
 import { useEffect, useState } from "react";
 import { BarChart3, CircleAlert, Loader2, RefreshCw } from "lucide-react";
 import { NUMBER_LOCALE, text, type UiStringKey } from "@/lib/ui-strings";
-import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
+import { UNATTRIBUTED_SOURCE } from "@/lib/accounts/first-touch-attribution";
 import type {
   ActivationFunnelResult,
   DurationSummary,

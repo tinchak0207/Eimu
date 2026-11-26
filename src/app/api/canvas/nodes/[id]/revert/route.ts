@@ -6,7 +6,7 @@
 // 回退本身也落一版（reason "revert"）——版本历史 append-only，回退可再被回退。
 // 只还原 title＋metadata，座标/尺寸不动（版本＝内容历史，不是版面历史）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 import {
   appendNodeVersion,

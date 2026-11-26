@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 // 2026-09-12 首屏减重拆分：画布铺法是执行侧，完整步骤型别与内建模板都在 payload 档。
-import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
+import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent/agent-templates-payload";
 import { templateToCanvasLayout, applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
-import { AGENT_TEMPLATES_FULL } from "@/lib/agent-templates-payload";
+import { AGENT_TEMPLATES_FULL } from "@/lib/agent/agent-templates-payload";
 
 /** 步骤 outputKind → 生成卡节点类型字串（CanvasNodeType 值即小写名；缺省 image）。 */
 const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, string> = {

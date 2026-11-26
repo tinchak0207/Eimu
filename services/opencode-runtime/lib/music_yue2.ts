@@ -1,10 +1,10 @@
 /**
  * YuE2 client VPS staging 稿（music_gen 第三通路，2026-09-19 机械导出）。
  *
- * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-yue2.ts
+ * 本档由 tools/codegen/export-music-tools-staging.ts 从行为真源 src/lib/generation-core/music-yue2.ts
  * 机械导出：真源全文逐行保留（端点/鉴权/HMAC 签名/契约栏位/错误铁律/600s 超时全在），
  * 零依赖、无 import，除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_yue2.ts
  * env：YUE2_MODAL_ENDPOINT（服务地址，缺省禁用本通路）、YUE2_HMAC_SECRET（HMAC 签名密钥）。
@@ -30,7 +30,7 @@
  *   不支援 image-to-music、不支援时间戳结构控制（`[0:00 - 0:10]` 只有 Lyria 认）、
  *   无 30 秒短档模式、一次一请求、生成较慢（分钟级）。
  *
- * 设计（逐段同构 src/lib/music-flowmusic.ts，白名单差异只有四处：端点、鉴权、
+ * 设计（逐段同构 src/lib/generation-core/music-flowmusic.ts，白名单差异只有四处：端点、鉴权、
  * request/response 栏位、env 名；其余结构照抄：零依赖、requireXxx fail-fast 人话报错、
  * 错误必带原文摘录、繁体注释＋简体文案）：
  *   - env：YUE2_MODAL_ENDPOINT（缺省→本通路停用，工具回落 FlowMusic2API／Gemini Lyria）、

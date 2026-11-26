@@ -12,7 +12,7 @@
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { text, type UiStringKey } from "@/lib/ui-strings";
-import type { AssetLibraryItem, AssetVisibility } from "@/lib/asset-scope";
+import type { AssetLibraryItem, AssetVisibility } from "@/lib/media/asset-scope";
 
 const VISIBILITY_KEY: Record<AssetVisibility, UiStringKey> = {
   owner: "assets.visibility.owner",

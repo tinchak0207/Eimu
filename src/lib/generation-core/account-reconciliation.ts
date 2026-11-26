@@ -23,8 +23,8 @@
 //   billing_operation writeoff             → 无（平台自身损失，不动用户余额）
 //   billing_operation release              → 无（解除预留，不动上游余额）
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { fetchGatewayUser } from "@/lib/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { fetchGatewayUser } from "@/lib/accounts/gateway-admin";
 import {
   computeAccountBalance,
   readAccountLedger,

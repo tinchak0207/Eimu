@@ -15,11 +15,11 @@
 //   - 面板壳／弹层语汇：`src/components/assets/ProjectAssetLibraryPanel.tsx:211-242`（lg-sheet + 右侧滑入 + 标题列）
 //   - 缩图＋点击放大：`src/components/ReferenceImageUpload.tsx:171-186`（缩图按钮）＋ `src/components/ImageLightbox.tsx`（全屏灯箱）
 //   - 上传控件：`src/components/ReferenceImageUpload.tsx:153`（按钮语汇；档案→dataURL 由父层走 `embed-helpers.fileToDataUrl`）
-//   - CSV 转义／下载：`src/lib/history-export.ts` 的 `csvCell` / `triggerDownload`（本刀把它们导出化；**零自创转义逻辑**）
-//   - 图片压缩包：`src/lib/export-zip.ts:38` `exportShotsZip()` 直接用
+//   - CSV 转义／下载：`src/lib/media/history-export.ts` 的 `csvCell` / `triggerDownload`（本刀把它们导出化；**零自创转义逻辑**）
+//   - 图片压缩包：`src/lib/media/export-zip.ts:38` `exportShotsZip()` 直接用
 //   - 单价：`src/lib/generation-model-catalog` 的 `modelPriceLabel`（与站内选模价签同一把尺）
 //
-// 批准状态栏位：形状**由路 1 定义并冻结**，且已落地为 `src/lib/character-cards.ts` 的 `ApprovalState`
+// 批准状态栏位：形状**由路 1 定义并冻结**，且已落地为 `src/lib/media/character-cards.ts` 的 `ApprovalState`
 // ＋判定尺 `isAssetApproved` ＋写入轮子 `setApproval`／`normalizeApprovalState`
 // （分镜侧 storyboard-contract.ts 明文「禁止另建第二套」）。本档**直接消费该真源**：
 //   读取 → `approvalStatusOf`（纯投影）／门槛 → `isAssetApproved`／写回 → 父层 `setApproval`。
@@ -28,14 +28,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Check, Download, ImagePlus, Loader2, Upload, X } from "lucide-react";
 import { ImageLightbox } from "@/components/ImageLightbox";
-import { CHARACTER_CARD_KIND_LABEL, isAssetApproved } from "@/lib/character-cards";
-import type { ApprovalState, CharacterCard } from "@/lib/character-cards";
-import type { AgentInteractionMode } from "@/lib/agent-chat-client";
-import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
-import { modelPriceLabel } from "@/lib/generation-model-catalog";
-import { exportShotsZip } from "@/lib/export-zip";
-import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/image-helpers";
-import { csvCell, triggerDownload } from "@/lib/history-export";
+import { CHARACTER_CARD_KIND_LABEL, isAssetApproved } from "@/lib/media/character-cards";
+import type { ApprovalState, CharacterCard } from "@/lib/media/character-cards";
+import type { AgentInteractionMode } from "@/lib/agent/agent-chat-client";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
+import { modelPriceLabel } from "@/lib/generation-core/generation-model-catalog";
+import { exportShotsZip } from "@/lib/media/export-zip";
+import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/media/image-helpers";
+import { csvCell, triggerDownload } from "@/lib/media/history-export";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────── 冻结契约（只消费，不定义）
@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
  * 也是同一个 shape，该档明文「禁止另建第二套」）。本档直接 import 真源、只做读取投影，
  * 判定一律走真源的 `isAssetApproved`（不重写第二套门槛尺）。
  */
-export type { ApprovalState } from "@/lib/character-cards";
+export type { ApprovalState } from "@/lib/media/character-cards";
 
 /**
  * 显示用读取投影（**不是判定**）：把 `approval` 投影成三态标签。

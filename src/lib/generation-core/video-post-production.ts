@@ -34,8 +34,8 @@
  *      的付费假交付。开了开关才送，送出去之前一律零成本失败。
  */
 
-import { generationModel } from "../generation-model-catalog";
-import type { VideoGenerationType } from "../generation-model-catalog";
+import { generationModel } from "./generation-model-catalog";
+import type { VideoGenerationType } from "./generation-model-catalog";
 import { SupplierRequestError } from "./failure-classifier";
 import { PAID_VIDEO_MAX_SECONDS } from "./paid-video-cost-gate";
 

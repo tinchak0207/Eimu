@@ -51,7 +51,7 @@
 
 ### P0-4 ｜ 专家宪法命令每个 Expert「载配方库」，3 个 Expert 根本没有
 - **尺子**：A6 悬空指针 + A10 ｜ **档**：`expert/expert-constitution.md` 第三条 1「进 Expert 即载配方库，must-load 常驻」由 `subagent.ts:1371-1383` 注入**每个**子代理；而 `expert/registry-digest.txt` 中 `video-director`／`screenwriter`／`critic` 三行写「配方库 未配置」。
-- **加重**：`docs/beast-army-r8-harness-architecture-audit.md:493-494` 实锤「gateway/lib **无任何 skillPaths 消费方**」⇒ 7/7 Expert 的配方库在生产端都没有执行机制。
+- **加重**：`docs/audits/beast-army-r8-harness-architecture-audit.md:493-494` 实锤「gateway/lib **无任何 skillPaths 消费方**」⇒ 7/7 Expert 的配方库在生产端都没有执行机制。
 - **修法**：宪法第三条按 Expert 是否持有 `skillPaths` 条件装配；或改 per-expert 生成，而不是全局统一 4.9KB 常量。
 
 ### P0-5 ｜ 注册在线的 `astra-ad-studio` 自称「GPT-6 Astra / Codex」
@@ -71,7 +71,7 @@
 
 ### P0-8 ｜ critic 条款自相矛盾（第 15 条 vs 第 18 条）
 - **尺子**：A5 不可判定 ｜ **档**：`expert/orchestrator-dispatch-playbook.md:96`（条 15）「**只有需要独立视角时才派** critic Expert」 ⟷ `:102`（条 18）「每个计入最终成品的 Expert 交付物**必须**过 critic…派 `subagent_dispatch expert="critic"`」；`:69` 又说机器层「有触发条件，不是无条件保证」——三处三种效力。
-- **后果**：模型对「到底要不要派」犹豫，`docs/beast-army-r8-harness-architecture-audit.md` 记录过 1204 秒零工具调用的实例。
+- **后果**：模型对「到底要不要派」犹豫，`docs/audits/beast-army-r8-harness-architecture-audit.md` 记录过 1204 秒零工具调用的实例。
 - **修法**：钉死单一语义（机器强制＝唯一路径，删第 18 条手工派遣；或反之），其余处只留一行引用。
 
 ### P0-9 ｜ 生产视频优化器与源码双份漂移 ⇒ kunpeng 6 条硬规则从未上船

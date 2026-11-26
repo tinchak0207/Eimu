@@ -38,3 +38,6 @@ tools/promo-video
 tools/qa
 tools/plugins
 tools/vendor
+
+# Frozen historical tools are not worker/runtime inputs.
+tools/archive

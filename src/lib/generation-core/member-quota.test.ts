@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import type { GenerationSql } from "./database.ts";
 import {
   allocateMemberQuota,
@@ -81,7 +81,7 @@ function fakeNewApi(seed: {
     const current = users.get(userId);
     if (!current) return null;
     return { id: userId, username: `user-${userId}`, quota: current.quota, used_quota: current.used };
-  }) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser;
+  }) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser;
 
   const adjustUserQuota = (async (userId: number, deltaQuota: number) => {
     if (!Number.isFinite(deltaQuota) || deltaQuota === 0) return;
@@ -94,7 +94,7 @@ function fakeNewApi(seed: {
     }
     current.quota += delta;
     adjustments.push({ userId, delta });
-  }) as unknown as typeof import("@/lib/gateway-admin").adjustGatewayUserQuotaExact;
+  }) as unknown as typeof import("@/lib/accounts/gateway-admin").adjustGatewayUserQuotaExact;
 
   /** new-api 内核的一笔消耗：成员花的是自己 user 的 quota（user 层由内核执法）。 */
   function consume(userId: number, quota: number): void {
@@ -595,7 +595,7 @@ test("主帐读不到时可视面返回 null（端点回 503，不画假数字�
         sql: cp.sql,
         fetchUser: (async () => {
           throw new Error("new-api down");
-        }) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser,
+        }) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser,
       },
     );
     assert.equal(view, null);
@@ -605,13 +605,13 @@ test("主帐读不到时可视面返回 null（端点回 503，不画假数字�
 test("成员额度读不到时 readMemberQuota 回 null（预检据此 fail-closed）", async () => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     const missing = await readMemberQuota(999, {
-      fetchUser: (async () => null) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser,
+      fetchUser: (async () => null) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser,
     });
     assert.equal(missing, null);
     const broken = await readMemberQuota(999, {
       fetchUser: (async () => {
         throw new Error("ECONNREFUSED");
-      }) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser,
+      }) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser,
     });
     assert.equal(broken, null);
     assert.equal(await readMemberQuota(0), null, "user_id=0 是无从计费通道，不发请求");

@@ -3,7 +3,7 @@ name: editor-rhythm
 description: 剪辑节奏卡点与体检配方。触发时机：节奏不对／太平／太赶、卡点剪辑、情绪曲线、镜头密度、dead air、高潮落点、节奏报告。任何「节奏」「卡点」「快慢」「呼吸感」类请求必载。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 片B3
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 片B3
               （节奏计算器 analyze_rhythm → curve+flags+climax：avg_shot_len/dialog_ratio/density/鼓点）
               与记忆 timeline-b1-b3-harness-training-e2e（E2E 实测：rhythm 两条 should＝dead_air 100%、pace_flat）。
 工具真源: VPS .opencode/tools/timeline_rhythm.ts 与 gateway/rhythm.ts。

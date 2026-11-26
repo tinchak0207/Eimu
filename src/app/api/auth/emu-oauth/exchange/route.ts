@@ -6,9 +6,9 @@ import {
   toPublicBizApiKey,
   USER_API_KEY_LIMIT,
   type BizKeyDraft,
-} from "@/lib/biz-api-keys";
-import { issueBizApiKey, listBizApiKeys } from "@/lib/biz-api-key-store";
-import { consumeEmuOauthCode } from "@/lib/emu-oauth";
+} from "@/lib/accounts/biz-api-keys";
+import { issueBizApiKey, listBizApiKeys } from "@/lib/accounts/biz-api-key-store";
+import { consumeEmuOauthCode } from "@/lib/accounts/emu-oauth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

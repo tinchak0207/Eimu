@@ -16,7 +16,7 @@
  *    本档内嵌的 JSON 字串必须与它逐域逐栏位一致（测试会读该档比对）。
  */
 
-import { QUALITY_POLICIES, type QualityPolicy } from "@/lib/media-quality-gate";
+import { QUALITY_POLICIES, type QualityPolicy } from "@/lib/media/media-quality-gate";
 
 /** 指南版本（格式 YYYY-MM-DD.N）。 */
 export const HARNESS_GUIDE_VERSION = "2026-10-03.3";

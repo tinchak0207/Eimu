@@ -1,8 +1,8 @@
 /**
  * blender_* 三工具 opencode 形状机械包装器（staging 稿，片 AJ，2026-09-06）。
  *
- * 行为真源 = blender-tools-impl.ts（由 tools/export-blender-tools-staging.ts 从
- * src/lib/blender-tools.ts 机械导出，BlenderToolDef 描述符形状）。本档把它包装成
+ * 行为真源 = blender-tools-impl.ts（由 tools/codegen/export-blender-tools-staging.ts 从
+ * src/lib/agent/blender-tools.ts 机械导出，BlenderToolDef 描述符形状）。本档把它包装成
  * opencode tool()（形状轮子 = src/vendor-bridges/opencode-tools/director_*.ts 的
  * tool({ description, args, execute }) + { title, output: JSON 字串 } 契约）。
  * 描述符 → schema 的映射是纯机械翻译：string→string、number→number、boolean→boolean、

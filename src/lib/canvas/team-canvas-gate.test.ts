@@ -15,8 +15,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { signBizKeySync } from "@/lib/biz-key-sync";
-import { lookupTeamMembershipViaRelay, type TeamMembership } from "@/lib/team-membership-lookup";
+import { signBizKeySync } from "@/lib/accounts/biz-key-sync";
+import { lookupTeamMembershipViaRelay, type TeamMembership } from "@/lib/accounts/team-membership-lookup";
 
 import {
   __resetCanvasStoreForTests,

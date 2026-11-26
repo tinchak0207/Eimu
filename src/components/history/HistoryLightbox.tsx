@@ -15,10 +15,10 @@ import { Coins, Download, GitBranch, Layers, RotateCcw, SlidersHorizontal, Star,
 import { useViewer, type ViewerExtraAction } from "@/components/viewer/ViewerHost";
 import { viewAssetFromHistoryEntry } from "@/lib/viewer/from-items";
 import type { ViewAsset } from "@/lib/viewer/types";
-import { formatCoins, inferEntryKind } from "@/lib/history-types";
-import { canHistoryEntryRerun } from "@/lib/history-rerun";
-import { historyDagNodes, historyDagNodesTotalCoins, workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
-import type { HistoryEntry } from "@/lib/history-types";
+import { formatCoins, inferEntryKind } from "@/lib/media/history-types";
+import { canHistoryEntryRerun } from "@/lib/media/history-rerun";
+import { historyDagNodes, historyDagNodesTotalCoins, workflowDagThumbnailUrl } from "@/lib/media/history-workflow-view";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 export interface HistoryLightboxProps {
   entries: HistoryEntry[];

@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCoins } from "@/lib/history-types";
+import { formatCoins } from "@/lib/media/history-types";
 
 export interface HistoryStatsProps {
   /** 本站保存的记录条数。 */

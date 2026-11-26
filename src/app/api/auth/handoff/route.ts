@@ -5,9 +5,9 @@ import {
   isValidHandoffChallenge,
   isValidHandoffVerifier,
   pollHandoff,
-} from "@/lib/pwa-handoff";
-import { packHandoffTicket } from "@/lib/github-auth";
-import { INVITE_COOKIE, looksLikeInviteCode } from "@/lib/first-touch-attribution";
+} from "@/lib/accounts/pwa-handoff";
+import { packHandoffTicket } from "@/lib/accounts/github-auth";
+import { INVITE_COOKIE, looksLikeInviteCode } from "@/lib/accounts/first-touch-attribution";
 
 export const preferredRegion = "sfo1";
 

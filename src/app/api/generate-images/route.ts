@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import type { GenerateImageRequest } from "@/lib/api-types";
 import { MOCK_MODE, mockGenerateImage } from "@/lib/mock";
-import { getRuntimeGatewayPools } from "@/lib/admin-pool-store";
+import { getRuntimeGatewayPools } from "@/lib/generation-core/admin-pool-store";
 // The queue, the breaker and the host formatter all come from the channel registry —
 // the same module the /admin routing panel reads. If this route ever builds its queue
 // any other way, /admin is lying again; the route tests pin this import.
@@ -13,34 +13,34 @@ import {
   recordEndpointFailure,
   recordEndpointSuccess,
   safeEndpointHost as safeEndpointName,
-} from "@/lib/channel-registry";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
-import { recordRoutingEvent, type RoutingAttempt, type RoutingOutcome } from "@/lib/routing-telemetry";
-import { publicImageUrl } from "@/lib/image-url";
+} from "@/lib/generation-core/channel-registry";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
+import { recordRoutingEvent, type RoutingAttempt, type RoutingOutcome } from "@/lib/generation-core/routing-telemetry";
+import { publicImageUrl } from "@/lib/media/image-url";
 import {
   canPersistGeneratedImages,
   persistGeneratedImage,
   persistUpstreamImageBytes,
   saveGeneratedHistoryEntry,
-} from "@/lib/server-history-store";
-import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
+} from "@/lib/media/server-history-store";
+import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
 import {
   WORKFLOW_SCHEMA_VERSION,
   buildWorkflowPrompt,
   normalizeGenerationWorkflowMetadata,
-} from "@/lib/generation-workflow";
-import { mergeLineageIntoHost, parentsFromReferences } from "@/lib/lineage";
-import type { GenerationWorkflowMetadata } from "@/lib/image-types";
+} from "@/lib/generation-core/generation-workflow";
+import { mergeLineageIntoHost, parentsFromReferences } from "@/lib/media/lineage";
+import type { GenerationWorkflowMetadata } from "@/lib/media/image-types";
 import {
   NANO_BANANA_PRO_MODEL_ID,
   imageGenerationCoins,
   isSupportedImageModel,
   resolveUpstreamModelId,
   type ModelMode,
-} from "@/lib/provider-config";
+} from "@/lib/generation-core/provider-config";
 import { resolveAdobe2ApiModelId } from "@/lib/generation-core/adobe2api-upstream";
-import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
-import { QUOTA_PER_COIN } from "@/lib/new-api-client";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/upstream-sanitizer";
+import { QUOTA_PER_COIN } from "@/lib/accounts/new-api-client";
 import {
   aspectRatioFromImageSize,
   imageSizeForAspectRatio,
@@ -48,11 +48,11 @@ import {
   resolveSupportedResolution,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
-import { normalizeControlNets, toPixaiControlNets, type PixaiControlNetEntry } from "@/lib/pixai-controlnets";
-import { gatesBlock, runPreGenerationGates } from "@/lib/generation-gates";
-import { appendGateLog } from "@/lib/generation-gate-log";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+} from "@/lib/generation-core/generation-model-catalog";
+import { normalizeControlNets, toPixaiControlNets, type PixaiControlNetEntry } from "@/lib/generation-core/pixai-controlnets";
+import { gatesBlock, runPreGenerationGates } from "@/lib/generation-core/generation-gates";
+import { appendGateLog } from "@/lib/generation-core/generation-gate-log";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 
 export const maxDuration = 300;
 // Co-located with the Tencent Cloud gateway (na-siliconvalley-2). One generation makes

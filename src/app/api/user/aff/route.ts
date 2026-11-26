@@ -1,5 +1,5 @@
 // GET /api/user/aff — get referral code
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

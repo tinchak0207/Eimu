@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listLoraUserState, upsertLoraUserState } from "@/lib/lora-user-state";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { listLoraUserState, upsertLoraUserState } from "@/lib/media/lora-user-state";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

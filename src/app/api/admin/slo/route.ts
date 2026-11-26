@@ -3,7 +3,7 @@
 // 跟 /api/admin/channels 一样走 requireAdminSession，不对外公开。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { computeSloWindow, evaluateSloBreaches, type SloThresholds } from "@/lib/generation-core/slo-service";
 
 export const runtime = "nodejs";

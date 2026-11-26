@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
-import type { NewApiUser } from "@/lib/new-api-client";
-import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncStoredAuthFromCookie } from "@/lib/new-api-client";
-import { fetchMe, logout as doLogout } from "@/lib/auth-client";
-import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
+import type { NewApiUser } from "@/lib/accounts/new-api-client";
+import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncStoredAuthFromCookie } from "@/lib/accounts/new-api-client";
+import { fetchMe, logout as doLogout } from "@/lib/accounts/auth-client";
+import type { WelcomeGiftModal } from "@/lib/billing/welcome-gift-modal";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { bindCreativeProjectsAuth } from "@/hooks/use-creative-projects";
 

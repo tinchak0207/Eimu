@@ -26,22 +26,22 @@
 
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { generationCapabilities, generationModel } from "@/lib/generation-model-catalog";
-import { WORKFLOW_SCHEMA_VERSION, buildWorkflowPrompt, normalizeGenerationWorkflowMetadata } from "@/lib/generation-workflow";
-import type { GenerationTaskProjection } from "@/lib/generation-task-types";
-import type { GenerationWorkflowMetadata } from "@/lib/image-types";
-import { imageGenerationCoins, type ModelMode } from "@/lib/provider-config";
-import { DEFAULT_IMAGE_MODEL_ID, SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids.js";
-import { isReferenceImageRole, toReferenceImageRole, type ReferenceImageRole } from "@/lib/image-types";
+import { generationCapabilities, generationModel } from "@/lib/generation-core/generation-model-catalog";
+import { WORKFLOW_SCHEMA_VERSION, buildWorkflowPrompt, normalizeGenerationWorkflowMetadata } from "@/lib/generation-core/generation-workflow";
+import type { GenerationTaskProjection } from "@/lib/generation-core/generation-task-types";
+import type { GenerationWorkflowMetadata } from "@/lib/media/image-types";
+import { imageGenerationCoins, type ModelMode } from "@/lib/generation-core/provider-config";
+import { DEFAULT_IMAGE_MODEL_ID, SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/generation-core/image-model-ids.js";
+import { isReferenceImageRole, toReferenceImageRole, type ReferenceImageRole } from "@/lib/media/image-types";
 import {
   applyProjectStyle,
   normalizeProjectStyleId,
   resolveProjectStyle,
   type AppliedStyleSource,
 } from "@/lib/canvas/project-style";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { GENERATION_TRACE_ID_HEADER, resolveGenerationTraceId } from "@/lib/generation-request-headers";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { GENERATION_TRACE_ID_HEADER, resolveGenerationTraceId } from "@/lib/generation-core/generation-request-headers";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { safeFetchPublicImage } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";

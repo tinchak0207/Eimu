@@ -23,11 +23,11 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Play, Pause, Sparkles, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { svgToDataUrl } from "@/lib/svg-data-url";
+import { svgToDataUrl } from "@/lib/media/svg-data-url";
 import { authHeaders } from "@/lib/canvas/client";
-import { uploadAgentAttachments } from "@/lib/agent-chat-client";
-import { buildAssetUrl, mintUploadsTicket } from "@/lib/agent-uploads";
-import { exportPlanPrevizKeyframes } from "@/lib/director-previz-export";
+import { uploadAgentAttachments } from "@/lib/agent/agent-chat-client";
+import { buildAssetUrl, mintUploadsTicket } from "@/lib/agent/agent-uploads";
+import { exportPlanPrevizKeyframes } from "@/lib/canvas/director-previz-export";
 import { evaluateDirectorFrame, planDuration, resolveShotTimeScale, shotAtTime } from "@/lib/director-engine/playback";
 import { describeShot } from "@/lib/director-engine/shotDescription";
 import { motionTemplate } from "@/lib/director-engine/motionTemplates";

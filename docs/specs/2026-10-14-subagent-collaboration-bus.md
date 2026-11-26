@@ -440,12 +440,12 @@ POST /internal/subagent/notify                    # 子 → 父
 - 新工具 `tools/notify_orchestrator.ts`（子用；含 `kind`/`text`/`question`）。
 - `tools/subagent_status.ts` 透传新栏位；`tools/subagent_stop.ts` 增 `mode`。
 - `opencode.json`：**无需改动即已可用**（2026-10-14 取证修正）。opencode 的语义是「tools map 只写 `false` 项，
-  **未列 = 默认开**」——见 `tools/export-expert-agents.ts:235` 自注；`subagent_message`/`notify_orchestrator`
+  **未列 = 默认开**」——见 `tools/codegen/export-expert-agents.ts:235` 自注；`subagent_message`/`notify_orchestrator`
   均未在任何 agent 的 `false` 清单里 ⇒ 本来就在**全部** agent 上开启。本轮加的 12 个 `=true` 属**声明性冗余**
   （不是使能开关），不承担「让工具可用」的职责。副作用（既有事实，非本轮引入）：子代理同样持有
   `subagent_message`/`subagent_status`/`subagent_stop`（可对兄弟动手），主代理持有 `notify_orchestrator`
   （对它自己无效：`byChildOc`→`subagentParentState` 反查不到 ⇒ 404）。是否按角色收紧属**产品面**，未擅自改。
-  注意生成链：`tools/export-expert-agents.ts` → `gateway/expert/opencode-agents.json`（**该档禁止重生成覆盖**，
+  注意生成链：`tools/codegen/export-expert-agents.ts` → `gateway/expert/opencode-agents.json`（**该档禁止重生成覆盖**，
   见 exporter 档头 2026-10-06 修正）；工具有效性以 `opencode-runtime/opencode.json` 的 agent 节为准。
 - `expert/orchestrator-dispatch-playbook.md`：补「先 status 看实况 → 再 message 纠偏 → 软停保成果 → 续跑」标准动作。
 

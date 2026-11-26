@@ -36,7 +36,7 @@ export interface WorkflowDslStep {
   count?: number;
   /** 门禁步（人工批准后才续跑）。 */
   gate?: boolean;
-  /** 必须 ∈ HARNESS_TOOL_IDS（src/lib/harness-tool-registry.ts；在校验顺序的 tool 段检查，见 compile.ts）。 */
+  /** 必须 ∈ HARNESS_TOOL_IDS（src/lib/agent/harness-tool-registry.ts；在校验顺序的 tool 段检查，见 compile.ts）。 */
   tool?: string;
   /** 透传进节点 metadata 的自由栏位；序列化 ≤4KB。 */
   meta?: Record<string, unknown>;

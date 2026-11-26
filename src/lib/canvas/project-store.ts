@@ -3,8 +3,8 @@
 // 沿用 server-history-store.ts 的模式：每次写入落到新路径 + 修剪旧世代，
 // 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」。单用户写入串行。
 import { randomBytes } from "node:crypto";
-import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
-import { sanitizeBlobSegment } from "@/lib/history-types";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/media/blob-backend";
+import { sanitizeBlobSegment } from "@/lib/media/history-types";
 import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./types";
 // 版本清单清洗与读取端 layout.fromCanvasProject 共用同一份（不制造第二个漂移点）。

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import type { AgentChatState, AgentToolAuthScope } from "@/lib/agent-chat-types";
+import type { AgentChatState, AgentToolAuthScope } from "@/lib/agent/agent-chat-types";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentToolCard } from "./AgentToolCard";
 import { AgentImageCard, type AgentImageCardProps } from "./AgentImageCard";

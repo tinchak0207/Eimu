@@ -371,7 +371,7 @@ test("底部 dock 齿轮＝button（情境感知动作桥），aria-label 仍是
   // 不准静态 import AgentChatSurface 取助理面动作（仍走动作桥）。
   assert.match(
     sidebarCode,
-    /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent-surface-actions"/,
+    /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent\/agent-surface-actions"/,
   );
 });
 

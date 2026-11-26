@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import type { Announcement } from "@/lib/notification-store";
+import type { Announcement } from "@/lib/accounts/notification-store";
 
 export interface AnnouncementDialogProps {
   open: boolean;

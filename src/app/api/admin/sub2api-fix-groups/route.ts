@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { sub2APIAdminFetch, sanitizeSub2APIError } from "@/lib/sub2api-admin";
-import { sub2APIImageGroupId } from "@/lib/sub2api";
+import { sub2APIAdminFetch, sanitizeSub2APIError } from "@/lib/generation-core/sub2api-admin";
+import { sub2APIImageGroupId } from "@/lib/generation-core/sub2api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

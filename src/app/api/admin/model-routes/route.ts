@@ -7,7 +7,7 @@
 // 只在控面执行（control-plane-proxy-routes 代理过去）：要读写 model_route_override 与 supplier 表。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { getGenerationSql } from "@/lib/generation-core/database";
 import {
   clearModelRouteOverride,
@@ -15,9 +15,9 @@ import {
   normalizeRouteInput,
   setModelRouteOverride,
 } from "@/lib/generation-core/model-routing";
-import { GENERATION_MODEL_CATALOG } from "@/lib/generation-model-catalog";
-import { modelBaseName } from "@/lib/provider-config";
-import { routeSupplierId } from "@/lib/model-routes.config";
+import { GENERATION_MODEL_CATALOG } from "@/lib/generation-core/generation-model-catalog";
+import { modelBaseName } from "@/lib/generation-core/provider-config";
+import { routeSupplierId } from "@/lib/generation-core/model-routes.config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

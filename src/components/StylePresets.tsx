@@ -1,6 +1,6 @@
 "use client";
 
-import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
+import { STYLE_PRESETS, type StylePreset } from "@/lib/generation-core/prompt-enhancer";
 import { cn } from "@/lib/utils";
 
 interface StylePresetsProps {

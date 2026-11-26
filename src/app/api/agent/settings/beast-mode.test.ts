@@ -10,7 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BEAST_MODE_SETTINGS_KEY, readBeastMode } from "../../../../lib/expert-registry.ts";
+import { BEAST_MODE_SETTINGS_KEY, readBeastMode } from "../../../../lib/agent/expert-registry.ts";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
@@ -42,7 +42,7 @@ test("readBeastMode：写入 true → 读出 true（写入读取往返）", () =
 
 test("settings route 在转交网关前把 beast_mode 规整为布尔（非 true 一律 false）", () => {
   const route = read("src/app/api/agent/settings/route.ts");
-  assert.match(route, /import \{ BEAST_MODE_SETTINGS_KEY \} from "@\/lib\/expert-registry"/);
+  assert.match(route, /import \{ BEAST_MODE_SETTINGS_KEY \} from "@\/lib\/agent\/expert-registry"/);
   assert.match(route, /BEAST_MODE_SETTINGS_KEY in body/);
   assert.match(route, /\[BEAST_MODE_SETTINGS_KEY\] === true/);
 });
@@ -80,12 +80,12 @@ test("设定弹层撤出四列开关；野兽模式改由输入区思考级别�
 test("client 侧 beast_mode 键与 expert-registry 常量同值（镜像守卫）", () => {
   // expert-registry 含 node:child_process 链，client 模块只能镜像字面量；
   // 该守卫防两处字面量漂移，并守 client 不吞 server-only 链。
-  const registry = read("src/lib/expert-registry.ts");
+  const registry = read("src/lib/agent/expert-registry.ts");
   // <1000 行重构：思考级别映射在 agent-chat-client/types.ts。
   const client = [
-    "src/lib/agent-chat-client.ts",
+    "src/lib/agent/agent-chat-client.ts",
     ...["auth", "session", "settings", "transport", "types"].map(
-      (m) => `src/lib/agent-chat-client/${m}.ts`,
+      (m) => `src/lib/agent/agent-chat-client/${m}.ts`,
     ),
   ]
     .map(read)
@@ -96,5 +96,5 @@ test("client 侧 beast_mode 键与 expert-registry 常量同值（镜像守卫�
   // 思考级别映射真源以 beast_mode 为键（三档 false / 极限 true）。
   assert.match(client, /beast_mode: false/);
   assert.match(client, /beast_mode: true/);
-  assert.doesNotMatch(client, /from "@\/lib\/expert-registry"/, "client 严禁 import server-only 链");
+  assert.doesNotMatch(client, /from "@\/lib\/agent\/expert-registry"/, "client 严禁 import server-only 链");
 });

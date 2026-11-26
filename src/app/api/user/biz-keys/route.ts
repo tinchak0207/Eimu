@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   BIZ_KEY_DEFAULT_RPM,
   generateBizApiKey,
@@ -7,8 +7,8 @@ import {
   toPublicBizApiKey,
   USER_API_KEY_LIMIT,
   type BizKeyDraft,
-} from "@/lib/biz-api-keys";
-import { issueBizApiKey, listBizApiKeys } from "@/lib/biz-api-key-store";
+} from "@/lib/accounts/biz-api-keys";
+import { issueBizApiKey, listBizApiKeys } from "@/lib/accounts/biz-api-key-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

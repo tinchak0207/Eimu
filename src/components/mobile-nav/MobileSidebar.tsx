@@ -43,13 +43,13 @@ import {
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
-import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
-import { loadPersisted } from "@/lib/agent-chat-persistence";
-import { getCurrentAgentSession } from "@/lib/agent-current-session";
+import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent/agent-chat-client";
+import { loadPersisted } from "@/lib/agent/agent-chat-persistence";
+import { getCurrentAgentSession } from "@/lib/agent/agent-current-session";
 import {
   requestAgentSurfaceAction,
   type AgentSurfaceAction,
-} from "@/lib/agent-surface-actions";
+} from "@/lib/agent/agent-surface-actions";
 import { cn } from "@/lib/utils";
 import "./mobile-sidebar.css";
 

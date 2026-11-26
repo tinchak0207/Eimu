@@ -1,6 +1,6 @@
 # PATCH-PLAN — blender_* 三工具 VPS gateway 落位稿（片G，2026-09-06）
 
-**性质：staging 稿，本片未上 VPS（零 SSH）。** 行为真源 `src/lib/blender-tools.ts`；opencode 形状稿 `services/blender-gateway/blender_tools.ts`（= VPS 端 `lib/blender-tools-impl.ts` 整份内容）。桥（`services/blender-bridge/`，片A 交付）本机已验收，VPS 侧进程管理待拍板（见 §5）。
+**性质：staging 稿，本片未上 VPS（零 SSH）。** 行为真源 `src/lib/agent/blender-tools.ts`；opencode 形状稿 `services/blender-gateway/blender_tools.ts`（= VPS 端 `lib/blender-tools-impl.ts` 整份内容）。桥（`services/blender-bridge/`，片A 交付）本机已验收，VPS 侧进程管理待拍板（见 §5）。
 
 配方依据：记忆 `opencode-autopsy-gateway-surgery-recipe`（tee 中转→python 补丁→bun build→重启→journalctl）、`agent-harness-deny-table-architecture`（deny 真源/gateway 60s 自读）、`2026-09-02-director-tools-piece4-deploy`（tools+lib 落位 install 644、/tmp sftp 限制、bun 直调 smoke、restart opencode-server 才生效）。
 
@@ -8,7 +8,7 @@
 
 | # | staging 档 / 内容来源 | VPS 落位路径 | 动作 | 属主/权限 |
 |---|---|---|---|---|
-| 1 | `blender_tools.ts`（整份，片 AJ 起由 tools/export-blender-tools-staging.ts 机械导出） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts` | 新增 | root 644 |
+| 1 | `blender_tools.ts`（整份，片 AJ 起由 tools/codegen/export-blender-tools-staging.ts 机械导出） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts` | 新增 | root 644 |
 | 1b | `blender_tools_adapter.ts`（整份，wrapBlenderTool 机械包装） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts` | 新增 | root 644 |
 | 2 | adapter blender_exec | `/opt/agent-harness/workspace/.opencode/tools/blender_exec.ts` | 新增 | root 644 |
 | 3 | adapter blender_render | `/opt/agent-harness/workspace/.opencode/tools/blender_render.ts` | 新增 | root 644 |
@@ -17,7 +17,7 @@
 | 6 | env 两键 | `/opt/agent-harness/.env` 追加 `BLENDER_BRIDGE_URL=http://127.0.0.1:8765`（`BLENDER_BIN` 见 §5） | 追加 | — |
 | 7 | 产物回传（片 AJ，2026-09-06） | 桥 `server.py` 增 `GET /v1/artifact?path=`（out/ 白名单+binary 回传）；真源 `blender-tools.ts` 成功 result 增 `artifact_base_url`（随 §1 导出稿自动在 impl 内）；agent 以 `${artifact_base_url}?path=<rel>` 经反向隧道取回，沙箱不自持档案 | 随桥/impl 更新 | — |
 
-- **注册表不需要加 id**：opencode 工具注册是目录扫描制（`.opencode/tools/*.ts` 落档即注册），无 id 清单档要改。本地 `src/lib/harness-tool-registry.ts` 已含 `blender_exec/blender_export_gltf/blender_render`（P0-4 片C 已登记，VPS 同步属 repo deploy 流程，不在本片）。
+- **注册表不需要加 id**：opencode 工具注册是目录扫描制（`.opencode/tools/*.ts` 落档即注册），无 id 清单档要改。本地 `src/lib/agent/harness-tool-registry.ts` 已含 `blender_exec/blender_export_gltf/blender_render`（P0-4 片C 已登记，VPS 同步属 repo deploy 流程，不在本片）。
 - `.opencode/` 目录 sftp 直接写会 Permission denied——一律先落 `/tmp` 再 `sudo cp`（记忆 director R1）。
 
 三个 adapter 档内容（各 3 行，片 AJ 改制：impl 为 BlenderToolDef 描述符形状（机械导出），由
@@ -106,7 +106,7 @@ vps.py run "export PATH=\$PATH:/home/ubuntu/.bun/bin && cd /opt/agent-harness/wo
 #   invalid_args 负例：render_engine="octane" → invalid_args 不发网络请求
 ```
 
-## 4. deny 例外清单（从 docs/blender-bridge-notes.md §5 继承，VPS 侧表述）
+## 4. deny 例外清单（从 docs/runbooks/blender-bridge-notes.md §5 继承，VPS 侧表述）
 
 deny 表唯一真源 = `/opt/agent-harness/workspace/.opencode/opencode.json` 的 `permission.bash`；gateway 每 60s 自动重读，**改表不重启 gateway**。本片结论：
 
@@ -133,7 +133,7 @@ vps.py run "sudo rm -f /opt/agent-harness/workspace/.opencode/tools/blender_exec
 # tools 目录整体还原（若 adapter 之外有意外改动）：sudo rm -rf .opencode/tools && sudo cp -a /tmp/tools.bak-MMDD-blender .opencode/tools
 ```
 
-## 7. 验收对账（上线当天照 docs/blender-bridge-notes.md §6 跑）
+## 7. 验收对账（上线当天照 docs/runbooks/blender-bridge-notes.md §6 跑）
 
 - [ ] 桥 GET /v1/health 200 且 gpu 栏位非空
 - [ ] 三档落位 + opencode-server 重启 journalctl 零错

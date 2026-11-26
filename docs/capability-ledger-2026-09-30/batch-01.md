@@ -131,18 +131,18 @@
 ## 非程式码能力
 
 - VPS／部署：`deploy/gatus`（config.yaml + docker-compose）自架状态页与 2h 间隔生产探测；`vercel.json` 配置 Vercel Cron 每分钟打 `/api/cron/generation-worker` ｜ 证据: 4860f1ed, ec748a51
-- DB 迁移：`db/migrations/001`~`007` 七支 schema 上线（生成控制平面、admin 配置审计、canary、帐务对帐、workflow lineage、LoRA 用户态、biz key）＋ `tools/migrate-generation-db.ts` ｜ 证据: 4860f1ed
-- DB 迁移：`tools/control-plane-bootstrap.ts` 与 `tools/seed-generation-suppliers.ts` 初始化控制平面与供应商 seed ｜ 证据: 4860f1ed
-- DB 迁移：`tools/run-canary.ts` 跑 canary run（对应 migrations/003） ｜ 证据: 4860f1ed
+- DB 迁移：`db/migrations/001`~`007` 七支 schema 上线（生成控制平面、admin 配置审计、canary、帐务对帐、workflow lineage、LoRA 用户态、biz key）＋ `tools/ops/database/migrate-generation-db.ts` ｜ 证据: 4860f1ed
+- DB 迁移：`tools/ops/database/control-plane-bootstrap.ts` 与 `tools/ops/suppliers/seed-generation-suppliers.ts` 初始化控制平面与供应商 seed ｜ 证据: 4860f1ed
+- DB 迁移：`tools/ops/suppliers/run-canary.ts` 跑 canary run（对应 migrations/003） ｜ 证据: 4860f1ed
 - 外部服务：Adobe IMS OAuth 回调/设定链路（`/api/adobe/*`）与 Adobe2API 帐号导入（`/api/admin/adobe2api/import`） ｜ 证据: 4860f1ed
 - 外部服务：微信公众平台测试号被动回覆接口 URL 配置（需微信端配置 token 与 URL 指向 `/api/auth/wechat/msg`） ｜ 证据: ec748a51
 - 运营流程：从 Vercel「6h 前生产部署」全量恢复源码／品牌名／差异档（三笔 restore commit），属事故恢复运营动作而非开发 ｜ 证据: ec748a51, 6ec4f018, 425ac035
-- 运营流程：上游帐号池导入与 biz 帐号开通（`/api/admin/account-pools/import`、`tools/provision-biz-account.ts`、`tools/issue-biz-key.ts`、`tools/verify-production-image-password.ps1`） ｜ 证据: 4860f1ed
-- 文档：`docs/biz-api.md`／`docs/biz-api-guide.md` 随 B 端能力更新；`/v1/openapi.json` 契约同步；`public/llms.txt` 供 agent 消费 ｜ 证据: e19103a3, 984b9878
+- 运营流程：上游帐号池导入与 biz 帐号开通（`/api/admin/account-pools/import`、`tools/ops/accounts/provision-biz-account.ts`、`tools/ops/accounts/issue-biz-key.ts`、`tools/verify-production-image-password.ps1`） ｜ 证据: 4860f1ed
+- 文档：`docs/runbooks/biz-api.md`／`docs/runbooks/biz-api-guide.md` 随 B 端能力更新；`/v1/openapi.json` 契约同步；`public/llms.txt` 供 agent 消费 ｜ 证据: e19103a3, 984b9878
 - 文档／计画：`docs/archive/plans/2026-08-22-large-file-refactor.md` 大型档案重构计画与 4 份 domain 分析（canvas/core/input/workstation） ｜ 证据: e7407935
 - 文档：`DESIGN.md`、`PRODUCT.md` 作为 UI/产品决策权威来源 ｜ 证据: e7407935
 - 契约测试守门：`agent-chat-ui.test.ts`、`character-cards.test.ts`、`canvas-reducer-adapter.test.ts`、`sku-engine.test.ts`、`batch-service.test.ts`、`agent-profile-store.test.ts`、`tailwind-opacity-modifier.test.ts` 等以「读旧档＋新档拼接」方式锁定语义不放宽 ｜ 证据: e62cf333, a7837658, e19103a3, 5913f5a7
-- 运营验证产物：`.codex-image-data-smoke.mjs`、`tools/run-production-image-upstream-probe.ps1` 等冒烟/探测脚本 ｜ 证据: 4860f1ed
+- 运营验证产物：`.codex-image-data-smoke.mjs`、`tools/archive/windows/run-production-image-upstream-probe.ps1` 等冒烟/探测脚本 ｜ 证据: 4860f1ed
 
 ## 边界与拒绝
 

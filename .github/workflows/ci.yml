@@ -71,7 +71,7 @@ jobs:
           # 只有两类原因，且都已在本机实测确认与「被测代码」零因果：
           #
           # A. 需要外部服务（CI 不可达）
-          #    src/lib/blender-e2e.test.ts
+          #    src/lib/agent/blender-e2e.test.ts
           #      需真 3D bridge http://127.0.0.1:8765/v1/execute；不可达时 health 重试
           #      上限 10 分钟／每案等 600s，整批看起来像「测试挂了」，实际是等不到外部服务。
           #
@@ -80,33 +80,33 @@ jobs:
           #    干净 checkout 不存在这些档 → readFileSync ENOENT 或逐字/行号对账失败。
           #    本地绿只是因为夹具存在于本机工作区。真正修法是把它们入库（需授权），
           #    不是删断言、也不是 `|| true`。
-          #    - src/lib/orchestrator-beast-frame.test.ts  → orchestrator-dispatch-playbook.md
+          #    - src/lib/agent/orchestrator-beast-frame.test.ts  → orchestrator-dispatch-playbook.md
           #      （另有 2 条本地既有红灯：片E/片F 的行号锚点 L152 已不存在于该档）
-          #    - src/lib/blender-expert-frame.test.ts     → expert-constitution.md（DIRECTOR_EXPERT_CONSTITUTION_PATH）
-          #    - src/lib/blender-honesty-gate.test.ts     → expert-constitution.md
-          #    - src/lib/critic-expert-frame.test.ts      → expert-delivery-contracts.json
-          #    - src/lib/music-expert-frame.test.ts       → expert-constitution.md（EXPERT_CONSTITUTION_PATH）
+          #    - src/lib/agent/blender-expert-frame.test.ts     → expert-constitution.md（DIRECTOR_EXPERT_CONSTITUTION_PATH）
+          #    - src/lib/agent/blender-honesty-gate.test.ts     → expert-constitution.md
+          #    - src/lib/agent/critic-expert-frame.test.ts      → expert-delivery-contracts.json
+          #    - src/lib/agent/music-expert-frame.test.ts       → expert-constitution.md（EXPERT_CONSTITUTION_PATH）
           #
           # C. 被测源码在本分支已删除（结构性失效，与本分支产品行为零因果）
           #    src/components/pro-workstation/** 已被 canvas-workstation 取代并删除，
           #    下列测试仍 readFileSync 旧路径 → 干净 checkout 必 ENOENT。
           #    本地同样红；保留测试档不入库删除（大规模删测试需单独授权），只在本闸排除。
           #    - src/components/PricingSync.test.ts          → 另含一条旧 pro-workstation 源码断言
-          #    - src/lib/kunpeng-assets.test.ts
-          #    - src/lib/lora-user-state.test.ts
+          #    - src/lib/agent/kunpeng-assets.test.ts
+          #    - src/lib/media/lora-user-state.test.ts
           #    - src/components/canvas-workstation/panels/migration.test.ts
           #
           # 本机基线（2026-10-20 快照 worktree、排除上列 11 档）：tests 4377 / pass 4363 / fail 0 / skipped 14
           EXCLUDE_FILES=(
-            "src/lib/blender-e2e.test.ts"
-            "src/lib/orchestrator-beast-frame.test.ts"
-            "src/lib/blender-expert-frame.test.ts"
-            "src/lib/blender-honesty-gate.test.ts"
-            "src/lib/critic-expert-frame.test.ts"
-            "src/lib/music-expert-frame.test.ts"
+            "src/lib/agent/blender-e2e.test.ts"
+            "src/lib/agent/orchestrator-beast-frame.test.ts"
+            "src/lib/agent/blender-expert-frame.test.ts"
+            "src/lib/agent/blender-honesty-gate.test.ts"
+            "src/lib/agent/critic-expert-frame.test.ts"
+            "src/lib/agent/music-expert-frame.test.ts"
             "src/components/PricingSync.test.ts"
-            "src/lib/kunpeng-assets.test.ts"
-            "src/lib/lora-user-state.test.ts"
+            "src/lib/agent/kunpeng-assets.test.ts"
+            "src/lib/media/lora-user-state.test.ts"
             "src/components/canvas-workstation/panels/migration.test.ts"
           )
 

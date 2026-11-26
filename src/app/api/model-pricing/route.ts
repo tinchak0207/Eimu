@@ -9,7 +9,7 @@
 // 触发背景重取，下一个请求就拿新值；2026-10-01 效能审计 P1-E 由 60 拉长，冷 MISS 实测 1.1–1.6s）。
 
 import { NextResponse } from "next/server";
-import { getRuntimeModelPricingOverrides } from "@/lib/pricing-overrides";
+import { getRuntimeModelPricingOverrides } from "@/lib/billing/pricing-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

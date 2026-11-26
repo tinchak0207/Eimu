@@ -13,7 +13,7 @@
 import { memo, useState } from "react";
 import { Check, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BUILT_IN_RECIPE_TEMPLATES, type RecipeTemplate } from "@/lib/recipe-templates";
+import { BUILT_IN_RECIPE_TEMPLATES, type RecipeTemplate } from "@/lib/agent/recipe-templates";
 import type { UserRecipeTemplateItem } from "./use-recipe-templates";
 
 interface PendingTemplate {

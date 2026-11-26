@@ -2,15 +2,15 @@
 
 **性质：staging 稿，本片未上 VPS（零 SSH）。** 行为真源 = `src/lib/shortdrama-domain/index.ts`
 `videoChain()`（本片新增 `scene_card_ref` / `camera_trajectory` 两可选栏接线）＋
-`src/lib/scene3d-video-fusion.ts`（宽容解析＋融合，只调用片 Z 契约）。
+`src/lib/generation-core/scene3d-video-fusion.ts`（宽容解析＋融合，只调用片 Z 契约）。
 本档只载 VPS handler 消费配方与落位命令，**行为零新增**。
 
 ## 0. 谁是真源、谁是消费端（轮子对照）
 
 | 层 | 档 | 角色 |
 |---|---|---|
-| 契约（片 Z，禁改） | `src/lib/blender-to-video-bridge.ts` / `src/lib/camera-trajectory-to-prompt.ts` / `invisible-prompt-director.ts DirectorOptions` | references 组装 / Camera 词翻译 / 接线契约 |
-| 融合（片AC 新增） | `src/lib/scene3d-video-fusion.ts` | unknown → 契约形宽容解析；任一形状不合回 null＝零行为变化 |
+| 契约（片 Z，禁改） | `src/lib/agent/blender-to-video-bridge.ts` / `src/lib/generation-core/camera-trajectory-to-prompt.ts` / `invisible-prompt-director.ts DirectorOptions` | references 组装 / Camera 词翻译 / 接线契约 |
+| 融合（片AC 新增） | `src/lib/generation-core/scene3d-video-fusion.ts` | unknown → 契约形宽容解析；任一形状不合回 null＝零行为变化 |
 | C 端面（片AC 接线） | `src/app/api/generate-videos/route.ts` | body 增 `scene_card`/`camera_trajectory`（snake/camel 双读）→ `optimizeVideoPrompt` options 穿 DirectorOptions；data URL 参考帧 → File 进 multipart（cap 2、不顶用户上传位） |
 | agent 工具面（片AC 接线） | `src/lib/shortdrama-domain/index.ts` `videoChain()` | `last_frame_video_chain` 输入增 `scene_card_ref`/`camera_trajectory`；同时合法 → 输出 `sceneDirector`（referenceDirective/cameraDirective/references/notes） |
 | VPS 消费端（本稿） | `/opt/agent-harness/workspace/.opencode/lib/shortdrama-video-chain-impl.ts` 同构档 | 把 `output.sceneDirector.cameraDirective` 并进视频生成请求 prompt；references 走 C 端直调通道（见 §2） |

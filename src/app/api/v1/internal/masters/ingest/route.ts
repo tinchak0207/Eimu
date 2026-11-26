@@ -21,7 +21,7 @@ import {
   ingestMasterExport,
   validateMasterIngestPayload,
 } from "@/lib/generation-core/master-ingest-service";
-import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hmac";
+import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/accounts/memory-hmac";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";

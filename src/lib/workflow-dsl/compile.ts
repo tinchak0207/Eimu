@@ -27,7 +27,7 @@ import {
   type CanvasNode,
   type CanvasNodeMetadata,
 } from "../canvas/types";
-import { HARNESS_TOOL_ID_LIST, HARNESS_TOOL_IDS } from "../harness-tool-registry";
+import { HARNESS_TOOL_ID_LIST, HARNESS_TOOL_IDS } from "../agent/harness-tool-registry";
 import {
   WORKFLOW_NS_PATTERN,
   validateWorkflowDsl,

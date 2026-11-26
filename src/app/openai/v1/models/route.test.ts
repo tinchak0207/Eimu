@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids";
+import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/generation-core/image-model-ids";
 import {
   AUTH_HEADER,
   clearCompatEnv,

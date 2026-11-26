@@ -1,6 +1,6 @@
 // 作品公开分享：建立 / 列出 / 撤销。
 //
-// 三条规矩（都在纯函式层有对应断言，见 src/lib/share-remix.test.ts）：
+// 三条规矩（都在纯函式层有对应断言，见 src/lib/media/share-remix.test.ts）：
 //   ①shareId 由 128-bit 随机产生，不能由 artifact/entry id 推得。
 //   ②预设不公开——没有点过分享就没有记录，/p/<shareId> 查无此页。
 //   ③撤销＝删记录，删完同一条连结当场 404。
@@ -9,18 +9,18 @@
 // 这里不另造存储、不搬图片。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { listGeneratedHistoryEntries, persistGeneratedImage } from "@/lib/server-history-store";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { listGeneratedHistoryEntries, persistGeneratedImage } from "@/lib/media/server-history-store";
 import { getSiteUrl } from "@/lib/site-url";
-import { inviteCodeFor, referralSecret } from "@/lib/referral-code";
-import { isShareId } from "@/lib/share-id";
+import { inviteCodeFor, referralSecret } from "@/lib/billing/referral-code";
+import { isShareId } from "@/lib/media/share-id";
 import {
   buildShareSnapshot,
   buildShareUrl,
   shareableResult,
   type ShareSnapshot,
-} from "@/lib/share-remix";
-import { createShare, listSharesForUser, revokeShare, setShareHidden } from "@/lib/share-store";
+} from "@/lib/media/share-remix";
+import { createShare, listSharesForUser, revokeShare, setShareHidden } from "@/lib/media/share-store";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

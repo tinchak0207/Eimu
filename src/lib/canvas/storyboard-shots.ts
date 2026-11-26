@@ -26,7 +26,7 @@
 // `compactMetadataForAgent` 两处白名单（真源＝`node-metadata-fields.ts`），漏一端＝
 // 刷新/回旧会话后候选集与星标凭空消失且不报错（同 sceneCard / storyboardShot 家族病灶）。
 
-import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
 import { normalizeTaskVersions } from "./task-versions";
 import type { CanvasNode, CanvasNodeMetadata, CanvasNodeStatus } from "./types";
 

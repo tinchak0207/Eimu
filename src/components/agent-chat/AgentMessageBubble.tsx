@@ -3,11 +3,11 @@
 import { memo, useEffect, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
 import { Brain, Check, ChevronDown, Copy, Navigation } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentAssistantTextItem, AgentSteerStatus, AgentUserTurnItem } from "@/lib/agent-chat-types";
+import type { AgentAssistantTextItem, AgentSteerStatus, AgentUserTurnItem } from "@/lib/agent/agent-chat-types";
 import { parseUserAttachmentBlock, AgentAttachmentCards } from "./AgentAttachmentCards";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { useAgentChatSend } from "./agent-chat-send-context";
-import { useHideAgentReasoning } from "@/lib/agent-display-preferences";
+import { useHideAgentReasoning } from "@/lib/agent/agent-display-preferences";
 
 /**
  * REQ-D2：steer 状态 → 人话（与网关 steer-core.ts 的 SteerStatus 值域一一对应）。

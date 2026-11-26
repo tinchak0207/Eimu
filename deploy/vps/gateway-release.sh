@@ -618,7 +618,7 @@ cmd_guard() {
 # 只读查 VPS ledger + opencode.db；样本不足（<5）跳过不挡。可用 --skip-media-wf-coverage 跳过。
 run_media_wf_coverage() {
   [ "$SKIP_MEDIA_WF_COVERAGE" -eq 1 ] && { log "SKIP media workflow_write coverage（--skip-media-wf-coverage）"; return 0; }
-  local script="$REPO_ROOT/tools/check-media-workflow-write-coverage.py"
+  local script="$REPO_ROOT/tools/qa/check-media-workflow-write-coverage.py"
   [ -f "$script" ] || die "找不到覆盖率脚本：$script"
   log "== 媒体会话 workflow_write 覆盖率发版门 =="
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -629,7 +629,7 @@ run_media_wf_coverage() {
   local remote_py="/tmp/check-media-workflow-write-coverage.$$.py"
   run_remote_binary "cat > $remote_py" < "$script" || die "上传覆盖率脚本失败"
   if ! run_remote "MEDIA_WF_DAYS=${MEDIA_WF_DAYS:-7} MEDIA_WF_MIN_COVERAGE=${MEDIA_WF_MIN_COVERAGE:-0.15} python3 $remote_py; ec=\$?; rm -f $remote_py; exit \$ec"; then
-    die "媒体会话 workflow_write 覆盖率未过门槛（见 tools/check-media-workflow-write-coverage.py；临时跳过加 --skip-media-wf-coverage）"
+    die "媒体会话 workflow_write 覆盖率未过门槛（见 tools/qa/check-media-workflow-write-coverage.py；临时跳过加 --skip-media-wf-coverage）"
   fi
   log "media workflow_write coverage PASS"
 }
@@ -740,7 +740,7 @@ cmd_release() {
   local GW_EXPECTED
   GW_EXPECTED="$(capture_gateway_identity)" || die "无法读取当前 gateway 身份"
   gateway_ancestry_gate "$sha_full"
-  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha_full" --repo "$REPO_ROOT"; fi
+  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/qa/check-opencode-tool-schemas.mjs" --commit "$sha_full" --repo "$REPO_ROOT"; fi
   sha_short="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha_full")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"; rel="$sha_short-$ts-$$"
   run_recon

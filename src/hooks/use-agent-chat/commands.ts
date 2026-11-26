@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
-import { AGENT_STEER_QUEUE_TTL_MS, type AgentChatState } from "@/lib/agent-chat-types";
+import { AGENT_STEER_QUEUE_TTL_MS, type AgentChatState } from "@/lib/agent/agent-chat-types";
 import {
   deleteAgentSession,
   isSteerReplayRejected,
@@ -12,9 +12,9 @@ import {
   steerAgentSession,
   steerReplayStatus,
   type DirectSendCapability,
-} from "@/lib/agent-chat-client";
-import { clearPersisted, type PersistedAgentChat } from "@/lib/agent-chat-persistence";
-import type { FrameBatcher } from "@/lib/agent-chat-frame-batch";
+} from "@/lib/agent/agent-chat-client";
+import { clearPersisted, type PersistedAgentChat } from "@/lib/agent/agent-chat-persistence";
+import type { FrameBatcher } from "@/lib/agent/agent-chat-frame-batch";
 import { INITIAL_BACKOFF_MS, newSteerId, type AgentChatAction } from "./core";
 import { keepSentenceOnSend } from "./logged-out-start";
 import type { ResumableAgentChat, UseAgentChatReturn } from "./types";

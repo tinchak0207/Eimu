@@ -9,8 +9,8 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
 import type { AlignMode } from "@/lib/canvas/interaction";
-import type { CharacterCardKind } from "@/lib/character-cards";
-import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/character-cards";
+import type { CharacterCardKind } from "@/lib/media/character-cards";
+import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/media/character-cards";
 import type { CanvasMenuItem } from "../CanvasContextMenu";
 import { imageUrlOf, type CreateMenuState, type EditorState, type MenuState } from "./embed-helpers";
 

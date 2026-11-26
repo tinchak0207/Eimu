@@ -6,11 +6,11 @@
 // 取消与退款走既有门面 `cancelGenerationJobWithRefund`（与单任务 DELETE 同一条路径，本路由不碰帐本）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { looksLikeBizApiKey, readBearerToken } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { looksLikeBizApiKey, readBearerToken } from "@/lib/accounts/biz-api-keys";
 import { cancelGenerationJobWithRefund } from "@/lib/generation-core/cancel-service";
 import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
-import { authenticateImageUser } from "@/lib/image-billing";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";

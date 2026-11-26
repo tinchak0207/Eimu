@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { deleteHistoryEntries, getHistoryEntry, patchHistoryEntry } from "@/lib/server-history-store";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { deleteHistoryEntries, getHistoryEntry, patchHistoryEntry } from "@/lib/media/server-history-store";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

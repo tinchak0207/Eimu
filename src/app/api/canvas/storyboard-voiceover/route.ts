@@ -31,7 +31,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
 import { mutateCanvasProject, readCanvasProject } from "@/lib/canvas/project-store";
 import {
   applyVoiceoverShotsToNodes,
@@ -45,10 +45,10 @@ import {
   listCompletedGenerationArtifacts,
 } from "@/lib/generation-core/job-repository";
 import { resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-response";
-import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
-import { TTS_1_MODEL_ID } from "@/lib/image-model-ids";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
+import { ttsQuotaForChars } from "@/lib/generation-core/generation-model-catalog/tts-pricing";
+import { TTS_1_MODEL_ID } from "@/lib/generation-core/image-model-ids";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

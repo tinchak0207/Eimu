@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWechatLoginState, expireWechatLogin } from "@/lib/wechat-login";
+import { getWechatLoginState, expireWechatLogin } from "@/lib/accounts/wechat-login";
 
 export const preferredRegion = "sfo1";
 

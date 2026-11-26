@@ -3,7 +3,7 @@ name: editor-look
 description: 剪辑风格与调色配方。触发时机：调色、滤镜、LUT、质感、胶片感、日系冷调、暖调、转场样式、字卡／字幕卡。任何「看起来像…」「风格改成…」「配色／色调」类剪辑请求必载。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 片B7
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 片B7
               （apply_style：filterPresets→clip.filter 四滑杆、转场 transitionPresets、字卡 subtitleExport/ASS；
               fx/追踪 unsupported）与 §1 妥协清单第 5 条（fxComponents 花字农场不做，风格走 ffmpeg 原生子集）。
 工具真源: VPS .opencode/tools/timeline_style.ts 与 gateway/style.ts（已入库轮子 presets/filterPresets.ts、

@@ -1,7 +1,7 @@
 // 创作项目 · 聊天条目 API：把网关会话挂到项目上（upsert / 解绑）。
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { MAX_CHAT_SESSION_ID_LENGTH, mutateCreativeProject } from "@/lib/creative-project/store";
 import type { ProjectChat } from "@/lib/creative-project/types";
 

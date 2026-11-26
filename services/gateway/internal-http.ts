@@ -315,7 +315,7 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
  * 共通核心全文编译进 system prompt，一次读完，不需 agent 多步思考。
  */
 
-// ⚠️ P0-9（2026-10-06）：本常量与仓库 src/lib/agent-prompt-director.ts 的
+// ⚠️ P0-9（2026-10-06）：本常量与仓库 src/lib/agent/agent-prompt-director.ts 的
 // PROMPT_DIRECTOR_SYSTEM_PROMPT ＋ KUNPENG_SEEDANCE_SUPPLEMENT **逐字等价**（gateway 是独立
 // 发布单元，运行时无法 import 仓库 src/，见 memory-recall.ts 顶注「禁止 import 仓库 src/」）。
 // 改任一份必须同步另一份；源头的 kunpeng Seedance 6 条硬规则（2026-08-27 补丁）曾在此缺席，

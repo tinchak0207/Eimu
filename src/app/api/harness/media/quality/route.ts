@@ -2,7 +2,7 @@
 //
 // 定位：对**已经生成完成**的档案（影片/图/音讯）做**确定性、非模型意见**的品质量测。
 //   本档不呼叫任何模型、不呼叫任何付费上游、不扣费、不写账本；只用
-//   `src/lib/media-quality-gate.ts` 的 `probeMedia`（本机 ffprobe/ffmpeg）与
+//   `src/lib/media/media-quality-gate.ts` 的 `probeMedia`（本机 ffprobe/ffmpeg）与
 //   `evaluateMediaQuality`（纯函式套政策阈值）。
 //
 // 为什么在 `/api/harness/**` 而不是 `/api/v1/**`：后者被 next.config.mjs 的 beforeFiles
@@ -21,8 +21,8 @@
 //   `QualityVerdict` 本体（`{ ok, measured, failures, policyId }`）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import {
   QUALITY_POLICIES,
@@ -30,7 +30,7 @@ import {
   probeMedia,
   type MediaProbe,
   type QualityVerdict,
-} from "@/lib/media-quality-gate";
+} from "@/lib/media/media-quality-gate";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

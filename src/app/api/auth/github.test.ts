@@ -22,7 +22,7 @@ test("public authentication only exposes OAuth (GitHub + WeChat)", () => {
   const playground = read("src/components/ImagePlayground.tsx");
   const pricing = read("src/components/PricingClient.tsx");
   const history = read("src/components/HistoryClient.tsx");
-  const authClient = read("src/lib/auth-client.ts");
+  const authClient = read("src/lib/accounts/auth-client.ts");
   const loginRoute = read("src/app/api/auth/login/route.ts");
   const registerRoute = read("src/app/api/auth/register/route.ts");
 

@@ -63,8 +63,8 @@ export interface ArtWorkflowDefinition {
 
 /** Existing owners discovered in this checkout; art tools compose these instead of replacing them. */
 export const ART_EXISTING_TOOL_INVENTORY = [
-  { id: "generate_image", owner: "src/lib/agent-tool-contract.ts", capability: "generation queue submission" },
-  { id: "canvas_apply_ops", owner: "src/lib/agent-tool-contract.ts", capability: "Canvas node/connection operations" },
+  { id: "generate_image", owner: "src/lib/agent/agent-tool-contract.ts", capability: "generation queue submission" },
+  { id: "canvas_apply_ops", owner: "src/lib/agent/agent-tool-contract.ts", capability: "Canvas node/connection operations" },
   { id: "reference_image_upload", owner: "src/components/ReferenceImageUpload.tsx", capability: "reference asset intake" },
   { id: "canvas_reference_nodes", owner: "src/lib/canvas/semantic-nodes.ts", capability: "reference role and generation input resolution" },
   { id: "canvas_metadata", owner: "src/lib/canvas/types.ts", capability: "workflow, asset, status and provenance metadata" },

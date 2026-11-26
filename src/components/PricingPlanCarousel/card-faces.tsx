@@ -1,7 +1,7 @@
 import { MessageCircle, WalletCards } from "lucide-react";
-import type { MapayPaymentType } from "@/lib/mapay";
-import { FLAGSHIP_COINS_PER_IMAGE, FLAGSHIP_MODEL_LABEL, PLAN_REFERENCE_MODEL_LABEL, formatCoins, gptImage2EquivalentImages, snapCustomCoins } from "@/lib/plans";
-import type { PricingPlan } from "@/lib/plans";
+import type { MapayPaymentType } from "@/lib/billing/mapay";
+import { FLAGSHIP_COINS_PER_IMAGE, FLAGSHIP_MODEL_LABEL, PLAN_REFERENCE_MODEL_LABEL, formatCoins, gptImage2EquivalentImages, snapCustomCoins } from "@/lib/billing/plans";
+import type { PricingPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { TIER_COPY, isWorldId, type WorldId } from "@/components/pricing3d/worlds";
 import { SLIDER_MAX, coinsForSliderValue, formatCustomCoins, sliderValueForCoins } from "./slider-math";

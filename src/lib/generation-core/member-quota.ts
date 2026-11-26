@@ -31,8 +31,8 @@
 
 import { randomUUID } from "node:crypto";
 
-import { adjustGatewayUserQuotaExact, fetchGatewayUser } from "@/lib/gateway-admin";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { adjustGatewayUserQuotaExact, fetchGatewayUser } from "@/lib/accounts/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import { ensureAccountBaselines, recordTransfer } from "./account-ledger";
 import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
 

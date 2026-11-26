@@ -25,15 +25,15 @@
 // account_ledger 的 `redemption:<单号>`／兑换码名 `MP<单号后18位>` 可反推者），再逐笔查支付商
 // 真实状态。「候选 0 或全部查无」＝看不到订单，**不得**当成健康（见 health 路由）。
 
-import { resolvePricingPlan, PLANS, FIRST_CHARGE_PLAN } from "@/lib/plans";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { listGatewayRedemptions, type GatewayRedemption } from "@/lib/gateway-admin";
-import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
-import { runMapayCreditWithSql, type MapayCreditOutcome, type MapayCreditStatus } from "@/lib/mapay-credit";
+import { resolvePricingPlan, PLANS, FIRST_CHARGE_PLAN } from "@/lib/billing/plans";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { listGatewayRedemptions, type GatewayRedemption } from "@/lib/accounts/gateway-admin";
+import { resolveMapayOrderBinding } from "@/lib/billing/mapay-order-param";
+import { runMapayCreditWithSql, type MapayCreditOutcome, type MapayCreditStatus } from "@/lib/billing/mapay-credit";
 import {
   fetchMapayOrder,
   type MapayOrder,
-} from "@/lib/mapay-orders";
+} from "@/lib/billing/mapay-orders";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
 import { quotaToCoins } from "./statistics-projection";
 
@@ -328,7 +328,7 @@ async function readLedgerRechargeEvidence(
 
 // ─────────────────────────────────────────── 候选单号（我方已知单号；全部只读 SELECT）
 
-/** 单号字元集（与 tools/inspect-mapay-order.ts 同一保守判准）。 */
+/** 单号字元集（与 tools/ops/accounts/inspect-mapay-order.ts 同一保守判准）。 */
 const OUT_TRADE_NO_PATTERN = /^[A-Za-z0-9_-]{3,64}$/;
 
 /**

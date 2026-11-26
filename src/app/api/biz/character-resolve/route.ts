@@ -6,22 +6,22 @@
 // `/api/v1/:path*` 整体代理到控制面 origin（VPS 容器那棵树没有卡模型档），`/api/biz/*`
 // 不在清单里 ⇒ 挂在这里才是 Vercel 全功能应用在服务。
 //
-// 解析逻辑**不在这里**：整段复用 src/lib/biz-image-references.ts 的 `planBizGenerationInput`
+// 解析逻辑**不在这里**：整段复用 src/lib/generation-core/biz-image-references.ts 的 `planBizGenerationInput`
 // ——与 `/v1/images/generations` 同一把尺（未命中 fail-open、卡库读取失败降级、上限 5 张截尾、
 // data:image 落地 Blob 换公网 URL）。本档只做三件事：认证、形状校验、把 plan 的
 // `references: GenerationReference[]` **最小投影**成契约要的 `reference_images: string[]`
 // （公网 URL）。不改 plan 的语义、不重写解析、不自己写 regex。
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { bizErrorResponse, guardBizApiKey } from "@/lib/biz-openai-error";
-import { listCharacterCards } from "@/lib/character-card-store";
+import { bizErrorResponse, guardBizApiKey } from "@/lib/generation-core/biz-openai-error";
+import { listCharacterCards } from "@/lib/media/character-card-store";
 import {
   EditInputError,
   parseBizGenerationTarget,
   planBizGenerationInput,
   type BizGenerationInputPlan,
   type BizGenerationTarget,
-} from "@/lib/biz-image-references";
+} from "@/lib/generation-core/biz-image-references";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

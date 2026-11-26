@@ -69,13 +69,13 @@ export function searchHistory(db: Db, q: { ownerKey: string; query: string; now?
 
 ### C4 基准（C 实现）
 - 数据：`~/bench-sources/longmemeval/longmemeval_s_cleaned.json`（500 题，已下载）与 `longmemeval_oracle.json`。
-- 流程：本机阶段 1＝每题把 haystack 会话按轮入索引（用 C1 模块，node:sqlite）→ 检索 → 生成 reader prompt（含题目日期）→ 落 `prompts.jsonl`；VPS 阶段 2＝跑 reader＋judge LLM 调用（沿用 `tools/ab-memory-experiment.mjs` 取渠道的做法：在 VPS 上读渠道配置，**绝不打印／落盘密钥**）；本机阶段 3＝汇总。输出按 question_type 分档：检索 recall@5/10（答案所在会话是否进 top-k）、端到端准确率。
+- 流程：本机阶段 1＝每题把 haystack 会话按轮入索引（用 C1 模块，node:sqlite）→ 检索 → 生成 reader prompt（含题目日期）→ 落 `prompts.jsonl`；VPS 阶段 2＝跑 reader＋judge LLM 调用（沿用 `tools/archive/experiments/ab-memory-experiment.mjs` 取渠道的做法：在 VPS 上读渠道配置，**绝不打印／落盘密钥**）；本机阶段 3＝汇总。输出按 question_type 分档：检索 recall@5/10（答案所在会话是否进 top-k）、端到端准确率。
 - 对照：①公开数字（`02-chatgpt-and-oss.md` §4，标注 reader 模型）；②同 reader 下的全上下文基线与 oracle 基线，用来扣除 reader 差异。
 - 迭代：基线跑出后，只允许调检索（分词、字段权重、时间解析、融合、snippet 扩展），每次改动重跑并记表；终稿报告 `docs/specs/memory-parity-1106/04-benchmark.md`。
 
 ## 4. 验收（编排者最后统一做）
 1. 各流测试全绿；合并三分支无冲突，`npx tsc --noEmit` 不新增错误。
 2. 部署顺序：①站点（自托管 eimu-site 配方，见记忆 `2026-11-01-eimu-site-selfhost-frontend-release`）→②网关＋runtime release（drain 闸，不 `--force`）→③开历史回填。重阻塞全放最后、丢背景。
-3. 真会话（`tools/human-conversation-e2e.mjs`，原话补进 corpus）：会话 1「我的品牌叫青禾茶舍，主色是松针绿，以后做图都按这个」→ 新会话 2「我上次说我的品牌主色是什么」答出松针绿；会话 3 临时对话问同题答不出且不写入；删除记忆后再问答不出。
+3. 真会话（`tools/qa/human-conversation-e2e.mjs`，原话补进 corpus）：会话 1「我的品牌叫青禾茶舍，主色是松针绿，以后做图都按这个」→ 新会话 2「我上次说我的品牌主色是什么」答出松针绿；会话 3 临时对话问同题答不出且不写入；删除记忆后再问答不出。
 4. 真浏览器截图：记忆管理界面（有数据／空态／清空确认／开关）、临时对话徽标；自己用 Read 看图。
 5. 基准表：我方分数 vs 公开的 ChatGPT／开源系统数字，诚实标注 reader 差异。

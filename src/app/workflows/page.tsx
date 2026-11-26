@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
-import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentTemplateDomain } from "@/lib/agent-templates";
+import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentTemplateDomain } from "@/lib/agent/agent-templates";
 import { WORKFLOW_PAGES, getWorkflowCard } from "@/lib/workflow-pages";
 import { getSiteUrl } from "@/lib/site-url";
 

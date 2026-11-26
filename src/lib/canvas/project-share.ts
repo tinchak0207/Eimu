@@ -7,8 +7,8 @@
 //   ·可撤销：删快照＋所有权记录，/p 页与复制入口当场 404（VPS 后端即时；Vercel Blob 受 CDN 最短 60 秒）。
 // 所有权记录与快照分文件存放：快照是公开读，owner 不进公开文档。
 
-import { del, ensureBlobBackendWritable, get, put } from "../blob-backend";
-import { generateShareId, isShareId } from "../share-id";
+import { del, ensureBlobBackendWritable, get, put } from "../media/blob-backend";
+import { generateShareId, isShareId } from "../media/share-id";
 import type { CanvasProject } from "./types";
 
 const ROOT = "shares/canvas-project";

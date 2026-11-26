@@ -28,10 +28,10 @@
 |---|---|---|
 | 模板真源 | **VPS** `/opt/agent-harness/gateway/workflow-templates/` | 13 模板、一个模板一个档（`single_image`／`character_sheet`／`scene_setup`／`single_video`／`feature_film`／`novel_film`／`novel_ip`／`ecom_launch`／`ecom_model`／`shortdrama_visual`／`shortdrama_poster`／`art_curation`／`art_style`）＋`index.ts`（共享注册）＋`types.ts`；节点 `kind` ∈ `text｜config｜image｜video｜audio｜film`，节点 `role` 是**模板内唯一键**，连线写 `{fromRole, toRole}` |
 | 展开与执行 | **VPS** `gateway/workflow-engine.ts`／`workflow-service.ts`／`workflow-gw.ts` 的 `expandTemplate` | **活本在 VPS**（`/opt/agent-harness/gateway/`）。`src/` 内 grep `expandTemplate` 只会命中注释——但 repo **另有一份可跑的镜像**：`services/gateway/`（见下） |
-| repo 镜像 | `services/gateway/`（含 `workflow-engine.ts` 与 `workflow-templates/`） | 这是**测试与建置用的第二份拷贝**：`src/lib/agent-output-cards.test.ts:29` 直接 `import { expandTemplate } from "../../services/gateway/workflow-engine"` 跑真引擎（不重写它的 merge）。AGENTS.md 明记此目录「勿当真源」。**2026-09-29 实查**：15 个模板档（13 模板＋`index.ts`＋`types.ts`）与 VPS 逐档 md5 **全等**，VPS 另多一支 `workflow-templates.test.ts`（W6 常驻回归）⇒ 此刻两份一致，但**一致是状态、不是契约**（逐档 SFTP 部署、无递回同步 ⇒ 随时可漂） |
+| repo 镜像 | `services/gateway/`（含 `workflow-engine.ts` 与 `workflow-templates/`） | 这是**测试与建置用的第二份拷贝**：`src/lib/agent/agent-output-cards.test.ts:29` 直接 `import { expandTemplate } from "../../services/gateway/workflow-engine"` 跑真引擎（不重写它的 merge）。AGENTS.md 明记此目录「勿当真源」。**2026-09-29 实查**：15 个模板档（13 模板＋`index.ts`＋`types.ts`）与 VPS 逐档 md5 **全等**，VPS 另多一支 `workflow-templates.test.ts`（W6 常驻回归）⇒ 此刻两份一致，但**一致是状态、不是契约**（逐档 SFTP 部署、无递回同步 ⇒ 随时可漂） |
 | 站点侧资料面 | `src/lib/agent-templates.ts`（`AgentPipelineStep`）、`recipe-templates.ts`、`scenario-templates.ts` | 是产线的**资料镜像与 UI 面**，不是执行引擎 |
 | 铺图排版 | `src/components/canvas-workstation/agent-template-canvas.ts`（`pipelineToCanvasLayout`） | 模板 → 画布版面（节点位置／型别徽章），**只排版，不改产线语义** |
-| 落图事件 | `canvas.plan`／`canvas.node.created`／`canvas.node.updated`（`src/lib/agent-chat-types.ts`、`src/lib/canvas/reducer.ts`） | 「首讯 8 秒建骨架」就是这条：模板展开后节点以事件落进画布，之后归 world1 |
+| 落图事件 | `canvas.plan`／`canvas.node.created`／`canvas.node.updated`（`src/lib/agent/agent-chat-types.ts`、`src/lib/canvas/reducer.ts`） | 「首讯 8 秒建骨架」就是这条：模板展开后节点以事件落进画布，之后归 world1 |
 
 ## 3. 边界（哪一格归谁）
 

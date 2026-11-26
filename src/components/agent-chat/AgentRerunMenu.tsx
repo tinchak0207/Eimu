@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CopyPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HISTORY_RERUN_COUNT_OPTIONS } from "@/lib/history-rerun";
+import { HISTORY_RERUN_COUNT_OPTIONS } from "@/lib/media/history-rerun";
 
 export interface AgentRerunMenuProps {
   /** 触发钮文案（视频／音频卡用「再来 N 组」）。 */

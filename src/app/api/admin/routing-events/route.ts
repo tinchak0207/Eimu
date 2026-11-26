@@ -2,8 +2,8 @@
 // sampleNote 如实标注统计窗口大小——聚合只覆盖取回的这批事件，不是全历史。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { listRoutingEvents, summarizeModelBreakdown, summarizeRoutingEvents } from "@/lib/routing-telemetry";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { listRoutingEvents, summarizeModelBreakdown, summarizeRoutingEvents } from "@/lib/generation-core/routing-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

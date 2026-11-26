@@ -3,7 +3,7 @@ name: editor-audio-first
 description: 旁白／解说先行时间线配方（audio-first）。触发时机：口播、旁白、解说、播客式剪辑，或需要先定音轨再让画面配合音频（含 TTS 生成旁白并按实测时长排时间线）。任务是「先有声音、画面跟音」时必载。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 片4（音视频链）
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 片4（音视频链）
               与 harness-tool-registry.ts L150 注解（audio_first_timeline 复用 gateway /agent/v1/tts
               逐行真 TTS + ffprobe 实测时长 + 累计 offset_ms 锚点）。
 工具真源: VPS .opencode/tools/audio_first_timeline.ts 与 gateway /agent/v1/tts。

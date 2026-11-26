@@ -1,8 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "shell": "/opt/agent-harness/workspace/.opencode/lib/eimu-shell",
-  "model": "a6api/deepseek-v4.1-flash-1017",
-  "small_model": "a6api/deepseek-v4.1-flash-1017",
+  "model": "hublinuxdo/claude-haiku-5-5",
+  "small_model": "hublinuxdo/claude-haiku-5-5",
   "instructions": [],
   "permission": {
     "bash": {

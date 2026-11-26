@@ -21,9 +21,9 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Film } from "lucide-react";
 import { Viewer } from "@/components/viewer/Viewer";
 import { cn } from "@/lib/utils";
-import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
-import { buildAssetUrl, freshTicketValue, mintUploadsTicket, type AgentUploadsTicket } from "@/lib/agent-uploads";
-import { formatBytes } from "@/lib/video-frames";
+import type { AgentAttachmentRef } from "@/lib/agent/agent-chat-types";
+import { buildAssetUrl, freshTicketValue, mintUploadsTicket, type AgentUploadsTicket } from "@/lib/agent/agent-uploads";
+import { formatBytes } from "@/lib/media/video-frames";
 import { useAgentViewerOpen, viewAssetFromUrl } from "./agent-viewer";
 
 // ─────────────────────────── 解析（纯函数，node --test 可测）

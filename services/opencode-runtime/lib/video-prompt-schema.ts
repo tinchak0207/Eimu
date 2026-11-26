@@ -250,7 +250,7 @@ export function validateMotionContract(shot: ShotJson): { ok: true } | { ok: fal
 /**
  * 散文 prompt 的动作兜底：当调用方没有 beats/state_change、也不是结构化 shot JSON 时，
  * 平台侧仍必须拿到一条物理变化合同，否则 H3 会把「slow camera push in」当成整条片子的内容。
- * 与站点 src/lib/invisible-prompt-director.ts 的 MOTION_CONTRACT 同义，保持两份一致。
+ * 与站点 src/lib/generation-core/invisible-prompt-director.ts 的 MOTION_CONTRACT 同义，保持两份一致。
  */
 export const VIDEO_MOTION_FALLBACK =
   "Continuous physical action drives the shot: the subject's position, pose, and silhouette change measurably from the first frame to the last, with at least one change in the environment or staging along the way. The camera move follows that change instead of replacing it."

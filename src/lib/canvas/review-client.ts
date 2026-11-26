@@ -1,5 +1,5 @@
 // 网页端「我的作品」的前端封装：与小程序 apps/miniapp/src/lib/project-review.ts 同一组服务端接口。
-import { getStoredUser } from "@/lib/new-api-client";
+import { getStoredUser } from "@/lib/accounts/new-api-client";
 import { authHeaders } from "@/lib/canvas/client";
 import type { ProjectReview } from "@/lib/canvas/shot-review";
 

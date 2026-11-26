@@ -4,7 +4,7 @@ import { RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { StylePresets } from "@/components/StylePresets";
 import { ModelPicker } from "@/components/ModelPicker";
 import type { Suggestion } from "@/lib/suggestions";
-import type { StylePreset } from "@/lib/prompt-enhancer";
+import type { StylePreset } from "@/lib/generation-core/prompt-enhancer";
 import {
   generationCoins,
   generationModel,
@@ -16,9 +16,9 @@ import {
   type AspectRatio,
   type ModelUsageTipParams,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import { cn } from "@/lib/utils";
-import { CAMERA_MOTION_PRESETS } from "@/lib/camera-motion-presets";
+import { CAMERA_MOTION_PRESETS } from "@/lib/generation-core/camera-motion-presets";
 import { LABEL_CLASS, RAIL_CLASS, ROW_CLASS } from "@/components/prompt-input/rail-classes";
 
 interface GenerateControlsProps {

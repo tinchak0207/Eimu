@@ -39,7 +39,7 @@ test("每个历史端点都用校验过的身份，绝不信任 x-user-id 请求
 });
 
 test("requireVerifiedUser 把令牌交给上游核对，并且查看历史不因余额为零被拦", () => {
-  const source = read("src/lib/server-user.ts");
+  const source = read("src/lib/accounts/server-user.ts");
   assert.match(source, /authenticateImageUser/);
   // 传 0 而不是默认的出图配额：余额为零的用户仍然有权查看自己的历史。
   assert.match(source, /authenticateImageUser\(req\.headers,\s*0\)/);
@@ -61,7 +61,7 @@ test("POST /api/history 校验请求体，不再原样落盘", () => {
 });
 
 test("拼进 Blob 路径的片段都经过清洗，挡住路径穿越", () => {
-  const store = read("src/lib/server-history-store.ts");
+  const store = read("src/lib/media/server-history-store.ts");
   assert.match(store, /sanitizeBlobSegment/);
   // entryId 与 provider 可能来自 POST 请求体，直接拼路径就能写进别人的目录。
   assert.match(store, /function imageBlobPath[\s\S]*?sanitizeBlobSegment\(entryId/);
@@ -75,13 +75,13 @@ test("generate images route persists successful generations to server history", 
   assert.match(source, /workflow/);
   // The entry shape now lives in history-types.ts; the route only supplies the input
   // fields, with `source`/`schemaVersion` filled by the storage layer.
-  assert.match(read("src/lib/history-types.ts"), /workflow\?: GenerationWorkflowMetadata/);
-  assert.match(read("src/lib/server-history-store.ts"), /SaveHistoryEntryInput/);
+  assert.match(read("src/lib/media/history-types.ts"), /workflow\?: GenerationWorkflowMetadata/);
+  assert.match(read("src/lib/media/server-history-store.ts"), /SaveHistoryEntryInput/);
 });
 
 test("server history store uses the shared blob-backed persistence adapter", () => {
-  const source = read("src/lib/server-history-store.ts");
-  assert.match(source, /@\/lib\/blob-backend/);
+  const source = read("src/lib/media/server-history-store.ts");
+  assert.match(source, /@\/lib\/media\/blob-backend/);
   assert.doesNotMatch(source, /from ["']@vercel\/blob["']/);
   assert.match(source, /put\(/);
   // Writes land on a fresh `history/<user>/index-<ts>.json` per save rather than

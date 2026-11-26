@@ -9,7 +9,7 @@ import {
   resolveFilmeraImageModelId,
   resolveFilmeraVideoModelId,
 } from "./filmera-upstream.ts";
-import { DEFAULT_IMAGE_MODEL_ID, NANO_BANANA_PRO_MODEL_ID, NANO_BANANA_2_MODEL_ID, SEEDANCE_20_MODEL_ID } from "../image-model-ids.js";
+import { DEFAULT_IMAGE_MODEL_ID, NANO_BANANA_PRO_MODEL_ID, NANO_BANANA_2_MODEL_ID, SEEDANCE_20_MODEL_ID } from "./image-model-ids.js";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
 function supplier(overrides: Partial<SupplierRecord> = {}): SupplierRecord {

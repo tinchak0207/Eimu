@@ -9,16 +9,16 @@
 ## 0. 一句话切线
 
 **推理、付费生成、计费帐本、画布 world1 状态留在云端；素材入库、产物落地、本机重算下放到使用者机器。**
-本机能力侦测一律走「端点/API 是否存在」，不是 UA 字串（`src/lib/local-save.ts:3-7`）；任一能力缺席即回落今天的云端路径，站点与薄壳行为不变。
+本机能力侦测一律走「端点/API 是否存在」，不是 UA 字串（`src/lib/media/local-save.ts:3-7`）；任一能力缺席即回落今天的云端路径，站点与薄壳行为不变。
 
 ## 1. 能力清单
 
 | 能力 | 入口档案 | 生效条件 | 缺席时的行为（回落） |
 |---|---|---|---|
-| 影片本机前处理（抽关键帧＋poster＋probe，只上行衍生小档） | `src/lib/local-media-ingest.ts:440`（`ingestMediaLocally`，契约「永不抛出」见档头 :10）；呼叫端 `src/components/agent-chat/AgentComposer.tsx:564` | 浏览器可解码该影片且衍生档 ≤ `MAX_DERIVED_UPLOAD_BYTES` 4MB（:43） | 逐级回落：衍生档上传失败→原片直传（`AgentComposer.tsx:595` uploadVideoDirect）→再失败→旧抽帧路径（:606） |
-| 直传物件存储（本站不经手位元组） | `src/lib/direct-upload-client.ts:243`（`uploadDirect`）；消费端 `src/components/canvas/embed/use-canvas-interaction.ts:531` | `/api/uploads/sign` 回可直传的 `uploadUrl`；`file.size ≤ 回应 maxBytes`（:9-13） | 后端不支援带 headers 的 PUT 时抛 `UNSUPPORTED_BACKEND_CODE`（:33），呼叫端自走旧路径 |
-| 产物直写本机目录（File System Access API） | `src/lib/local-save.ts:78` `saveBlobLocally`／:116 `saveManyLocally`；消费端 `src/lib/image-helpers.ts:138`、`src/lib/export-zip.ts:66`、`src/lib/history-export.ts:11` | 端点 `showSaveFilePicker`/`showDirectoryPicker` 存在（:70 `hasLocalFileSave`） | 回 `"unsupported"`（:11），呼叫端回落 blob＋`<a download>`；桌面壳的 `will-download` 拦截仍是那条落地面（`apps/desktop/main.js:257`） |
-| 本机重算卸载 adapter（probe/抽帧/转码走桌面壳 ffmpeg） | `src/lib/local-media-worker.ts:143` `hasLocalMediaWorker`／:157／:171／:188 | 页面存在 `window.eimuLocal` 且 `capabilities().ffmpeg === true`（:14-19） | 一律回 `{ok:false, reason}`，**不 throw**（档头 :10-12）；纯浏览器＝`no_local_worker` |
+| 影片本机前处理（抽关键帧＋poster＋probe，只上行衍生小档） | `src/lib/media/local-media-ingest.ts:440`（`ingestMediaLocally`，契约「永不抛出」见档头 :10）；呼叫端 `src/components/agent-chat/AgentComposer.tsx:564` | 浏览器可解码该影片且衍生档 ≤ `MAX_DERIVED_UPLOAD_BYTES` 4MB（:43） | 逐级回落：衍生档上传失败→原片直传（`AgentComposer.tsx:595` uploadVideoDirect）→再失败→旧抽帧路径（:606） |
+| 直传物件存储（本站不经手位元组） | `src/lib/media/direct-upload-client.ts:243`（`uploadDirect`）；消费端 `src/components/canvas/embed/use-canvas-interaction.ts:531` | `/api/uploads/sign` 回可直传的 `uploadUrl`；`file.size ≤ 回应 maxBytes`（:9-13） | 后端不支援带 headers 的 PUT 时抛 `UNSUPPORTED_BACKEND_CODE`（:33），呼叫端自走旧路径 |
+| 产物直写本机目录（File System Access API） | `src/lib/media/local-save.ts:78` `saveBlobLocally`／:116 `saveManyLocally`；消费端 `src/lib/media/image-helpers.ts:138`、`src/lib/media/export-zip.ts:66`、`src/lib/media/history-export.ts:11` | 端点 `showSaveFilePicker`/`showDirectoryPicker` 存在（:70 `hasLocalFileSave`） | 回 `"unsupported"`（:11），呼叫端回落 blob＋`<a download>`；桌面壳的 `will-download` 拦截仍是那条落地面（`apps/desktop/main.js:257`） |
+| 本机重算卸载 adapter（probe/抽帧/转码走桌面壳 ffmpeg） | `src/lib/media/local-media-worker.ts:143` `hasLocalMediaWorker`／:157／:171／:188 | 页面存在 `window.eimuLocal` 且 `capabilities().ffmpeg === true`（:14-19） | 一律回 `{ok:false, reason}`，**不 throw**（档头 :10-12）；纯浏览器＝`no_local_worker` |
 | 桌面壳本地能力通道（原生挑档／ffprobe／ffmpeg） | `apps/desktop/preload.js`（暴露 `window.eimuLocal`）→ `apps/desktop/local-worker.js`（主进程授权闸） | `main.js:224` 注入 preload；仅 `eimu.dev` 顶层 frame；逐次 pickFiles 授权 | 非授权来源/路径回 `E_*` 错误（契约见 `apps/desktop/LOCAL-CAPABILITIES.md:32`） |
 | Device bridge（云端 agent 经本机出站连线读已授权档） | 云端 `services/gateway/device-bridge.ts`；本机 `apps/desktop/device-bridge-client.js` | `EIMU_DEVICE_BRIDGE=1` 且能取得凭证（见 §3、§6） | 闸道 `router.ts:375` 前缀闸不进；本机停 `off`，一位元组不出网（`apps/desktop/device-bridge-client.js:16-17`） |
 
@@ -41,8 +41,8 @@
 
 ## 4. 计费面规则（本轮重点）
 
-1. **客户端只算「预估」**：`src/lib/task-budget.ts:13` `estimateCoins` 由 catalog credits÷10 推导（:7），与 `/v1/quota` 同源。结算权威仍在伺服器：`account_ledger`（`src/lib/mapay-credit.ts:14`「我方帐本 account_ledger 记一笔 recharge（余额权威）」）；`users.quota` 是内核执法点（`quota-precheck.ts:317-320`）。
-2. **额度显示三态**：`src/lib/quota-display.ts:52` `describeQuota` 收敛 authoritative／estimated／unavailable；`unavailable` **一律回「暂不可用」且 tone=unknown，永不显示 0**（:32、档头 :9-12，与伺服器端 `src/app/api/v1/quota/decision.ts:56-57` 503 `quota_unavailable` 同一诚实线）。
+1. **客户端只算「预估」**：`src/lib/billing/task-budget.ts:13` `estimateCoins` 由 catalog credits÷10 推导（:7），与 `/v1/quota` 同源。结算权威仍在伺服器：`account_ledger`（`src/lib/billing/mapay-credit.ts:14`「我方帐本 account_ledger 记一笔 recharge（余额权威）」）；`users.quota` 是内核执法点（`quota-precheck.ts:317-320`）。
+2. **额度显示三态**：`src/lib/billing/quota-display.ts:52` `describeQuota` 收敛 authoritative／estimated／unavailable；`unavailable` **一律回「暂不可用」且 tone=unknown，永不显示 0**（:32、档头 :9-12，与伺服器端 `src/app/api/v1/quota/decision.ts:56-57` 503 `quota_unavailable` 同一诚实线）。
 3. **预算硬停**：呼叫端在请求体宣告 `cap_coins` → route 透传 `budgetCapCoins`（`images/generations/route.ts:341-347`、`videos/generations/route.ts:323-329`）；超限回 **402 `task_budget_exceeded`**（`quota-precheck.ts:81-83`、guard :295-307），附 `estimated_coins`/`cap_coins`。未宣告＝零回归（:288-290）。
 4. **新增生成入口不得绕过 `enforceQuotaGate`**：现况只有 4 条对外生成路由接闸（`quota-gate-coverage.test.ts:34-39`），另有 6 条 legacy（见 §6）。守门测试 `quota-gate-coverage.test.ts` 会在「新入口没接闸又不在白名单」时红灯，但它**只是变更探针**（自述 :10-21）。
 5. **幂等**：生成型请求带并沿用**同一个 `X-Request-Id`**（`generation-request-headers.ts:23`、:39；MCP 幂等键 `mcpGenerationIdempotencyKey` :58）。直传 PUT 重试沿用同一 `objectKey` 以保证伺服器端 `alreadyCommitted` 幂等（`direct-upload-client.ts:11-13`）。任何 log 不得含 `authorization` 值（`generation-request-headers.ts:13`）。
@@ -60,7 +60,7 @@
 1. **device bridge 缺凭证来源**：壳只载远端页面、只有 session，无 biz key；`credentialProvider` 恒回 null（`apps/desktop/main.js:306-314`）⇒ 即使 `EIMU_DEVICE_BRIDGE=1`，桥得到 `credentials_unavailable` 不启动。补法（短效 device token 经窄 IPC 注入）**尚未实作**（`apps/desktop/DEVICE-BRIDGE.md:32-39`）。**未验证**。
 2. **`cap_coins` 前端未接**：全站 UI 无任何元件送 `cap_coins`（grep 命中仅 images/videos route 与测试）；「使用者如何在 UI 设预算」未定。后端有能力，**前端未接、未验证**。
 3. **6 条 legacy 生成入口不经 precheck（既有状况，非本轮引入）**：`batches`／`generation-jobs`／`upscale`／`storyboard-voiceover`／`sku/run-service`／`generation-core/canary-service`（明文白名单＋各自收费依据见 `quota-gate-coverage.test.ts:45-52`）。它们走 legacy reserve/sync-charge（有实际扣费），但确实不经 `enforceQuotaGate`。
-4. **`db/migrations/036_generation_attempt_source.sql.pending` 刻意未套用**：`tools/migrate-generation-db.ts:9` 只收 `.sql` 结尾档，故以 `.pending` 副档名挡住（档头自述）。**未对任何真实 DB 执行**。
+4. **`db/migrations/036_generation_attempt_source.sql.pending` 刻意未套用**：`tools/ops/database/migrate-generation-db.ts:9` 只收 `.sql` 结尾档，故以 `.pending` 副档名挡住（档头自述）。**未对任何真实 DB 执行**。
 5. **桌面壳 GUI E2E 尚未跑**（无显示环境）：挑档对话框、真 ffmpeg 抽帧/转码、origin 拒绝、IPC 串接、device bridge 真连线均未验（`apps/desktop/LOCAL-CAPABILITIES.md:43`、`apps/desktop/DEVICE-BRIDGE.md:69-74`）。
 6. **W4 本机重算 adapter 无生产消费者**：`local-media-worker.ts` 仅有自身与 `local-media-worker.test.ts`，无 route/元件 import（grep 实查）。lib＋单元测试已交付，**尚未接线**。已确认无适用接点：前端发起的媒体重算仅 `AgentComposer.tsx`／`local-media-ingest.ts` 两处（已由 W1 覆盖，见 §1），canvas 路径吃远端 https，本机 worker 契约不适用。
 7. **额度三态显示已接 UI（原缺口解除）**：`src/components/WalletBadge.tsx:8` import `describeQuota`、`:106` 呼叫消费（`quotaState ?? derivedQuotaState`），不再是「仅 lib＋测试」。三态呈现（`WalletBadge.tsx:82-112`）：① 有有限读数 ⇒ `authoritative`，直接显示帐本权威值（含真实的 0）；② 读不到但有上次成功读数 ⇒ `estimated`，显示「约 N」并以 `stale` 标已过期、tone 依时效 `ok`/`warn`；③ 完全读不到 ⇒ `unavailable`，显示「暂不可用」、tone=`unknown`，**永不画假 0**。`quotaToneClass`（:107-112）对应 tone 上色。纯显示层收敛，未改任何取余额 API／资料层；真帐本 E2E 仍未跑。
@@ -81,8 +81,8 @@ grep -n "EIMU_DEVICE_BRIDGE" apps/desktop/main.js services/gateway/device-bridge
 grep -n "enforceQuotaGate\|budgetCapCoins" src/lib/generation-core/quota-precheck.ts
 
 # 计费三态与预算闸
-grep -n "QUOTA_UNAVAILABLE_LABEL\|describeQuota" src/lib/quota-display.ts
-grep -n "exceedsBudget" src/lib/task-budget.ts
+grep -n "QUOTA_UNAVAILABLE_LABEL\|describeQuota" src/lib/billing/quota-display.ts
+grep -n "exceedsBudget" src/lib/billing/task-budget.ts
 
 # 绕过预检清单（变更探针，非 oracle）
 grep -n "RESERVE_PATH_ALLOWLIST\|GATED_FILES" src/lib/generation-core/quota-gate-coverage.test.ts

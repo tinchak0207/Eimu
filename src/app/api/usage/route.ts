@@ -1,6 +1,6 @@
 // GET /api/usage — backward-compat shim
 import { NextRequest } from "next/server";
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

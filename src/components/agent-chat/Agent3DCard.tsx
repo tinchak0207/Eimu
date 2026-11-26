@@ -6,7 +6,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Box, Coins, Download } from "lucide-react";
-import type { AgentModel3dItem } from "@/lib/agent-chat-types";
+import type { AgentModel3dItem } from "@/lib/agent/agent-chat-types";
 import { viewAssetFromModel3dItem } from "@/lib/viewer/from-items";
 import { Viewer } from "@/components/viewer/Viewer";
 

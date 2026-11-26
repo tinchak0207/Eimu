@@ -14,7 +14,7 @@ import {
   normalizeCharacterCard,
   type CharacterCard,
   type CharacterCardKind,
-} from "@/lib/character-cards";
+} from "@/lib/media/character-cards";
 import { buildNodeCard } from "./use-canvas-interaction";
 import { buildCanvasEmbedMenuItems, MAX_VARIANT_MOTHER_CARDS, type CanvasEmbedMenuItemsInput } from "./context-menu-items";
 import type { CanvasMenuItem } from "../CanvasContextMenu";

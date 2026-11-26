@@ -2,8 +2,8 @@
 // 索引在 gateway 的 sessions.db，本站不存副本：身份用 resolveAgentCaller，其余原样转交。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import { callAgentGateway } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

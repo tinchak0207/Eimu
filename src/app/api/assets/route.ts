@@ -1,7 +1,7 @@
 // 资产包 API：list / upsert / delete。
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 //
-// item kind 契约（由 src/lib/deliverable-kind.ts 注册表推导，asset-pack-store 收口）：
+// item kind 契约（由 src/lib/media/deliverable-kind.ts 注册表推导，asset-pack-store 收口）：
 //   * 资产专属：prompt / reference / lora / recipe / scene_3d / bpy_script；
 //   * 交付物媒体：image（有 imageUrl）/ video（有 mediaUrl）/ audio（有 mediaUrl）。
 //   video/audio 缺 mediaUrl 的 item 会在 normalizeAssetPack 被 drop（本路由只收干净包）。
@@ -15,17 +15,17 @@
 //   * 非 team 宣告（personal / project）→ 完全不查 relay，零额外开销、既有语义逐位不变。
 // 本路由不碰任何计费/配额（RBAC 与团队配额由后续刀接手）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   AssetPackLimitError,
   deleteAssetPacks,
   listAssetPacks,
   normalizeAssetPack,
   saveAssetPack,
-} from "@/lib/asset-pack-store";
-import type { AssetPack } from "@/lib/asset-pack-store";
-import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
-import { decideTeamAssetScope, lookupAssetsTeamMembership } from "@/lib/asset-team-scope";
+} from "@/lib/media/asset-pack-store";
+import type { AssetPack } from "@/lib/media/asset-pack-store";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/media/asset-scope";
+import { decideTeamAssetScope, lookupAssetsTeamMembership } from "@/lib/media/asset-team-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

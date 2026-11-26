@@ -4,7 +4,7 @@
 //   - 指纹：VideoComposeServiceImpl.java:979 `computeExportFingerprint`（素材归一化 SHA-256，URL 转相对路径）
 //   - 守卫：compose/util/MaterialUrlGuard.java（blob:/data:/嵌套协议/非 http(s) 拒绝）
 // 本档为 TS 重写（AID 为 Java + hutool；此处只用 node:crypto，零新依赖）。
-// 对齐 PRD 资产表：docs/symdiff-aid-swallow-prd.md §10「export 幂等指纹」「导出前 8 道结构校验」。
+// 对齐 PRD 资产表：docs/proposals/symdiff-aid-swallow-prd.md §10「export 幂等指纹」「导出前 8 道结构校验」。
 //
 // normalizeMaterialPath 的口径（本档选择，AID 的 toRelativePath 细节未取到原件，故显式声明）：
 //   1. **剥离协议 + host**：`https://a.com/x/y.mp4` 与 `/x/y.mp4` 视为同一素材（AID 明文口径）。

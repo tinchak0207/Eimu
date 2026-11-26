@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fetchGatewayUser } from "@/lib/gateway-admin";
+import { fetchGatewayUser } from "@/lib/accounts/gateway-admin";
 import { MEMBER_QUOTA_DISABLED_MESSAGE, MEMBER_QUOTA_INSUFFICIENT_MESSAGE } from "./member-quota.ts";
 import type { GenerationSql } from "./database.ts";
 import {

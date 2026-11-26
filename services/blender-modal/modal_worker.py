@@ -7,7 +7,7 @@
   - 输出形状 = bridge /v1/execute 回应同构（modal_common.bridge_envelope）：
     {ok, artifacts:[{path,bytes,kind}], scene_summary, stdout_tail,
     duration_ms, queued, queue_position} —— 可直接当桥的云端执行后端替身，
-    工具层（src/lib/blender-tools.ts）只认这个形状。
+    工具层（src/lib/agent/blender-tools.ts）只认这个形状。
   - 片M/片K/L 存活语义同构：分块、每块重试 ≤2、retriable 分类、
     ffmpeg_unavailable 结构化报错、PNG 验真（差异：块=单帧，片L 实锤
     单帧 job 才是安全单位；崩溃由 Modal 容器隔离天然自愈）。

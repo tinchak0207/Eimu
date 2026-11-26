@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { AnnouncementDialog } from "./AnnouncementDialog";
-import type { Announcement, InboxItem } from "@/lib/notification-store";
+import type { Announcement, InboxItem } from "@/lib/accounts/notification-store";
 
 /** 一次拉多少条；与服务端 NOTIFICATION_PAGE_SIZE 同值。 */
 const PAGE_SIZE = 20;

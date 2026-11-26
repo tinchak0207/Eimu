@@ -64,8 +64,8 @@
  * 直到有一次真单量到长边 ≥3840px 为止。
  */
 
-import type { UpscaleTier } from "../generation-model-catalog/types";
-import { upscaleFourKUpstreamEnabled } from "../upscale-4k-flag";
+import type { UpscaleTier } from "./generation-model-catalog/types";
+import { upscaleFourKUpstreamEnabled } from "./upscale-4k-flag";
 import {
   defaultUpscaleTier as defaultUpscaleTierWithFlag,
   isUpscaleTierServable as isUpscaleTierServableWithFlag,

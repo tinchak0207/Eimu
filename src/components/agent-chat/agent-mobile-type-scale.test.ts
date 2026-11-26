@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentMarkdown } from "./AgentMarkdown";
-import type { AgentUserTurnItem } from "@/lib/agent-chat-types";
+import type { AgentUserTurnItem } from "@/lib/agent/agent-chat-types";
 
 const root = process.cwd();
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");

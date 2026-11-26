@@ -2,7 +2,7 @@
 
 // 历史卡的「分享」对话框：把自己的作品变成一条公开连结 /p/<shareId>。
 //
-// 三条产品规矩（对应纯函式层的断言，见 src/lib/share-remix.test.ts）：
+// 三条产品规矩（对应纯函式层的断言，见 src/lib/media/share-remix.test.ts）：
 //   ①预设不公开——打开这个框＝按下分享才建立记录；没建立过就没有公开读取路径。
 //   ②shareId 不可枚举（128-bit 随机，由 /api/share 产生），不能从作品 id 推得。
 //   ③可撤销——撤销即删记录，同一条连结当场 404。
@@ -14,9 +14,9 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Copy, EyeOff, Link2, Loader2, Share2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { createShareLink, stationAuthHeaders } from "@/lib/agent-image-share";
-import { firstShareableIndex } from "@/lib/share-remix";
-import type { HistoryEntry } from "@/lib/history-types";
+import { createShareLink, stationAuthHeaders } from "@/lib/agent/agent-image-share";
+import { firstShareableIndex } from "@/lib/media/share-remix";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 export interface ShareDialogProps {
   entry: HistoryEntry;

@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readCanvasProject } from "@/lib/canvas/project-store";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { listMasterArtifacts } from "@/lib/generation-core/master-artifact-index";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

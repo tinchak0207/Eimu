@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { generateWithNewApiVideo, isNewApiVideoKernelEnabled } from "./newapi-video-upstream.ts";
 import { generateWithSupplier } from "./supplier-adapter.ts";
-import { MINIMAX_H3_MODEL_ID } from "../image-model-ids.js";
+import { MINIMAX_H3_MODEL_ID } from "./image-model-ids.js";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
 // 覆盖 P1 视频语义归一开关（NEWAPI_VIDEO_KERNEL）：

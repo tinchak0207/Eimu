@@ -1,5 +1,5 @@
-import type { MapayPaymentType } from "@/lib/mapay";
-import type { PricingPlan } from "@/lib/plans";
+import type { MapayPaymentType } from "@/lib/billing/mapay";
+import type { PricingPlan } from "@/lib/billing/plans";
 
 export interface PricingPlanCarouselProps {
   /** 静态套餐档（已按周期过滤）；引用必须稳定（滑杆拖动不得重建本数组）。 */

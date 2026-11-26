@@ -59,6 +59,7 @@
     "bridge",
     "deploy-staging",
     "bench",
-    "tools/generated"
+    "tools/generated",
+    "tools/archive"
   ]
 }

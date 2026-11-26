@@ -1,10 +1,10 @@
 /**
  * Lyria client VPS staging 稿（MOE Wave1 片B，2026-09-08 机械导出）。
  *
- * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-lyria.ts
+ * 本档由 tools/codegen/export-music-tools-staging.ts 从行为真源 src/lib/generation-core/music-lyria.ts
  * 机械导出：真源全文逐行保留（端点/鉴权/prompt 组装/错误铁律/超时全在），
  * 零依赖、无 import，除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
  * env：GEMINI_STUDIO_API_KEY（generativelanguage lyria-3.5 generateContent，带人声整歌，付费）；

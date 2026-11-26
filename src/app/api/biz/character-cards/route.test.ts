@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { registerBizCharacterCardRouteSuite } from "../../../../lib/biz-character-cards-route-suite";
+import { registerBizCharacterCardRouteSuite } from "../../../../lib/media/biz-character-cards-route-suite";
 import { GET as bizGet, POST as bizPost } from "./route";
 import { GET as v1Get, POST as v1Post } from "../../v1/character-cards/route";
 

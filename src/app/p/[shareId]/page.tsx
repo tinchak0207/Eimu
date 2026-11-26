@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, EyeOff, Maximize2, Sparkles } from "lucide-react";
-import { getPublicShare } from "@/lib/share-store";
-import { buildSharePath } from "@/lib/share-remix";
+import { getPublicShare } from "@/lib/media/share-store";
+import { buildSharePath } from "@/lib/media/share-remix";
 import { getSiteUrl } from "@/lib/site-url";
-import { formatModelLabel } from "@/lib/history-types";
+import { formatModelLabel } from "@/lib/media/history-types";
 import { RemixButton } from "@/components/share/RemixButton";
 
 // 作品公开分享页。

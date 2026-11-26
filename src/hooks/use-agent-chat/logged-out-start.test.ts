@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { readPendingTrial, stashBlockedSend, type PromoStorage } from "../../components/promo/promo-gate.ts"
-import { REPLICATE_FILMS } from "../../lib/replicate-films.ts"
+import { REPLICATE_FILMS } from "../../lib/generation-core/replicate-films.ts"
 import {
   keepSentenceOnSend,
   markClosedForLoggedOutOwner,

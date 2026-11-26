@@ -9,7 +9,7 @@
 // 纯函数、无 I/O，供 pickDefaultVideoModel / resolveActiveModel / 兜底共用。
 
 /**
- * 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p 全站默认）。真源 src/lib/image-model-ids.js 的
+ * 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p 全站默认）。真源 src/lib/generation-core/image-model-ids.js 的
  * DEFAULT_VIDEO_MODEL_ID（网关单独发布不能 import src/，镜像一份，改默认时两处同改）。
  * 排序规则：默认模型只要「可用且未被证伪」就排第一，不按交付样本数让位；其余模型仍按 proven 规则。
  */

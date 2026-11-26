@@ -17,7 +17,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { homedir } from "node:os";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

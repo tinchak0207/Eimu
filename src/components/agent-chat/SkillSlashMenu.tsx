@@ -23,7 +23,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { tryAuthHeaders } from "@/lib/agent-chat-client";
+import { tryAuthHeaders } from "@/lib/agent/agent-chat-client";
 
 /**
  * 一列所需要的最小字段（结构型别）。

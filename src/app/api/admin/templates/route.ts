@@ -12,8 +12,8 @@
 // 当前仅实现 GET 只读；CRUD 后端与 /v1/templates 的写入通道尚未打通。
 
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,7 +1,7 @@
-import { AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent-skills";
-import { getSkillByIdPublic, listPublicSkills, listSkillFamilies, searchPublicSkills, type AgentSkillView } from "@/lib/agent-skills/registry";
-import { EXPERT_IDS } from "@/lib/expert-contract";
-import { QUALITY_POLICIES } from "@/lib/media-quality-gate";
+import { AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent/agent-skills";
+import { getSkillByIdPublic, listPublicSkills, listSkillFamilies, searchPublicSkills, type AgentSkillView } from "@/lib/agent/agent-skills/registry";
+import { EXPERT_IDS } from "@/lib/agent/expert-contract";
+import { QUALITY_POLICIES } from "@/lib/media/media-quality-gate";
 import { JSON_RPC_ERROR_CODES, McpRpcError, textResult, truncateToolText } from "../protocol";
 import type { McpToolCallResult } from "../protocol";
 import { agentSessionPath, runAgent } from "./agent";

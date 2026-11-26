@@ -22,7 +22,7 @@
 
 import { decompileWorkflow } from "@/lib/workflow-dsl/decompile";
 import type { WorkflowDslSource } from "@/lib/workflow-dsl/schema";
-import type { CharacterCard } from "@/lib/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import type {
   CanvasConnection,
   CanvasNode,

@@ -4,13 +4,13 @@
 // catalog 换模型/换预设比例时，范例自动跟随；范例引用的 id 必须同时存在于
 // GENERATION_MODEL_CATALOG 与使用者可见白名单 IMAGE_MODEL_IDS，否则整段不显示
 // （宁可不给范例，也不给一颗打不通的 model）。
-import { DEFAULT_IMAGE_MODEL_ID } from "./image-model-ids.js";
+import { DEFAULT_IMAGE_MODEL_ID } from "./generation-core/image-model-ids.js";
 import {
   GENERATION_MODEL_CATALOG,
   IMAGE_MODEL_IDS,
   generationModel,
   imageSizeForAspectRatio,
-} from "./generation-model-catalog";
+} from "./generation-core/generation-model-catalog";
 
 /** /v1 对外 Base URL（与站内接入文档、DSH 插件同一真源）。 */
 export const DEV_QUICKSTART_BASE_URL = "https://eimu.dev/v1";

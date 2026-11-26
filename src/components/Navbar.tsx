@@ -14,10 +14,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { SplitLoginButton } from "@/components/SplitLoginButton";
 import { useAuth } from "@/hooks/use-auth";
-import { getStoredToken } from "@/lib/new-api-client";
+import { getStoredToken } from "@/lib/accounts/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
-import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/accounts/github-login";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 import { WindowControls } from "@/components/WindowControls";
 import { ShellUpdatePrompt } from "@/components/ShellUpdatePrompt";

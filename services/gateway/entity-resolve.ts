@@ -15,7 +15,7 @@ import { PLATFORM_BASE } from "./constants-gateway.ts"
 
 /**
  * token 标记。这里**只做「要不要打这一枪」的判定**，不做语法解析——真正的语法
- * （种类字正/简/英、名称段长度、未命中保留）全在站点 `src/lib/entity-tokens.ts`。
+ * （种类字正/简/英、名称段长度、未命中保留）全在站点 `src/lib/media/entity-tokens.ts`。
  */
 export const ENTITY_TOKEN_MARKER = "@["
 
@@ -27,7 +27,7 @@ export const ENTITY_TOKEN_MARKER = "@["
 export const ENTITY_RESOLVE_PATH = "/api/biz/character-resolve"
 
 /**
- * 参考图上限。与控制面 `MAX_REFERENCE_IMAGES`（`src/lib/biz-image-references.ts`）同一把尺：
+ * 参考图上限。与控制面 `MAX_REFERENCE_IMAGES`（`src/lib/generation-core/biz-image-references.ts`）同一把尺：
  * 超过上限控制面直接 400 `invalid_reference_images`（不静默截断），所以**送出前**就要截。
  */
 export const MAX_ENTITY_REFERENCES = 5

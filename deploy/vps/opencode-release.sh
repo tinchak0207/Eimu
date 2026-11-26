@@ -325,10 +325,10 @@ release_prompts_only() {
   tmp="$(mktemp -d /tmp/oc-prompts.XXXXXX)"
   trap 'rm -rf "${tmp:-}"' EXIT
   git -C "$REPO_ROOT" archive --format=tar "$sha" \
-    "$SRC_SUBDIR/AGENTS.md" "$SRC_SUBDIR/skills/_prompt-routing" > "$.local/tmp/general/prompts.tar"
+    "$SRC_SUBDIR/AGENTS.md" "$SRC_SUBDIR/skills/_prompt-routing" > "$tmp/prompts.tar"
   r_tar="/tmp/oc-prompts-$sha12-$ts.tar"
   log "== 提示词快发 @ $sha12 → $ts（只装 AGENTS.md + skills/_prompt-routing，不重启）=="
-  remote_binary "cat > $r_tar" < "$.local/tmp/general/prompts.tar"
+  remote_binary "cat > $r_tar" < "$tmp/prompts.tar"
   run_oc_activation "$WORKSPACE_DIR" "$VPS_DIR" "$r_tar" "$SRC_SUBDIR" "$OC_EXPECTED" "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" "$BACKUP_DIR" "$OWNER" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$sha" <<'REMOTE'
 set -euo pipefail
 export LC_ALL=C
@@ -387,32 +387,32 @@ cmd_plan() {
   # RETURN trap 触发时 local 已出作用域，set -u 下直接引用 $tmp 会喷 unbound
   # （与 cmd_release 同因，见其 EXIT trap 注解）——用 ${tmp:-} 保险。
   trap 'rm -rf "${tmp:-}"' RETURN
-  mkdir -p "$.local/tmp/general/stage"
-  stage_from_commit "$.local/tmp/general/stage" "$.local/tmp/general/exp" "$sha"
-  log "== plan @ $(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")：commit 端 $(wc -l < "$.local/tmp/general/exp") 档 =="
+  mkdir -p "$tmp/stage"
+  stage_from_commit "$tmp/stage" "$tmp/exp" "$sha"
+  log "== plan @ $(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")：commit 端 $(wc -l < "$tmp/exp") 档 =="
 
-  for c in "${CONFIGS[@]}"; do echo "$c"; done > "$.local/tmp/general/conf.txt"
-  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && echo \"\$c\"; done; } | LC_ALL=C sort" > "$.local/tmp/general/actual.txt"
-  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' -exec md5sum {} + 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && sudo md5sum \"\$c\"; done; } | LC_ALL=C sort -k2" > "$.local/tmp/general/actual.md5"
-  ( cd "$.local/tmp/general/stage"
+  for c in "${CONFIGS[@]}"; do echo "$c"; done > "$tmp/conf.txt"
+  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && echo \"\$c\"; done; } | LC_ALL=C sort" > "$tmp/actual.txt"
+  remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' -exec md5sum {} + 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && sudo md5sum \"\$c\"; done; } | LC_ALL=C sort -k2" > "$tmp/actual.md5"
+  ( cd "$tmp/stage"
     # 档名可能含空白（例：skills/higgsfield/docs/Seedance 2 Skill.md）——用 NUL
     # 分隔（-print0 / sort -z / xargs -0），否则 `md5sum $(cat 清单)` 会被
     # word-split 成多个假档名而 exit 1（实测）。
     { find tools lib skills plugin -type f ! -path '*/__pycache__/*' -print0 2>/dev/null
       for c in opencode.json package.json bun.lock package-lock.json; do [ -f "$c" ] && printf '%s\0' "$c"; done
-    } | sort -z > "$.local/tmp/general/head-list.txt"
-    xargs -0 -r md5sum < "$.local/tmp/general/head-list.txt" 2>/dev/null
-  ) | sort -k2 > "$.local/tmp/general/head.md5"
+    } | sort -z > "$tmp/head-list.txt"
+    xargs -0 -r md5sum < "$tmp/head-list.txt" 2>/dev/null
+  ) | sort -k2 > "$tmp/head.md5"
 
-  echo "--- 生产多出（release 会删）---"; comm -13 "$.local/tmp/general/exp" "$.local/tmp/general/actual.txt" | sed 's/^/  DEL /'
-  echo "--- git 有、生产缺（release 会新增）---"; comm -23 "$.local/tmp/general/exp" "$.local/tmp/general/actual.txt" | sed 's/^/  ADD /'
+  echo "--- 生产多出（release 会删）---"; comm -13 "$tmp/exp" "$tmp/actual.txt" | sed 's/^/  DEL /'
+  echo "--- git 有、生产缺（release 会新增）---"; comm -23 "$tmp/exp" "$tmp/actual.txt" | sed 's/^/  ADD /'
   echo "--- 内容不同 ---"
-  join -j2 -o 0,1.1,2.1 "$.local/tmp/general/head.md5" "$.local/tmp/general/actual.md5" 2>/dev/null \
+  join -j2 -o 0,1.1,2.1 "$tmp/head.md5" "$tmp/actual.md5" 2>/dev/null \
     | awk '$2!=$3{print "  DIFF " $1}' || true
   echo "（完整判定以 vps-opencode-recon.sh 为准）"
-  if [ -f "$.local/tmp/general/stage/AGENTS.md" ]; then
+  if [ -f "$tmp/stage/AGENTS.md" ]; then
     local a b
-    a="$(md5sum "$.local/tmp/general/stage/AGENTS.md" | awk '{print $1}')"
+    a="$(md5sum "$tmp/stage/AGENTS.md" | awk '{print $1}')"
     b="$(remote "sudo md5sum '$WORKSPACE_DIR/AGENTS.md' 2>/dev/null" | awk '{print $1}')"
     if [ "$a" = "$b" ]; then echo "  $WORKSPACE_DIR/AGENTS.md 一致"; else echo "  DIFF $WORKSPACE_DIR/AGENTS.md（workspace 根）"; fi
   fi
@@ -428,7 +428,7 @@ cmd_release() {
   local sha sha12 ts stage exp tar_file
   sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
   opencode_ancestry_gate "$sha"
-  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
+  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/qa/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   stage="$(mktemp -d /tmp/oc-stage.XXXXXX)"; exp="$(mktemp /tmp/oc-exp.XXXXXX)"; tar_file="$(mktemp /tmp/oc-stage.XXXXXX.tar)"

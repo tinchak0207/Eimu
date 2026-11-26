@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { safeFetchPublicImage } from "@/lib/ssrf-guard";
-import { getRuntimeGatewayPools } from "@/lib/admin-pool-store";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
+import { getRuntimeGatewayPools } from "@/lib/generation-core/admin-pool-store";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
 import {
   buildModelQueue,
   isEndpointCoolingDown,
@@ -10,11 +10,11 @@ import {
   recordEndpointFailure,
   recordEndpointSuccess,
   safeEndpointHost,
-} from "@/lib/channel-registry";
-import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
-import { publicImageUrl } from "@/lib/image-url";
-import { QUOTA_PER_COIN } from "@/lib/new-api-client";
-import { recordRoutingEvent, type RoutingAttempt } from "@/lib/routing-telemetry";
+} from "@/lib/generation-core/channel-registry";
+import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
+import { publicImageUrl } from "@/lib/media/image-url";
+import { QUOTA_PER_COIN } from "@/lib/accounts/new-api-client";
+import { recordRoutingEvent, type RoutingAttempt } from "@/lib/generation-core/routing-telemetry";
 import {
   defaultGenerateAudio,
   generationCoins,
@@ -26,11 +26,11 @@ import {
   resolveSupportedResolution,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import { resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { optimizeVideoPrompt } from "@/lib/agent-prompt-optimizer";
-import { fuseSceneVideo } from "@/lib/scene3d-video-fusion";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { optimizeVideoPrompt } from "@/lib/agent/agent-prompt-optimizer";
+import { fuseSceneVideo } from "@/lib/generation-core/scene3d-video-fusion";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

@@ -1,7 +1,7 @@
-import { normalizeGenerationConfig } from "../generation-model-catalog";
-import type { AspectRatio, NormalizedGenerationConfig, OutputResolution } from "../generation-model-catalog";
-import type { GenerationTaskProjection } from "../generation-task-types";
-import type { GenerationWorkflowMetadata } from "../image-types";
+import { normalizeGenerationConfig } from "./generation-model-catalog";
+import type { AspectRatio, NormalizedGenerationConfig, OutputResolution } from "./generation-model-catalog";
+import type { GenerationTaskProjection } from "./generation-task-types";
+import type { GenerationWorkflowMetadata } from "../media/image-types";
 import { decryptGenerationPrompt } from "./crypto";
 import { failureClassToApiErrorCode } from "../api-error-codes";
 import { taskStatus } from "./task-response";

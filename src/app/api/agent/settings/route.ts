@@ -8,9 +8,9 @@
 // 带该键时非 true 一律强制为 false（缺键 = 网关默认 OFF，零迁移零破坏）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
-import { BEAST_MODE_SETTINGS_KEY } from "@/lib/expert-registry";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
+import { BEAST_MODE_SETTINGS_KEY } from "@/lib/agent/expert-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

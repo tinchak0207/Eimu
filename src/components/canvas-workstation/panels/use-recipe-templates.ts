@@ -9,8 +9,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
-import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
+import { getStoredToken, getStoredUser } from "@/lib/accounts/new-api-client";
+import type { WorkflowRecallConfig } from "@/lib/agent/workflow-recall";
 
 /** 契约扩展点：modelId 为可选扩展字段（向后兼容，无此字段的旧模板照常载入）。 */
 export type UserRecipeConfig = WorkflowRecallConfig & { modelId?: string };

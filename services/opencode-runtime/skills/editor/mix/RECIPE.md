@@ -3,7 +3,7 @@ name: editor-mix
 description: 剪辑混音与 ducking 配方。触发时机：混音、配乐、BGM、SFX 音效、人声太吵／太小、旁白被音乐盖住、响度、LUFS、ducking、音轨平衡。任何「声音层次／音量／配乐」类剪辑请求必载。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 片B5
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 片B5
               （混音增强：三轨 voice/bgm/sfx + ducking sidechaincompress 后置 pass，不动 composeEngine 主钉 +
               响度报告）与 §7 终验（mix 13/13；loudnorm 口径 I=-16 TP=-1.5 LRA=11）。
 工具真源: VPS .opencode/tools/timeline_mix.ts 与 gateway/mix.ts。

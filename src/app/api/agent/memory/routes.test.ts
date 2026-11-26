@@ -12,11 +12,11 @@ import { POST as retractPOST } from "./retract/route";
 import { POST as reviewPOST } from "./review/route";
 import { GET as exportGET } from "./export/route";
 import { GET as memoryTraceGET } from "../sessions/[id]/memory-trace/route";
-import { MEMORY_SIGNATURE_HEADER, signMemoryBody } from "@/lib/memory-hmac";
+import { MEMORY_SIGNATURE_HEADER, signMemoryBody } from "@/lib/accounts/memory-hmac";
 import {
   __resetAgentMemoryStoreForTests,
   listMemoryDocs,
-} from "@/lib/agent-memory-store";
+} from "@/lib/agent/agent-memory-store";
 
 const SECRET = "route-test-secret-not-real";
 

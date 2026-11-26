@@ -4,7 +4,7 @@
 // 与批量端点 `POST /api/canvas/nodes/restore` 同一语义，差别只在目标是路径上的单一 id。
 // （竞品同时有 `/{id}/restore` 与 `/batch-restore` 两个入口，这里对齐。）
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 
 export const runtime = "nodejs";

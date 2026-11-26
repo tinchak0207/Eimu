@@ -29,7 +29,7 @@ allowed-tools:
 triggers:
   - 用户要把小说/文本改编成短剧
 requires:
-  - src/lib/character-cards.ts
+  - src/lib/media/character-cards.ts
 optional: []
 ---
 ```

@@ -27,8 +27,8 @@
 //      生成呼叫**；回传的 `gates`/`ready` 即门禁自身判定，不经上游、不受网路影响。
 
 import { NextRequest, NextResponse } from "next/server";
-import { listCharacterCards } from "@/lib/character-card-store";
-import type { CharacterCard } from "@/lib/character-cards";
+import { listCharacterCards } from "@/lib/media/character-card-store";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import { readCanvasProject } from "@/lib/canvas/project-store";
 import { storyboardShotsOfEpisode } from "@/lib/canvas/storyboard-episode-batch";
 import type { CanvasNode } from "@/lib/canvas/types";
@@ -40,7 +40,7 @@ import {
   storyboardQcGateArgs,
   type StoryboardScriptShot,
 } from "@/lib/storyboard-contract";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

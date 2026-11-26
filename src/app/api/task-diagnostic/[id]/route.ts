@@ -2,12 +2,12 @@
 // 只认本租户的任务；回结局四态、钱的去向、关键步骤的人话时间线，和一句可直接粘贴给客服的工单文字。
 
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { looksLikeBizApiKey, readBearerToken } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { looksLikeBizApiKey, readBearerToken } from "@/lib/accounts/biz-api-keys";
 import { getJobTimeline } from "@/lib/generation-core/job-events";
 import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
 import { buildTaskDiagnostic } from "@/lib/generation-core/task-diagnostic";
-import { authenticateImageUser } from "@/lib/image-billing";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";

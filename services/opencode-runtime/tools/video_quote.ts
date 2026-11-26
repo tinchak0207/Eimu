@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, platformFetch, ok, fail } from "../lib/client"
 
-// 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p）。真源是 src/lib/image-model-ids.js 的 DEFAULT_VIDEO_MODEL_ID；
+// 平台默认视频模型（2026-11-21 暴君令：seedance-2.5-720p）。真源是 src/lib/generation-core/image-model-ids.js 的 DEFAULT_VIDEO_MODEL_ID；
 // 本工具随 opencode-runtime 单独发布、不能 import src/，故在此镜像一份——改默认时两处同改（网关侧见 video-model-select.ts）。
 const PLATFORM_DEFAULT_VIDEO_MODEL = "seedance-2.5-720p"
 

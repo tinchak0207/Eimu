@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { groupHistoryByDay, inferEntryKind } from "@/lib/history-types";
-import type { HistoryEntry, HistoryEntryKind } from "@/lib/history-types";
+import { groupHistoryByDay, inferEntryKind } from "@/lib/media/history-types";
+import type { HistoryEntry, HistoryEntryKind } from "@/lib/media/history-types";
 import { HistoryCard } from "./HistoryCard";
 import { HistorySkeleton } from "./HistorySkeleton";
 

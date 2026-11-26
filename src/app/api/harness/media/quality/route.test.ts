@@ -13,8 +13,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
 import { POST } from "./route";
 
 const VALID_KEY = `sk-biz-${"f0e1d2c3b4a59687".repeat(2)}`;

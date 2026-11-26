@@ -138,5 +138,5 @@ worker 并发/重试语义同构：每帧重试 ≤2（2s cooldown，片 M）、
 
 - ~~容器暖复用（`@app.cls`）~~ **片 AD 已交付**（实测暖帧 0.4-1.8s）。
 - ~~blend_bytes 路径实弹~~ **片 AD 已交付**（rain_chase_final.blend 真帧，方差 7038，mp4 首末差分 7.79%）。
-- 接 `src/lib/blender-tools.ts`：worker 回应已同构，工具层换 endpoint 即吃。
+- 接 `src/lib/agent/blender-tools.ts`：worker 回应已同构，工具层换 endpoint 即吃。
 - 持久部署：`modal deploy --detached`（现为普通 deploy，CLI 进程结束即收）。

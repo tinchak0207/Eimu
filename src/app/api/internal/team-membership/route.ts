@@ -27,7 +27,7 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationControlPlaneEnabled, getGenerationSql } from "@/lib/generation-core/database";
 
 export const runtime = "nodejs";

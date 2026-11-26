@@ -13,8 +13,8 @@ import { createRequire } from "node:module";
 import {
   applyModelPricingOverrides,
   type ModelPricingOverrides,
-} from "../../../../lib/generation-model-catalog";
-import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../../../../lib/admin-auth";
+} from "../../../../lib/generation-core/generation-model-catalog";
+import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../../../../lib/accounts/admin-auth";
 import { GET, PATCH } from "./route";
 
 const requireFn = createRequire(import.meta.url);

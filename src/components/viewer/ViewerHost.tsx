@@ -43,7 +43,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { viewKindLabel } from "@/lib/viewer/from-items";
-import { HISTORY_RERUN_COUNT_OPTIONS } from "@/lib/history-rerun";
+import { HISTORY_RERUN_COUNT_OPTIONS } from "@/lib/media/history-rerun";
 import type {
   Locator,
   ViewAsset,

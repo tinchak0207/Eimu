@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, siteFetch, publicImageUrl, uploadImageBytes, ok, fail } from "../lib/client"
 
-// 角色卡五值 kind（与站点 src/lib/character-cards.ts 的 CHARACTER_CARD_KIND_VALUES 同尺）。
+// 角色卡五值 kind（与站点 src/lib/media/character-cards.ts 的 CHARACTER_CARD_KIND_VALUES 同尺）。
 const KINDS = ["character", "scene", "style", "prop", "audio"] as const
 // 站点同尺上限（character-cards.ts MAX_CARD_REFERENCES = 8）。
 const MAX_REFERENCE_IMAGES = 8

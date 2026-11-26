@@ -5,7 +5,7 @@
 // 这里不 throw 认证错，回 { ok:false, reason } —— 画布是「顺手存」的东西，
 // 没登入时安静降级成纯本端画布，而不是在画布上弹一张挡路的错误卡。
 
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { getStoredToken, getStoredUser } from "@/lib/accounts/new-api-client";
 import { LOCAL_TEST_MODE } from "../local-test-mode";
 import type { CanvasProject } from "./types";
 import { parseCanvasProjectSummaries, toCanvasProjectSummaryWire, type CanvasProjectSummaryWire } from "./project-summary";

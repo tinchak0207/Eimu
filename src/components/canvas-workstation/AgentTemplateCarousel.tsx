@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
-import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentPipelineStep, type AgentTemplate } from "@/lib/agent-templates";
+import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentPipelineStep, type AgentTemplate } from "@/lib/agent/agent-templates";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { text } from "@/lib/ui-strings";
 import { cn } from "@/lib/utils";

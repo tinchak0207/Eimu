@@ -17,7 +17,7 @@ import test, { afterEach, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { POST } from "./route";
-import { getStyleById, STYLE_LIBRARY } from "@/lib/style-library";
+import { getStyleById, STYLE_LIBRARY } from "@/lib/media/style-library";
 
 /** 真实注册表 id（不造假风格）。 */
 const STYLE_ID = STYLE_LIBRARY[0].id;

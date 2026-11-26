@@ -19,10 +19,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { AgentAttachmentCards, AttachmentThumb } =
   require("./AgentAttachmentCards") as typeof import("./AgentAttachmentCards");
-const { buildAssetUrl } = require("@/lib/agent-uploads") as typeof import("@/lib/agent-uploads");
-const { formatBytes } = require("@/lib/video-frames") as typeof import("@/lib/video-frames");
+const { buildAssetUrl } = require("@/lib/agent/agent-uploads") as typeof import("@/lib/agent/agent-uploads");
+const { formatBytes } = require("@/lib/media/video-frames") as typeof import("@/lib/media/video-frames");
 /* eslint-enable @typescript-eslint/no-require-imports */
-import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
+import type { AgentAttachmentRef } from "@/lib/agent/agent-chat-types";
 
 const IMG_REF: AgentAttachmentRef = {
   kind: "image",

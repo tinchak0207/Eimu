@@ -1,10 +1,10 @@
 import { cleanHumanEdited } from "@/lib/canvas/human-edits";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { isReferenceImageRole } from "@/lib/image-types";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
+import { isReferenceImageRole } from "@/lib/media/image-types";
 import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/storyboard-contract";
 // 批准状态清洗的**唯一收口**：不另写第二把尺——`normalizeApprovalState` 同时服务
 // 卡侧（`normalizeCharacterCard`/`setApproval`）与节点侧，两侧值域判据同一份。
-import { normalizeApprovalState } from "@/lib/character-cards";
+import { normalizeApprovalState } from "@/lib/media/character-cards";
 // metadata 白名单的**键集合单一真源**（双白名单铁律：本档与 canvas-chat-types.ts 的
 // compactMetadataForAgent 曾各自手工维护键清单，漏一端＝功能静默消失）。
 import { DURABLE_METADATA_FIELDS, type DurableFieldSpec, type MetadataCleanerName } from "../node-metadata-fields";
@@ -90,7 +90,7 @@ function toIdList(v: unknown): string[] | undefined {
  * 节点 metadata 的实体宣告键：gateway 模板节点的 `defaults.emitsEntity`
  * （`services/gateway/workflow-templates/*`）经 `expandTemplate` spread 进节点
  * metadata，随 SSE `canvas.node.created/updated` 落地；消费端
- * `src/lib/agent-output-cards.ts` 据此自动落成可 @ 引用的实体卡。
+ * `src/lib/agent/agent-output-cards.ts` 据此自动落成可 @ 引用的实体卡。
  *
  * **本档刻意零依赖**（不 import `character-cards.ts`）：五值字面与该档
  * `CHARACTER_CARD_KIND_VALUES` **逐字同步**，不 import 以避免读取端反向依赖卡模组。

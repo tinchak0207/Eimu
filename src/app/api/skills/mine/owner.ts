@@ -13,8 +13,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { deriveMemoryOwnerKey } from "@/lib/agent-memory-injection";
-import { resolveAgentCaller } from "@/lib/agent-session-guard";
+import { deriveMemoryOwnerKey } from "@/lib/agent/agent-memory-injection";
+import { resolveAgentCaller } from "@/lib/agent/agent-session-guard";
 
 export const noStore = { "Cache-Control": "no-store" } as const;
 

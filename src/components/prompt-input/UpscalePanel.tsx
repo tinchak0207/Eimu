@@ -2,9 +2,9 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { ImagePlus, Loader2, X } from "lucide-react";
-import { generationCoins, resolutionFromImageSize } from "@/lib/generation-model-catalog";
-import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
-import { imageHelpers } from "@/lib/image-helpers";
+import { generationCoins, resolutionFromImageSize } from "@/lib/generation-core/generation-model-catalog";
+import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
+import { imageHelpers } from "@/lib/media/image-helpers";
 import type { PickedImage } from "@/components/pixai-tools/shared";
 import { pickSourceFile, type PixaiStage } from "@/components/prompt-input/use-pixai-tools-panel";
 import { LABEL_CLASS, RAIL_CLASS, ROW_CLASS } from "@/components/prompt-input/rail-classes";

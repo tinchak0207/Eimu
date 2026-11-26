@@ -6,7 +6,7 @@
 // - 有关联图 → {kind:"image", title:"参考图", imageUrl}
 // 纯函式无副作用（不 fetch / 不读 store），方便单测。
 
-import type { AssetPackItem } from "@/lib/asset-pack-store";
+import type { AssetPackItem } from "@/lib/media/asset-pack-store";
 
 /** 转换输入：涵盖画布节点与提示词卡的共通栏位。 */
 export interface NodeToAssetPackInput {

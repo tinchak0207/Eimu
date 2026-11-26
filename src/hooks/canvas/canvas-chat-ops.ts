@@ -5,12 +5,12 @@ import { CANVAS_READABLE_MIN_SCALE, bezierPath, canvasProjectMeta, clampScale, f
 import { postCanvasOpsResult } from "@/lib/canvas/client";
 import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
 import { isCanvasScriptType, type CanvasScriptType } from "@/lib/canvas/project-narration";
-import { normalizeVoiceId } from "@/lib/voice-library";
+import { normalizeVoiceId } from "@/lib/media/voice-library";
 import { isCanvasProjectType } from "@/lib/canvas/types";
 import type { CanvasAgentOp, CanvasConnection, CanvasEpisode, CanvasNode, CanvasNodeMetadata, CanvasPosition, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
-import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef, type AgentOutputNodeRef } from "@/lib/agent-output-cards";
-import type { CharacterCard } from "@/lib/character-cards";
+import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef, type AgentOutputNodeRef } from "@/lib/agent/agent-output-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import { toast } from "@/hooks/use-toast";
 import { canvasReducer, type CanvasAction } from "./canvas-reducer-adapter";
 import type { CanvasBackgroundMode, CanvasDeriveCard, CanvasPlanCard } from "./canvas-chat-types";

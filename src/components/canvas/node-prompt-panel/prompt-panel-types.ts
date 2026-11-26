@@ -1,4 +1,4 @@
-import type { CharacterCardKind } from "@/lib/character-cards";
+import type { CharacterCardKind } from "@/lib/media/character-cards";
 
 /** 上游可引用资源（由宿主从连线图算出）。 */
 export interface CanvasReferenceCandidate {

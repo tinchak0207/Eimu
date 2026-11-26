@@ -29,7 +29,7 @@ import {
   type AllocateDeps,
   type TeamMemberRecord,
 } from "./member-quota";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import type { GenerationSql } from "./database";
 
 export type SeatAllocationFailureCode =

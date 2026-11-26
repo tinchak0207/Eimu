@@ -1,4 +1,4 @@
-import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
+import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/billing/image-billing";
 import { BillingRelayUnavailableError } from "../billing-relay";
 import type { BillingReplayOperation, ReplayPlan } from "../operation-registry";
 import type { FailureClass, GenerationJob } from "../types";

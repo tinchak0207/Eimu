@@ -30,8 +30,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { ensureBlobBackendWritable, put } from "@/lib/blob-backend";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { ensureBlobBackendWritable, put } from "@/lib/media/blob-backend";
 import {
   MAX_SCENE_3D_BYTES,
   SCENE_3D_MAGIC_BYTES,

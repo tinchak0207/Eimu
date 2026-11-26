@@ -1,4 +1,4 @@
-import type { PricingPlan } from "@/lib/plans";
+import type { PricingPlan } from "@/lib/billing/plans";
 
 /** items 构建期的自定义档占位对象：卡面渲染一律用 props.customPlan（滑杆实时值），
  *  这里只保证 item.plan 类型完整（防止误用静态假数据渲染价格）。 */

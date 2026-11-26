@@ -1,5 +1,5 @@
 // 控制面侧的 new-api 稳定会话令牌（session token）端点。调用方是 Vercel 上的
-// src/lib/newapi-session-token.ts：Vercel 无控制面 DB 直连，也够不到
+// src/lib/accounts/newapi-session-token.ts：Vercel 无控制面 DB 直连，也够不到
 // new-api 内网地址，于是经签名通道把 {userId, sessionCookie} 转投到这里，
 // 由控制面执行「查表 → 验活 → 复用/重新生成覆盖」。
 //
@@ -11,8 +11,8 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
-import { ensureNewApiSessionToken, lookupUserIdByToken } from "@/lib/newapi-session-token";
+} from "@/lib/accounts/biz-key-sync";
+import { ensureNewApiSessionToken, lookupUserIdByToken } from "@/lib/accounts/newapi-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

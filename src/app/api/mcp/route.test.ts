@@ -11,8 +11,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
 import { JSON_RPC_ERROR_CODES } from "@/lib/mcp/protocol";
 import { HARNESS_PROMPTS, HARNESS_RESOURCES } from "@/lib/mcp/harness-guide";
 import { POST } from "./route";

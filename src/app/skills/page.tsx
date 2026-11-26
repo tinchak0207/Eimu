@@ -9,9 +9,9 @@ import {
   AGENT_SKILL_FAMILY_LABELS,
   countAgentSkillsByFamily,
   listAgentSkills,
-} from "@/lib/agent-skills";
-import type { AgentSkillFamily } from "@/lib/agent-skills/types";
-import { OUTPUT_KIND_LABELS } from "@/lib/agent-skills/output-kinds";
+} from "@/lib/agent/agent-skills";
+import type { AgentSkillFamily } from "@/lib/agent/agent-skills/types";
+import { OUTPUT_KIND_LABELS } from "@/lib/agent/agent-skills/output-kinds";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 const SITE_URL = getSiteUrlFromEnv();

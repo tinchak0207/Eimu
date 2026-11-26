@@ -263,7 +263,7 @@ smoke_local() {
   docker rm -f "$name" >/dev/null 2>&1 || true
   echo "SMOKE api healthz=${code:-无回应}"
   [ "$code" = 200 ] || die "api 冒烟失败：healthz≠200（镜像已建未上线）"
-  docker run --rm --entrypoint sh "$wt" -c 'test -f /app/worker/generation-worker.ts && test -f /app/tools/control-plane-bootstrap.ts && test -d /app/node_modules/tsx' \
+  docker run --rm --entrypoint sh "$wt" -c 'test -f /app/worker/generation-worker.ts && test -f /app/tools/ops/database/control-plane-bootstrap.ts && test -d /app/node_modules/tsx' \
     || die "worker 冒烟失败：源码/tsx 不在位"
   [ "$(docker image inspect "$wt" --format '{{json .Config.Cmd}}')" = '["npm","run","generation:bootstrap"]' ] || die "worker CMD 与线上配方不同"
   echo "SMOKE worker OK"

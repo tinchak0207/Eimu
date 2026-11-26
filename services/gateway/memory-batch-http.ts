@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-// ─────────────────────────── HMAC 签名工具（逐字比照 src/lib/memory-hmac.ts，契约 §3）
+// ─────────────────────────── HMAC 签名工具（逐字比照 src/lib/accounts/memory-hmac.ts，契约 §3）
 // 为什么按 raw body bytes 验签：gateway 签的是它送出的那串位元组；repo 端一律
 // `await req.arrayBuffer()` 取原始位元组再算。GET（export）没有 body → 对「空 bytes」验签。
 // 凭据纪律：密钥与签名值永不写进 log／回应／记忆档。

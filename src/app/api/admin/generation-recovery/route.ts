@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { getGenerationSql } from "@/lib/generation-core/database";
 import { checkpointProviderOutput, checkpointProviderTaskReceipt, clearProviderOutputCheckpoint, markProviderTaskSubmitted } from "@/lib/generation-core/job-repository";
 

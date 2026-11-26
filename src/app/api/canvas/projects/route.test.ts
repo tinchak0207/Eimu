@@ -1,7 +1,7 @@
 // REQ-B2-2 生成注入闸的接线守门件（**源码层变更探针，不计入「已验证」**，口径见 TG-02）。
 //
 // 为何只能走源码层：本路由用 requireVerifiedUser（要打上游 /api/user/self 验身分），离线测不起来。
-// 真正的**行为**断言在 `src/lib/asset-library.test.ts`（filterCardIdsForProject 逐条实测）
+// 真正的**行为**断言在 `src/lib/media/asset-library.test.ts`（filterCardIdsForProject 逐条实测）
 // 与 `src/lib/storyboard-contract.test.ts`（注入端逐条实测）；本档只钉住「路由确实把闸接上、
 // 且闸在落库之前」——防的是接线被无声拆掉。
 import { test } from "node:test";

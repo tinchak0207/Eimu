@@ -12,10 +12,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import SkillDetailPage, { generateMetadata, generateStaticParams } from "./page";
-import { AGENT_SKILLS, AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent-skills";
-import type { AgentSkillView } from "@/lib/agent-skills/registry";
-import { registerUserSkillSource } from "@/lib/agent-skills/registry";
-import { OUTPUT_KIND_LABELS } from "@/lib/agent-skills/output-kinds";
+import { AGENT_SKILLS, AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent/agent-skills";
+import type { AgentSkillView } from "@/lib/agent/agent-skills/registry";
+import { registerUserSkillSource } from "@/lib/agent/agent-skills/registry";
+import { OUTPUT_KIND_LABELS } from "@/lib/agent/agent-skills/output-kinds";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 const SITE_URL = getSiteUrlFromEnv();

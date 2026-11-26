@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { ingestRedeemedRecharges } from "./account-ledger";
-import { runLifecycleEmailsWithSql } from "@/lib/lifecycle-email";
-import { runReferralRewardsWithSql } from "@/lib/referral-reward";
-import { productionWelcomeGiftDeps, runWelcomeGiftDevCatchUp } from "@/lib/welcome-gift";
+import { runLifecycleEmailsWithSql } from "@/lib/accounts/lifecycle-email";
+import { runReferralRewardsWithSql } from "@/lib/billing/referral-reward";
+import { productionWelcomeGiftDeps, runWelcomeGiftDevCatchUp } from "@/lib/billing/welcome-gift";
 import { ingestSubscriptionRedemptions } from "./subscription";
 import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
@@ -14,9 +14,9 @@ import { createFailureRecord } from "./failure-record";
 import { planGenerationAttemptReplay } from "./operation-registry";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { persistOutputArtifact } from "./artifact-service";
-import { generationCoins } from "@/lib/generation-model-catalog/pricing";
-import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { generationCoins } from "@/lib/generation-core/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-core/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import {
   attemptedSupplierRoutingForOutput,
   beginGenerationAttempt,
@@ -51,8 +51,8 @@ import { enforcePaidVideoCostGate } from "./paid-video-cost-gate";
 import type { GenerationArtifactResult, GenerationJob, GenerationKind, FailureClass, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
-import { emitJobRoutingEvent } from "../routing-telemetry";
-import { sweepMapayIntakeOnce } from "@/lib/mapay-intake";
+import { emitJobRoutingEvent } from "./routing-telemetry";
+import { sweepMapayIntakeOnce } from "@/lib/billing/mapay-intake";
 
 export interface GenerationWorkerOptions {
   workerId?: string;

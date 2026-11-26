@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { modelPricingRevision, subscribeModelPricing } from "@/lib/generation-model-catalog";
+import { modelPricingRevision, subscribeModelPricing } from "@/lib/generation-core/generation-model-catalog";
 
 /**
  * 前端订阅模型定价覆写版本号：管理员改价后 applyModelPricingOverrides bump

@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "../../../../lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "../../../../lib/biz-api-key-store";
-import { __resetAssetPackStoreForTests } from "../../../../lib/asset-pack-store";
+import { hashBizApiKey } from "../../../../lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "../../../../lib/accounts/biz-api-key-store";
+import { __resetAssetPackStoreForTests } from "../../../../lib/media/asset-pack-store";
 import { GET, PUT, DELETE } from "./route";
 
 const root = process.cwd();

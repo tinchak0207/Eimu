@@ -15,7 +15,7 @@ import {
   filterAgentSessions,
   formatSessionRelativeTime,
 } from "./AgentSessionList";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
 
 const root = process.cwd();
 // <1000 行重构：Surface 的纯 helper（含 isInsideHistorySurface）已拆到同目录子模组。

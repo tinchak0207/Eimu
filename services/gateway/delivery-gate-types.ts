@@ -1,4 +1,4 @@
-/** 单一 Expert 的交付契约（与 src/lib/expert-registry.ts deliverableContract 同形）。 */
+/** 单一 Expert 的交付契约（与 src/lib/agent/expert-registry.ts deliverableContract 同形）。 */
 export interface ExpertDeliveryContract {
   requiredFields: string[]
   qcSignatureRequired: boolean

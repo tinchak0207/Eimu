@@ -12,8 +12,8 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
-import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
+} from "@/lib/accounts/biz-key-sync";
+import { readSupplierHealthSignal } from "@/lib/generation-core/supplier-health-signal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

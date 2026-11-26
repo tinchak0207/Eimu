@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { AspectRatio, OutputResolution } from "@/lib/generation-model-catalog";
-import type { ReflectedParams } from "@/lib/agent-param-reflect";
+import type { AspectRatio, OutputResolution } from "@/lib/generation-core/generation-model-catalog";
+import type { ReflectedParams } from "@/lib/agent/agent-param-reflect";
 
 /** D-12 撤销条上的项目名。顺序即显示顺序。 */
 export const AGENT_PARAM_LABELS: ReadonlyArray<{

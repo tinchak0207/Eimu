@@ -11,26 +11,26 @@
 // 上游调额不幂等，幂等键是 mPay 的 out_trade_no（mapay_credit 主键）。
 //
 // 首充专享档（plan id `first-charge`）的额度例外地不是标价函数：有资格才给 300 币，
-// 资格不符按正价折算（见 src/lib/first-charge.ts 的 resolveFirstChargeGrant）。
+// 资格不符按正价折算（见 src/lib/billing/first-charge.ts 的 resolveFirstChargeGrant）。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
 import {
   MAPAY_CREDIT_RELAY_SIGNATURE_DOMAIN,
   createPostgresMapayCreditStore,
   runMapayCreditWithSql,
   type MapayCreditOutcome,
-} from "@/lib/mapay-credit";
-import { mapayPlanQuota } from "@/lib/mapay-redemption";
-import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
-import { resolveFirstChargeGrantWithSql } from "@/lib/first-charge";
-import { parseSeatOrderParam, seatOrderEntitlementCoins } from "@/lib/team-seat-order";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+} from "@/lib/billing/mapay-credit";
+import { mapayPlanQuota } from "@/lib/billing/mapay-redemption";
+import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/billing/plans";
+import { resolveFirstChargeGrantWithSql } from "@/lib/billing/first-charge";
+import { parseSeatOrderParam, seatOrderEntitlementCoins } from "@/lib/billing/team-seat-order";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
     } else {
       // 首充专享档的额度不是标价函数：有资格才给 300 币；资格不符（并发第二单 / 已有充值记录 /
       // 资格判不了）按 ¥7 对应正价折算（约 70 币）入帐，原因写进 mapay_credit.detail。
-      // 「每帐号限一次」的并发执法点是 first_charge_claim 的 user_id 主键（见 src/lib/first-charge.ts）。
+      // 「每帐号限一次」的并发执法点是 first_charge_claim 的 user_id 主键（见 src/lib/billing/first-charge.ts）。
       amountQuota = mapayPlanQuota(plan!);
       if (plan!.id === FIRST_CHARGE_PLAN_ID) {
         const grant = await resolveFirstChargeGrantWithSql(sql, { userId, outTradeNo: orderId });

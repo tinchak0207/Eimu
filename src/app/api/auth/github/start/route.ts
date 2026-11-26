@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildGitHubAuthorizeUrl, createGitHubState, embedTicketInState } from "@/lib/github-auth";
+import { buildGitHubAuthorizeUrl, createGitHubState, embedTicketInState } from "@/lib/accounts/github-auth";
 
 export const preferredRegion = "sfo1";
 

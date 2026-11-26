@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { AdminLogin } from "@/components/admin/AdminLogin";
 import { AdminPoolManager } from "@/components/admin/AdminPoolManager";
-import { getAdminSession } from "@/lib/admin-session";
+import { getAdminSession } from "@/lib/accounts/admin-session";
 
 export const dynamic = "force-dynamic";
 

@@ -28,7 +28,7 @@ test("single_video / novel_film 预设 model=seedance-2.0 且时长 ≥10s", () 
 })
 
 test("锚点价与控面目录一致（目录档存在时，credits/10）", () => {
-  const p = new URL("../../src/lib/generation-model-catalog/catalog.ts", import.meta.url)
+  const p = new URL("../../src/lib/generation-core/generation-model-catalog/catalog.ts", import.meta.url)
   if (!existsSync(p)) return
   const src = readFileSync(p, "utf8")
   const m = src.match(/\[SEEDANCE_20_MODEL_ID\]: \{[\s\S]*?videoCreditsPerSecond: \{ "480p": (\d+), "720p": (\d+), "1080p": (\d+) \}/)

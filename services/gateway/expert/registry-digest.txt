@@ -1,4 +1,4 @@
-<!-- 由 src/lib/expert-registry.ts EXPERT_REGISTRY 现值生成（buildExpertRegistryDigest 逐字输出，全部 skillPath 经本脚本统一规则映射为 workspace 根相对形：前缀 .opencode/，嵌套 SKILL.md→RECIPE.md；由 tools/export-expert-agents.ts 机械生成）。生成日期 2026-10-13（registry 改行后须重生成上传）。 -->
+<!-- 由 src/lib/agent/expert-registry.ts EXPERT_REGISTRY 现值生成（buildExpertRegistryDigest 逐字输出，全部 skillPath 经本脚本统一规则映射为 workspace 根相对形：前缀 .opencode/，嵌套 SKILL.md→RECIPE.md；由 tools/codegen/export-expert-agents.ts 机械生成）。生成日期 2026-10-13（registry 改行后须重生成上传）。 -->
 Expert 注册表（能力断路真源；域外工具不存在于该 Expert 的工具表）：
 - director3d（3D 导演）：任务类型 3d / blender / scene_3d；工具 blender_exec, blender_export_gltf, blender_render, image_quote；配方库 .opencode/skills/blender-director/SKILL.md；交付契约 turntable, stills, blend, glb（qcSignature：必需）
 - lyricist（歌词专家）：任务类型 lyrics / lyric / lyricist / songwriting / 作词 / 歌词 / 填词；工具 ；配方库 .opencode/skills/lyricist/SKILL.md, .opencode/skills/fang-wenshan/SKILL.md；交付契约 title, lyrics, hook, prosody_notes, qc（qcSignature：必需）

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Lightbulb, Package, AlertTriangle, Clapperboard } from "lucide-react";
 import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeGateConfirm, type CanvasNodeStatus } from "@/lib/canvas/types";
-import { svgToDataUrl } from "@/lib/svg-data-url";
+import { svgToDataUrl } from "@/lib/media/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
 import { buildAuthHeaders } from "../embed/embed-helpers";
 import { Scene3dCardBody } from "./Scene3dCardBody";

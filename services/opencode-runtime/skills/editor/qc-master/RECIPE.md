@@ -3,7 +3,7 @@ name: editor-qc-master
 description: 剪辑质检闸与母带导出配方。触发时机：成片导出、交付、质检、QC、检查后导出、竖屏／横屏／影院画幅、封面帧、交付规格、导出被拒排障。任何「把片子交出来」的请求必载——lint 是闸门不是可选步骤。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 片B4+B6
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 片B4+B6
               （B4 信号层 linter：黑帧/白闪/爆音/静音段/音量跳变/音画时长错位，ffmpeg blackdetect·freezedetect·
               astats·silencedetect，must/should 分级；B6 母带 check+export 闸，must 未清拒导，预设
               9:16/16:9/2.39:1/封面帧）与 §7（master 14/14 含负向闸：声明 > 源实测 → av_mismatch must → export 400）。

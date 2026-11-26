@@ -8,7 +8,7 @@ triggers:
   - 使用者要把服装平铺图做成模特穿搭、种草图、电商套图
   - 使用者要做服装细节图、身份一致、手部接触修复或平台重排
 requires:
-  - src/lib/fashion-tryon-tools.ts
+  - src/lib/agent/fashion-tryon-tools.ts
   - 现有 generation batch owner（src/lib/generation-core/batch-service.ts）
   - 现有 Canvas artifact boundary（src/lib/canvas/types.ts，只读）
 unsupported-tools:

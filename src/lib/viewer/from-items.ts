@@ -1,15 +1,15 @@
 // 赏阅：把站内既有的成品形状（agent 媒体卡 item / 历史条目）投影成 ViewAsset。
 // 纯函式、零 React。只搬真实有的字段：没有的就不写，不编造标题/封面/来历。
 
-import type { AgentAudioItem, AgentImageItem, AgentModel3dItem, AgentVideoItem } from "@/lib/agent-chat-types";
-import type { HistoryEntry, HistoryResult } from "@/lib/history-types";
+import type { AgentAudioItem, AgentImageItem, AgentModel3dItem, AgentVideoItem } from "@/lib/agent/agent-chat-types";
+import type { HistoryEntry, HistoryResult } from "@/lib/media/history-types";
 import {
   DELIVERABLE_KINDS,
   deliverableKindLabel,
   deliverableKindsOfResult,
   isDeliverableKind,
   type DeliverableKind,
-} from "@/lib/deliverable-kind";
+} from "@/lib/media/deliverable-kind";
 import type { ViewAsset, ViewKind } from "./types";
 
 const EXTRA_KIND_LABEL: Record<Exclude<ViewKind, DeliverableKind>, string> = {

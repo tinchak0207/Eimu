@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AspectRatio } from "@/lib/generation-model-catalog";
-import { nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
+import type { AspectRatio } from "@/lib/generation-core/generation-model-catalog";
+import { nearestAspectRatio } from "@/lib/generation-core/generation-model-catalog/resolution";
 import {
   GPT_IMAGE_25_FLARE_MODEL_ID,
   GPT_IMAGE_25_SUNBURST_MODEL_ID,
@@ -11,7 +11,7 @@ import {
   SI_45_IMAGE_MODEL_ID,
   VIDU_Q2_IMAGE_MODEL_ID,
   VIDU_Q3_TURBO_VIDEO_MODEL_ID,
-} from "../image-model-ids.js";
+} from "./image-model-ids.js";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplyAdapter } from "./supply-registry";
 import type {

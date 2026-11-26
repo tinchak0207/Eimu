@@ -9,7 +9,7 @@ function read(relPath: string) {
 
 test("image display download button never invokes native share", () => {
   const displaySource = read("src/components/ImageDisplay.tsx");
-  const helperSource = read("src/lib/image-helpers.ts");
+  const helperSource = read("src/lib/media/image-helpers.ts");
   assert.match(displaySource, /imageHelpers\.download/);
   assert.doesNotMatch(displaySource, /Share/);
   assert.doesNotMatch(helperSource, /navigator\.share/);

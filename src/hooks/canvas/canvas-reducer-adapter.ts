@@ -3,7 +3,7 @@
 // reduceCanvasEvent 的签名是 (state, CanvasSseEvent)，不是标准 reducer。
 // 这里包一层 adapter，同时容纳「本端动作」（载入专案、拖动节点、undo 还原）。
 import { guardAgentPatchAgainstHumanEdits, HUMAN_OVERRIDE_KEY, humanProtectedDeleteMessage, isHumanProtectedNode, opOverridesNode, stampHumanEdit } from "@/lib/canvas/human-edits";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
 import {
   CANVAS_INITIAL_STATE,
   layoutGraph,

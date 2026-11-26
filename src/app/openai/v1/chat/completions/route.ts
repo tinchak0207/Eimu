@@ -12,7 +12,7 @@
 // 非生图模型（gpt-4o 之类）→ 400 model_not_supported：我们没有文本模型，假装能答会更糟。
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { isModelAllowedForKey } from "@/lib/biz-api-keys";
+import { isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
 import { extractLastUserPrompt, imageMarkdown } from "@/lib/openai-compat/chat-messages";
 import { guardBizApiKey, openAICompatError, openAIError, type OpenAIErrorFields } from "@/lib/openai-compat/errors";
 import {

@@ -21,7 +21,7 @@
 //   - canvas/canvas-event-settler.ts     image.done 对账收敛
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
 import { CANVAS_INITIAL_STATE, layoutGraph } from "@/lib/canvas/reducer";
 import {
   CANVAS_EMPTY_HISTORY,
@@ -47,7 +47,7 @@ import { fetchCanvasProject, listCanvasProjectSummaries, postCanvasOpsResult, ty
 import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
 // 解说剧设定（P1-5／D7）：型别值域＋旁白音色的判据（与落盘端同一份）。
 import { isCanvasScriptType, type CanvasScriptType } from "@/lib/canvas/project-narration";
-import { normalizeVoiceId } from "@/lib/voice-library";
+import { normalizeVoiceId } from "@/lib/media/voice-library";
 import { CanvasNodeType, isCanvasProjectType } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
@@ -87,7 +87,7 @@ import {
 import { useCanvasProjectSync } from "./canvas/canvas-project-sync";
 import { upstreamTextNameFor, useCanvasCards } from "./canvas/use-canvas-cards";
 import { useCanvasEventSettler } from "./canvas/canvas-event-settler";
-import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent-output-cards";
+import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent/agent-output-cards";
 import { toast } from "@/hooks/use-toast";
 
 import { useCanvasChatOps } from "./canvas/canvas-chat-ops";

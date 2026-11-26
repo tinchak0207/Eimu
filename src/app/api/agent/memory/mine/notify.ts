@@ -1,4 +1,4 @@
-import { callAgentGateway } from "@/lib/agent-gateway";
+import { callAgentGateway } from "@/lib/agent/agent-gateway";
 
 /**
  * 通知 gateway：该账号的记忆刚被用户改／删——失效召回缓存，并把在线会话 L0 里已删的条目摘掉。

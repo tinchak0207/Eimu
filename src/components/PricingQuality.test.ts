@@ -11,12 +11,12 @@ import {
   modelPriceRows,
   planDiscountPercent,
   planUnitsForCoins,
-} from "../lib/plans.ts";
+} from "../lib/billing/plans.ts";
 import {
   IMAGE_MODEL_IDS,
   VIDEO_MODEL_IDS,
   generationCoins,
-} from "../lib/generation-model-catalog.ts";
+} from "../lib/generation-core/generation-model-catalog.ts";
 
 const PRICING_CAROUSEL_FILES = [
   "src/components/PricingPlanCarousel.tsx",

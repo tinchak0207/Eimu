@@ -6,8 +6,8 @@
 // 身份：resolveAgentCaller（与 messages / sessions 一致）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
-import { loadAgentProfile, saveAgentProfile, type AgentProfile } from "@/lib/agent-profile-store";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
+import { loadAgentProfile, saveAgentProfile, type AgentProfile } from "@/lib/agent/agent-profile-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

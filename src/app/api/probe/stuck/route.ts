@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { listStuckJobs } from "@/lib/generation-core/job-events";
 
 // P1.5 probe 侦查面：滞留名单 + 死因分类（pending_billing 未受理 / running 轮询断 /

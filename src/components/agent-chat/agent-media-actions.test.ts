@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AgentImageCard } from "./AgentImageCard";
 import { AgentVideoCard } from "./AgentVideoCard";
 import { AgentAudioCard } from "./AgentAudioCard";
-import type { AgentImageItem, AgentAudioItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentImageItem, AgentAudioItem, AgentVideoItem } from "@/lib/agent/agent-chat-types";
 
 const root = process.cwd();
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");

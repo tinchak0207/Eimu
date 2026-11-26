@@ -1,4 +1,4 @@
-import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
+import type { AgentAttachmentRef } from "@/lib/agent/agent-chat-types";
 import type { PendingAttachment } from "./AgentComposer.types";
 
 /**

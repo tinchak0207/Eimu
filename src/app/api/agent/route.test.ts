@@ -9,7 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { decryptAgentKey, encryptAgentKey } from "../../../lib/agent-user-key";
+import { decryptAgentKey, encryptAgentKey } from "../../../lib/agent/agent-user-key";
 
 const root = process.cwd();
 
@@ -58,7 +58,7 @@ test("sse-ticket 路由的 caller.key 只能作为 callAgentGateway 参数，不
 });
 
 test("agent-user-key.ts 不打 log，throw 讯息不得夹带明文或其变量", () => {
-  const source = code("src/lib/agent-user-key.ts");
+  const source = code("src/lib/agent/agent-user-key.ts");
   assert.doesNotMatch(source, /console\.log/, "不得把任何东西打进 log");
   // 明文 / 解密结果（变量名 clear）不得出现在任何 throw 的讯息里；
   // 模板插值也一并禁掉，因为那是把敏感值塞进错误讯息的最常见写法。
@@ -70,12 +70,12 @@ test("agent-user-key.ts 不打 log，throw 讯息不得夹带明文或其变量"
 });
 
 test("漏配 env 与临时故障必须是两种 503，不共用一句「稍后重试」", () => {
-  const keySource = code("src/lib/agent-user-key.ts");
+  const keySource = code("src/lib/agent/agent-user-key.ts");
   // 型别分开，不靠比对 message 字串。
   assert.match(keySource, /export class AgentKeyConfigError extends Error/);
   assert.match(keySource, /throw new AgentKeyConfigError\("AGENT_KEY_ENCRYPTION_SECRET 未配置/);
 
-  const guard = code("src/lib/agent-session-guard.ts");
+  const guard = code("src/lib/agent/agent-session-guard.ts");
   assert.match(guard, /error instanceof AgentKeyConfigError/);
   assert.match(guard, /code: "agent_key_not_configured"/);
   assert.match(guard, /code: "agent_key_unavailable"/);
@@ -84,7 +84,7 @@ test("漏配 env 与临时故障必须是两种 503，不共用一句「稍后�
 });
 
 test("agent gateway 预设指向 store 域名，绝不指向 image 域名（404）", () => {
-  const source = code("src/lib/agent-gateway.ts");
+  const source = code("src/lib/agent/agent-gateway.ts");
   assert.match(source, /AGENT_GATEWAY_DEFAULT_ORIGIN\s*=\s*"https:\/\/store\.tinchak0207\.xyz"/);
   assert.doesNotMatch(source, /image\.tinchak0207\.xyz/, "image 域名的 /agent/* 是 404，打过去等于功能全坏");
   assert.match(source, /agentGatewayOrigin\(/, "取 origin 必须走正规化函数");

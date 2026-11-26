@@ -7,7 +7,7 @@
 //   ② 不碰计费语义：作用域层不许出现 reserve / refund / quota 这类字眼
 //
 // REQ-B2b 起，本档新增的断言一律标「变更探针，不计入已验证」（TG-02）：
-// 挂用 copy-on-use 的**行为**断言在 src/lib/asset-mount-copy.test.ts（真建副本、真删来源、
+// 挂用 copy-on-use 的**行为**断言在 src/lib/media/asset-mount-copy.test.ts（真建副本、真删来源、
 // 真幂等、真环路拒绝）；本档只钉住路由/前端接线没被拆掉。
 import { test } from "node:test";
 import assert from "node:assert/strict";

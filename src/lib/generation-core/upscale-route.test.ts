@@ -136,7 +136,7 @@ test("后端默认＝legacy（PixAI bridge）：不设 UPSCALE_BACKEND 不会偷
 test("档位折算成像素 size：1:1 的 1k／2k／4k 分别是 1024／2048／4096（逐字进白名单）", async () => {
   const { planGptImageUpscale, UPSCALE_BACKEND_MODEL_ID } = await import("./upscale-backend.ts");
   const { DURABLE_IMAGE_SIZES } = await import("./durable-image-sizes.ts");
-  const { generationModel } = await import("@/lib/generation-model-catalog");
+  const { generationModel } = await import("@/lib/generation-core/generation-model-catalog");
 
   assert.ok(
     generationModel(UPSCALE_BACKEND_MODEL_ID)?.resolutions.includes("4k"),
@@ -286,8 +286,8 @@ const CHARGE_TIERS = ["1k", "2k", "4k"] as const;
 
 test("① gpt-image-2 后端按档位价收费（1k=1／2k=2／4k=8 币），逐档严格递增", async () => {
   const { upscaleChargeModelId, upscaleChargeQuota } = await import("./upscale-backend.ts");
-  const { generationModel } = await import("@/lib/generation-model-catalog");
-  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+  const { generationModel } = await import("@/lib/generation-core/generation-model-catalog");
+  const { QUOTA_PER_COIN } = await import("@/lib/billing/quota-constants");
 
   // 定价键＝后端模型本身（不再是 legacy 的 pixai-upscale）。
   assert.equal(upscaleChargeModelId("gpt-image-2"), "gpt-image-2");
@@ -303,7 +303,7 @@ test("① gpt-image-2 后端按档位价收费（1k=1／2k=2／4k=8 币），逐
 
 test("② legacy 未被打到：pixai-bridge 后端仍是 pixai-upscale 的一口价 0.001 币（与档位无关）", async () => {
   const { upscaleChargeModelId, upscaleChargeQuota } = await import("./upscale-backend.ts");
-  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+  const { QUOTA_PER_COIN } = await import("@/lib/billing/quota-constants");
 
   assert.equal(upscaleChargeModelId("pixai-bridge"), "pixai-upscale");
   const expected = Math.round(0.001 * QUOTA_PER_COIN);
@@ -315,7 +315,7 @@ test("② legacy 未被打到：pixai-bridge 后端仍是 pixai-upscale 的一�
 test("③ 上游不双扣：同步层收足档位价、durable 提交额恒 0（0 额快车道外呼零次）", async () => {
   const { upscaleChargeQuota, UPSCALE_UPSTREAM_BILLING_AMOUNT } = await import("./upscale-backend.ts");
   const { reserveGenerationBilling } = await import("./billing-ledger.ts");
-  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+  const { QUOTA_PER_COIN } = await import("@/lib/billing/quota-constants");
 
   // 同步层真的收钱（route 的 reserveSyncCharge 用的就是这个额）。
   assert.ok(upscaleChargeQuota("gpt-image-2", "4k", QUOTA_PER_COIN) > 0, "同步层必须真的收钱");

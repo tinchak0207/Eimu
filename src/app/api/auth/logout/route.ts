@@ -3,7 +3,7 @@ import {
   lookupUserIdByToken,
   revokeNewApiSessionToken,
   rotateUpstreamAccessToken,
-} from "@/lib/newapi-session-token";
+} from "@/lib/accounts/newapi-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -37,7 +37,7 @@ export interface UseCanvasShortcutsInput {
   createNodeAt: (
     type: "text" | "image" | "prompt" | "reference",
     world: CanvasPosition,
-    extras?: { content?: string; title?: string; width?: number; height?: number; referenceRole?: import("@/lib/image-types").ReferenceImageRole },
+    extras?: { content?: string; title?: string; width?: number; height?: number; referenceRole?: import("@/lib/media/image-types").ReferenceImageRole },
   ) => string;
 }
 

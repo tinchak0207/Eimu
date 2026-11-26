@@ -11,8 +11,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import type { GatewayAdminUser, GatewayRedemption } from "@/lib/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import type { GatewayAdminUser, GatewayRedemption } from "@/lib/accounts/gateway-admin";
 import type { GenerationSql } from "./database.ts";
 import {
   computeAccountBalance,
@@ -977,7 +977,7 @@ test("发码端：产生的码名带 SKU 标记，且先搜后建（重复履约
     );
   }) as unknown as typeof fetch;
 
-  const { fulfillSubscriptionRedemption } = await import("@/lib/subscription-redemption");
+  const { fulfillSubscriptionRedemption } = await import("@/lib/billing/subscription-redemption");
   const first = await withEnv({}, () =>
     fulfillSubscriptionRedemption({ plan: { sku: "pro-monthly", orderId: "ord-7", quota: 750_000_000 } }, adminEnv, fetcher),
   );

@@ -2,8 +2,8 @@
 // 认证与 route.ts 同一套 requireAdminSession——没有 session 就 401，不做任何弱化。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { listConfigChanges } from "@/lib/admin-audit";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { listConfigChanges } from "@/lib/accounts/admin-audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

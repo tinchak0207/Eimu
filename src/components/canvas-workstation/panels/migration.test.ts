@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   KUNPENG_STYLE_ASSETS,
-} from "../../../lib/kunpeng-style-assets";
-import { KUNPENG_PROMPT_TEMPLATES } from "../../../lib/kunpeng-prompt-templates";
+} from "../../../lib/agent/kunpeng-style-assets";
+import { KUNPENG_PROMPT_TEMPLATES } from "../../../lib/agent/kunpeng-prompt-templates";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");

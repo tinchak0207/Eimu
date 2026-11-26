@@ -32,9 +32,9 @@ import {
   LENS_LANGUAGE_LIBRARY,
   LENS_LANGUAGE_SOURCE,
   composeLensFragment,
-} from "@/lib/lens-language-library";
+} from "@/lib/media/lens-language-library";
 
-/** skill 生成器的类别顺序（`tools/gen-lens-skill.ts` GROUP_ORDER，逐字）。 */
+/** skill 生成器的类别顺序（`tools/codegen/gen-lens-skill.ts` GROUP_ORDER，逐字）。 */
 const SKILL_GROUP_ORDER = [
   "composition",
   "shot_size",
@@ -73,7 +73,7 @@ test("lens-picker: 12 类齐全、顺序与 skill 生成器一致、条数逐类
   assert.deepEqual(
     groups.map((g) => g.id),
     [...SKILL_GROUP_ORDER],
-    "分组顺序必须等于 tools/gen-lens-skill.ts 的 GROUP_ORDER（单一真源不许漂移）",
+    "分组顺序必须等于 tools/codegen/gen-lens-skill.ts 的 GROUP_ORDER（单一真源不许漂移）",
   );
   let total = 0;
   for (const g of groups) {
@@ -284,7 +284,7 @@ test("词库元件不碰 src/lib/：只读 lens-language-library 的既有导出
     assert.equal(/LENS_LANGUAGE_LIBRARY\s*=/.test(src), false, "不得在本片重新定义词库");
     assert.equal(/group:.*name:.*text:/.test(src), false, "不得在本片内联词条字面量");
   }
-  assert.match(picker, /from "@\/lib\/lens-language-library"/);
+  assert.match(picker, /from "@\/lib\/media\/lens-language-library"/);
   // 拼装一律走既有轮子，不自造第二套
   assert.match(picker, /composeLensFragment\(/);
   assert.equal(/join\("；"\)/.test(picker), false, "不得手写第二套拼接（须走 composeLensFragment）");

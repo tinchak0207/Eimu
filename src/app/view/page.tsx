@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { isDeliverableKind } from "@/lib/deliverable-kind";
+import { isDeliverableKind } from "@/lib/media/deliverable-kind";
 import { stableAssetId, viewKindLabel } from "@/lib/viewer/from-items";
 import type { ViewAsset, ViewKind } from "@/lib/viewer/types";
 import { ViewClient } from "./ViewClient";

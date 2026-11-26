@@ -184,7 +184,7 @@ test("pricing plans are selectable carousel cards with in-card checkout closure"
 test("pricing custom plan prices by the single-source 0.045 RMB per coin constant", () => {
   // 2026-09-07 暴君钦定：自定义档 0.045 RMB/金币，价格常量单点定义在 plans.ts，
   // 页面展示与 checkout/notify 服务端计价共用同一解析器，客户端传价不参与计价。
-  const plans = read("src/lib/plans.ts");
+  const plans = read("src/lib/billing/plans.ts");
   const carousel = readPricingCarousel();
   const checkout = read("src/app/api/payments/mapay/checkout/route.ts");
   const notify = read("src/app/api/payments/mapay/notify/route.ts");

@@ -13,7 +13,7 @@ import {
   parseAgentMarkdown,
   type MdBlock,
   type MdInline,
-} from "@/lib/agent-markdown";
+} from "@/lib/agent/agent-markdown";
 
 /**
  * 助理消息的 Markdown 渲染（罪状 3 + 罪状 9）。

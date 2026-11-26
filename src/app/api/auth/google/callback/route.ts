@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/new-api-auth-server";
-import { signEmuOauthCode } from "@/lib/emu-oauth";
+import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
+import { signEmuOauthCode } from "@/lib/accounts/emu-oauth";
 import {
   buildGooglePassword,
   buildGoogleUsername,
   type GoogleProfile,
-} from "@/lib/google-auth";
-import { extractTicketFromState, unpackHandoffTicket } from "@/lib/github-auth";
-import { deliverHandoff } from "@/lib/pwa-handoff";
-import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
-import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode } from "@/lib/first-touch-attribution";
-import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/user-attribution";
+} from "@/lib/accounts/google-auth";
+import { extractTicketFromState, unpackHandoffTicket } from "@/lib/accounts/github-auth";
+import { deliverHandoff } from "@/lib/accounts/pwa-handoff";
+import { ensureGatewayUserForOAuth } from "@/lib/accounts/gateway-admin";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode } from "@/lib/accounts/first-touch-attribution";
+import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/accounts/user-attribution";
 
 export const preferredRegion = "sfo1";
 

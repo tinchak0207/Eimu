@@ -27,7 +27,7 @@
 //   整包代理给控制面（`/image-control/api/v1/**`），控面没有本 route ⇒ 直打 404。harness
 //   前缀未被代理，由本部署直接服务；MCP 工具目标路由漂移由 tools.test.ts 守门。
 //
-// 栏位层 / evidence / qc 签名的规则真源＝`src/lib/expert-contract.ts` 的
+// 栏位层 / evidence / qc 签名的规则真源＝`src/lib/agent/expert-contract.ts` 的
 //   `validateExpertDeliverable` 与 `computeQcSignature`（本路由只做 HTTP 包装、body 白名单
 //   与契约必填栏检查，**绝不重写它已有的规则**）。本档不呼叫任何模型、不呼叫任何付费上游、
 //   不扣费、不写账本。
@@ -38,8 +38,8 @@
 //   `{ ok, errors[], qc_signature }`。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import {
   EXPERT_IDS,
@@ -48,7 +48,7 @@ import {
   type ExpertDeliverable,
   type ExpertId,
   type ExpertTaskContract,
-} from "@/lib/expert-contract";
+} from "@/lib/agent/expert-contract";
 
 // 契约真源（resolveJsonModule 静态载入）。`src/lib/mcp/expert-delivery-contracts.json` 是为能被
 // 建置打包而放在 src/ 的**镜像**；`services/expert-gateway/expert-delivery-contracts.json`
@@ -99,7 +99,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * 为何存在：对外 MCP inputSchema（tools.ts 的 check_delivery_contract）宣告的 evidence
  * 指针是 **snake_case**（`artifact_path` / `duration_sec`），因为交付物 payload 本身用的是
  * snake_case 字段（见契约档 requiredFields）；但底层规则真源 `ExpertDeliverable.evidence`
- * （src/lib/expert-contract.ts:80）是 **camelCase**（`artifactPath` / `durationSec`）。
+ * （src/lib/agent/expert-contract.ts:80）是 **camelCase**（`artifactPath` / `durationSec`）。
  * 若不在这一层映射，外部 agent 照工具说明书只给 `{"duration_sec": 12}` 会**必然失败**——
  * 2026-10-03 生产实测错误原文：
  *   `evidence 至少需要一项可核验指针：url（可访问地址）、artifactPath（档案路径）、bytes（字节数）或 durationSec（时长秒）任一非空。`

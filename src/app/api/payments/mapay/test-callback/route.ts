@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PLANS } from "@/lib/plans";
+import { PLANS } from "@/lib/billing/plans";
 import {
   createMapayOrderId,
   formatMapayMoney,
@@ -7,7 +7,7 @@ import {
   normalizeMapayPaymentType,
   signMapayParams,
   type MapayFields,
-} from "@/lib/mapay";
+} from "@/lib/billing/mapay";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

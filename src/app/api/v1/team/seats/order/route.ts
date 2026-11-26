@@ -6,7 +6,7 @@
 //
 // 全链已接线（2026-10-01）：本路由只算价、出决定性订单 id、给收银台入口；收款由
 // GET /api/payments/mapay/checkout?plan=seat:... 发起，回调由 notify 的席位履约分支
-// （src/lib/team-seat-fulfillment.ts）同源覆核金额后把配额加到团队主帐。
+// （src/lib/billing/team-seat-fulfillment.ts）同源覆核金额后把配额加到团队主帐。
 // **本路由与本档不真收款、不写任何已支付状态、不落本地订单表**（禁影子帐本）。
 // 价格未配置 → 409 seat_price_not_configured；参数不合法 → 400（各自的码）。
 //
@@ -16,14 +16,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import {
   listTeamRoster,
   resolveActorTeam,
   resolveTeamActor,
 } from "@/lib/generation-core/team-governance";
-import { decideSeatOrder } from "@/lib/team-seat-order";
+import { decideSeatOrder } from "@/lib/billing/team-seat-order";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

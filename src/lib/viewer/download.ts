@@ -5,7 +5,7 @@
 //       ③ 都不行就让浏览器按附件打开 <a download>，用户至少拿得到文件。
 // 成功＝触发了浏览器保存（回 true）；只有地址为空才回 false。
 
-import { stationAuthHeaders } from "@/lib/agent-image-share";
+import { stationAuthHeaders } from "@/lib/agent/agent-image-share";
 import type { ViewAsset } from "@/lib/viewer/types";
 
 const EXT_BY_MIME: Record<string, string> = {

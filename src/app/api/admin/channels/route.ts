@@ -13,18 +13,18 @@ import {
   describeChannels,
   overridableChannelIds,
   safeEndpointHost,
-} from "@/lib/channel-registry";
+} from "@/lib/generation-core/channel-registry";
 import {
   normalizeChannelOverrides,
   readChannelOverrides,
   writeChannelOverrides,
   type ChannelOverrides,
-} from "@/lib/channel-overrides";
-import { readAdminPools } from "@/lib/admin-pool-store";
-import { requireAdminSession } from "@/lib/admin-session";
-import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/admin-audit";
-import { sub2apiSwitchedOn } from "@/lib/sub2api";
-import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids.js";
+} from "@/lib/generation-core/channel-overrides";
+import { readAdminPools } from "@/lib/generation-core/admin-pool-store";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/accounts/admin-audit";
+import { sub2apiSwitchedOn } from "@/lib/generation-core/sub2api";
+import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/generation-core/image-model-ids.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

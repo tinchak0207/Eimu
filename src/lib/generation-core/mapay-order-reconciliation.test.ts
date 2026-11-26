@@ -11,10 +11,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import type { GatewayRedemption } from "@/lib/gateway-admin";
-import { buildMapayOrderParam } from "@/lib/mapay-order-param";
-import type { MapayOrder } from "@/lib/mapay-orders";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import type { GatewayRedemption } from "@/lib/accounts/gateway-admin";
+import { buildMapayOrderParam } from "@/lib/billing/mapay-order-param";
+import type { MapayOrder } from "@/lib/billing/mapay-orders";
 import type { GenerationSql } from "./database.ts";
 import {
   classifyMapayPaidOrder,

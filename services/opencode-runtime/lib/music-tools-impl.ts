@@ -2,7 +2,7 @@
 /**
  * music_gen harness 工具 VPS staging 稿（MOE Wave1 片B，2026-09-08 机械导出）。
  *
- * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-tools.ts
+ * 本档由 tools/codegen/export-music-tools-staging.ts 从行为真源 src/lib/agent/music-tools.ts
  * 机械导出：真源全文逐行保留（工具定义/ok-fail/resolveKey/ffprobe 时长/上传通路
  * 全在），除「环境适配」外与真源逐行等价。
  * 白名单 diff 仅六处：① 本注释头；②③④⑤⑥ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
@@ -10,7 +10,7 @@
  * `from "./music-prompt-director"` → `from "./music_prompt_director"`、
  * `from "./music-yue2"` → `from "./music_yue2"` 与
  * `from "./music-take-entropy"` → `from "./music_take_entropy"`（同目录落位档名惯例）。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
  * env：GATEWAY_URL（默认 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
@@ -23,19 +23,19 @@
 /**
  * music_gen harness 工具（MOE 改革 Wave1 片B 音乐 Expert，2026-09-08）。
  *
- * 定义形状同构 src/lib/blender-tools.ts 的 BlenderToolDef（零依赖：
+ * 定义形状同构 src/lib/agent/blender-tools.ts 的 BlenderToolDef（零依赖：
  * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
  * output 为 JSON 字串）；ok/fail 与 resolveKey 逐行同构
  * src/vendor-bridges/lib/director-common.ts（VPS 落位范式：gateway
  * /internal/session-key 解 Bearer key，fallback env HARNESS_API_KEY）。
  *
- * 生成通路：Google Lyria（src/lib/music-lyria.ts，Gemini API v1beta/interactions，
+ * 生成通路：Google Lyria（src/lib/generation-core/music-lyria.ts，Gemini API v1beta/interactions，
  * env GEMINI_API_KEY）。duration_hint=full → lyria-3.5（整歌 ~3 分钟）；
  * clip30 → lyria-3-clip-preview（固定 30 秒）。无歌词默认按纯器乐处理
  * （官方写法 "Instrumental only, no vocals."），需要人声必须提供歌词。
  *
  * prompt 规则层：buildToolPrompt 组出完整文本（含器乐声明）后，最后一关过
- * src/lib/music-prompt-director.ts 的 directMusicPrompt（伪标签/时间戳剥除、
+ * src/lib/agent/music-prompt-director.ts 的 directMusicPrompt（伪标签/时间戳剥除、
  * 六层补齐、通路长度上限），回执 prompt_director 如实回报改写/警告/截断。
  * 顺序不可颠倒：220 runes 上限要算进器乐声明等所有字元。
  *

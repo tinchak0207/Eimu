@@ -11,7 +11,7 @@
 // 模组级缓存 60 秒，与 model-status 的 recentStats 缓存同节奏。
 
 import { NextResponse } from "next/server";
-import { listRoutingEvents, summarizeRecentModelStats } from "@/lib/routing-telemetry";
+import { listRoutingEvents, summarizeRecentModelStats } from "@/lib/generation-core/routing-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

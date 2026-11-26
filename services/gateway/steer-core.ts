@@ -25,7 +25,7 @@ export const STEER_MAX_CHARS = 2000;
 /**
  * 一条排队 steer 的存活上限（epoch ms，30 分钟）。超过这个时间还没被投递＝这条指引
  * 已经不可能在「同一轮工作的语境」里生效，诚实落 failed 而不是永远排队中。
- * 前端镜像常数 AGENT_STEER_QUEUE_TTL_MS（src/lib/agent-chat-types.ts）必须逐字等值。
+ * 前端镜像常数 AGENT_STEER_QUEUE_TTL_MS（src/lib/agent/agent-chat-types.ts）必须逐字等值。
  *
  * ── 与命令身份（REQ-D2b / steer-identity.ts）的语义分工，勿混用 ──
  *   * TTL＝**UI 兜底**：让「排队中」徽章有时间上的收口（网关活著时落 queue_expired、
@@ -91,7 +91,7 @@ export function gateSteerAcceptance(opts: {
  *             与「确知没送到」是两件事，混为一谈就是把不确定说成事实。UI 显示「未确认·未重送」。
  *
  * 值域权威仍在本档：steer-identity.ts 的持久态（多一个内部态 dispatched）映射到这里，
- * 前端 src/lib/agent-chat-types.ts 的 AGENT_STEER_STATUSES 逐字对齐（六个值）。
+ * 前端 src/lib/agent/agent-chat-types.ts 的 AGENT_STEER_STATUSES 逐字对齐（六个值）。
  */
 export type SteerStatus = "queued" | "injected" | "applied" | "aborted" | "failed" | "uncertain";
 

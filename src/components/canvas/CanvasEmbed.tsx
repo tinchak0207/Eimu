@@ -56,11 +56,11 @@ import {
 } from "@/components/assets/AssetReviewPanel";
 import { ShotReviewPanel, reviewShotsFromNodes, shotApprovalFor } from "@/components/assets/ShotReviewPanel";
 // 批准状态（路 1 落地的真源）：写入走 setApproval、分镜侧清洗走 shotApprovalFor（内部即 normalizeApprovalState）。
-import { setApproval } from "@/lib/character-cards";
-import type { ApprovalState } from "@/lib/character-cards";
-import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent-chat-client";
-import type { AgentInteractionMode } from "@/lib/agent-chat-client";
-import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { setApproval } from "@/lib/media/character-cards";
+import type { ApprovalState } from "@/lib/media/character-cards";
+import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent/agent-chat-client";
+import type { AgentInteractionMode } from "@/lib/agent/agent-chat-client";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ import { useCanvasGeneration } from "./embed/use-canvas-generation";
 import { useCanvasShortcuts } from "./embed/use-canvas-shortcuts";
 import { buildCanvasEmbedMenuItems } from "./embed/context-menu-items";
 import { CanvasEmbedOverlays } from "./embed/CanvasEmbedOverlays";
-import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
+import { CHARACTER_CARD_KIND_LABEL } from "@/lib/media/character-cards";
 import { shotEntityCardIdsFromMetadata } from "./CanvasNodePromptPanel";
 import {
   centerViewport,

@@ -1,10 +1,10 @@
 /**
  * web_search harness 工具 VPS staging 稿（beast 军团 R1，2026-09-10 机械导出）。
  *
- * 本档由 tools/export-web-search-tools-staging.ts 从行为真源 src/lib/web-search-tools.ts
+ * 本档由 tools/codegen/export-web-search-tools-staging.ts 从行为真源 src/lib/agent/web-search-tools.ts
  * 机械导出：真源全文逐行保留（工具定义/ok-fail/Exa 通路/错误铁律/超时全在），
  * 零依赖、无 import，除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-web-search-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-web-search-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts
  * env：EXA_API_KEY（Exa Search API 鉴权，写 /opt/agent-harness/.env 与
@@ -14,9 +14,9 @@
 /**
  * web_search harness 工具（beast 军团 R1 研究军团搜索弹药，2026-09-10；2026-10-02 上游 Tavily→Exa）。
  *
- * 定义形状同构 src/lib/music-tools.ts 的 MusicToolDef（零依赖：
+ * 定义形状同构 src/lib/agent/music-tools.ts 的 MusicToolDef（零依赖：
  * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
- * output 为 JSON 字串）；ok/fail 与错误铁律逐行同构 src/lib/music-tools.ts
+ * output 为 JSON 字串）；ok/fail 与错误铁律逐行同构 src/lib/agent/music-tools.ts
  * （本工具无会话资产落盘，砍上传/ffprobe/音频专属面，plumbing 契约不动）。
  *
  * 上游通路：Exa REST Search API（技能 build-with-exa 为唯一真源）：

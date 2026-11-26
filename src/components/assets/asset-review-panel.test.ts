@@ -33,8 +33,8 @@ import {
   openReviewPanel,
 } from "./AssetReviewPanel";
 // 写入与判定轮子＝真源（路 1 落地）；面板不重写第二套。
-import { clearApproval, isAssetApproved, setApproval } from "@/lib/character-cards";
-import type { CharacterCard } from "@/lib/character-cards";
+import { clearApproval, isAssetApproved, setApproval } from "@/lib/media/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 
 function card(over: Partial<CharacterCard> = {}): CharacterCard {
   return {

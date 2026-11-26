@@ -4,9 +4,9 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, 
 import { ImagePlus, Loader2, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import { ImageLightbox } from "@/components/ImageLightbox";
-import type { ReferenceImage } from "@/lib/image-types";
+import type { ReferenceImage } from "@/lib/media/image-types";
 import { cn } from "@/lib/utils";
-import { extractWorkflowFromPng } from "@/lib/workflow-png";
+import { extractWorkflowFromPng } from "@/lib/canvas/workflow-png";
 
 export const MAX_REFERENCE_IMAGES = 6;
 

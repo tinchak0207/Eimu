@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/new-api-auth-server";
-import { signEmuOauthCode } from "@/lib/emu-oauth";
+import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
+import { signEmuOauthCode } from "@/lib/accounts/emu-oauth";
 import {
   buildGitHubPassword,
   buildGitHubPasswordLegacy,
@@ -8,11 +8,11 @@ import {
   extractTicketFromState,
   unpackHandoffTicket,
   type GitHubProfile,
-} from "@/lib/github-auth";
-import { deliverHandoff } from "@/lib/pwa-handoff";
-import { ensureGatewayUserForOAuth, findGatewayUserByUsername, resetGatewayUserPassword } from "@/lib/gateway-admin";
-import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode, type GitHubEmailEntry } from "@/lib/first-touch-attribution";
-import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/user-attribution";
+} from "@/lib/accounts/github-auth";
+import { deliverHandoff } from "@/lib/accounts/pwa-handoff";
+import { ensureGatewayUserForOAuth, findGatewayUserByUsername, resetGatewayUserPassword } from "@/lib/accounts/gateway-admin";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE, decodeFirstTouchCookieValue, looksLikeInviteCode, type GitHubEmailEntry } from "@/lib/accounts/first-touch-attribution";
+import { buildOAuthAttributionInput, recordInviteViaRelay, recordUserAttributionViaRelay } from "@/lib/accounts/user-attribution";
 
 export const preferredRegion = "sfo1";
 

@@ -15,27 +15,27 @@
 // 依据（决策定稿）：3 逐镜可改、批准整批一次；4 驳回＝填理由后停下；9 导出 CSV＋图片包；
 // 2 全自动档可看可改、不阻塞流程，协作档才是停点。
 //
-// 批准状态真源＝`src/lib/character-cards.ts`（`ApprovalState` / `isAssetApproved` / `normalizeApprovalState`，
+// 批准状态真源＝`src/lib/media/character-cards.ts`（`ApprovalState` / `isAssetApproved` / `normalizeApprovalState`，
 // 分镜侧 storyboard-contract.ts 明文「禁止另建第二套」）——本档只 import 消费，不重写 shape 或门槛尺。
 
 import { useCallback, useMemo, useState } from "react";
 import { Check, Download, Loader2, X } from "lucide-react";
 import { ImageLightbox } from "@/components/ImageLightbox";
-import type { AgentInteractionMode } from "@/lib/agent-chat-client";
-import { isAssetApproved, normalizeApprovalState } from "@/lib/character-cards";
-import type { ApprovalState } from "@/lib/character-cards";
+import type { AgentInteractionMode } from "@/lib/agent/agent-chat-client";
+import { isAssetApproved, normalizeApprovalState } from "@/lib/media/character-cards";
+import type { ApprovalState } from "@/lib/media/character-cards";
 import { normalizeStoryboardShot } from "@/lib/storyboard-contract";
 import type { CanvasConnection, CanvasNode } from "@/lib/canvas/types";
 import { imageUrlOf } from "@/components/canvas/embed/embed-helpers";
-import { exportShotsZip } from "@/lib/export-zip";
-import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/image-helpers";
-import { csvCell, triggerDownload } from "@/lib/history-export";
+import { exportShotsZip } from "@/lib/media/export-zip";
+import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/media/image-helpers";
+import { csvCell, triggerDownload } from "@/lib/media/history-export";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────── 冻结契约（只消费，不定义；与资产面同形）
 
 /** 批准状态真源＝`@/lib/character-cards`（`ApprovalState`）；本档 import，不另建 shape。 */
-export type { ApprovalState } from "@/lib/character-cards";
+export type { ApprovalState } from "@/lib/media/character-cards";
 
 /**
  * 显示用读取投影（不是判定）：缺省＝已批准（决策 23）、读不懂落回已批准（与真源同向）。

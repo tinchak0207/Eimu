@@ -16,10 +16,10 @@ import {
   RefreshCw,
   Save,
 } from "lucide-react";
-import type { ChannelDescriptor } from "@/lib/channel-registry";
-import type { ChannelOverride, ChannelOverrides } from "@/lib/channel-overrides";
-import type { ChannelAggregate, RoutingEvent, RoutingOutcome } from "@/lib/routing-telemetry";
-import { modelBaseName } from "@/lib/provider-config";
+import type { ChannelDescriptor } from "@/lib/generation-core/channel-registry";
+import type { ChannelOverride, ChannelOverrides } from "@/lib/generation-core/channel-overrides";
+import type { ChannelAggregate, RoutingEvent, RoutingOutcome } from "@/lib/generation-core/routing-telemetry";
+import { modelBaseName } from "@/lib/generation-core/provider-config";
 import { AdminModelRoutesPanel } from "@/components/admin/AdminModelRoutesPanel";
 
 interface QueuePreviewEntry {

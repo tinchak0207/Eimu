@@ -5,8 +5,8 @@
 //   GET  {origin}/api/v1/images/{id}         → 任务快照（依脚本逐次回）
 //   GET  {artifactUrl}                       → 产物位元组
 // 全程零外网、零花钱（付费上游一次都不碰）。
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
 
 let originalFetch: typeof fetch | null = null;
 

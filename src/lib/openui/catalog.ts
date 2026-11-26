@@ -3,7 +3,7 @@
  *
  * 四处消费同一份清单，保证「网关提示词里允许的组件 = 前端能渲染的组件」：
  *   1. `eimu-library.ts`：按本清单注册渲染组件；
- *   2. `tools/gen-openui-prompt.mts`：生成网关 system prompt（签名 + 白名单行），
+ *   2. `tools/codegen/gen-openui-prompt.mts`：生成网关 system prompt（签名 + 白名单行），
  *      并断言 prompt 里出现的组件集合与本清单逐一相等；
  *   3. `repair.ts`：模型写错名字时的别名/模糊映射目标集合；
  *   4. `agent-markdown.ts`：裸 DSL（未套围栏）识别的轻量判据。

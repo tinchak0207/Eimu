@@ -180,7 +180,7 @@ export async function resolveKey(sessionID: string, signal?: AbortSignal): Promi
 // ---- per-key rate limiting (D-22) ----
 //
 // The platform enforces 60 requests / 60s per sk-biz- key with a SLIDING WINDOW
-// (see the site's src/lib/biz-api-keys.ts: BIZ_KEY_DEFAULT_RPM / RATE_WINDOW_MS),
+// (see the site's src/lib/accounts/biz-api-keys.ts: BIZ_KEY_DEFAULT_RPM / RATE_WINDOW_MS),
 // and one agent turn can fire many tool calls. Without a limiter here, a dense
 // iteration loop just collects 429s halfway through and the user sees a turn die
 // for no reason they can act on.

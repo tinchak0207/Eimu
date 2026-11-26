@@ -1,10 +1,10 @@
 /**
  * FlowMusic2API client VPS staging 稿（死线3 music_gen 通路换血，2026-09-09 机械导出）。
  *
- * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-flowmusic.ts
+ * 本档由 tools/codegen/export-music-tools-staging.ts 从行为真源 src/lib/generation-core/music-flowmusic.ts
  * 机械导出：真源全文逐行保留（端点/鉴权/clips 解析/下载/错误铁律/超时全在），
  * 零依赖、无 import，除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
  * env：FLOWMUSIC2API_URL（服务地址，缺省禁用本通路）、FLOWMUSIC2API_KEY（Bearer）。

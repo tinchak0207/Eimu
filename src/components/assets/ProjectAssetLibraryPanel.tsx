@@ -18,9 +18,9 @@ import {
   assignAssetProjectTags,
   assignAssetScope,
   listProjectAssets,
-} from "@/lib/project-assets-client";
-import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, normalizeProjectIds } from "@/lib/asset-scope";
-import type { AssetKind, AssetLibraryItem, AssetVisibility } from "@/lib/asset-scope";
+} from "@/lib/media/project-assets-client";
+import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, normalizeProjectIds } from "@/lib/media/asset-scope";
+import type { AssetKind, AssetLibraryItem, AssetVisibility } from "@/lib/media/asset-scope";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
 
 export interface ProjectAssetLibraryPanelProps {
@@ -189,7 +189,7 @@ export function ProjectAssetLibraryPanel({
   /**
    * 「只看本项目标签」＝客户端过滤（服务端列表已过可见性/检索/挂用；标签是展示层筛选）。
    *
-   * 走 src/lib/asset-scope.ts 的 filterByProjectTag（**client-safe**：该档纯逻辑无 IO、
+   * 走 src/lib/media/asset-scope.ts 的 filterByProjectTag（**client-safe**：该档纯逻辑无 IO、
    * 不 import node:crypto 等伺服器专属模块，可从 "use client" 元件安全 import）。
    * 语义：projectId 空 / 空白 → 原样回传；否则 projectIds 含它才命中。单一实作，不另立规则。
    */

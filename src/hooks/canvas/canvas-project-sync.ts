@@ -12,7 +12,7 @@ import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
 import type { CanvasEpisode, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
 import type { CanvasScriptType } from "@/lib/canvas/project-narration";
-import type { CharacterCard } from "@/lib/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
   toProjectSummaries,

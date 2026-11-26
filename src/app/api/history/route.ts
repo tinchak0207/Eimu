@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   clearHistoryEntries,
   deleteHistoryEntries,
   listGeneratedHistoryEntries,
   saveGeneratedHistoryEntry,
-} from "@/lib/server-history-store";
+} from "@/lib/media/server-history-store";
 import {
   HISTORY_MAX_PROMPT_LENGTH,
   HISTORY_MAX_RESULTS_PER_ENTRY,
@@ -15,13 +15,13 @@ import {
   filterHistoryEntries,
   mergeHistoryEntries,
   paginateHistoryEntries,
-} from "@/lib/history-types";
-import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
+} from "@/lib/media/history-types";
+import type { HistoryEntry, HistoryQuery } from "@/lib/media/history-types";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { listGenerationJobsForTenant } from "@/lib/generation-core/job-repository";
-import { generationJobHistoryEntry } from "@/lib/generation-task-history";
-import { loadScopedLibrary } from "@/lib/asset-library";
-import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
+import { generationJobHistoryEntry } from "@/lib/generation-core/generation-task-history";
+import { loadScopedLibrary } from "@/lib/media/asset-library";
+import { filterByProjectTag, MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/media/asset-scope";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAdminPassword } from "@/lib/admin-auth";
-import { clearAdminSession, configuredAdminUsername, requireAdminSession, setAdminSession } from "@/lib/admin-session";
+import { verifyAdminPassword } from "@/lib/accounts/admin-auth";
+import { clearAdminSession, configuredAdminUsername, requireAdminSession, setAdminSession } from "@/lib/accounts/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

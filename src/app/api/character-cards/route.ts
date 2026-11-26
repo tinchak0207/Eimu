@@ -7,15 +7,15 @@
 // 存储：character-card-store（Blob 世代模式，对齐 project-store）。
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   deleteCharacterCards,
   listCharacterCards,
   saveCharacterCard,
-} from "@/lib/character-card-store";
-import { normalizeCharacterCard } from "@/lib/character-cards";
-import type { CharacterCard } from "@/lib/character-cards";
-import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
+} from "@/lib/media/character-card-store";
+import { normalizeCharacterCard } from "@/lib/media/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/media/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

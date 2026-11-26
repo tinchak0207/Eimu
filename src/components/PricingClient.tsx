@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BadgeCheck, BookOpen, ChevronDown, Copy, Gift, Sparkles, Ticket, X } from "lucide-react";
-import type { MapayPaymentType } from "@/lib/mapay";
+import type { MapayPaymentType } from "@/lib/billing/mapay";
 import {
   ACTIVE_PRICING_PROMO,
   FIRST_CHARGE_PLAN,
@@ -18,14 +18,14 @@ import {
   PLANS,
   resolvePricingPlan,
   planUnitsForCoins,
-} from "@/lib/plans";
-import type { ModelPriceRow, PricingPromo } from "@/lib/plans";
-import { IMAGE_MODEL_IDS, VIDEO_MODEL_IDS, generationCoins } from "@/lib/generation-model-catalog";
+} from "@/lib/billing/plans";
+import type { ModelPriceRow, PricingPromo } from "@/lib/billing/plans";
+import { IMAGE_MODEL_IDS, VIDEO_MODEL_IDS, generationCoins } from "@/lib/generation-core/generation-model-catalog";
 import { useAuth } from "@/hooks/use-auth";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
-import { fetchInviteLink, quotaToCoins, redeemTopupCode } from "@/lib/new-api-client";
+import { fetchInviteLink, quotaToCoins, redeemTopupCode } from "@/lib/accounts/new-api-client";
 import { useToast } from "@/hooks/use-toast";
-import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/accounts/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PricingPlanCarousel } from "@/components/PricingPlanCarousel";
 import { PricingAtmosphere } from "@/components/pricing3d/PricingAtmosphere";
@@ -96,7 +96,7 @@ function redeemFailureText(message: string | undefined): string {
  * 且永远排在三档正价之前（这是转化率最高的一张牌）。
  *
  * 资格是服务端权威（/api/payments/first-charge/eligibility → 控面帐本判准），
- * 前端只是显示闸门；真正的执法在 checkout 403 与入帐时按正价折算（见 src/lib/first-charge.ts）。
+ * 前端只是显示闸门；真正的执法在 checkout 403 与入帐时按正价折算（见 src/lib/billing/first-charge.ts）。
  * 没资格或未登录整卡不渲染；未登录时卡上按钮先走登录（登录后回来才会重新判资格）。
  */
 function FirstChargeOffer({
@@ -235,7 +235,7 @@ export function PricingClient() {
   }, [token, refresh, toast]);
 
   // 支付回跳带 ?mapay=credited：这笔单已由服务端直接入帐（notify／回跳直达加额，
-  // 见 src/lib/mapay-credit.ts），**不触发兑换**，只提示到账并刷新余额；
+  // 见 src/lib/billing/mapay-credit.ts），**不触发兑换**，只提示到账并刷新余额；
   // 随后从 URL 拿掉参数，刷新不会重复提示。
   const mapayNoticeTried = useRef(false);
   useEffect(() => {

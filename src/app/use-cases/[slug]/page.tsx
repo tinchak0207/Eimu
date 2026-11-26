@@ -9,7 +9,7 @@ import {
   type UseCaseCategory,
 } from "@/lib/use-case-categories";
 import { getWorkflowCard } from "@/lib/workflow-pages";
-import type { AgentTemplate } from "@/lib/agent-templates";
+import type { AgentTemplate } from "@/lib/agent/agent-templates";
 import { getSiteUrl } from "@/lib/site-url";
 
 type RouteParams = { params: Promise<{ slug: string }> };

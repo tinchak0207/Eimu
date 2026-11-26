@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
-import { sanitizeUpstreamValue } from "@/lib/proxy";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
+import { sanitizeUpstreamValue } from "@/lib/generation-core/proxy";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 
 export const preferredRegion = "sfo1";
 

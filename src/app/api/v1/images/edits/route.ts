@@ -17,17 +17,17 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
-import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
-import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken, isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
 import {
   generationCoins,
   aspectRatioFromImageSize,
   resolveGenerationModelId,
   resolveSubmitResolution,
-} from "@/lib/generation-model-catalog";
-import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
+} from "@/lib/generation-core/generation-model-catalog";
+import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/generation-core/provider-config";
 import { DURABLE_IMAGE_SIZES, resolveDurableImageSizeAlias } from "@/lib/generation-core/durable-image-sizes";
-import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
+import { PIXAI_EDIT_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import {
   jsonWithTrace,
   pixaiAuthError,
@@ -35,12 +35,12 @@ import {
   pixaiRequestError,
   proxyPixai,
   resolveBridgeModel,
-} from "@/lib/pixai-proxy";
+} from "@/lib/generation-core/pixai-proxy";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import {
   checkOrReserveSyncIdempotency,
   commitSyncIdempotency,
@@ -55,10 +55,10 @@ import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 // 参考图 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
 // 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行为逐位元不变。
-import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
+import { EditInputError, resolveEditReference } from "@/lib/generation-core/biz-image-references";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 import type { GenerationReference } from "@/lib/generation-core/types";
-import type { BizApiKey } from "@/lib/biz-api-keys";
+import type { BizApiKey } from "@/lib/accounts/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

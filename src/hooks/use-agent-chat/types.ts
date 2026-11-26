@@ -1,4 +1,4 @@
-import type { AgentChatState, AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentChatState, AgentSseEvent } from "@/lib/agent/agent-chat-types";
 
 export interface UseAgentChatOptions {
   /** 画布 SSE 事件分流（v3 embed）：canvas.* 事件转交右侧 CanvasEmbed。 */

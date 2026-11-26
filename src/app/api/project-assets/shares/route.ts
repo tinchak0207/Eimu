@@ -4,10 +4,10 @@
 // 认证：requireVerifiedUser。
 // 红线：跨项目复用只能靠**这个显式动作**——没有隐含可见、没有「同帐号自动放行」。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { findOwnedAsset } from "@/lib/asset-library";
-import { AssetShareConflictError, AssetShareLimitError, grantAssetShare, revokeAssetShare } from "@/lib/asset-scope-store";
-import { assetShareId, decideAssetShareGrant, toAssetKind } from "@/lib/asset-scope";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { findOwnedAsset } from "@/lib/media/asset-library";
+import { AssetShareConflictError, AssetShareLimitError, grantAssetShare, revokeAssetShare } from "@/lib/media/asset-scope-store";
+import { assetShareId, decideAssetShareGrant, toAssetKind } from "@/lib/media/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

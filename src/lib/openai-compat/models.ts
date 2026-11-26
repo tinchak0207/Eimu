@@ -12,11 +12,11 @@
 // 注意：`readUnavailableModels()` 需要控制面 DB。路由跑在 Vercel 时没有
 // GENERATION_DATABASE_URL（见 generation.ts 档头），此闸会静默 fail-open；要让熔断闸
 // 真正生效，这条路由必须跑在持有 DB 的一方（控制面）——部署判定见回报。
-import { isModelAllowedForKey, type BizApiKey } from "@/lib/biz-api-keys";
-import { isSupportedImageModel, resolveGenerationModelId } from "@/lib/generation-model-catalog";
+import { isModelAllowedForKey, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { isSupportedImageModel, resolveGenerationModelId } from "@/lib/generation-core/generation-model-catalog";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
-import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/generation-core/image-model-ids";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 
 /** OpenAI 客户端的 `owned_by`；本站品牌名。 */
 export const OPENAI_COMPAT_MODEL_OWNER = "eimu";

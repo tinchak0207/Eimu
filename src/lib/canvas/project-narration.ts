@@ -32,7 +32,7 @@
 // 叶模组：只 import 纯常数（aid-enums）与 voice-library 的判据，不碰 DB／`node:*`。
 
 import { AID_SCRIPT_TYPE_ENUM } from "@/lib/aid-enums/creation";
-import { normalizeVoiceId } from "@/lib/voice-library";
+import { normalizeVoiceId } from "@/lib/media/voice-library";
 
 /** 剧本型别（＝AID `ScriptTypeEnum` 的值集合：`plot`｜`monologue`）。 */
 export type CanvasScriptType = (typeof AID_SCRIPT_TYPE_ENUM)[keyof typeof AID_SCRIPT_TYPE_ENUM]["value"];

@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
-import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
-import { TTS_1_MODEL_ID } from "@/lib/image-model-ids";
+import { ttsQuotaForChars } from "@/lib/generation-core/generation-model-catalog/tts-pricing";
+import { TTS_1_MODEL_ID } from "@/lib/generation-core/image-model-ids";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { normalizeVoiceId } from "@/lib/voice-library";
+import { normalizeVoiceId } from "@/lib/media/voice-library";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

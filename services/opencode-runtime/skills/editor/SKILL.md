@@ -4,11 +4,11 @@ description: 剪辑域 Expert 配方库总入口。触发时机：时间线编�
 ---
 <!--
 来源（轮子）: 自有配方（非第三方轮子）。内容依据我方后期制建设既有盘面，非凭空编写：
-              docs/timeline-post-production-plan.md §2 拆片表（B1-B7）与 §7 全役完结；
+              docs/proposals/timeline-post-production-plan.md §2 拆片表（B1-B7）与 §7 全役完结；
               记忆 2026-08-31-b1-timeline-lifecycle-layer、timeline-post-production-buildout-0831、
               timeline-b1-b3-harness-training-e2e。
 工具真源: VPS /opt/agent-harness/workspace/.opencode/tools/timeline_*.ts（本地
-           src/lib/harness-tool-registry.ts 只登记 id，handler 不在本 repo）。
+           src/lib/agent/harness-tool-registry.ts 只登记 id，handler 不在本 repo）。
 入库批次: 2026-09-27 剪辑域 Agent 能力面活化（补 editor-persona skillPaths 待补项）。
 -->
 

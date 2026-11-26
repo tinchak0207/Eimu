@@ -8,13 +8,13 @@ import type {
   AgentSubagentRunSummary,
   AgentSubagentToolEntry,
   AgentSubagentTranscriptEntry,
-} from "@/lib/agent-chat-types";
+} from "@/lib/agent/agent-chat-types";
 import {
   AgentChatError,
   listAgentSubagents,
   readAgentSubagentTranscript,
   stopAgentSubagent,
-} from "@/lib/agent-chat-client";
+} from "@/lib/agent/agent-chat-client";
 import { toolDisplayName } from "./AgentToolCard";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。

@@ -8,9 +8,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
-import { VOICE_ALIASES, VOICE_LIBRARY } from "@/lib/voice-library";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
+import { VOICE_ALIASES, VOICE_LIBRARY } from "@/lib/media/voice-library";
 import { GET as listVoicesRoute } from "./route";
 import { POST as submitTts } from "../generations/route";
 

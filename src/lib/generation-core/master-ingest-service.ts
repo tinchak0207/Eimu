@@ -236,7 +236,7 @@ async function runMediaQualityGateAfterIngest(
   input: MasterIngestPayload,
 ): Promise<void> {
   try {
-    const { probeMedia, evaluateMediaQuality, QUALITY_POLICIES } = await import("../media-quality-gate");
+    const { probeMedia, evaluateMediaQuality, QUALITY_POLICIES } = await import("../media/media-quality-gate");
     const probe = await probeMedia(input.deliveryUrl, 30_000);
     const verdict = evaluateMediaQuality(probe, QUALITY_POLICIES.video_default);
     console.log(

@@ -1,6 +1,6 @@
 <!--
 version: 3.0（全文改口语；无新增或删减约束，只换说法）
-source: docs/expert-constitution-draft.md（卷二：Orchestrator 派遣手册）；范式由暴君亲定
+source: docs/proposals/expert-constitution-draft.md（卷二：Orchestrator 派遣手册）；范式由暴君亲定
 injection: Orchestrator system prompt（派工协议节，替换现有分散规则）
 gate: 仅在 BEAST_MODE=ON 时由 VPS gateway 注入；BEAST_MODE=OFF 本档完全不生效
 note: 版本沿革、修订编号与事故起源一律移至同目录 CHANGELOG.md（不进注入面）

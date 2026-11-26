@@ -1,13 +1,13 @@
 /**
  * blender_* 三工具 VPS staging 稿（片 AJ，2026-09-06 机械导出改制）。
  *
- * 本档由 tools/export-blender-tools-staging.ts 从行为真源 src/lib/blender-tools.ts
+ * 本档由 tools/codegen/export-blender-tools-staging.ts 从行为真源 src/lib/agent/blender-tools.ts
  * 机械导出：真源全文逐行保留（bpy 脚本模板/分块存活配方/makedirs/崩溃重试/ffmpeg
  * 合成/指纹接线/artifact_base_url 全在），除「环境适配」外与真源逐行等价。
  * 白名单 diff 仅三处：① 本注释头；② 真源 `./blender-asset-store` import → 桩块
  * （理由见桩块注释）；③ `./harness-tool-ids` re-export → 内联同值字面量（理由见
  * 导出脚本对应节）。禁止手改本档——改真源后跑
- * `npx tsx tools/export-blender-tools-staging.ts` 重导出（根治 T2 部署漂移）。
+ * `npx tsx tools/codegen/export-blender-tools-staging.ts` 重导出（根治 T2 部署漂移）。
  *
  * VPS 落位（完整命令见同目录 PATCH-PLAN.md）：
  *   本档整份                 → /opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts
@@ -49,7 +49,7 @@
  *
  * 错误铁律：桥未就绪/超时/非 200 一律返回结构化 fail()（含「桥未启动，请先启动
  * blender-bridge」指引），绝不 throw 原始 fetch 错误。
- * deny 例外暂存与桥接说明：docs/blender-bridge-notes.md。
+ * deny 例外暂存与桥接说明：docs/runbooks/blender-bridge-notes.md。
  * 工具文案一律简体（记忆 agent-gateway-copy-rules）。
  *
  * Blender 5.2 兼容 + 存活配方（2026-09-06 片M 修复，依 smoke P0-5 实锤
@@ -74,7 +74,7 @@ import * as nodePath from "node:path"
 // VPS .opencode/lib 无 blender-asset-store 依赖闭包（→ asset-pack-store → @/lib/blob-backend，
 // bun 解析不到），且 opencode 工具 context 永不带 userId（片 AG2 契约：缺 userId = 不入库、
 // 不预查）→ 以同名惰性桩中立化：真源函数体零改动、桩永不触发，行为与「userId 缺省」分支
-// 逐字等价。桩形状同构 src/lib/blender-asset-store.ts 的返回类型（未命中/未入库语义）。
+// 逐字等价。桩形状同构 src/lib/media/blender-asset-store.ts 的返回类型（未命中/未入库语义）。
 type FindTemplateResult =
   | { ok: true; template: { packId: string; itemTitle: string; fingerprint: string; sceneSummary?: string } }
   | { ok: false; code: "invalid_fingerprint" | "not_found"; hint: string }
@@ -201,7 +201,7 @@ function classifyFetchError(e: unknown): BridgeError {
     return bridgeError(
       "bridge_unavailable",
       `桥未启动，请先启动 blender-bridge（默认 ${bridgeUrl()}，可用 GET ${bridgeUrl()}/v1/health 验证应返回 200）。` +
-        `启动步骤与排障见 docs/blender-bridge-notes.md。底层原因：${err?.message ?? String(e)}${causeCode ? ` (${causeCode})` : ""}`,
+        `启动步骤与排障见 docs/runbooks/blender-bridge-notes.md。底层原因：${err?.message ?? String(e)}${causeCode ? ` (${causeCode})` : ""}`,
     )
   }
   return bridgeError(
@@ -287,7 +287,7 @@ async function bridgeExecute(
   if (!body || body.ok !== true) {
     throw bridgeError(
       "bridge_bad_response",
-      `blender-bridge 响应形状异常（HTTP 200 但缺少 ok:true 成功体），HTTP 契约见 docs/blender-bridge-notes.md。`,
+      `blender-bridge 响应形状异常（HTTP 200 但缺少 ok:true 成功体），HTTP 契约见 docs/runbooks/blender-bridge-notes.md。`,
     )
   }
   return body as unknown as BlenderExecuteSuccess

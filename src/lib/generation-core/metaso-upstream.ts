@@ -1,4 +1,4 @@
-import { MINIMAX_H3_MODEL_ID } from "../image-model-ids.js";
+import { MINIMAX_H3_MODEL_ID } from "./image-model-ids.js";
 import { SupplierRequestError } from "./failure-classifier";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 

@@ -2,7 +2,7 @@
 
 # Eimu
 
-开发维护从[仓库导航](docs/REPOSITORY.md)进入。
+开发维护从[任务与职责地图](docs/REPOSITORY.md)进入，规范、方案与证据见[文档入口](docs/README.md)。
 
 ### 剪辑和分镜已经死了，现在人人都是导演。
 

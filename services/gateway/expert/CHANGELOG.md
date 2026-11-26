@@ -45,7 +45,7 @@
 - **2026-10-06 审计 P0-8**：条 15 末句「只有需要独立视角时才派 critic」与条 18「必须过 critic」自相矛盾 →
   已删条 15 的 critic 分句改指条 18；条 18 钉死为 critic 义务唯一真源；第一节末机器兜底声明补「兜底≠替代，
   不得以机器兜底为由省略人工派遣」。**机器兜底不是删除人工派遣的授权。**
-- `docs/beast-army-r8-harness-architecture-audit.md` 记录过 1204 秒零工具调用的实例——模型对「到底要不要派」
+- `docs/audits/beast-army-r8-harness-architecture-audit.md` 记录过 1204 秒零工具调用的实例——模型对「到底要不要派」
   犹豫是本次收敛口径的直接病源。
 
 ### 其余正文条目起源
@@ -93,5 +93,5 @@
 
 - 生成基线：R4（2026-09-11），摘要行扩充配方库 + 交付契约。registry 改行后须重生成上传。
 - 2026-10-06 审计 P1「过期注册表摘要」：档头「生成日期 2026-09-11」与内容不符（内容含晚于该日期才有的
-  10 件 video-director 工具）；生成器 `tools/export-expert-agents.ts` 的 `DIGEST_PROVENANCE_HEADER` 把日期
+  10 件 video-director 工具）；生成器 `tools/codegen/export-expert-agents.ts` 的 `DIGEST_PROVENANCE_HEADER` 把日期
   硬编为 2026-09-11，重跑生成器不会刷新日期。档头已改为「生成物，勿手改」表述（详见该档头注释）。

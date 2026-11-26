@@ -9,10 +9,10 @@ import { claimBillingOperation, committedAmount, dueReservationJobs, ensureRefun
 import { billingRetryAt, classifyBillingFailure, classifyRefundFailure, detailOf, operationAttempts, operationStatus, rejectedFailureClass, type BillingReconciliationSummary, type BillingRefundResult, type Row, type SyncReserveOutcome } from "./types";
 import { DEFAULT_RECONCILE_BATCH, ZOMBIE_RECLAIM_BATCH, ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT } from "./types";
 import type { FailureClass, GenerationJob } from "../types";
-import { generationCoins } from "@/lib/generation-model-catalog/pricing";
-import { PRICING_COIN_STEP } from "@/lib/generation-model-catalog/types";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { ImageBillingGatewayError } from "@/lib/image-billing";
+import { generationCoins } from "@/lib/generation-core/generation-model-catalog/pricing";
+import { PRICING_COIN_STEP } from "@/lib/generation-core/generation-model-catalog/types";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { ImageBillingGatewayError } from "@/lib/billing/image-billing";
 
 /**
  * 降档交付（2026-10-25）：该 job 的成片实际档位低于请求档位时，返回实际档位。

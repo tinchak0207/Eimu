@@ -1,4 +1,4 @@
-import { REGISTRY_CHANNELS } from "@/lib/supplier-channels.config";
+import { REGISTRY_CHANNELS } from "@/lib/generation-core/supplier-channels.config";
 import { generateWithBlenderNode } from "./blender-node-upstream";
 import { generateWithDmc, pollDmcTask } from "./dmc-upstream";
 import { generateWithFilmera, pollFilmeraTask } from "./filmera-upstream";
@@ -18,7 +18,7 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 //
 // 新增一条**新协议**供给＝2 档：
 //   ① 新 adapter 档：`export const fooAdapter: SupplyAdapter = { protocol: "foo", submit, poll? }`
-//   ② `src/lib/supplier-channels.config.ts` 条目：`adapterType: "foo", adapter: fooAdapter`
+//   ② `src/lib/generation-core/supplier-channels.config.ts` 条目：`adapterType: "foo", adapter: fooAdapter`
 // 本档在载入时扫 REGISTRY_CHANNELS 的 `adapter` 栏位自动注册，不需改本档。
 // 未知协议一律明确失败（不再 default 成 newapi_video）。
 //

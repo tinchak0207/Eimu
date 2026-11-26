@@ -1,6 +1,6 @@
-import type { HistoryEntry } from "./history-types";
+import type { HistoryEntry } from "./media/history-types";
 import type { ShowcaseCase, ShowcaseRecipe } from "./showcase-cases";
-import { extractPromptSection } from "./workflow-recall";
+import { extractPromptSection } from "./agent/workflow-recall";
 
 /**
  * ⚠️ 已裁定禁止能力的残留（DO NOT WIRE UP）—— 这不是「未完成的待接功能」。

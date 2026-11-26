@@ -1,5 +1,5 @@
 // GET /api/data/self — daily quota consumption trend
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

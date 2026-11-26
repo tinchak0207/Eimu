@@ -10,7 +10,7 @@
 
 import { memo } from "react";
 import { Anchor, RefreshCw } from "lucide-react";
-import type { BatchAnchor } from "@/lib/agent-batch-anchor";
+import type { BatchAnchor } from "@/lib/agent/agent-batch-anchor";
 
 export interface AgentAnchorCardProps {
   anchor: BatchAnchor;

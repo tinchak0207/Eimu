@@ -5,7 +5,7 @@ import { generateWithMetaso, isMetasoModel } from "./metaso-upstream.ts";
 import { SupplierRequestError } from "./failure-classifier.ts";
 import { createFailureRecord } from "./failure-record.ts";
 import { planGenerationAttemptReplay } from "./operation-registry.ts";
-import { MINIMAX_H3_MODEL_ID } from "../image-model-ids.js";
+import { MINIMAX_H3_MODEL_ID } from "./image-model-ids.js";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
 function supplier(overrides: Partial<SupplierRecord> = {}): SupplierRecord {

@@ -8,8 +8,8 @@
 // normalize 之后、写入之前，检查原始 body 与合并后 effective，违规就回 400 并列出 modelId。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/admin-audit";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/accounts/admin-audit";
 import {
   GENERATION_MODEL_CATALOG,
   PRICING_COIN_STEP,
@@ -21,9 +21,9 @@ import {
   type GenerationModelDefinition,
   type ModelPricingOverride,
   type ModelPricingOverrides,
-} from "@/lib/generation-model-catalog";
-import { readModelPricingOverrides, writeModelPricingOverrides } from "@/lib/pricing-overrides";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+} from "@/lib/generation-core/generation-model-catalog";
+import { readModelPricingOverrides, writeModelPricingOverrides } from "@/lib/billing/pricing-overrides";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -66,7 +66,7 @@
 
 - [创作域] 生成中任务卡进历史 — 历史列表新增生成中卡片：粒子海动画、无操作条、5s 轮询（`HistoryClient` `setInterval(..., 5000)`） ｜ 证据: 7ee680cd
 - [创作域] 历史光箱拔除「发布为案例／存为角色卡」两钮 — 移除 `onSaveCard`／`onPublishCase` 两颗工具列按钮与其 props 挂载；mask 改纯渐变 ｜ 证据: 7ee680cd
-- [创作域] 生成血统（lineage）登记与视图 — `generate-images` 完成落历史时登记 `parents`：本次请求的参考图若出自另一条生成任务（`sourceGenerationId`）记 derivation、直接引用产物（`sourceResultId`）记 reference；裸上传无持久身份不登记；「再来 N 组」以 `retry_of_job_id` 落库、源无 taskId 时用历史把手 `history-<id>` 组 rerun；job 面为读时投影组装（存量任务同路径自动可溯）；`LineageDrawer` 血统抽屉＋ `tools/backfill-lineage.ts` 回填工具；血统只落历史本体，agent/canvas 两面零触碰 ｜ 证据: a16d5690
+- [创作域] 生成血统（lineage）登记与视图 — `generate-images` 完成落历史时登记 `parents`：本次请求的参考图若出自另一条生成任务（`sourceGenerationId`）记 derivation、直接引用产物（`sourceResultId`）记 reference；裸上传无持久身份不登记；「再来 N 组」以 `retry_of_job_id` 落库、源无 taskId 时用历史把手 `history-<id>` 组 rerun；job 面为读时投影组装（存量任务同路径自动可溯）；`LineageDrawer` 血统抽屉＋ `tools/archive/incidents/backfill-lineage.ts` 回填工具；血统只落历史本体，agent/canvas 两面零触碰 ｜ 证据: a16d5690
 - [创作域] 资产作用域与血统清洗收口 — `asset-pack-store` 与 `character-cards` 共用 `asset-scope`／`lineage` 清洗：非法条目丢、上限截尾并显式标记 `parents` 曾超限；非 project 一律收敛成 personal 并省略栏位（不写 `scope:{owner:"personal"}` 冒充已设定） ｜ 证据: a16d5690
 - [创作域] 修 `isUsableCardImageUrl` 误判 `data:audio/` 为非法 — 修复内嵌参考音频被静默丢弃的缺陷 ｜ 证据: a7e169f3
 
@@ -109,7 +109,7 @@
 - DB 迁移 019–022 — `019_team_member_quota.sql`、`020_account_ledger.sql`、`021_failure_record.sql`、`022_subscription_pools.sql`（团队成员配额／帐本／失败记录／订阅池四张表的 schema 落地） ｜ 证据: a16d5690
 - VPS 网关部署产物 — steer 引导链闸道侧档案（`services/gateway/steer-core.ts`／`steer-identity.ts`／`steer-gw.ts`／`steer-ledger-gw.ts` 与对应测试）、`outbound-emit.ts` 自 `outbound-sanitize.ts` 拆分；0b3dee7f 自陈「VPS 已同步跑同一码，md5 逐档等价」 ｜ 证据: a16d5690／0b3dee7f
 - VPS harness 工具落档 — `services/vps-tools/image_generate.ts`（169 行）入库，含影片时长硬规则与模型探测 ｜ 证据: a0cf8147
-- 血统回填运维工具 — `tools/backfill-lineage.ts`（168 行），供存量历史回填生成血统 ｜ 证据: a16d5690
+- 血统回填运维工具 — `tools/archive/incidents/backfill-lineage.ts`（168 行），供存量历史回填生成血统 ｜ 证据: a16d5690
 - 外部服务整合 — mPay 支付回调（notify/return）容忍规则与拒绝日志（手续费容忍上限 `max(0.5 元, 5%)`） ｜ 证据: ac8fa0c0
 - 运营内容资产 — QQ 交流群二维码图档（`public/qq-group-qrcode.jpg`，群号 980122175）与站点教程文档（`/docs` 五章＋快速上手三章） ｜ 证据: 0ef8381c／83e09bea
 - 发布物 — `public/docs/eimu-competition-report.pdf` 随 a16d5690 入库 ｜ 证据: a16d5690

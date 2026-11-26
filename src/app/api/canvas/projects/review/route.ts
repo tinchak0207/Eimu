@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mutateCanvasProject, readCanvasProject } from "@/lib/canvas/project-store";
 import { adoptShotVersion, buildProjectReview, type AdoptReceipt } from "@/lib/canvas/shot-review";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

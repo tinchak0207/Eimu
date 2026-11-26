@@ -35,20 +35,20 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { renderWorkflowDagPng } from "@/lib/dag-png-server";
-import { put } from "@/lib/blob-backend";
-import { saveGeneratedHistoryEntry } from "@/lib/server-history-store";
-import { sanitizeBlobSegment } from "@/lib/history-types";
+import { renderWorkflowDagPng } from "@/lib/canvas/dag-png-server";
+import { put } from "@/lib/media/blob-backend";
+import { saveGeneratedHistoryEntry } from "@/lib/media/server-history-store";
+import { sanitizeBlobSegment } from "@/lib/media/history-types";
 import { listCreativeProjects } from "@/lib/creative-project/store";
-import { ingestMemoryDocs } from "@/lib/agent-memory-store";
-import { deriveMemoryOwnerKey } from "@/lib/agent-memory-injection";
-import { extractWorkflowMemoryBody, shouldPersistWorkflow, WORKFLOW_MEMORY_BODY_MAX } from "@/lib/workflow-memory";
+import { ingestMemoryDocs } from "@/lib/agent/agent-memory-store";
+import { deriveMemoryOwnerKey } from "@/lib/agent/agent-memory-injection";
+import { extractWorkflowMemoryBody, shouldPersistWorkflow, WORKFLOW_MEMORY_BODY_MAX } from "@/lib/agent/workflow-memory";
 import {
   extractWorkflowRunConfig,
   projectWorkflowRunToHistory,
   workflowHistoryEntryId,
   type WorkflowRunPushPayload,
-} from "@/lib/generation-workflow";
+} from "@/lib/generation-core/generation-workflow";
 // sharp（DAG PNG）是原生模组，只能在 Node runtime；force-dynamic 因为这条端点
 // 永远带 body、永远要写入，静态化毫无意义且有快取风险。
 export const runtime = "nodejs";

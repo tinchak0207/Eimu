@@ -5,9 +5,9 @@
 // 所以明确回报「不支持探测」而不是假装探测失败。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readAdminPools } from "@/lib/admin-pool-store";
-import { requireAdminSession } from "@/lib/admin-session";
-import { describeEnvChannels } from "@/lib/sub2api";
+import { readAdminPools } from "@/lib/generation-core/admin-pool-store";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { describeEnvChannels } from "@/lib/generation-core/sub2api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

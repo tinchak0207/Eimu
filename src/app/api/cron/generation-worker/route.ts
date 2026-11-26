@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runGenerationMaintenanceOnce, runGenerationWorkerOnce } from "@/lib/generation-core/worker-service";
 import { runMapayOrderReconciliationOnce } from "@/lib/generation-core/mapay-order-reconciliation";
 import { generationControlPlaneEnabled, getGenerationSql } from "@/lib/generation-core/database";
-import { sweepMapayIntakeOnce, type MapayIntakeSweepResult } from "@/lib/mapay-intake";
+import { sweepMapayIntakeOnce, type MapayIntakeSweepResult } from "@/lib/billing/mapay-intake";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

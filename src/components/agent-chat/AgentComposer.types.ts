@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
+import type { AgentAttachmentRef } from "@/lib/agent/agent-chat-types";
 
 export interface AgentComposerProps {
   /** 为 true 时（disabled 属性或会话已关闭）整个输入区禁用。 */

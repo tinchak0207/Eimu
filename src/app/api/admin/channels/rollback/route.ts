@@ -6,15 +6,15 @@
 // 认证与 route.ts / audit/route.ts 同一套 requireAdminSession。
 
 import { NextRequest, NextResponse } from "next/server";
-import { overridableChannelIds } from "@/lib/channel-registry";
+import { overridableChannelIds } from "@/lib/generation-core/channel-registry";
 import {
   normalizeChannelOverrides,
   readChannelOverrides,
   writeChannelOverrides,
   type ChannelOverrides,
-} from "@/lib/channel-overrides";
-import { requireAdminSession } from "@/lib/admin-session";
-import { diffJson, getConfigChangeSnapshot, nextConfigVersion, recordConfigChange } from "@/lib/admin-audit";
+} from "@/lib/generation-core/channel-overrides";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { diffJson, getConfigChangeSnapshot, nextConfigVersion, recordConfigChange } from "@/lib/accounts/admin-audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

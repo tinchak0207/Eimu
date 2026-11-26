@@ -16,13 +16,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
-import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hmac";
-import { readSupplierHealthSignal, type SupplierHealthSignal } from "@/lib/supplier-health-signal";
+import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/accounts/memory-hmac";
+import { readSupplierHealthSignal, type SupplierHealthSignal } from "@/lib/generation-core/supplier-health-signal";
 import {
   listRoutingEvents,
   summarizeRecentModelStats,
   type ModelRecentStats,
-} from "@/lib/routing-telemetry";
+} from "@/lib/generation-core/routing-telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -5,19 +5,19 @@ import {
   ProviderTiming,
   ReferenceImage,
   ReferenceImageRole,
-} from "@/lib/image-types";
-import { initializeProviderRecord, normalizeProviderKey, PROVIDER_KEY, type ModelMode, ProviderKey } from "@/lib/provider-config";
+} from "@/lib/media/image-types";
+import { initializeProviderRecord, normalizeProviderKey, PROVIDER_KEY, type ModelMode, ProviderKey } from "@/lib/generation-core/provider-config";
 import {
   generationModel,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import {
   fetchStoredHistory,
   getStoredToken,
   getStoredUser,
   type StoredHistoryEntry,
-} from "@/lib/new-api-client";
+} from "@/lib/accounts/new-api-client";
 import {
   mergePersistedHistory,
   type PersistedGenerationEntry,
@@ -25,19 +25,19 @@ import {
   recordGenerationResult,
   selectPersistedHistoryForUser,
   writeGenerationCache,
-} from "@/lib/generation-cache";
+} from "@/lib/generation-core/generation-cache";
 import {
   WORKFLOW_SCHEMA_VERSION,
   buildWorkflowPrompt,
   createGenerationWorkflow,
-} from "@/lib/generation-workflow";
+} from "@/lib/generation-core/generation-workflow";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   generationTaskListSignature,
   mergeGenerationTaskProjections,
   nextGenerationSyncDelay,
   type GenerationTaskProjection,
-} from "@/lib/generation-task-types";
+} from "@/lib/generation-core/generation-task-types";
 
 interface UseImageGenerationReturn {
   images: ImageResult[];

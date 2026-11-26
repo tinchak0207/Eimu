@@ -2,8 +2,8 @@
 // 认证：requireVerifiedUser（与 character-cards / canvas 同款，不信任 x-user-id）。
 // 存储：generation-gate-log（Blob 世代模式，对齐 project-store）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { aggregateGateStats, listGateLog } from "@/lib/generation-gate-log";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { aggregateGateStats, listGateLog } from "@/lib/generation-core/generation-gate-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

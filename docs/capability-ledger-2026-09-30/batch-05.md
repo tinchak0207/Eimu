@@ -36,7 +36,7 @@
 - [Agent助理] 闸道节点生成认得实体 tag — workflow-gw 节点提交处展开最终 prompt 并把卡参考图并进 `reference_images`（去重截 5），既有单张 reference 逐字保留；key 用呼叫端传入的使用者 key，快取键含 apiKey 且守卫在查快取之前（防跨租户共用卡参考图）｜ 证据: 7f9dbe4e
 - [Agent助理] 133 条内建 Skill 条目层（10 家族）— 电影美学 40／商业广告 27／短剧 20／特效动画 12／剧本 8／分镜 8／选角 5／UGC 5／MV 4／旅拍 4；公开列举＝builtin+recipe+template＝151，私有列举以 ownerKey 隔离 ｜ 证据: 513462a5
 - [Agent助理] 对话框斜线直呼 Skill — 输入框打 `/` 出 SkillSlashMenu（debounce 160ms＋双路 AbortController＋「我的技能」分区），选中写回输入框不自动送出 ｜ 证据: 513462a5
-- [Agent助理] 私有技能管理面 — 设置弹层内 MySkillsDialog 管理自订技能（交付形态标签收敛到 `src/lib/agent-skills/output-kinds.ts` 单真源）｜ 证据: 513462a5, 2d5dbeac
+- [Agent助理] 私有技能管理面 — 设置弹层内 MySkillsDialog 管理自订技能（交付形态标签收敛到 `src/lib/agent/agent-skills/output-kinds.ts` 单真源）｜ 证据: 513462a5, 2d5dbeac
 - [Agent助理] 思维链结算后收合 — 串流中展开、结算后自动收合成「已思考 · N 秒」一行；使用者手动点过 summary 后自动收合不再介入（reasoningTouched ref）｜ 证据: 92a2a698
 - [Agent助理] 顶栏精简为直接入口 — 常态状态文字回空串（第二行消失），资产／历史从 ⋯ 选单提出直接站在标题右侧，⋯ 选单退役换齿轮触发 `openSettings()`；reconnecting／closed／connecting 三个异常态文字保持唯一出口 ｜ 证据: 397571a2
 - [Agent助理] 顶栏改纯图示列（零文字）— 拆掉「AI 助理」h2 与星芒图标，五颗入口（资产／历史／新会话／直接生成／设置）图示即 logo；连线异常态文字不再由顶栏承担（下沉对话区）｜ 证据: c5f89542

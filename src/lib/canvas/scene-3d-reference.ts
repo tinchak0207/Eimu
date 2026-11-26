@@ -30,8 +30,8 @@
 // stills 缺席（导入卡只带 glb_path）＝零参考，不编造。角色映射用既有
 // `toReferenceImageRole`（未知值收敛 general），不另立枚举。
 
-import { buildSceneFrameReferenceCard } from "../blender-to-video-bridge";
-import { toReferenceImageRole } from "../image-types";
+import { buildSceneFrameReferenceCard } from "../agent/blender-to-video-bridge";
+import { toReferenceImageRole } from "../media/image-types";
 import { CanvasNodeType } from "./types";
 import type { CanvasConnection, CanvasNode, CanvasNodeMetadata } from "./types";
 import type { CanvasGenerationReference } from "./semantic-nodes";

@@ -313,7 +313,7 @@ test("一致性探针（防漂移）：环境段宣告的断路工具 ⊇ regist
     for (const t of m[1].split(/[,，]\s*/)) if (t.trim()) domainTools.add(t.trim())
   }
   assert.ok(domainTools.size > 0, "digest 应可解析出域工具")
-  // 例外：orchestrator 刻意保留的直调路由（tools/export-expert-agents.ts
+  // 例外：orchestrator 刻意保留的直调路由（tools/codegen/export-expert-agents.ts
   // ORCHESTRATOR_KEPT_DOMAIN_TOOLS）不在断路清单，也就不该被本子集探针要求切断。
   // digest 可能把同一工具列在别域的「工具 …」清单里（如 image_generate），故先剔除豁免项。
   // held 面（含 canvas_get_state / workflow_write / quote_bundle / subagent_* 等）本就不该被切。

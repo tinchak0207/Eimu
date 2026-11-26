@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { completeMiniappLogin } from "@/lib/miniapp-login";
+import { completeMiniappLogin } from "@/lib/accounts/miniapp-login";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

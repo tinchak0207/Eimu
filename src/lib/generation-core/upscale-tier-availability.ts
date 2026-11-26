@@ -10,7 +10,7 @@
 // 单一真源：`UPSCALE_UNVERIFIED_TIERS` 是「未校准档位」的唯一清单；
 // `upscale-tier.ts` 的 `UPSCALE_TIER_CONTRACTS[*].semantics` 必须与之一致（4k）。
 
-import type { UpscaleTier } from "../generation-model-catalog/types";
+import type { UpscaleTier } from "./generation-model-catalog/types";
 
 /** 上游语义尚未由真单校准的档位（默认 fail-closed，仅服务端开关可放行）。 */
 export const UPSCALE_UNVERIFIED_TIERS: readonly UpscaleTier[] = ["4k"];

@@ -12,9 +12,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "../../../../lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "../../../../lib/biz-api-key-store";
-import { __resetCharacterCardStoreForTests } from "../../../../lib/character-card-store";
+import { hashBizApiKey } from "../../../../lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "../../../../lib/accounts/biz-api-key-store";
+import { __resetCharacterCardStoreForTests } from "../../../../lib/media/character-card-store";
 import { POST as saveCard } from "../character-cards/route";
 import { GET, POST } from "./route";
 

@@ -5,7 +5,7 @@
 // 防止误触清库。新增内容过凭证闸（sensitive_content:*），命中原文永不回显。
 
 import { NextRequest, NextResponse } from "next/server";
-import { createUserMemory, deleteUserMemories, listMemoryDocs } from "@/lib/agent-memory-store";
+import { createUserMemory, deleteUserMemories, listMemoryDocs } from "@/lib/agent/agent-memory-store";
 import { noStore, resolveSkillOwner } from "@/app/api/skills/mine/owner";
 import { notifyGatewayMemoryChanged } from "./notify";
 import { toMineView } from "./view";

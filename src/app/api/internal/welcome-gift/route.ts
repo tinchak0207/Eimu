@@ -1,5 +1,5 @@
 // 控制面侧的新人礼端点。调用方：
-//   - Vercel 上 /api/auth/me（src/lib/welcome-gift-login.ts）：op=grant 发放；
+//   - Vercel 上 /api/auth/me（src/lib/billing/welcome-gift-login.ts）：op=grant 发放；
 //     站内通知写完后 op=noticed 回执（占位表 noticed_at）
 //   - Vercel 上 POST /api/auth/me：首登弹窗展示后 op=modal_seen 回执（modal_seen_at）
 //   - 运维回溯（在控制面容器内签名后打本端点）：op=backfill，可带 dryRun
@@ -12,7 +12,7 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured } from "@/lib/generation-core/database";
 import {
   WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN,
@@ -21,7 +21,7 @@ import {
   grantWelcomeGift,
   createPostgresWelcomeGiftStore,
   productionWelcomeGiftDeps,
-} from "@/lib/welcome-gift";
+} from "@/lib/billing/welcome-gift";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

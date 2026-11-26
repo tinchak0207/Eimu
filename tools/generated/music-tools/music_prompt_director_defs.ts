@@ -1,10 +1,10 @@
 /**
  * Music Prompt Director VPS staging 稿（确定性规则层，2026-09-12 机械导出）。
  *
- * 本档由 tools/export-music-tools-staging.ts 从行为真源 src/lib/music-prompt-director.ts
+ * 本档由 tools/codegen/export-music-tools-staging.ts 从行为真源 src/lib/agent/music-prompt-director.ts
  * 机械导出：真源全文逐行保留（六层侦测/anti-slop/伪标签剥除/mood 修剪/通路硬规则/
  * 补层/长度上限全在），零依赖、无 import，除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-music-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-music-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_prompt_director.ts
  * env：无（纯函数，零依赖零副作用）。

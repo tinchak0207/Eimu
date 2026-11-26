@@ -2,17 +2,17 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { AlertTriangle, AudioLines, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
-import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/history-media";
+import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/media/history-media";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ShareDialog } from "@/components/history/ShareDialog";
-import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
-import { deliverableKindLabel } from "@/lib/deliverable-kind";
-import { canHistoryEntryRerun } from "@/lib/history-rerun";
-import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
-import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
-import { firstShareableIndex } from "@/lib/share-remix";
-import type { HistoryEntry } from "@/lib/history-types";
+import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/media/history-types";
+import { deliverableKindLabel } from "@/lib/media/deliverable-kind";
+import { canHistoryEntryRerun } from "@/lib/media/history-rerun";
+import { assetPackPayloadFromHistoryEntry } from "@/lib/media/history-card-anchor";
+import { workflowDagThumbnailUrl } from "@/lib/media/history-workflow-view";
+import { firstShareableIndex } from "@/lib/media/share-remix";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 export interface HistoryCardProps {
   entry: HistoryEntry;

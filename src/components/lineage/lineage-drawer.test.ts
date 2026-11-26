@@ -77,8 +77,8 @@ test("lineage stays out of the agent upload whitelist and canvas node metadata",
 
 /** 栏位族契约：宿主是本体记录，不是第二套存储。 */
 test("hosts carry the lineage field family and normalize passes it through", () => {
-  const historyTypes = read("src/lib/history-types.ts");
-  const cards = read("src/lib/character-cards.ts");
+  const historyTypes = read("src/lib/media/history-types.ts");
+  const cards = read("src/lib/media/character-cards.ts");
 
   assert.match(historyTypes, /lineage\?: LineageLink\[\]/);
   assert.match(historyTypes, /lineageTruncated\?: boolean/);
@@ -90,8 +90,8 @@ test("hosts carry the lineage field family and normalize passes it through", () 
 /** 写入挂钩三处必须存在且复用现成事件流（不新造）。 */
 test("write hooks a/b/c are wired at the existing choke points", () => {
   const syncRoute = read("src/app/api/generate-images/route.ts");
-  const projection = read("src/lib/generation-task-history.ts");
-  const anchor = read("src/lib/history-card-anchor.ts");
+  const projection = read("src/lib/generation-core/generation-task-history.ts");
+  const anchor = read("src/lib/media/history-card-anchor.ts");
 
   // a. 生成完成落成品索引：历史保存前组 parents。
   assert.match(syncRoute, /parentsFromReferences\(workflow\?\.referenceImages/);
@@ -105,7 +105,7 @@ test("write hooks a/b/c are wired at the existing choke points", () => {
 
 /** 存量回溯补丁是交付件的一部分（tools/ 惯例位置，幂等＝已有登记零触碰）。 */
 test("backfill tool lives at the repo convention and skips registered hosts", () => {
-  const tool = read("tools/backfill-lineage.ts");
+  const tool = read("tools/archive/incidents/backfill-lineage.ts");
   assert.match(tool, /Array\.isArray\(entry\.lineage\)/);
   assert.match(tool, /Array\.isArray\(card\.lineage\)/);
   assert.match(tool, /--dry-run/);

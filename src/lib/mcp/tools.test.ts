@@ -13,10 +13,10 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
 import { CONTROL_PLANE_PROXY_SOURCES } from "../control-plane-proxy-routes.mjs";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
-import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent-skills/registry";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
+import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent/agent-skills/registry";
 import { compileWorkflow, workflowNodeId } from "@/lib/workflow-dsl/compile";
 import { JSON_RPC_ERROR_CODES, McpRpcError, type McpToolCallResult } from "./protocol";
 import {

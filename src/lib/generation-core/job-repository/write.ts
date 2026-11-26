@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { requirePinnedPublishedWorkflow } from "../../comfyui-workflow-pin";
+import { requirePinnedPublishedWorkflow } from "../comfyui-workflow-pin";
 import { getGenerationSql, type GenerationSql } from "../database";
 import { JOB_EVENT, emitJobEvent } from "../job-events";
 import type { CreateGenerationJobInput, FailureClass, GenerationArtifactResult, GenerationJob, GenerationJobResult, GenerationJobStatus, ProviderProtocol, SupplierLease, SupplierRecord } from "../types";

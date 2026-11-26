@@ -4,14 +4,14 @@
 // 壳内不叠卡（agent-chat-liquid-glass-inset-surface）：iOS 内嵌面
 // rounded-[18px] + bg-[rgba(120,120,128,0.06)]，无边框无阴影，骨架照抄
 // AgentToolCard/AgentImageCard 既有语汇。SVG 走 data:image/svg+xml;base64 img
-//（src/lib/svg-data-url.ts），禁 dangerouslySetInnerHTML。
+//（src/lib/media/svg-data-url.ts），禁 dangerouslySetInnerHTML。
 // 「在新分页开启导演台」→ /director/<sessionId>（P2 全屏导演台，同一份场景文档）。
 
 import { memo, type ComponentType } from "react";
 import { Clapperboard, MonitorPlay, TriangleAlert, CircleCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentDirectorItem } from "@/lib/agent-chat-types";
-import { svgToDataUrl } from "@/lib/svg-data-url";
+import type { AgentDirectorItem } from "@/lib/agent/agent-chat-types";
+import { svgToDataUrl } from "@/lib/media/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
 
 export interface AgentDirectorCardProps {

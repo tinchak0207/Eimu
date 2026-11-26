@@ -21,8 +21,8 @@ import { buildCriticAudioParts, extractAudioTargets } from "./critic-audio-parts
 // ─────────────────────────────────────────── P0-4（2026-10-06）：本域配方库事实行
 // 专家宪法第三条命令每个 Expert「进域即载配方库」，但注册表里部分域 skillPaths 为空
 // （video-director / screenwriter / critic）——无条件命令会让子代理去找不存在的配方档。
-// 真源＝src/lib/expert-registry.ts 的 EXPERT_REGISTRY[id].skillPaths，gateway 侧同内容的
-// 生成物＝expert/registry-digest.txt 的「配方库」栏（tools/export-expert-agents.ts 机械生成；
+// 真源＝src/lib/agent/expert-registry.ts 的 EXPERT_REGISTRY[id].skillPaths，gateway 侧同内容的
+// 生成物＝expert/registry-digest.txt 的「配方库」栏（tools/codegen/export-expert-agents.ts 机械生成；
 // gateway 是独立发布单元，运行时无法 import 仓库 src/lib）。此处**从生成物派生**该栏，
 // 禁手抄——旧手抄表当天即漂移（editor 的嵌套路径真身为 RECIPE.md 却写成 SKILL.md，且
 // 全部 skills/… 缺 .opencode/ 前缀而指空）。读档一次、模块级缓存；只读此生成物、不猜路径。

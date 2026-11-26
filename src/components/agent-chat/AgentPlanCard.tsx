@@ -3,7 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Brain, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentPlanItem } from "@/lib/agent-chat-types";
+import type { AgentPlanItem } from "@/lib/agent/agent-chat-types";
 
 export interface AgentPlanCardProps {
   item: AgentPlanItem;

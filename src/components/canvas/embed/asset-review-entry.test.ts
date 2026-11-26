@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CanvasEmbedOverlays } from "./CanvasEmbedOverlays";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import type { CharacterCard } from "@/lib/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 
 function card(over: Partial<CharacterCard> = {}): CharacterCard {
   return {

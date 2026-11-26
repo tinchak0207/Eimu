@@ -15,7 +15,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
-import { parseToolParams } from "@/lib/agent-tool-params";
+import { parseToolParams } from "@/lib/agent/agent-tool-params";
 
 export interface AgentParamDisclosureProps {
   argsSummary: string;

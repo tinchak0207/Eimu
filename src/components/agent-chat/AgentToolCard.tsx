@@ -15,9 +15,9 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentToolAuthScope, AgentToolCallItem } from "@/lib/agent-chat-types";
-import { taskStatusTone } from "@/lib/agent-task-status";
-import { classifiedErrorStatus, sanitizeDisplayError } from "@/lib/agent-error-status";
+import type { AgentToolAuthScope, AgentToolCallItem } from "@/lib/agent/agent-chat-types";
+import { taskStatusTone } from "@/lib/agent/agent-task-status";
+import { classifiedErrorStatus, sanitizeDisplayError } from "@/lib/agent/agent-error-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {

@@ -15,11 +15,11 @@ triggers:
   - 用户要求角色/场景/风格跨画面保持一致
   - 用户要求多比例输出、资产溯源或可审计归档
 requires:
-  - src/lib/novel-ip-visual-tools.ts（七项工具的输入、输出、门禁、unsupported 与 Canvas artifact metadata）
-  - src/lib/agent-gateway.ts（现有 harness owner）
+  - src/lib/agent/novel-ip-visual-tools.ts（七项工具的输入、输出、门禁、unsupported 与 Canvas artifact metadata）
+  - src/lib/agent/agent-gateway.ts（现有 harness owner）
   - src/lib/canvas/types.ts（Canvas 节点、referenceRole 与项目结构 owner）
   - src/lib/canvas/semantic-nodes.ts（参考图/提示词注入 owner）
-  - src/lib/generation-gates.ts（确定性生成门 owner）
+  - src/lib/generation-core/generation-gates.ts（确定性生成门 owner）
   - src/lib/generation-core/command-service.ts（生成任务提交 owner）
   - src/lib/generation-core/artifact-service.ts（产物校验、哈希与归档 owner）
 optional:
@@ -44,12 +44,12 @@ optional:
 | `multi_aspect_reflow` | sequence artifact、catalog 中目标比例、版式约束、每格优先级 | reflow manifest：目标比例、构图变化、保留/裁切/重生原因、必要任务 | `reflow.aspect_supported`、`reflow.order_preserved`、`reflow.reference_bindings_preserved`、`generation.preflight` | `artifactKind=aspect_reflow`、`nodeType=group`、保留 composition/character/style 引用 | `generation-workflow.ts`；`generation-model-catalog/`；现有 generation queue |
 | `asset_provenance_archive` | Canvas node/artifact id、generation task id、来源 URL/repo、许可备注；禁止 secret | 不可变归档：关系、来源、许可、task id、mime/尺寸/hash、gate 结果 | `provenance.ids_resolve`、`provenance.hash_present`、`provenance.secret_free`、`artifact.validated` | `artifactKind=provenance_archive`、`nodeType=text`、来源与 sha256 数组 | agent tool result；Canvas state；`generation-core/artifact-service.ts` |
 
-完整 TypeScript 定义见 `src/lib/novel-ip-visual-tools.ts`。`gate` 只声明业务段门；确定性生成前置门仍由 `src/lib/generation-gates.ts` 执行，出图必须继续走现有 generation queue。
+完整 TypeScript 定义见 `src/lib/agent/novel-ip-visual-tools.ts`。`gate` 只声明业务段门；确定性生成前置门仍由 `src/lib/generation-core/generation-gates.ts` 执行，出图必须继续走现有 generation queue。
 
 ## 行为规则
 
 1. 角色、场景和参考图引用必须解析到现有 Canvas 节点或 generation artifact；工具不得创建第二套资产 id。
-2. `referenceRole` 只能复用 `src/lib/image-types.ts` 的角色语义；风格参考用 `style`，角色参考用 `character`，构图条件用 `composition`。
+2. `referenceRole` 只能复用 `src/lib/media/image-types.ts` 的角色语义；风格参考用 `style`，角色参考用 `character`，构图条件用 `composition`。
 3. 任何生成任务必须经现有 generation route、`generation-core/command-service.ts` 和 `generation-gates`；不得直连 StoryDiffusion、IP-Adapter 或 ControlNet 上游。
 4. 角色与序列工具必须保留输入 node/artifact id、generation task id、sha256 与 gate results；没有这些证据不得声称一致性完成。
 5. `multi_aspect_reflow` 只能使用 model catalog 已声明的比例；不支持的比例阻断对应任务，不静默改成另一个比例。

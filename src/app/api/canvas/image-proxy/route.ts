@@ -8,7 +8,7 @@
 // 「把公网图片变同源」存在，不提供内网探测面。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { ImageTooLargeError, SsrfBlockedError, isForbiddenHost, safeFetchPublicImage } from "@/lib/ssrf-guard";
 
 export const runtime = "nodejs";

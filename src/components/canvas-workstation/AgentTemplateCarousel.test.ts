@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_TEMPLATES } from "@/lib/agent-templates";
+import { AGENT_TEMPLATES } from "@/lib/agent/agent-templates";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
@@ -71,7 +71,7 @@ test("carousel is a verbatim copy of CaseShowcase interaction machinery", () => 
 
 test("carousel renders template cards with poster watermark and circular step selector", () => {
   const source = read("src/components/canvas-workstation/AgentTemplateCarousel.tsx");
-  const data = readDirSources("src/lib/agent-templates");
+  const data = readDirSources("src/lib/agent/agent-templates");
 
   for (const template of AGENT_TEMPLATES) {
     assert.ok(data.includes(template.name), `模板数据应包含卡片名「${template.name}」`);
@@ -185,8 +185,8 @@ test("playground resets template-gallery dismissal on a new agent session and re
   assert.match(playground, /setAgentTemplateDismissed\(false\)/);
   assert.match(playground, /onSessionChange=\{handleAgentSessionChange\}/);
   // Bug1b：每个新 sid 拉一次快照；nodes>0 且画布仍空才回填。
-  assert.match(playground, /fetchAgentCanvasSnapshot\(sid\)/);
-  assert.match(playground, /host\.restoreAgentSnapshot\(snapshot\)/);
+  assert.match(playground, /fetchAgentCanvasSnapshot(?:WithRev)?\(sid\)/);
+  assert.match(playground, /host\.restoreAgentSnapshot\((?:snapshot|pulled\.state)\)/);
   assert.match(playground, /host\.nodes\.length > 0 \|\| host\.plans\.length > 0/);
   // hook 端：回填走 fromCanvasProject 校验，空快照拒绝落地，不进撤销栈。
   assert.match(hook, /const restoreAgentSnapshot = useCallback/);

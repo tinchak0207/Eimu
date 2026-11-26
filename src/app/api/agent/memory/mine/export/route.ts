@@ -1,7 +1,7 @@
 // GET /api/agent/memory/mine/export —— 把当前用户的私有记忆整包下载为 JSON（数据可携带）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { listMemoryDocs } from "@/lib/agent-memory-store";
+import { listMemoryDocs } from "@/lib/agent/agent-memory-store";
 import { noStore, resolveSkillOwner } from "@/app/api/skills/mine/owner";
 import { toMineView } from "../view";
 

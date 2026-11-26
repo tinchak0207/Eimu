@@ -1,4 +1,4 @@
-// 控制面侧的 mPay 回调落地存证端点（履约副作用之前先写一笔，见 src/lib/mapay-intake.ts）。
+// 控制面侧的 mPay 回调落地存证端点（履约副作用之前先写一笔，见 src/lib/billing/mapay-intake.ts）。
 //
 // 呼叫方：Vercel 上 /api/payments/mapay/notify
 //   op=record    upsert 一条 intake（state='received'）
@@ -12,13 +12,13 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
 import {
   MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN,
   createPostgresMapayIntakeStore,
   type MapayIntakeDelivery,
-} from "@/lib/mapay-intake";
+} from "@/lib/billing/mapay-intake";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

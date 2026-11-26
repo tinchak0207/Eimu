@@ -1,4 +1,4 @@
-import { fuseSceneVideo } from "../scene3d-video-fusion";
+import { fuseSceneVideo } from "../generation-core/scene3d-video-fusion";
 import { claimScriptEpisode, scriptBindsParents, storyboardBindsItems, type ChildAssetItem, type ParentAsset } from "./asset-levels";
 import { sliceAllows, type ShortDramaActor } from "./slices";
 

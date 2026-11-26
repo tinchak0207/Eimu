@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { applyRecentAccountFailures, mapSub2APIAccounts, recentAccountFailureFromOps, sanitizeSub2APIError, shouldDeleteSub2APIAccount, sub2APIAdminFetch, type RecentAccountFailure } from "@/lib/sub2api-admin";
-import { requireAdminSession } from "@/lib/admin-session";
-import { inferSupportedModels } from "@/lib/admin-pools";
-import { describeEnvChannels, probeSub2APIGateway, sub2APIImageGroupId } from "@/lib/sub2api";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
+import { applyRecentAccountFailures, mapSub2APIAccounts, recentAccountFailureFromOps, sanitizeSub2APIError, shouldDeleteSub2APIAccount, sub2APIAdminFetch, type RecentAccountFailure } from "@/lib/generation-core/sub2api-admin";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { inferSupportedModels } from "@/lib/generation-core/admin-pools";
+import { describeEnvChannels, probeSub2APIGateway, sub2APIImageGroupId } from "@/lib/generation-core/sub2api";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,6 +1,6 @@
-import { readSupplierChannelHealth } from "@/lib/supplier-health-signal";
+import { readSupplierChannelHealth } from "@/lib/generation-core/supplier-health-signal";
 import { usageAssetKindForJobKind } from "../usage-asset-kind";
-import { readFunnelAttribution } from "@/lib/user-attribution";
+import { readFunnelAttribution } from "@/lib/accounts/user-attribution";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "../database";
 import { buildUsageNotes, projectConsumption, windowStartDay } from "./project-consumption";
 import { projectChannelHealth, projectRemainingQuota } from "./project-revenue";
@@ -246,7 +246,7 @@ async function defaultLoadRemainingQuota(userIds: number[]): Promise<RemainingQu
       `[statistics] remaining quota read capped at ${MAX_QUOTA_USERS} identities (given ${userIds.length}); 覆盖数已随 truncated 申报`,
     );
   }
-  const { fetchGatewayUser } = await import("@/lib/gateway-admin");
+  const { fetchGatewayUser } = await import("@/lib/accounts/gateway-admin");
   return Promise.all(
     targets.map(async (billingUserId): Promise<RemainingQuotaEntry> => {
       try {
@@ -382,7 +382,7 @@ export async function readFunnelRecharges(input: {
 
 /** 注册预设读法：new-api 管理 API（不直连 sqlite）。 */
 async function defaultLoadRegistrations(since: Date): Promise<{ registrations: FunnelRegistration[]; truncated: boolean }> {
-  const { listGatewayUsersRegisteredSince } = await import("@/lib/gateway-admin");
+  const { listGatewayUsersRegisteredSince } = await import("@/lib/accounts/gateway-admin");
   const { users, truncated } = await listGatewayUsersRegisteredSince(Math.floor(since.getTime() / 1000));
   return {
     registrations: users.map((user) => ({

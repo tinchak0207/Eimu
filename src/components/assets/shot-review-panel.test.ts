@@ -28,7 +28,7 @@ import {
   ShotReviewPanel,
 } from "./ShotReviewPanel";
 // 门槛判定/清洗轮子＝真源（路 1 落地）；面板不重写第二套。
-import { isAssetApproved } from "@/lib/character-cards";
+import { isAssetApproved } from "@/lib/media/character-cards";
 import type { CanvasConnection, CanvasNode } from "@/lib/canvas/types";
 
 const PNG_1PX =

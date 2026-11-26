@@ -1,19 +1,19 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
-import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
-import { sanitizeUpstreamMessage } from "@/lib/proxy";
-import { isSessionTokenRevoked, lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
-import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
+import { getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/proxy";
+import { isSessionTokenRevoked, lookupUserIdByTokenViaRelay } from "@/lib/accounts/newapi-session-token";
+import { ensureWelcomeGiftOnLogin } from "@/lib/billing/welcome-gift-login";
 import {
   ackWelcomeGiftModalSeenViaRelay,
   welcomeGiftModalCopy,
   welcomeGiftImageCount,
   type WelcomeGiftResult,
-} from "@/lib/welcome-gift";
-import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
-import { FIRST_TOUCH_COOKIE, INVITE_COOKIE } from "@/lib/first-touch-attribution";
-import { recordFirstTouchCookieViaRelay, recordInviteViaRelay } from "@/lib/user-attribution";
+} from "@/lib/billing/welcome-gift";
+import type { WelcomeGiftModal } from "@/lib/billing/welcome-gift-modal";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE } from "@/lib/accounts/first-touch-attribution";
+import { recordFirstTouchCookieViaRelay, recordInviteViaRelay } from "@/lib/accounts/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -38,7 +38,7 @@ function cacheVerifiedMe(key: string, data: unknown) {
   meMicroCache.set(key, { expiresAt: Date.now() + ME_CACHE_TTL_MS, data });
 }
 
-// 新人礼挂点（src/lib/welcome-gift-login.ts → 控面 welcome-gift）：验证通过后、写快取前，
+// 新人礼挂点（src/lib/billing/welcome-gift-login.ts → 控面 welcome-gift）：验证通过后、写快取前，
 // 首次命中即发，已发/不符合则 no-op。每个实例每个用户只问一次控面（结案状态永久记住；
 // 未结案 5 分钟后再试），整段最多等 WELCOME_GIFT_BUDGET_MS，失败只记日志、绝不挡登入。
 // 本次发放成功时把 quota 就地加上，钱包当场看到到帐；站内通知同时写入。
@@ -109,7 +109,7 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
   }
 }
 
-// 首次触达归因补记（src/lib/user-attribution.ts → 控面 user-attribution）：
+// 首次触达归因补记（src/lib/accounts/user-attribution.ts → 控面 user-attribution）：
 // OAuth 回调已带 email 落库，这里是**所有 provider 的兜底**（微信等没有 callback 的路径
 // 也在登入后打 /api/auth/me，同样带著浏览器的 eimu_first_touch cookie）。控面是首触胜出的
 // 幂等 upsert，重复送无副作用。没有 cookie（多数回访）＝零网路成本直接跳过。

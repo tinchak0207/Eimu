@@ -7,13 +7,13 @@
 // 上游异常同样以 200 + available:false 返回，面板显示原因。
 
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   signBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

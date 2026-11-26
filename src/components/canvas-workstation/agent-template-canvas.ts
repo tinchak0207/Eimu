@@ -1,11 +1,11 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
-import { recipeTemplateToRecallConfig } from "@/lib/recipe-templates";
-import type { RecipeTemplate } from "@/lib/recipe-templates";
+import { recipeTemplateToRecallConfig } from "@/lib/agent/recipe-templates";
+import type { RecipeTemplate } from "@/lib/agent/recipe-templates";
 // 2026-09-12 首屏减重拆分：本档是执行侧铺法，需要带 promptNotes/deliverable/
 // requiredTools 的完整步骤；显示档的 AgentPipelineStep 只剩卡面环节字段。
 // 纯 type import（编译期擦除），不把 payload 的 11 万字文案拉进 bundle。
-import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
-import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
+import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent/agent-templates-payload";
+import type { WorkflowRecallConfig } from "@/lib/agent/workflow-recall";
 
 /**
  * 助理起手模板 → 画布 workflow（2026-08-26 工具链重铺）。

@@ -1,5 +1,5 @@
 import { PricingClient } from "@/components/PricingClient";
-import { PLANS } from "@/lib/plans";
+import { PLANS } from "@/lib/billing/plans";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 const SITE_URL = getSiteUrlFromEnv();

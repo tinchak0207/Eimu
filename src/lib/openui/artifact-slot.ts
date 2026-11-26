@@ -1,7 +1,7 @@
 /**
  * OpenUI 成品组件 → 会话真实产物的渲染插槽（2026-10-18）。
  *
- * eimu-library.ts 会被 Node 脚本（tools/gen-openui-prompt.mts）直接 require，不能 import
+ * eimu-library.ts 会被 Node 脚本（tools/codegen/gen-openui-prompt.mts）直接 require，不能 import
  * 聊天卡片（AgentImageCard 等，带 lucide/next/CSS 依赖）。所以成品组件只渲染
  * `<ArtifactSlot>`，真正的实现由客户端的 AgentOpenUIBlock 通过 Context 注入
  * （见 src/components/agent-chat/OpenUIArtifactSlot.tsx）。

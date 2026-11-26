@@ -6,8 +6,8 @@
 
 import { useMemo } from "react";
 import { squarify } from "@/lib/treemap";
-import { modelBaseName } from "@/lib/provider-config";
-import type { ModelBreakdown } from "@/lib/routing-telemetry";
+import { modelBaseName } from "@/lib/generation-core/provider-config";
+import type { ModelBreakdown } from "@/lib/generation-core/routing-telemetry";
 
 const MODEL_COLORS = [
   "#2878d0", "#20a65a", "#d99024", "#a82d24", "#7c5cbf",

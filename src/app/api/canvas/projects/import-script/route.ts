@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { buildScriptImportProject, type ScriptImportReference } from "@/lib/canvas/script-import";
 import { saveCanvasProject } from "@/lib/canvas/project-store";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

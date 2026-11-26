@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import { getJobTimeline } from "@/lib/generation-core/job-events";
 
 // P1.5 probe 侦查面：一条命令 30 秒出死因（含上游错误原文），不开 docker exec、不进 VPS。

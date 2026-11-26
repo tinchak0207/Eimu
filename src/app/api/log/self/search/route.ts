@@ -1,5 +1,5 @@
 // GET /api/log/self/search — search user logs
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

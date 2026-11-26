@@ -15,9 +15,9 @@
 // 的池化并发治理（全量提交 + scheduler 排队），batch 不自建节流器。
 
 import { randomUUID } from "node:crypto";
-import { isModelAllowedForKey, type BizApiKey } from "@/lib/biz-api-keys";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { directVideoPrompt } from "@/lib/invisible-prompt-director";
+import { isModelAllowedForKey, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { directVideoPrompt } from "@/lib/generation-core/invisible-prompt-director";
 import {
   aspectRatioFromImageSize,
   generationCoins,
@@ -25,9 +25,9 @@ import {
   isSupportedVideoModel,
   normalizeGenerationConfig,
   resolveGenerationModelId,
-} from "@/lib/generation-model-catalog";
-import { ADOBE_FIREFLY_MODEL_ID, imageGenerationCoins } from "@/lib/provider-config";
-import { MAX_CONTROL_NETS, normalizeControlNets, toPixaiControlNets } from "@/lib/pixai-controlnets";
+} from "@/lib/generation-core/generation-model-catalog";
+import { ADOBE_FIREFLY_MODEL_ID, imageGenerationCoins } from "@/lib/generation-core/provider-config";
+import { MAX_CONTROL_NETS, normalizeControlNets, toPixaiControlNets } from "@/lib/generation-core/pixai-controlnets";
 import { generationRequestHash } from "./crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { mapGenerationJob } from "./job-repository";

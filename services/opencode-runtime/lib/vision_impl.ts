@@ -1,11 +1,11 @@
 /**
  * vision_analyze harness 工具 VPS staging 稿（beast-army R2→R2c，2026-09-10 机械导出）。
  *
- * 本档由 tools/export-vision-tools-staging.ts 从行为真源 src/lib/vision-tools.ts
+ * 本档由 tools/codegen/export-vision-tools-staging.ts 从行为真源 src/lib/agent/vision-tools.ts
  * 机械导出：真源全文逐行保留（工具定义/ok-fail/读图白名单/new-api 中控通路/
  * 错误铁律/60s 超时全在），零本地依赖（仅 node:fs/promises 内建模组），
  * 除本注释头外与真源逐行等价。
- * 禁止手改本档——改真源后跑 `npx tsx tools/export-vision-tools-staging.ts` 重导出。
+ * 禁止手改本档——改真源后跑 `npx tsx tools/codegen/export-vision-tools-staging.ts` 重导出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
  * env：NEWAPI_API_KEY（Bearer 鉴权，VPS /opt/image-control-plane/.env.control-plane
@@ -18,7 +18,7 @@
 /**
  * vision_analyze harness 工具（野兽模式多毒蛇评审的眼睛，beast-army R2→R2c，2026-09-10）。
  *
- * 定义形状同构 src/lib/music-tools.ts 的 MusicToolDef（零依赖：
+ * 定义形状同构 src/lib/agent/music-tools.ts 的 MusicToolDef（零依赖：
  * { id, description, args, execute } + ok()/fail() 契约，回 { title, output }，
  * output 为 JSON 字串）。
  *

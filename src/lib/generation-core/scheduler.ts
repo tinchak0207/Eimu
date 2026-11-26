@@ -3,7 +3,7 @@ import { getGenerationSql, type GenerationSql } from "./database";
 import { mapSupplierLease } from "./job-repository";
 import type { ClassifiedFailure } from "./failure-classifier";
 import type { GenerationJob, SupplierLease } from "./types";
-import { NEWAPI_ROUTE_LABEL, routeSupplierId } from "../model-routes.config";
+import { NEWAPI_ROUTE_LABEL, routeSupplierId } from "./model-routes.config";
 import { resolveModelRoute } from "./model-routing";
 
 /**
@@ -209,7 +209,7 @@ export async function diagnoseSupplierUnavailability(
     return {
       reason: "model_not_routed",
       detail: `${job.modelId} has no route (source: ${route.source}). `
-        + "Add it to MODEL_ROUTES in src/lib/model-routes.config.ts or set a route in /admin.",
+        + "Add it to MODEL_ROUTES in src/lib/generation-core/model-routes.config.ts or set a route in /admin.",
     };
   }
 

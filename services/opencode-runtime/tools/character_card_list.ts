@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, siteFetch, ok, fail } from "../lib/client"
 
-// 角色卡五值 kind（与站点 src/lib/character-cards.ts 的 CHARACTER_CARD_KIND_VALUES 同尺）。
+// 角色卡五值 kind（与站点 src/lib/media/character-cards.ts 的 CHARACTER_CARD_KIND_VALUES 同尺）。
 const KINDS = ["character", "scene", "style", "prop", "audio"] as const
 
 /** 卡视图：只暴露 agent 引用卡需要的栏位（id/名称/种类/锁定描述片段/参考图网网址）。 */

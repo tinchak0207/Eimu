@@ -12,7 +12,7 @@
  *   不改变任何渲染行为。
  *
  * 硬指标：`generateSystemPrompt({ library: eimuLibrary.toSpec(), promptOptions: eimuPromptOptions })`
- * 必须 <= 14000 字符（全量 chat 库约 53k）。`tools/gen-openui-prompt.mts` 会打印实测值。
+ * 必须 <= 14000 字符（全量 chat 库约 53k）。`tools/codegen/gen-openui-prompt.mts` 会打印实测值。
  *
  * 注意：本文件会被 Node 脚本（tsx）与客户端组件同时 import，**不要在这里 import CSS**。
  */
@@ -601,7 +601,7 @@ const baseRules = openuiChatPromptOptions.additionalRules ?? [];
 /**
  * Eimu 场景规则（2026-10-18 改造）：只保留卡片/按钮契约，删除全部表单规则
  * （原 643/647 行「Prefer structured inputs」「生图/生视频时渲染一个 Form」）。
- * 注：tools/gen-openui-prompt.mts 只抽签名行，网关实际规则以该脚本为准。
+ * 注：tools/codegen/gen-openui-prompt.mts 只抽签名行，网关实际规则以该脚本为准。
  */
 export const eimuPromptOptions: PromptOptions = {
   examples: [],

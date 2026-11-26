@@ -6,7 +6,7 @@
 //   - /api/payments/mapay/notify：直达入帐通道不可用、退回旧兑换码流程时，按「本单是否就是名额
 //     持有单」决定发 300 币还是按正价折算的 70 币（带 outTradeNo 的那一路就是这个用途）。
 //
-// 判准唯一权威在 src/lib/first-charge.ts（帐本无 recharge 行 + 从未买过本档）；本端点只做
+// 判准唯一权威在 src/lib/billing/first-charge.ts（帐本无 recharge 行 + 从未买过本档）；本端点只做
 // 参数校验与转发，不回显内部错误细节。鉴权复用 biz-key-sync 的 HMAC 通道
 // （signatureDomain "first-charge"），与 welcome-gift / user-attribution 同一骨架。
 //
@@ -18,12 +18,12 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
 import {
   FIRST_CHARGE_RELAY_SIGNATURE_DOMAIN,
   checkFirstChargeEligibilityWithSql,
-} from "@/lib/first-charge";
+} from "@/lib/billing/first-charge";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

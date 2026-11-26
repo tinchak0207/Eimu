@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { forkCanvasProject } from "@/lib/canvas/project-fork";
 import { readCanvasProject, saveCanvasProject } from "@/lib/canvas/project-store";
 import { getProjectShare } from "@/lib/canvas/project-share";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

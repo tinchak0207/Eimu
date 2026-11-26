@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { listGeneratedHistoryEntries } from "@/lib/server-history-store";
-import { buildHistoryFacets, buildHistoryStats, mergeHistoryEntries } from "@/lib/history-types";
-import type { HistoryEntry } from "@/lib/history-types";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { listGeneratedHistoryEntries } from "@/lib/media/server-history-store";
+import { buildHistoryFacets, buildHistoryStats, mergeHistoryEntries } from "@/lib/media/history-types";
+import type { HistoryEntry } from "@/lib/media/history-types";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { listGenerationJobsForTenant } from "@/lib/generation-core/job-repository";
-import { generationJobHistoryEntry } from "@/lib/generation-task-history";
+import { generationJobHistoryEntry } from "@/lib/generation-core/generation-task-history";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

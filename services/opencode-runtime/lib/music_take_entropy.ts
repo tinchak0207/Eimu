@@ -1,7 +1,7 @@
 /**
  * Music take 熵决策层 VPS staging 稿（多 take 偏好闸，2026-10-03 机械导出）。
  *
- * 镜像自 src/lib/music-take-entropy.ts，勿直接手改本档。
+ * 镜像自 src/lib/generation-core/music-take-entropy.ts，勿直接手改本档。
  * 该档零依赖、零 import，故全文逐行照抄、无任何 import 路径改写。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_take_entropy.ts

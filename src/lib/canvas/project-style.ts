@@ -10,12 +10,12 @@
 //   ① 唯一注册面 = `STYLE_LIBRARY`（一律经 `getStyleById` 查）。查不到 ⇒ null，
 //      不制造半形绑定、不回退「第一个风格」、不猜近似 id。
 //   ② 素材化一律呼叫既有轮子 `applyStyleToPrompt` / `mergeStyleNegative`
-//      （src/lib/style-library.ts，MIT · twri/sdxl_prompt_styler）——本模组不另写套用逻辑。
+//      （src/lib/media/style-library.ts，MIT · twri/sdxl_prompt_styler）——本模组不另写套用逻辑。
 //   ③ 无风格（style === null）⇒ prompt / negativePrompt **逐位不变**（零回归）。
 //
 // 叶模组铁律：只 import `@/lib/style-library` 的型别与函式。
 // 不得 import DB／`node:*`／catalog runtime —— 本档同时被伺服器路由与前端 hook 链路使用。
-import { applyStyleToPrompt, getStyleById, mergeStyleNegative, type StyleTemplate } from "@/lib/style-library";
+import { applyStyleToPrompt, getStyleById, mergeStyleNegative, type StyleTemplate } from "@/lib/media/style-library";
 
 /** 风格的来源：`request`＝本次呼叫自带（优先），`project`＝专案持久化绑定。 */
 export type ProjectStyleSource = "request" | "project";

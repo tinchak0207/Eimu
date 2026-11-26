@@ -29,9 +29,9 @@
 //   （只认「分镜节点 ＋ `metadata.episodeId` 逐字相符」，不按节点序切段、不臆造归属）。
 //   未指定 `episode` ＝ 全专案分镜（按镜号 numeric 排序，与既有轮子同序）。
 
-import { usableAudioUrl } from "@/lib/agent-output-cards";
-import { TTS_COINS_PER_CHAR, ttsCoinsForChars } from "@/lib/generation-model-catalog/tts-pricing";
-import { DEFAULT_TTS_VOICE } from "@/lib/voice-library";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
+import { TTS_COINS_PER_CHAR, ttsCoinsForChars } from "@/lib/generation-core/generation-model-catalog/tts-pricing";
+import { DEFAULT_TTS_VOICE } from "@/lib/media/voice-library";
 import {
   AUDIO_TOOL_DEFAULT_MAX_LINES,
   AUDIO_TOOL_MAX_LINES,

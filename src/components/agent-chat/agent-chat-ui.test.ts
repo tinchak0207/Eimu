@@ -65,7 +65,7 @@ const {
   AgentBackToBottomButton: (props: { scrolledUp: boolean; onClick: () => void }) => React.ReactElement;
   AgentChatPanel: React.ComponentType<Record<string, unknown>>;
 };
-import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent-chat-reducer";
+import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent/agent-chat-reducer";
 import {
   EMPTY_AGENT_CHAT_STATE,
   type AgentAssistantTextItem,
@@ -74,7 +74,7 @@ import {
   type AgentSubagentItem,
   type AgentSubagentReportItem,
   type AgentVideoItem,
-} from "../../lib/agent-chat-types";
+} from "../../lib/agent/agent-chat-types";
 
 const root = process.cwd();
 
@@ -143,9 +143,9 @@ const agentRoute = read("src/app/agent/page.tsx");
 // <1000 行重构把传输层拆成 src/lib/agent-chat-client/{auth,session,settings,transport,types}.ts，
 // 顶层档只剩 re-export。源码断言必须读到子模组本体，否则「barrel 全绿」是假绿。
 const agentChatClientSource = [
-  "src/lib/agent-chat-client.ts",
+  "src/lib/agent/agent-chat-client.ts",
   ...["auth", "session", "settings", "transport", "types"].map(
-    (m) => `src/lib/agent-chat-client/${m}.ts`,
+    (m) => `src/lib/agent/agent-chat-client/${m}.ts`,
   ),
 ]
   .map((rel) => read(rel))
@@ -920,13 +920,13 @@ test("the agent transport sends token and user id together, never half", () => {
   assert.doesNotMatch(code, /headers: \{ Authorization/);
 
   // 服务端那侧的前提，一起钉住：少了 id 就是 401，不是 500 也不是放行。
-  const billing = readCode(read("src/lib/image-billing.ts"));
+  const billing = readCode(read("src/lib/billing/image-billing.ts"));
   assert.match(billing, /headers\.get\("x-user-id"\) \?\? headers\.get\("New-Api-User"\)/);
   assert.match(billing, /if \(!auth \|\| !userId\) \{\s*return \{ ok: false, status: 401/);
 });
 
 test("a 401 says which kind of 401 it is", () => {
-  const guard = readCode(read("src/lib/agent-session-guard.ts"));
+  const guard = readCode(read("src/lib/agent/agent-session-guard.ts"));
 
   // 没送凭证 → 自己的 code，不跟「凭证被拒」共用一句话。
   assert.match(guard, /code: "agent_not_signed_in"/);
@@ -1350,9 +1350,9 @@ test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、�
 
 // ───────────────────── 资产入库：recipe 分支（E1 白名单） ────────────────
 
-import { buildChatSaveItem } from "../../lib/agent-chat-asset-builders";
-import { normalizeAssetPack } from "../../lib/asset-pack-store";
-import type { AgentImageItem } from "../../lib/agent-chat-types";
+import { buildChatSaveItem } from "../../lib/agent/agent-chat-asset-builders";
+import { normalizeAssetPack } from "../../lib/media/asset-pack-store";
+import type { AgentImageItem } from "../../lib/agent/agent-chat-types";
 
 function imageItem(overrides: Partial<AgentImageItem>): AgentImageItem {
   return {

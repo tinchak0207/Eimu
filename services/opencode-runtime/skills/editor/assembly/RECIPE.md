@@ -3,7 +3,7 @@ name: editor-assembly
 description: 剪辑素材入轨与时间线编排配方。触发时机：把素材加入时间线／剪切／合并／排序／修剪／拆分／变速／锁定／分组／设转场／多轨音频字幕／回退版本。时间线结构有任何变更（add/remove/reorder/trim/split/speed/lock/group/transition）时必载。
 ---
 <!--
-来源（轮子）: 自有配方（非第三方轮子）。依据 docs/timeline-post-production-plan.md §2 B1/B2 拆片表
+来源（轮子）: 自有配方（非第三方轮子）。依据 docs/proposals/timeline-post-production-plan.md §2 B1/B2 拆片表
               （时间线资料对象 + ops 9 类指令 + 版本 + 决策日志）与 §7；记忆
               2026-08-31-b1-timeline-lifecycle-layer（版本/锁定/幂等语义）。
 工具真源: VPS /opt/agent-harness/workspace/.opencode/tools/{timeline_ops,timeline_query,

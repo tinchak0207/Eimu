@@ -5,7 +5,7 @@
 // 认证：requireVerifiedUser（与 /api/assets、/api/character-cards 同款，不信任 x-user-id）。
 // 红线：不可见即不可用——挂用前必过 resolveMountable，不可见一律 403（不得静默成功）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   AssetCopyLimitError,
   AssetMountCopyConflictError,
@@ -15,9 +15,9 @@ import {
   mountAssetWithCopy,
   resolveMountable,
   unmountAssetAndCopies,
-} from "@/lib/asset-library";
-import { AssetMountConflictError, AssetMountLimitError } from "@/lib/asset-scope-store";
-import { isAssetLocalCopyId, toAssetKind } from "@/lib/asset-scope";
+} from "@/lib/media/asset-library";
+import { AssetMountConflictError, AssetMountLimitError } from "@/lib/media/asset-scope-store";
+import { isAssetLocalCopyId, toAssetKind } from "@/lib/media/asset-scope";
 import { readCanvasProject } from "@/lib/canvas/project-store";
 import { listCanvasProjectsForCaller } from "@/lib/canvas/team-canvas-gate";
 import { readCreativeProject } from "@/lib/creative-project/store";

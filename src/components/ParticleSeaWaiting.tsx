@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { resolveWaitingProgress } from "@/lib/waiting-contract";
+import { resolveWaitingProgress } from "@/lib/agent/waiting-contract";
 
 interface ParticleSeaWaitingProps {
   visible: boolean;

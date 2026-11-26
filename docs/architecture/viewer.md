@@ -38,4 +38,4 @@
 - 3D：`src/components/canvas/node-view/Scene3dGltfViewport.tsx`。
 - Markdown：`src/components/agent-chat/AgentMarkdown.tsx`。
 - 全屏/portal 语汇：`src/components/ImageLightbox.tsx`、`src/components/history/HistoryLightbox.tsx`。
-- 种类真源：`src/lib/deliverable-kind.ts`。
+- 种类真源：`src/lib/media/deliverable-kind.ts`。

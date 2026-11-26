@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildGitHubAuthorizeUrl, createGitHubState } from "@/lib/github-auth";
+import { buildGitHubAuthorizeUrl, createGitHubState } from "@/lib/accounts/github-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -17,15 +17,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import {
   allocateMemberQuota,
   findMemberByUserId,
   readTeamQuotaView,
   toCoins,
 } from "@/lib/generation-core/member-quota";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";

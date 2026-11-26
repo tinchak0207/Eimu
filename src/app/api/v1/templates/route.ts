@@ -3,7 +3,7 @@
 // 2026-08-05 从 VPS 补回 repo。目录是公开的（C 端浏览器不带 key 直接取），
 // 不出图、不计费，因此没有认证与扣费环节。
 
-import { json, pixaiError, proxyPixai } from "@/lib/pixai-proxy";
+import { json, pixaiError, proxyPixai } from "@/lib/generation-core/pixai-proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -68,11 +68,11 @@
 - **模型不可用时推荐替代模型** — 提交到已停用模型时被挡下，并直接告诉用户「同介质成功率最高的另一个模型是哪个」 ｜ 证据: f009cf09
 - **模型目录只列真正可用的模型** — 被断路器停用或无供货的模型不会出现在模型列表里 ｜ 证据: f009cf09
 - **音乐生成多路自动回落** — 选的音乐通路失败时自动改走下一条（YuE2→FlowMusic→Lyria），成片率明显提高 ｜ 证据: e75a2e8e
-  > **2026-10-02 对账更正（覆盖先前错误事实；先前的「FlowMusic 只到 /test 绿」「直接 Lyria 仍 403 SERVICE_DISABLED」两句已作废）**：回落**码**在场（`src/lib/music-tools.ts:777-827`，YuE2→flowmusic→lyria 顺序尝试，回执带 `fallback_from`／`fallback_reason`）。
+  > **2026-10-02 对账更正（覆盖先前错误事实；先前的「FlowMusic 只到 /test 绿」「直接 Lyria 仍 403 SERVICE_DISABLED」两句已作废）**：回落**码**在场（`src/lib/agent/music-tools.ts:777-827`，YuE2→flowmusic→lyria 顺序尝试，回执带 `fallback_from`／`fallback_reason`）。
   > - **YuE2 已实证出歌（2026-10-02）**：真单两首 FLAC 51.40s／8,664,342B、67.84s／12,123,451B（`deploy-staging/yue2-modal/out_local/service/runs/yue2-ebd3791e-8db7-4d87-944a-f661f3a2144b-20261002-120745-264412-1/audio.flac`、`yue2-60772fcd-082a-4df0-a46b-b10fc2c85de8-20261002-121502-264412-3/audio.flac`，receipt `ok=true`），公网 Range 206＋magic `fLaC`。ABC token 上限原为我方 config 保守值 500，已恢复上游预设 4096（`deploy-staging/yue2-modal/local_service.py:102-106`）。**限制**：≥90 秒在 8GB 卡未达成（OOM `nar.py:149 _prefill`→`mlp.down_proj`，`…/yue2-20a21ec4-a774-488b-93a9-fdf789c5abeb-20261002-121020-264412-2/child.log:25`）；且笔电反向隧道**不能 24/7**，休眠即不可达并回落 FlowMusic。
   > - **FlowMusic 已实证出歌（2026-10-02）**：真单 HTTP 200，clip 153.98s m4a，音讯 URL Range GET 验为 206＋`content-type: audio/mp4`（magic `ftypM4A`），credits −10（帐号 `ujkanicina@gmail.com`）；看门狗已加第二消费者侦测（`CHAIN_DEAD.json`），换血配方固化为 skill `flowmusic-session-revival`。
-  > - **Lyria**：Vertex `lyria-002` 可出纯器乐约 30s WAV（已验 RIFF/WAVE 206）；**直接 Lyria 3.5 人声整歌仍待打通**。旧「403 SERVICE_DISABLED／需暴君启用 GCP」口径已作废；契约已换血为 `models/<id>:generateContent`（旧 `/v1beta/interactions` 端点 404），新 key 已注入（`GEMINI_STUDIO_API_KEY`）。**真正阻断点＝该 GCP 专案未开帐单、生成配额为 0**（真单 429 RESOURCE_EXHAUSTED，`lyria-3-pro` limit 0），单价 $0.08/首，需暴君在 Google Cloud 开 billing。出处：`src/lib/music-lyria.ts:4-21,33-45,64-67`；记忆 `2026-10-02-lyria35-generatecontent-studio-key-1002`。
-  > ⇒ 三路中 **YuE2、FlowMusic 已实证出歌**，Lyria 目前仅纯器乐；「成片率明显提高」仍缺端到端统计证据。口径已拍板：**主张保留＋本更正事实注**（对外语气不动）。对账表见 `docs/CAPABILITIES.md` 内部「对外宣称 vs 现场对账（2026-10-02）」。
+  > - **Lyria**：Vertex `lyria-002` 可出纯器乐约 30s WAV（已验 RIFF/WAVE 206）；**直接 Lyria 3.5 人声整歌仍待打通**。旧「403 SERVICE_DISABLED／需暴君启用 GCP」口径已作废；契约已换血为 `models/<id>:generateContent`（旧 `/v1beta/interactions` 端点 404），新 key 已注入（`GEMINI_STUDIO_API_KEY`）。**真正阻断点＝该 GCP 专案未开帐单、生成配额为 0**（真单 429 RESOURCE_EXHAUSTED，`lyria-3-pro` limit 0），单价 $0.08/首，需暴君在 Google Cloud 开 billing。出处：`src/lib/generation-core/music-lyria.ts:4-21,33-45,64-67`；记忆 `2026-10-02-lyria35-generatecontent-studio-key-1002`。
+  > ⇒ 三路中 **YuE2、FlowMusic 已实证出歌**，Lyria 目前仅纯器乐；「成片率明显提高」仍缺端到端统计证据。口径已拍板：**主张保留＋本更正事实注**（对外语气不动）。对账表见 `docs/presentation/CAPABILITIES.md` 内部「对外宣称 vs 现场对账（2026-10-02）」。
 - **欠费无替补即时失败并退款** — 上游额度用尽且无健康替代供应商时，2.4 秒内直接失败退款，不再空等 25 分钟 ｜ 证据: e75a2e8e
 - **字幕分屏** — 成片字幕每屏 7-12 字，优先切在换行／句末标点／句内停顿等语义边界，不把一句话切断 ｜ 证据: 51631bc1
   > **2026-10-02 第二轮更正（覆盖早前「接线施工中」判定）**：字幕烧录＋标题字入画**已上线**——`assembleFilmNode` 建 `subtitleCues` 并 `setHarnessState`（`services/gateway/workflow-gw.ts:892-937`），`exportSelectedMainClips` 复用 `toAss`＋`subtitles=` 滤镜（`services/gateway/editor/composeEngine.ts:584-600`；轮子 `src/vendor-bridges/editor/composeEngine.ts:1021-1026,1106-1110`），本机与 VPS md5 相符。离线像素证据（对照组＝无字幕成片）：t=12 底部字幕带 24.80% 像素被改动、上方 20% 区 0.000%；t=25 为 17.14%／0.000%（`eval-e2e-final-cut-1002/evidence/r2/`）。**仍缺**：真实 workflow 全流程（agent→workflow_generate→film）端到端跑一次。｜ 验证方式: orchestrator 亲验（像素差）／待验（真 workflow）
@@ -491,12 +491,12 @@
 
 **声明**：本档证明「能力存在于 repo 历史」，不等于已部署验证。以下每条都只到「repo 里有这个实作／宣告」的程度，缺的是生产端到端证据；凡三筛时已自陈未验者，一律原样保留，不升级为已验。
 
-**2026-10-02 第二轮回核**：本节已按当日最终状态**覆盖**早前判定（尤以「字幕接线施工中」为代表——该句作废，现为已上线）。每条末新增 `验证方式` 栏，分级＝`orchestrator 亲验`／`代理实测`／`待验`（源码或字串断言、档案存在、调用次数只算变更探针，不计入已验）。产品的对外语气取舍另列于 `docs/CAPABILITIES.md`「待裁」，不在此改写。
+**2026-10-02 第二轮回核**：本节已按当日最终状态**覆盖**早前判定（尤以「字幕接线施工中」为代表——该句作废，现为已上线）。每条末新增 `验证方式` 栏，分级＝`orchestrator 亲验`／`代理实测`／`待验`（源码或字串断言、档案存在、调用次数只算变更探针，不计入已验）。产品的对外语气取舍另列于 `docs/presentation/CAPABILITIES.md`「待裁」，不在此改写。
 
 缺什么证据分述：
 
 - **成片自动装配的字幕／标题字入画（2026-10-02 第二轮：已上线；覆盖早前「接线施工中」判定）** — `assembleFilmNode` 建 `subtitleCues` 并 `setHarnessState`（`services/gateway/workflow-gw.ts:892-937`）；`exportSelectedMainClips` 复用 `toAss`＋`subtitles=` 滤镜烧录（`services/gateway/editor/composeEngine.ts:584-600`；轮子 `src/vendor-bridges/editor/composeEngine.ts:1021-1026,1106-1110`），本机与 VPS md5 相符。离线像素证据（对照组＝无字幕成片）：t=12 底部字幕带 24.80% 像素被改动、上方 20% 区 0.000%；t=25 为 17.14%／0.000%（`eval-e2e-final-cut-1002/evidence/r2/`）。**仍缺**：真实 workflow 全流程（agent→workflow_generate→film）跑一次。 ｜ 证据: 51631bc1 ｜ 验证方式: orchestrator 亲验（像素差）／待验（真 workflow）
-- **导出前质检＝矫正器非阻挡门（2026-10-02 第二轮）** — `services/gateway/film-qc.ts` 已挂导出前（`workflow-gw.ts:1008-1016`）做 -16 LUFS 响度两遍＋尾冻结／黑帧修剪，对上轮 `final.mp4` 实测 -38.5→-16.1 LUFS、30.26→29.01s；设计为**永不抛错**（内层异常→catch→交原片＋message 注明）。对外「must 项没清完不许导出」的硬口径与现场不符，属产品定位，见 `docs/CAPABILITIES.md`「待裁」。**仍缺**：真会话复测。 ｜ 证据: 2890c923 ｜ 验证方式: 代理实测（对 final.mp4）／待验（真会话）
+- **导出前质检＝矫正器非阻挡门（2026-10-02 第二轮）** — `services/gateway/film-qc.ts` 已挂导出前（`workflow-gw.ts:1008-1016`）做 -16 LUFS 响度两遍＋尾冻结／黑帧修剪，对上轮 `final.mp4` 实测 -38.5→-16.1 LUFS、30.26→29.01s；设计为**永不抛错**（内层异常→catch→交原片＋message 注明）。对外「must 项没清完不许导出」的硬口径与现场不符，属产品定位，见 `docs/presentation/CAPABILITIES.md`「待裁」。**仍缺**：真会话复测。 ｜ 证据: 2890c923 ｜ 验证方式: 代理实测（对 final.mp4）／待验（真会话）
 - **音乐全链备援（2026-10-02 第二轮）** — YuE2、FlowMusic 已实证出歌；Lyria 契约已换血为 `models/<id>:generateContent`，但该 GCP 项目未开帐单、生成配额 0（真单 429，单价 $0.08/首）。仍缺：① YuE2 **24/7 稳定性**（笔电反向隧道休眠即不可达、回落 FlowMusic）；② Lyria 人声整歌（待暴君开 billing）。 ｜ 证据: e75a2e8e ｜ 验证方式: orchestrator 亲验（FlowMusic Range 206）／代理实测（YuE2 FLAC）／待验（Lyria 人声、YuE2 24/7）
 - **计费帐本对账（2026-10-02 第二轮）** — 单价估算与扣费本来同源（同一 `generationCoins`）；E2E 391 vs 520 真因是孤儿镜＋退款未入控面帐本，已改控面逐 job 实扣单一真源（`services/gateway/workflow-gw.ts:503-558`、`:94-96`、`:425-429`，退款＝批准额−控面实扣−已退，孤儿镜取消 `:453`）。VPS 12:01:52 曾对 `wf_muqfkhw7_1` 记出 **130.001 币假退款且永不回冲**（控面帐本投影秒级延迟，旧版把「还没查到」当「没扣」）；已加未落帐 job 重试 8×5s＋`unresolved>0` 不记退款（`:518-530,553-554`），历史两笔假帐 append-only 反向冲销留痕（未删原行）。**仍缺**：真会话帐本验收。 ｜ 证据: e19103a3, a0cf8147 ｜ 验证方式: orchestrator 亲验
 - **繁体会话简→繁输出矫正（2026-10-02 第二轮：已上线）** — 此前只在本机、本轮补部署；VPS md5＝本机。`services/gateway/outbound-sanitize.ts:184-187`（`bodyT2s`，`t2s===false` 走 `s2tLine`）、`:142-153`（`s2tLine`）、`:73-78`（`S2T_MAP` 由 R5-C 对照表反向导出，仅新增 export）。四情境真输入通过：繁体会话全繁、JSON 栅栏与 URL 逐字不动、简体会话无回退、含假名日文行原样。 ｜ 验证方式: 代理实测（用 VPS 部署后档跑行为 harness）
@@ -514,7 +514,7 @@
 - **4K 超分未经真单校准** — 4K 倍率语义未实测前一律具名拒；缺校准后真单且帐本对得上的证据（同一闸声明切新后端亦同）。 ｜ 证据: 329c4221, 0289ade9
 - **视频秒数三元组由 catalog 生成** — 档位由真实目录自动生成，但缺每个档位「核过价且真出片」的全量证据。 ｜ 证据: ed732c8e
 - **时装域 8 支工具仅 1 支有真能力** — 其余明示不支援；缺那 1 支的真效果验收。 ｜ 证据: 06c6fdda
-  > 2026-10-01 更正（覆盖本条）：此为 `src/lib/fashion-tryon-tools.ts`（2026-08-26 commit `06c6fdda`）**宣告层**的旧自述。现场＝VPS `/opt/agent-harness/workspace/.opencode/tools/` 8 档全在且无 stub；其中 6 支零生图扣费（rembg u2net＋VLM chat＋PIL），2 支是诚实替代（`virtual_tryon` 走站点 `/v1/images/edits`、`hand_contact_repair` 走 VLM 定位＋局部修复）。判准见 `src/lib/harness-tool-registry.ts:10-13`（宣告层自我认证不代表 harness 能执行）。
+  > 2026-10-01 更正（覆盖本条）：此为 `src/lib/agent/fashion-tryon-tools.ts`（2026-08-26 commit `06c6fdda`）**宣告层**的旧自述。现场＝VPS `/opt/agent-harness/workspace/.opencode/tools/` 8 档全在且无 stub；其中 6 支零生图扣费（rembg u2net＋VLM chat＋PIL），2 支是诚实替代（`virtual_tryon` 走站点 `/v1/images/edits`、`hand_contact_repair` 走 VLM 定位＋局部修复）。判准见 `src/lib/agent/harness-tool-registry.ts:10-13`（宣告层自我认证不代表 harness 能执行）。
 - **3D 需求禁二维顶替** — 规则成立，但缺 3D 工具链端到端出片的完整链路证据。 ｜ 证据: 86b2584b
 - **行内 tag 未命中降级** — fail-open 与诚实降级已实作，缺生产流量下未命中比例与前端呈现的实证。 ｜ 证据: 2bd7217c, 50f7e436
 - **B 端参考图控制面不可用时 501 fail-closed** — 缺控制面真的不可用时的生产演练证据。 ｜ 证据: 2bd7217c

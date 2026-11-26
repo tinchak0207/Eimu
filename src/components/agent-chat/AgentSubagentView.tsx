@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { ArrowLeft, Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSubagentItem } from "@/lib/agent-chat-types";
+import type { AgentSubagentItem } from "@/lib/agent/agent-chat-types";
 import {
   STICK_BOTTOM_PX,
   STATUS_DOT,

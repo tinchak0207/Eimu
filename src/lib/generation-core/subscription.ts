@@ -13,7 +13,7 @@
 // 定时任务；过期只在读取余额/预检时由 computePoolBalances(entries, now) 判定。
 // 本档唯一与时间有关的写入是「续期替换」（有人按了续费，是事件不是时间流逝）。
 
-import { listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/gateway-admin";
+import { listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/accounts/gateway-admin";
 import {
   SUBSCRIPTION_FULFILLMENT_CHANNEL,
   SUBSCRIPTION_RENEWAL_MODE,

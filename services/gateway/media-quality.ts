@@ -1,13 +1,13 @@
 /**
  * media-quality.ts — gateway 侧「事后产物硬检」（确定性量测，2026-10-03）。
  *
- * 为什么是**移植**不是**共用**：站点侧 `src/lib/media-quality-gate.ts` 属 Next 服务端
+ * 为什么是**移植**不是**共用**：站点侧 `src/lib/media/media-quality-gate.ts` 属 Next 服务端
  * runtime（其 import 图、tsconfig include、部署单元都在 image-app repo）；gateway 是独立
  * 部署单元（bun + bun:sqlite，`services/gateway`，权威跑法
  * `bash services/vps-tools/run-tests.sh`），tsconfig 只 include `./**`。跨 runtime
  * 相对 import 站点档会把两条建置链耦合成一条（gateway 起不来就拖垮站点，反之亦然），
  * 违反「gateway 是独立 runtime」的硬约束。故在此移植**核心判定逻辑**（政策表、failure
- * code、未知≠通过 的红线），语义与站点逐条对齐；spawn/逾时骨架照 `src/lib/music-tools.ts:187-216`
+ * code、未知≠通过 的红线），语义与站点逐条对齐；spawn/逾时骨架照 `src/lib/agent/music-tools.ts:187-216`
  * （ffprobe spawn / timeout / SIGKILL / ENOENT 判定）移植。
  *
  * ─────────────────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ export function extractMediaTargets(text: string, maxArtifacts = MEDIA_QUALITY_M
   return found
 }
 
-// ── I/O 层（spawn 骨架照 src/lib/music-tools.ts:187-216 移植） ─────────────────────
+// ── I/O 层（spawn 骨架照 src/lib/agent/music-tools.ts:187-216 移植） ─────────────────────
 
 type RunResult = { ok: true; stdout: string; stderr: string } | { ok: false; error: string; timedOut: boolean }
 

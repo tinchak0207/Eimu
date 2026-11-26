@@ -14,15 +14,15 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
 import {
   USER_ATTRIBUTION_RELAY_SIGNATURE_DOMAIN,
   createPostgresUserAttributionStore,
   parseAttributionUpsertBody,
-} from "@/lib/user-attribution";
-import { parseInviteCode } from "@/lib/referral-code";
-import { createPostgresReferralStore } from "@/lib/referral-reward";
+} from "@/lib/accounts/user-attribution";
+import { parseInviteCode } from "@/lib/billing/referral-code";
+import { createPostgresReferralStore } from "@/lib/billing/referral-reward";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

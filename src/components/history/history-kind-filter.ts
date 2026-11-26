@@ -4,9 +4,9 @@
 // node:test 下 tsx 会把 CSS 当 JS 编译而报错，导致「合法种类值」这条契约无法做真值断言。
 // 把推导抽到这里，元件与测试读同一份清单；新增一种交付物时只要在
 // /lib/deliverable-kind 注册表加一行，这里与 UI 自动跟上，不必再改历史页。
-import { DELIVERABLE_KIND_IDS } from "@/lib/deliverable-kind";
-import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
-import type { HistoryEntryKind } from "@/lib/history-types";
+import { DELIVERABLE_KIND_IDS } from "@/lib/media/deliverable-kind";
+import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/media/history-types";
+import type { HistoryEntryKind } from "@/lib/media/history-types";
 
 /**
  * URL 种类参数（PARAM.kind）与种类筛选器认的合法值。

@@ -1,8 +1,8 @@
 /**
  * 刀 1（2026-09-19）：Jev 测谎闸＋空壳栏初筛 — shadow 模式。
  *
- * PRD：docs/plans/2026-09-19-jev-system-one-prd.md（G2 刀1）
- * 阈值：docs/plans/jev-threshold-calibration.md（round2 实锤校准：
+ * PRD：docs/proposals/2026-09-19-jev-system-one-prd.md（G2 刀1）
+ * 阈值：docs/proposals/jev-threshold-calibration.md（round2 实锤校准：
  *   brief_honesty 说谎 0.10 vs 如实 0.59 → 阈值 0.30；
  *   field_substance 实质 0.78 vs 空壳 0.06/0.09 → 阈值 0.40）
  *
@@ -537,7 +537,7 @@ export async function classifyBeastStages(task: string): Promise<JevBeastStageKe
 }
 
 // ── 记忆库第五类型 `workflow`（2026-09-20）：入库闸 ────────────────────────
-// 分工铁律：**内容由机器抽取**（repo `src/lib/workflow-memory.ts`
+// 分工铁律：**内容由机器抽取**（repo `src/lib/agent/workflow-memory.ts`
 // `extractWorkflowMemoryBody`：六槽 config JSON 序列化），**Jev 只当闸门**
 // ——判「这条跑批值不值得进记忆库」，不生成一个字的内容。
 //

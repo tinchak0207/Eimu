@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { AGENT_SKILLS } from "@/lib/agent-skills";
+import { AGENT_SKILLS } from "@/lib/agent/agent-skills";
 import { USE_CASES } from "@/lib/use-cases";
 import { USE_CASE_CATEGORIES } from "@/lib/use-case-categories";
 import { WORKFLOW_PAGES } from "@/lib/workflow-pages";

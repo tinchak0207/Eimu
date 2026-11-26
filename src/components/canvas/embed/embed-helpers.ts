@@ -4,8 +4,8 @@
  */
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
 import type { CanvasImageEditMode } from "../CanvasImageEditorDialog";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
-import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
+import { getStoredToken, getStoredUser } from "@/lib/accounts/new-api-client";
+import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-core/generation-request-headers";
 
 /** 同一批节点进场的间隔（ms）。 */
 export const ENTER_STAGGER_MS = 110;

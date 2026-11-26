@@ -1,7 +1,7 @@
-// GET /api/user/invite — 当前用户的邀请连结（我方自签邀请码，见 src/lib/referral-code.ts）。
+// GET /api/user/invite — 当前用户的邀请连结（我方自签邀请码，见 src/lib/billing/referral-code.ts）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { buildInviteUrl, inviteCodeFor, referralSecret } from "@/lib/referral-code";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { buildInviteUrl, inviteCodeFor, referralSecret } from "@/lib/billing/referral-code";
 import { getSiteUrl } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";

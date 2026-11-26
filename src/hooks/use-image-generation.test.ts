@@ -31,7 +31,7 @@ test("image generation hook sends user auth and refreshes balance after completi
 
 test("image generation hook sends reference images as multipart form data", () => {
   const hook = read("src/hooks/use-image-generation.ts");
-  const imageTypes = read("src/lib/image-types.ts");
+  const imageTypes = read("src/lib/media/image-types.ts");
 
   assert.match(imageTypes, /ReferenceImage/);
   assert.match(hook, /referenceImages/);
@@ -46,8 +46,8 @@ test("image generation hook sends reference images as multipart form data", () =
 
 test("image generation hook persists professional workflow metadata", () => {
   const hook = read("src/hooks/use-image-generation.ts");
-  const cache = read("src/lib/generation-cache.ts");
-  const client = read("src/lib/new-api-client.ts");
+  const cache = read("src/lib/generation-core/generation-cache.ts");
+  const client = read("src/lib/accounts/new-api-client.ts");
 
   assert.match(hook, /negativePrompt/);
   assert.match(hook, /workflowPreset/);

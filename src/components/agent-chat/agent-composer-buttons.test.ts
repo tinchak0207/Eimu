@@ -28,7 +28,7 @@ import {
   createDeviceBridgeController,
   supportsSetMode,
   type BridgeStatus,
-} from "@/lib/device-bridge-display";
+} from "@/lib/accounts/device-bridge-display";
 
 /**
  * AgentComposer 输入区三颗按钮的回归锁：IME 组字守卫、送出连点锁、中止进行中态。

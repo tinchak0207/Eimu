@@ -1,11 +1,11 @@
 /**
  * memory-recall.ts — 契约 §7 召回算法（P0 零依赖，不建向量库）＋ §3.3/§3.4 语料快取。
  *
- * 铁律：token 化函式与 repo 侧 `src/lib/agent-memory-store.ts` 的 `memoryTokens`
+ * 铁律：token 化函式与 repo 侧 `src/lib/agent/agent-memory-store.ts` 的 `memoryTokens`
  * 逐行同构（演算法两侧必须一致，否则 Jaccard/BM25 漂移），改一侧必改另一侧。
  * 禁止 import 仓库 src/（gateway 独立 bundle）。
  *
- * 签名演算法真源在 `./memory-batch.ts`（逐字比照 src/lib/memory-hmac.ts），
+ * 签名演算法真源在 `./memory-batch.ts`（逐字比照 src/lib/accounts/memory-hmac.ts），
  * 本档只组「对空 bytes 验签」的 GET 头（§3：export 没有 body）。
  */
 import { MEMORY_SIGNATURE_HEADER, signEmptyMemoryBody } from "./memory-batch.ts"
@@ -39,7 +39,7 @@ export interface RecallableDoc {
 }
 
 // ─────────────────────────── token 化
-// 逐行复制自 src/lib/agent-memory-store.ts `memoryTokens`（同名同体，白名单改动＝无）。
+// 逐行复制自 src/lib/agent/agent-memory-store.ts `memoryTokens`（同名同体，白名单改动＝无）。
 /** token 化：ASCII 词按空白+标点切；CJK 按 bigram。 */
 export function memoryTokens(text: string): string[] {
   const source = String(text ?? "");

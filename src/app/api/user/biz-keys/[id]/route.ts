@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { listBizApiKeys, revokeBizApiKey } from "@/lib/biz-api-key-store";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { listBizApiKeys, revokeBizApiKey } from "@/lib/accounts/biz-api-key-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

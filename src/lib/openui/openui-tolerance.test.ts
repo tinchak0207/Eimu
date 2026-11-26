@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import { OPENUI_COMPONENTS } from "./catalog";
 import { repairOpenUISource, resolveComponentName } from "./repair";
 import { buildOpenUIActionMessage, safeOpenUrl } from "./action-message";
-import { fenceBareOpenUI, isBareOpenUIInfo, isOpenUILang, parseAgentMarkdown } from "../agent-markdown";
+import { fenceBareOpenUI, isBareOpenUIInfo, isOpenUILang, parseAgentMarkdown } from "../agent/agent-markdown";
 
 const require = createRequire(import.meta.url);
 const { createParser } = require("@openuidev/react-lang") as typeof import("@openuidev/react-lang");

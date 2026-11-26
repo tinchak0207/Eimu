@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { applyModelPricingOverrides } from "@/lib/generation-model-catalog";
+import { applyModelPricingOverrides } from "@/lib/generation-core/generation-model-catalog";
 
 // 中性存储键（2026-10-05：旧键名夹带内部语义，已换名）。
 const STORAGE_KEY = "emu.pricing.sync.v1";

@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import type { Announcement } from "@/lib/notification-store";
+import type { Announcement } from "@/lib/accounts/notification-store";
 import { AnnouncementDialog } from "@/components/notifications/AnnouncementDialog";
 
 export function AnnouncementSurfaces() {

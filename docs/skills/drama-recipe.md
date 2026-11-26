@@ -10,8 +10,8 @@ triggers:
   - 用户要把小说 / 文本 / 剧本改编成短剧（要分镜、角色设定、场景设定、批量出图）
   - 用户提到短剧、分镜表、五段管线、小说改编
 requires:
-  - src/lib/character-cards.ts（卡体系：资产 id 唯一来源，锁定注入 applyCharacterCards）
-  - src/lib/drama-recipe.ts（确定性推导：清洗 / 秒数 / 批次切分 / 资产清单）
+  - src/lib/media/character-cards.ts（卡体系：资产 id 唯一来源，锁定注入 applyCharacterCards）
+  - src/lib/agent/drama-recipe.ts（确定性推导：清洗 / 秒数 / 批次切分 / 资产清单）
   - generation-gates（段级质量门：本配方只声明门，执行归 generation-gates）
 optional:
   - lora_search / lora_get（为角色/场景卡选风格 LoRA 的增强路径，上游不可用时跳过，不影响主流程）
@@ -19,7 +19,7 @@ optional:
 
 # drama-recipe —— 短剧五段管线配方
 
-> 吞并自 [eternityspring/shuohao-skills](https://github.com/eternityspring/shuohao-skills)（Apache 2.0）：其 outline/cast/art/script/storyboard 五段 JSON 接线收敛为本平台**一条配方**。吞并姿势：资产 id 用 character-cards 的卡 id（C 前缀编号对应 character 卡、P 前缀对应 scene 卡），出图全部走平台生成队列，质量门走 generation-gates。确定性部分（秒数折算、批次切分、资产清单）由 `src/lib/drama-recipe.ts` 纯函数执行。
+> 吞并自 [eternityspring/shuohao-skills](https://github.com/eternityspring/shuohao-skills)（Apache 2.0）：其 outline/cast/art/script/storyboard 五段 JSON 接线收敛为本平台**一条配方**。吞并姿势：资产 id 用 character-cards 的卡 id（C 前缀编号对应 character 卡、P 前缀对应 scene 卡），出图全部走平台生成队列，质量门走 generation-gates。确定性部分（秒数折算、批次切分、资产清单）由 `src/lib/agent/drama-recipe.ts` 纯函数执行。
 
 ## 用途
 

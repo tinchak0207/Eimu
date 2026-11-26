@@ -28,20 +28,20 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
 import { useAuth } from "@/hooks/use-auth";
 import { consumeAgentDraft } from "@/lib/canvas/review-client";
-import { setCurrentAgentSession } from "@/lib/agent-current-session";
+import { setCurrentAgentSession } from "@/lib/agent/agent-current-session";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
 import { AgentLibraryTabs, type LibraryTab } from "@/components/agent-chat/AgentLibraryTabs";
 import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
-import { createHandoffLogin, isStandalonePwa } from "@/lib/github-login";
-import type { AssetPack } from "@/lib/asset-pack-store";
-import type { HistoryEntry } from "@/lib/history-types";
+import { createHandoffLogin, isStandalonePwa } from "@/lib/accounts/github-login";
+import type { AssetPack } from "@/lib/media/asset-pack-store";
+import type { HistoryEntry } from "@/lib/media/history-types";
 import { RerunDialog, type HistoryRerunMode } from "@/components/history/RerunDialog";
 import {
   formatSessionLabel,
@@ -52,7 +52,7 @@ import {
 } from "./AgentChatSurface.helpers";
 import type { AgentChatSurfaceProps } from "./AgentChatSurface.types";
 import { useAgentSurfaceSessionActions } from "./AgentChatSurface.session-actions";
-import { setTemporaryArmed, useTemporaryChat } from "@/lib/agent-chat-client/temporary-chat";
+import { setTemporaryArmed, useTemporaryChat } from "@/lib/agent/agent-chat-client/temporary-chat";
 
 export type { AgentChatSurfaceProps } from "./AgentChatSurface.types";
 export { formatSessionLabel, isInsideHistorySurface } from "./AgentChatSurface.helpers";
@@ -137,7 +137,7 @@ export function AgentChatSurface({
     ensureSession,
     dispatchNotice,
   } = chat;
-  // 活跃会话唯读镜像（src/lib/agent-current-session.ts）：真源是本 hook 的 sessionId，
+  // 活跃会话唯读镜像（src/lib/agent/agent-current-session.ts）：真源是本 hook 的 sessionId，
   // 这里只把它同步给另一棵元件树（MobileSidebar 的当前高亮）读取；不碰既有
   // localStorage 存档（存档会被还原／开新路径 consume 掉，见 use-agent-chat）。
   useEffect(() => {

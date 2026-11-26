@@ -30,7 +30,7 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { buildChunkRenderScript } from "../blender-tools";
+import { buildChunkRenderScript } from "../agent/blender-tools";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 

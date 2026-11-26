@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { generationDatabaseConfigured } from "@/lib/generation-core/database";
 import { INSUFFICIENT_BALANCE_ERROR } from "@/lib/generation-core/quota-precheck";
-import { musicChargeId, musicChargeSql, runMusicChargeWithSql } from "@/lib/music-charge";
-import { musicCoinsPerGeneration, musicQuotaPerGeneration } from "@/lib/music-pricing";
+import { musicChargeId, musicChargeSql, runMusicChargeWithSql } from "@/lib/billing/music-charge";
+import { musicCoinsPerGeneration, musicQuotaPerGeneration } from "@/lib/billing/music-pricing";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
@@ -39,7 +39,7 @@ function errorResponse(
  * 音乐走 harness 的 `music_gen`（FlowMusic2API / Lyria / YuE2），**从不经过平台的
  * 生成管线**，所以平台侧原本没有任何扣费点（记忆 2026-10-10-music-has-no-price-authority）。
  * 本端点补上这个扣费点：harness 每次生成尝试带一个稳定 `ref` 调用一次，平台对该
- * key 绑定的 new-api user 扣 **1 币/次**（金额唯一来源＝src/lib/music-pricing.ts）。
+ * key 绑定的 new-api user 扣 **1 币/次**（金额唯一来源＝src/lib/billing/music-pricing.ts）。
  *
  * 契约：
  *   · 请求体**只接受 `{ ref: string }`** —— 出现任何其他栏位（尤其金额/单价：

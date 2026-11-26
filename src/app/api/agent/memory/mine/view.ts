@@ -1,4 +1,4 @@
-import type { AgentMemoryDoc } from "@/lib/agent-memory-store";
+import type { AgentMemoryDoc } from "@/lib/agent/agent-memory-store";
 
 /** 「我的记忆」对前端暴露的字段（不含 ownerKey／batchId／promptVersion 等内部栏位）。 */
 export interface MineMemoryView {

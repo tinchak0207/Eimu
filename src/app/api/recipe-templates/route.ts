@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   deleteUserRecipeTemplate,
   listUserRecipeTemplates,
   saveUserRecipeTemplate,
-} from "@/lib/recipe-template-store";
+} from "@/lib/agent/recipe-template-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
