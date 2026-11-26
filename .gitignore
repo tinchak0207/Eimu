@@ -43,6 +43,8 @@ yarn-error.log*
 /sub2api-local
 /output/
 /tools/bin/
+/.memory-queue/
+/.patch-staging/
 
 # env files (can opt-in for committing if needed)
 .env*

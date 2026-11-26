@@ -155,7 +155,7 @@
 - AGENTS.md 付费上游呼叫硬闸规则 — 规则落进工作规则档（model 白名单为唯一真源、resolution ≤720p、seconds ≤5、提交前先核价、一次授权一次呼叫、花暴君的钱先问） ｜ 证据: e33571e9
 - biz-api 「两种接法」文档 — 开篇并列 A 标准 OpenAI 同步 base https://eimu.dev/openai/v1（images/generations、chat/completions 含 stream:true、models）与 B 异步 base https://eimu.dev/v1（202+task_id 轮询／callback／Idempotency-Key），并给 new-api/one-api 加渠道 9 步填法 ｜ 证据: dffaef5b
 - openapi／biz-api 契约文档校正 — response_format 预设改 b64_json、size enum 补 2048x2048、data[0].b64_json 叙述改为 202 异步 + 轮询取图、错误表改码、SDK 段落诚实说明 ｜ 证据: a9ceb2f0
-- S2 OpenAI 兼容核对报告 — docs/specs-0928/S2-compat-report.md 逐维度差异（异步 202 vs 同步 200、data[] 为 TaskArtifact 无 b64_json、response_format 预设 b64_json、n 1-4、size 固定 4 值）＋三家客户端接入判定 ｜ 证据: 0cbd7c0c
+- S2 OpenAI 兼容核对报告 — docs/archive/specs-0928/S2-compat-report.md 逐维度差异（异步 202 vs 同步 200、data[] 为 TaskArtifact 无 b64_json、response_format 预设 b64_json、n 1-4、size 固定 4 值）＋三家客户端接入判定 ｜ 证据: 0cbd7c0c
 - /openai/v1 控面部署依赖 runbook — 部署配置必须加 OPENAI_COMPAT_GENERATION_ORIGIN: http://127.0.0.1:3000（兼容层预设打 origin + /api/v1/*，但控面 app 路径在 /image-control/api/v1/* 底下会落不到 route，真单撞 503 control_plane_unreachable） ｜ 证据: ea31d305
 - 决策分界工作规则 — ops／口径问题自行拍板并在回报写判准，只有不可逆且偏好因人而异的产品／审美题才回报待裁 ｜ 证据: 8f2eaac2
 - DB 迁移 023–031 — 023_team_governance／024_welcome_gift_grant／025_user_attribution／026_welcome_gift_modal_seen／027_lifecycle_email／028_referral／029_api_rejection／030_mapay_credit／031_first_charge_claim（现 repo db/migrations/ 已存在至 033） ｜ 证据: 2447c874 / 629b4ae5 / 86fb664b / 586d83bd / 9f883c61 / e33571e9 / af6c6a49 / e27e3697 / 1b592d5d

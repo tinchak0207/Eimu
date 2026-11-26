@@ -154,12 +154,12 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 【严重度 P3】
 
 【证据】`git ls-files docs | wc -l` = 190（125 md、35 png、9 txt、9 json、3 jpg、3 html、2 webp、1 mp4、1 mts、1 mmd）。
-- 一次性/时点快照目录：`evidence/` 33、`arch/` 27（含 9 个 `_sp-audit-samples/*.txt` 系统提示采样）、`plans/` 21、`preview/` 18、`specs-0928/` 15、`capability-ledger-2026-09-30/` 15、`archive/` 4。合计 133 个，占 **70%**。
+- 一次性/时点快照目录：`evidence/` 33、`arch/` 27（含 9 个 `_sp-audit-samples/*.txt` 系统提示采样）、`plans/` 21、`preview/` 18、`archive/specs-0928/` 15、`capability-ledger-2026-09-30/` 15、`archive/` 4。合计 133 个，占 **70%**。
 - 根层 38 个文件，其中 25 个文件名含 prd/audit/report/handoff/draft/plan/survey/swallow/symdiff 等一次性文档（如 `2026-08-25-swallow-decision-list.md`、`aid-half-done-audit-2026-09-16.md`、`beast-army-r4-report.md` … `r8-...`、`grok-sota-pipeline-prompt.md`/`-answer.md`、`CAPABILITIES.draft2.md`）。
 - 真正的"长期文档"只有：`runbooks/` 2（infra-debugging、bias-refresh）、`architecture/` 4（dual-truth-boundary 等，AGENTS.md 引用）、`skills/` 8、`ARCHITECTURE.md`、`SELF-HOSTING.md`、`CAPABILITIES.md`、`biz-api*.md`，约 20 个，占 **约 11%**。
-- 隐藏的调试截图：`docs/.check.png`、`.check2.png`、`.check3.png`、`.check4.png`。
+- 隐藏的调试截图：`docs/archive/debug-screenshots/.check.png`、`.check2.png`、`.check3.png`、`.check4.png`。
 - docs 里的 mp4/图片 17.7 MB（发现 6 已计入）。
-- `docs/specs-0928/planes-wrapup-deepseek.md`：文件名指向已被 AGENTS.md 删除的"DeepSeek 专用限制"。
+- `docs/archive/specs-0928/planes-wrapup-deepseek.md`：文件名指向已被 AGENTS.md 删除的"DeepSeek 专用限制"。
 
 【影响】docs/ 成了考古层，真文档被淹没；新读者分不清哪些是现行规范。
 

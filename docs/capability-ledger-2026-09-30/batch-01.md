@@ -139,7 +139,7 @@
 - 运营流程：从 Vercel「6h 前生产部署」全量恢复源码／品牌名／差异档（三笔 restore commit），属事故恢复运营动作而非开发 ｜ 证据: ec748a51, 6ec4f018, 425ac035
 - 运营流程：上游帐号池导入与 biz 帐号开通（`/api/admin/account-pools/import`、`tools/provision-biz-account.ts`、`tools/issue-biz-key.ts`、`tools/verify-production-image-password.ps1`） ｜ 证据: 4860f1ed
 - 文档：`docs/biz-api.md`／`docs/biz-api-guide.md` 随 B 端能力更新；`/v1/openapi.json` 契约同步；`public/llms.txt` 供 agent 消费 ｜ 证据: e19103a3, 984b9878
-- 文档／计画：`docs/plans/2026-08-22-large-file-refactor.md` 大型档案重构计画与 4 份 domain 分析（canvas/core/input/workstation） ｜ 证据: e7407935
+- 文档／计画：`docs/archive/plans/2026-08-22-large-file-refactor.md` 大型档案重构计画与 4 份 domain 分析（canvas/core/input/workstation） ｜ 证据: e7407935
 - 文档：`DESIGN.md`、`PRODUCT.md` 作为 UI/产品决策权威来源 ｜ 证据: e7407935
 - 契约测试守门：`agent-chat-ui.test.ts`、`character-cards.test.ts`、`canvas-reducer-adapter.test.ts`、`sku-engine.test.ts`、`batch-service.test.ts`、`agent-profile-store.test.ts`、`tailwind-opacity-modifier.test.ts` 等以「读旧档＋新档拼接」方式锁定语义不放宽 ｜ 证据: e62cf333, a7837658, e19103a3, 5913f5a7
 - 运营验证产物：`.codex-image-data-smoke.mjs`、`tools/run-production-image-upstream-probe.ps1` 等冒烟/探测脚本 ｜ 证据: 4860f1ed

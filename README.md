@@ -2,11 +2,13 @@
 
 # Eimu
 
+开发维护从[仓库导航](docs/REPOSITORY.md)进入。
+
 ### 剪辑和分镜已经死了，现在人人都是导演。
 
 随口一扔，编译器吞掉中间所有脏活；端上来的，是一部能直接播的成片。
 
-[**进入工作台**](https://eimu.dev/) · [实机成片](#实机成片) · [单点模型之痛](#单点模型之痛) · [机器怎么跑的](#机器怎么跑的) · [基准跑分](#基准跑分) · [快速上手](#快速上手) · [English](README.en.md)
+[**进入工作台**](https://eimu.dev/) · [实机成片](#实机成片) · [单点模型之痛](#单点模型之痛) · [机器怎么跑的](#机器怎么跑的) · [基准跑分](#基准跑分) · [快速上手](#快速上手)
 
 <p align="center">
   <a href="https://eimu.dev"><img src="https://img.shields.io/badge/Live-eimu.dev-2ea44f?style=flat-square" alt="Live"></a>

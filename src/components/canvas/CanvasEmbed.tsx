@@ -15,7 +15,7 @@
 //      执行后结果回流 gateway；run_generation 由本层代跑
 //   D  提示词库/云端素材库面板接线；编辑器角度重绘/AI 重绘回调接生成管线
 //
-// 2026-08-22 域拆分（docs/plans/2026-08-22-large-file-refactor.md Task 7）：
+// 2026-08-22 域拆分（docs/archive/plans/2026-08-22-large-file-refactor.md Task 7）：
 // 纯函数/类型 → embed/embed-helpers.ts、交互域 → embed/use-canvas-interaction.ts、
 // 生成编排 → embed/use-canvas-generation.ts、键盘/剪贴簿 → embed/use-canvas-shortcuts.ts、
 // 右键选单 → embed/context-menu-items.ts、浮层+样式 → embed/CanvasEmbedOverlays.tsx。

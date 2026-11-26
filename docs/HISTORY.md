@@ -41,7 +41,7 @@
 |---|---|---|---|
 | 05-28 | `personal_site` 仓 image 分支替换为 image.tinchak0207.xyz 应用 | 未查证 | mem `2026-10-03-personal-site-access-and-product-history-sources` |
 | 06-05 | 首次对外部署（Next.js＋new-api 网关架构） | — | mem `git-history-recovery-and-chain-backup-0912`（Vercel 部署元数据） |
-| 06-09～08-01 | 工作站/企业 PRD、UX 重构、B 端 API、durable 生成控制面、专业工作流主线等计划文档 | 见各文档 | `docs/plans/2026-06-09-*`、`2026-06-10-ux-refactor.md`、`2026-06-11-apple-copy-revision.md`、`2026-07-26-biz-api-design.md`、`2026-07-29-gpt2image-pro-fusion-handoff.md`、`2026-08-01-professional-workflow-product-mainline.md`（均随 `4860f1edd` 入本仓） |
+| 06-09～08-01 | 工作站/企业 PRD、UX 重构、B 端 API、durable 生成控制面、专业工作流主线等计划文档 | 见各文档 | `docs/archive/plans/2026-06-09-*`、`2026-06-10-ux-refactor.md`、`2026-06-11-apple-copy-revision.md`、`2026-07-26-biz-api-design.md`、`2026-07-29-gpt2image-pro-fusion-handoff.md`、`2026-08-01-professional-workflow-product-mainline.md`（均随 `4860f1edd` 入本仓） |
 | 08-01 | agent-native 终极蓝图决策稿 | mem 记载：验收条件查无达成记录 | `docs/agent-native-ultimate-blueprint-zh.md`；mem `2026-10-03-eimu-moat-arc-and-history-deliverable` |
 | 08-12 | 品牌「影像工作室」改名 **Emu** | 好念、Image 谐音 | mem `2026-08-12-rebrand-emu` |
 
@@ -51,9 +51,9 @@
 |---|---|---|---|
 | 08-14 | 本仓起点 | 8 月迁出独立仓 | `4860f1edd`；mem `git-history-recovery-and-chain-backup-0912` |
 | 08-17 | 从 Vercel 生产部署恢复源码；品牌 Emu 改回 **Eimu** | 本地源码落后于生产 | `ec748a518`、`425ac0352`、`6ec4f018f` |
-| 08-18 | 专业模式拆解 PRD：LoRA 迁到 Agent Skill，队列/批量迁到画布原生 | 见 PRD | `docs/plans/2026-08-18-professional-mode-migration-prd.md`（随 `e19103a3e` 入库） |
+| 08-18 | 专业模式拆解 PRD：LoRA 迁到 Agent Skill，队列/批量迁到画布原生 | 见 PRD | `docs/archive/plans/2026-08-18-professional-mode-migration-prd.md`（随 `e19103a3e` 入库） |
 | 08-21 | B 端 P0–P2：batch API、SKU 引擎、角色卡、TTS 路由、画布语义节点 | 未查证（commit 只写做了什么） | `e19103a3e` |
-| 08-22 | liquid glass 设计系统迁移＋大文件重构计划 | 未查证 | `e74079359`；`docs/plans/2026-08-22-large-file-refactor.md` |
+| 08-22 | liquid glass 设计系统迁移＋大文件重构计划 | 未查证 | `e74079359`；`docs/archive/plans/2026-08-22-large-file-refactor.md` |
 | 08-27 | 控制面换血到 new-api（当时计费仍留自研） | 未查证细节 | mem `control-plane-reblood-to-new-api` |
 | 08-28 | 控制面手术：拆自研阻塞式计费闸，改 new-api 配额预检＋异步投影记账 | 磁盘满 → postgres 崩 → 自研计费执行器死且无自愈 → 视频任务卡死并误报超时 | mem `control-plane-newapi-surgery`、`control-plane-billing-paradigm`（本仓 commit 未查证） |
 | 08-30 | 中控架构大革命（「opus大革命」）：10 个病灶审计＋三片修复 | 换模失效/熔断不恢复/0 额漏损等 | mem `control-plane-overhaul-0830`（本仓 commit 未查证，见下条） |
@@ -147,7 +147,7 @@
 | 方向 | 推翻/回滚 | HEAD 现状 | 证据 |
 |---|---|---|---|
 | 品牌「影像工作室」→ Emu | 08-17 改回 Eimu | `src/app/manifest.ts` short_name=Eimu；`PRODUCT.md` 仍写 Emu（过时） | mem `2026-08-12-rebrand-emu`；`6ec4f018f` |
-| 专业模式独立工作站 | 08-18 PRD 拆解（LoRA→Skill，队列/批量→画布） | `ProfessionalWorkstation.test.ts` 仍在，组件实现状态未逐一核对（未查证） | `docs/plans/2026-08-18-professional-mode-migration-prd.md` |
+| 专业模式独立工作站 | 08-18 PRD 拆解（LoRA→Skill，队列/批量→画布） | `ProfessionalWorkstation.test.ts` 仍在，组件实现状态未逐一核对（未查证） | `docs/archive/plans/2026-08-18-professional-mode-migration-prd.md` |
 | 自研阻塞式计费 | 08-28 改 new-api 配额预检＋异步投影 | 以 mem 权威档为准 | mem `control-plane-billing-paradigm` |
 | 04-18 本地 main 链当作 Eimu 历史 | 09-12 改判为 personal_site 个人网站链 | 起源＝`personal_site/image`，06-05 首部署 | mem `git-history-recovery-and-chain-backup-0912` |
 | TTS 配音音色库 | 09-16 revert | 已移除 | `0c418b535` |
