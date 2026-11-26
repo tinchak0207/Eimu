@@ -111,11 +111,11 @@ opencode 合成 system 头部同形：
 
 ## 3. 已落地改动
 
-1. `deploy-staging/gateway/expert/opencode-agents.json` — 增 `creator: { tools: { task: false } }`
-2. `deploy-staging/gateway/environment-facts.ts` — `isOpenToolSurface`；creator 渲染「默认开放／可直调」
-3. `deploy-staging/gateway/environment-facts.test.ts` — 对齐 slim 断言 + creator 用例（17 pass）
-4. `deploy-staging/gateway/messages-gw.ts` — PROMPT_SKELETON／画布写穿与 beast 解绑
-5. `deploy-staging/opencode-runtime/AGENTS.md` — 路由表与成片／分镜／附件恢复 OFF 直调路径
+1. `services/gateway/expert/opencode-agents.json` — 增 `creator: { tools: { task: false } }`
+2. `services/gateway/environment-facts.ts` — `isOpenToolSurface`；creator 渲染「默认开放／可直调」
+3. `services/gateway/environment-facts.test.ts` — 对齐 slim 断言 + creator 用例（17 pass）
+4. `services/gateway/messages-gw.ts` — PROMPT_SKELETON／画布写穿与 beast 解绑
+5. `services/opencode-runtime/AGENTS.md` — 路由表与成片／分镜／附件恢复 OFF 直调路径
 
 ## 4. 体量差
 
@@ -140,9 +140,9 @@ opencode 合成 system 头部同形：
 
 ```bash
 # creator 真源
-python3 -c "import json;d=json.load(open('deploy-staging/gateway/expert/opencode-agents.json'));print(d['creator'])"
+python3 -c "import json;d=json.load(open('services/gateway/expert/opencode-agents.json'));print(d['creator'])"
 # 环境渲染
-cd deploy-staging/gateway && bun -e 'import {collectRuntimeEnvironment,renderEnvironmentSection,renderCapabilityCutoffFact} from "./environment-facts.ts"; const e=collectRuntimeEnvironment({plane:"creator"}); console.log(renderEnvironmentSection(e)); console.log(renderCapabilityCutoffFact(e));'
+cd services/gateway && bun -e 'import {collectRuntimeEnvironment,renderEnvironmentSection,renderCapabilityCutoffFact} from "./environment-facts.ts"; const e=collectRuntimeEnvironment({plane:"creator"}); console.log(renderEnvironmentSection(e)); console.log(renderCapabilityCutoffFact(e));'
 bun test environment-facts.test.ts
 # VPS 新会话后：
 journalctl -u agent-gateway --since "5 min ago" | grep -E "PROMPT_SKELETON|beast-frame|agent：creator" | tail

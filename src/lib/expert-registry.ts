@@ -253,7 +253,7 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
   // ─────────────────────────────────────── 09-15 评测补课片 → 翻正：critic 激活行
   //
   // 独立审核 Expert（质量闸）：裁定背景 = 评测实案 Orchestrator 自产自验
-  // 0 次 QC / 0 次驳回（REPORT 见 eval-2026-op-theme/）。原 provisioned: true
+  // 0 次 QC / 0 次驳回（REPORT 见 .local/experiments/op-theme/）。原 provisioned: true
   // 占位（routeExpert 跳过、digest 标「未启用」挡死路由）已于 09-15 翻正部署片
   // 删除该键，与七个可路由兄弟行逐栏同构（不设 provisioned = 激活可路由）。契约四栏
   // critic-delegate 常量（09-15 翻正接线片换挂）：CRITIC_DELIVERABLES 为该清单

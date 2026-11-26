@@ -2,8 +2,8 @@
  * harness_tts 适配层：站点控制面 kind=tts 的 job → **harness 闸道既有 TTS 端点**。
  *
  * 上游真源（逐字）：
- *   · `deploy-staging/gateway/router.ts:531` → `POST /agent/v1/tts` → `handleTts(key, req)`
- *     （`deploy-staging/gateway/media-internal-routes.ts`：同步调用，入 `{text, voice?}`，
+ *   · `services/gateway/router.ts:531` → `POST /agent/v1/tts` → `handleTts(key, req)`
+ *     （`services/gateway/media-internal-routes.ts`：同步调用，入 `{text, voice?}`，
  *      出 `{ok, url, chars, cost_coins, format:"mp3"}`；上游不可用回 503 `tts_unavailable`）。
  *   · 该端点的 `TTS_UPSTREAM`（media-internal-routes.ts:245-265）自 2026-08-30 起指向本机
  *     edge-tts-proxy（`/opt/edge-tts/`，免 key 中文音色）；此路径已被一次真跑证实可出音档

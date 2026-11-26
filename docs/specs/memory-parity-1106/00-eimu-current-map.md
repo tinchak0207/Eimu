@@ -4,8 +4,8 @@
 
 ## 结构
 - store：`src/lib/agent-memory-store.ts`（76 行 barrel）＋ `src/lib/agent-memory-store/` 17 模块（types/validation/keys/store/blob-io/ingest/reconcile/history/validity/read-api/index-md/mutate/normalize/reports/text/db/constants）。
-- gateway：`deploy-staging/gateway/memory-wiring{,-inject,-recall,-batch}.ts`、`memory-recall.ts`（BM25）、`memory-gate.ts`、`memory-http.ts`（`/internal/memory/note` 回环）、`memory-note.ts`、`memory-batch*.ts`、`memory-trigger.ts`、`memory-queue.ts`、`agent-memory-write.ts`（文件式记忆 memory_save/list/read，不注入）。
-- runtime 工具：`deploy-staging/opencode-runtime/tools/memory_{note,recall,save,list,read}.ts`、`lib/memory_recall_impl.ts`。memory_note 开给 12 个 agent；memory_recall 只开 build、orchestrator（`opencode.json`）。
+- gateway：`services/gateway/memory-wiring{,-inject,-recall,-batch}.ts`、`memory-recall.ts`（BM25）、`memory-gate.ts`、`memory-http.ts`（`/internal/memory/note` 回环）、`memory-note.ts`、`memory-batch*.ts`、`memory-trigger.ts`、`memory-queue.ts`、`agent-memory-write.ts`（文件式记忆 memory_save/list/read，不注入）。
+- runtime 工具：`services/opencode-runtime/tools/memory_{note,recall,save,list,read}.ts`、`lib/memory_recall_impl.ts`。memory_note 开给 12 个 agent；memory_recall 只开 build、orchestrator（`opencode.json`）。
 - 注入组装：`src/lib/agent-memory-injection.ts:144-175`（建会话 `src/app/api/agent/sessions/route.ts:62-94`、恢复 `src/app/api/agent/sessions/[id]/memory/route.ts:83-108`）；gateway 每回合注入 `memory-wiring-inject.ts:89-223`，注入点 `messages-gw-admission.ts:362-381`。
 
 ## 数据模型
@@ -35,7 +35,7 @@
 
 ## 测试
 - repo：`npx tsx --test <file>`；记忆相关 78/78 绿（agent-memory-store、injection、memory-hmac、workflow-memory、workflow-recall、api/agent/memory/routes、agent-profile-store、user-skill、skills/mine）。
-- gateway：`bash deploy-staging/vps-tools/run-tests.sh <file>`（bun）；memory-recall 12/12；memory-gate 30/35（5 红为夹具缺 ownerKeyHint，被 4af310238 回滚撤掉了修正，测试过时非回归）；memory-http/note/write/trigger/queue 零测试。
+- gateway：`bash services/vps-tools/run-tests.sh <file>`（bun）；memory-recall 12/12；memory-gate 30/35（5 红为夹具缺 ownerKeyHint，被 4af310238 回滚撤掉了修正，测试过时非回归）；memory-http/note/write/trigger/queue 零测试。
 
 ## 技术债
 L1 截断；private>8 不可见且被 skill/workflow 文档抢位；lessons 读不回；lastUsedAt 不回写；sourceMessageIds 无生产者；无 CAS；会话累计字节未接 teardown。

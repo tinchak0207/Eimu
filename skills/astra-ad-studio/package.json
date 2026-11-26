@@ -7,7 +7,7 @@
     "astra-ad-studio": "bin/astra-ad-studio.js"
   },
   "scripts": {
-    "demo": "node scripts/render_campaign.mjs demo-input/demo-campaign.json outputs/demo-campaign",
+    "demo": "node scripts/render_campaign.mjs demo-input/demo-campaign.json .local/outputs/agent/demo-campaign",
     "test": "node tests/astra-ad-studio.test.mjs",
     "prepack": "npm test"
   },

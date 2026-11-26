@@ -7,8 +7,8 @@
 // 正文与真源逐行等价，白名单 diff 只有注释头一类（vision-tools.ts 零本地 import，
 // 仅 node:fs/promises 内建模组，无需 import 改写）。
 //
-// staging 目标目录：落 staging/vision-tools/，VPS 同步落位：
-//   staging/vision-tools/vision_tools.ts → /opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
+// staging 目标目录：落 tools/generated/vision-tools/，VPS 同步落位：
+//   tools/generated/vision-tools/vision_tools.ts → /opt/agent-harness/workspace/.opencode/lib/vision_impl.ts
 // 薄入口 /opt/agent-harness/workspace/.opencode/tools/vision_analyze.ts 为 VPS 侧
 // 一次性接线稿（同 music_gen.ts 先例），不经本导出器。
 //
@@ -21,7 +21,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const TOOLS_SOURCE = join(root, "src/lib/vision-tools.ts");
-const TARGET_DIR = join(root, "staging/vision-tools");
+const TARGET_DIR = join(root, "tools/generated/vision-tools");
 const TOOLS_TARGET = join(TARGET_DIR, "vision_tools.ts");
 const CHECK = process.argv.includes("--check");
 

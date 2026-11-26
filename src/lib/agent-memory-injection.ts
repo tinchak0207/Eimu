@@ -1,7 +1,7 @@
 // 记忆库注入组装（PRD P0-4 repo 侧）：把私有记忆与共享索引塞进 gateway
 // 建号 / memory-patch 的既有 payload。
 //
-// 契约：`.gateway-work/prod-20260915/MEMORY-INTERFACES.md`
+// 契约：`.local/state/gateway/prod-20260915/MEMORY-INTERFACES.md`
 //   §1 ownerKey 算法：SHA-256(key) 前 12 bytes hex（24 字元小写），
 //      与 gateway `index.ts:938` `hashKey`（WebCrypto subtle 版）逐字元等价；
 //   §4 注入契约：两新栏 `memory_docs`（private active docs，≤8，含 body，
@@ -38,7 +38,7 @@ import {
 export const MEMORY_INJECTION_MAX_PRIVATE_DOCS = 8;
 
 /**
- * 偏好类记忆判定——逐行等价复刻 gateway `deploy-staging/gateway/memory-wiring.ts:63-67`
+ * 偏好类记忆判定——逐行等价复刻 gateway `services/gateway/memory-wiring.ts:63-67`
  * 的 `isPreferenceMemoryDoc`（slug 前缀 `pref-`/`preference-`，或 domain 命中
  * pref/preference/preferences/user/profile/feedback）。repo 侧没有该判定，故照抄。
  *
@@ -68,7 +68,7 @@ export type CanonicalKeyResolver = (rawKey: string) => Promise<string>;
 
 /**
  * 预设解析器：在 repo 进程内直接实作 gateway `resolveCanonicalKey`
- * （deploy-staging/gateway/index.ts:911）背后的语义——gateway 打的是本站
+ * （services/gateway/index.ts:911）背后的语义——gateway 打的是本站
  * `POST /api/agent/biz/resolve-owner`，该端点的逻辑正是
  * `authenticateBizApiKey` → owner userId → `getOrCreateAgentKeyForUser`。
  * 这里复用同一组纯函式，结果与 gateway 呼叫端点完全一致，省掉一次 HTTP 往返。
@@ -98,7 +98,7 @@ export const defaultCanonicalKeyResolver: CanonicalKeyResolver = async (rawKey) 
 };
 
 /**
- * 镜像 gateway `hashKey`（deploy-staging/gateway/index.ts:938）：
+ * 镜像 gateway `hashKey`（services/gateway/index.ts:938）：
  * UTF-8(key) → SHA-256 → 前 12 bytes → 小写 hex（24 字元，无分隔符）。
  * 纯杂凑，不负责正典化——由 `deriveMemoryOwnerKey` 在正典化后调用。
  */

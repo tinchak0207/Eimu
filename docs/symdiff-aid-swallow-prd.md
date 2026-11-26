@@ -24,7 +24,7 @@
 **已交付**（本轮）：
 - `src/lib/lens-language-library.ts`（142 条 / 12 类，MIT 逐字取自 AID `aid_prompt_lib`；9/9 契约测试绿、tsc 0 错）
 - `tools/gen-lens-skill.ts`（单一真源生成 skill，禁手改两份）
-- `deploy-staging/training/dao0-activation-mechanism.md`（闸门面 + 注入面落位说明 + 验收 SQL）
+- `services/training/dao0-activation-mechanism.md`（闸门面 + 注入面落位说明 + 验收 SQL）
 - `THIRD-PARTY-NOTICES.md` 追加 AID 条目
 
 **验收判据**：部署后跑一次 ≥3 镜任务，`storyboard_qc_17` 调用数自基线 **0 → ≥1**，且 skill 载入出现 `lens-language`。**若仍 0 ⇒ 纪律层无效 ⇒ 立即转机器层**（`workflow_generate` 提交前硬跑门禁），不再加纪律文字。
@@ -81,12 +81,12 @@
 | 时间线资料模型 + op DSL | `src/vendor-bridges/gateway/timeline.ts:68`（`Timeline{session_id,version,clips,audioTracks,audioClips,subtitles,bgm,aspect,markers,updated_at}`）、`:102`（`TimelineOp` DSL 14 种） | `TimelineClip extends EditorClip` 追加 `sceneId/shotSize/emotionTag/locked/group/costCoins/filter` |
 | 母带导出闸 | `src/vendor-bridges/gateway/master.ts:30`（`MASTER_PRESETS`）、`:67`（blockers 聚合 lint must + mix `sync_errors`）、`:99`（`ok: blockers.length===0`）；`probeRenderedVideo` 强校验 | B6 已上线 |
 | 混音/节奏/波形 | `gateway/{mix,lint,rhythm,style,waveform,beatDetect}.ts` | B5 已上线，内建 `loudnorm=I=-16:TP=-1.5:LRA=11` |
-| 剪辑轮子本体 | `/home/lenovo/Desktop/kunpeng-vendor` @`872a58b`：`src/stores/editorStore.ts`(1317)、`src/lib/agent/tools/timelineTools.ts`(3997，69 工具)、`src/lib/editor/`(**12991**) | ⚠️ 在**仓外**；image-app 内经 `src/vendor-bridges/editor/`(2463) 镜像，记帐 `vendor/kunpeng/PATCHES.md` |
+| 剪辑轮子本体 | `/home/lenovo/Desktop/kunpeng-vendor` @`872a58b`：`src/stores/editorStore.ts`(1317)、`src/lib/agent/tools/timelineTools.ts`(3997，69 工具)、`src/lib/editor/`(**12991**) | ⚠️ 在**仓外**；image-app 内经 `src/vendor-bridges/editor/`(2463) 镜像，记帐 `tools/vendor/kunpeng/PATCHES.md` |
 | 画布专案持久化 | `src/lib/canvas/project-store.ts`（Blob `canvas/{userId}/index-*`，世代轮替 2 代，上限 50）、`src/lib/canvas/types.ts:309` `CanvasProject`（含 `cardIds?`）、`/api/canvas/projects` | 已含 `normalizeProject` 逐栏白名单清洗范式 |
 | 资产包（含 agent 注入） | `src/lib/asset-pack-store.ts:91`（Blob `asset-packs/{userId}/`）、`ITEM_KINDS` 7 类（`asset-pack-store.ts:117`）、`/api/assets` + `/api/v1/assets`、`src/lib/agent-assets.ts` | P0 已落地；`scene_3d`/`bpy_script` 是**同构追加先例** |
 | 角色/场景/风格卡 | `src/lib/character-cards.ts:42`（`CharacterCard{id,name,kind,prompt,references[],negativePrompt?,loraIds?}`）、`character-card-store.ts:28` | 无 view/DNA/项目栏位 |
 | 配方模板 | `recipe-templates.ts:45`（内建 10）、`recipe-template-store.ts:42`（用户级 50） | — |
-| TTS（真出声那条） | `deploy-staging/gateway/index.ts:6939`（`TTS_UPSTREAM`）、`:7026`、路由 `:8729` `POST /agent/v1/tts` | 产物落 `TTS_AUDIO_DIR`，经 `TTS_PUBLIC_BASE` 公开 |
+| TTS（真出声那条） | `services/gateway/index.ts:6939`（`TTS_UPSTREAM`）、`:7026`、路由 `:8729` `POST /agent/v1/tts` | 产物落 `TTS_AUDIO_DIR`，经 `TTS_PUBLIC_BASE` 公开 |
 | 站点 TTS 骨干 | `src/app/api/v1/tts/generations/route.ts:60-88` → `submitGenerationCommand` → 能力闸 → scheduler | **上游 adapter 缺 minimax/did handler（缺口）** |
 | DB migration 机制 | `tools/migrate-generation-db.ts`（`` `NNN_snake_case.sql` ``、只增不改、sha256 校验、advisory lock） | 最新 017，下一号 018；**用户资料默认不加表** |
 | 吞并先例范式 | `src/lib/kunpeng-prompt-templates.ts`（MIT 逐字复制 + 白名单改写 + license/commit 标注） | 本次沿用此姿势 |

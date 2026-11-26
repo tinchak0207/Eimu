@@ -6,12 +6,12 @@
  *   ② 工具白名单（blender_exec / blender_render / blender_export_gltf / image_quote）
  *   ③ SKILL 挂载引用（repo 内 skills/blender-director/SKILL.md 的语义定位；
  *      VPS 侧经 opencode.json agent 条目的 prompt 段引用该路径，见
- *      deploy-staging/blender-director-persona/ 三落位稿）
+ *      services/blender-director-persona/ 三落位稿）
  *   ④ 委托单入参契约（composeDelegation schema）+ 回传契约
  *      （bridge ExecuteResult → collectSceneCardFromArtifacts →
  *      buildScene3dCanvasOp）——全部 import 型别，零重定义。
  *   ⑤ MOE Wave1-A Expert 框架接线：野兽模式（expert-registry.readBeastMode）
- *      ON 时委托单 prompt 注入 Expert 宪法头部（deploy-staging/expert-gateway/
+ *      ON 时委托单 prompt 注入 Expert 宪法头部（services/expert-gateway/
  *      expert-constitution.md 路径常量，同 SKILL_PATH 单一真源范式）、回覆走
  *      交付物契约（blenderArtifactToEvidence → ExpertDeliverable →
  *      computeQcSignature → validateExpertDeliverable 闸门）并附契约摘要一行；
@@ -22,7 +22,7 @@
  * agent-models.json bindings、subagent 派遣 gateway/subagent.ts、agent prompt
  * / AGENTS.md）都在 VPS /opt/agent-harness（记忆 agent-persona-bound-model-
  * reasoning、subagent-ui-menu-gateway-reasoning-filter），本地 repo 无 gateway
- * 真源可改（.tmp-home/subagent.ts 是 08-31 派遣用镜像非活码）。本档钉死契约
+ * 真源可改（.local/state/tool-home/subagent.ts 是 08-31 派遣用镜像非活码）。本档钉死契约
  * 四要素并被委托单/回传两端 import，Astra 真模型上线日只换
  * VPS agent-models.json 的 bindings.persona.director 一个 id。
  *
@@ -240,14 +240,14 @@ export { BLENDER_DELIVERABLES };
 // ─────────────────────────────────────────── ⑤ MOE Wave1-A：宪法注入 + settings 入口
 
 /**
- * Expert 宪法档路径（repo 内相对路径，单一真源 = deploy-staging/expert-gateway/
+ * Expert 宪法档路径（repo 内相对路径，单一真源 = services/expert-gateway/
  * expert-constitution.md）。注入范式同 ③ 的 DIRECTOR_PERSONA_SKILL_PATH：
  * 本地只持有路径与用途声明，内容由 readFileSync 在组装 prompt 时读取
  * （测试端同款读法，见 blender-director-persona.test.ts ③；服务端 runtime
  * 读取走 composeDirectorDelegationForSettings 的 try/catch 后备 inline）。
  */
 export const DIRECTOR_EXPERT_CONSTITUTION_PATH =
-  "deploy-staging/expert-gateway/expert-constitution.md" as const;
+  "services/expert-gateway/expert-constitution.md" as const;
 
 /**
  * 交付前自检节（诚实门禁，2026-09-08）：渲染后必须抽帧亲眼看、逐项对照
@@ -358,7 +358,7 @@ export async function composeDirectorDelegationPrompt(
   try {
     // 显式 override（opts.constitutionPath）仍走 fs 读该档（保留既有注入 seam 与
     // 测试：指向不存在／空档时结构化拒绝）；未给才走静态 import 的 bundle 镜像
-    // （Vercel 拿不到 deploy-staging/，见 src/lib/expert-gateway-assets.ts 档头）。
+    // （Vercel 拿不到 services/，见 src/lib/expert-gateway-assets.ts 档头）。
     const raw = opts.constitutionPath
       ? readFileSync(
           path.resolve(fileURLToPath(import.meta.url), "../../..", opts.constitutionPath),

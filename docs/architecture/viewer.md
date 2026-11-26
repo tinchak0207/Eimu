@@ -30,7 +30,7 @@
 - **触控**：目标 ≥44px，正文 ≥13px，`touch-action` 正确（拖选区/缩放不触发页面滚动）。
 - **可降级**：任一适配器失败（URL 404/解码失败）显示可重试的错误态，不白屏，不影响壳与评审层。
 - **inline 与 full 同源**：同一个 Surface 两种 density，不写两份。inline 只缩 chrome，不删能力入口（点开进 full）。
-- 视觉：沿用 `design-system/MASTER.md` / `DESIGN.md` 与 `tailwind.config.ts` token；全屏壳为深色沉浸（参考 `ImageLightbox` 的 portal/背板语汇与 [历史播放器 v2](/home/lenovo/Documents/image-app-retired-20261126/eval-av-agent-bench/scripts/lyric-align/player/index.html) 的交互与观感；现役壳与评审入口为 `src/components/viewer/ViewerHost.tsx`、`src/components/viewer/ReviewSheet.tsx`）。
+- 视觉：沿用 `docs/design-system/MASTER.md` / `DESIGN.md` 与 `tailwind.config.ts` token；全屏壳为深色沉浸（参考 `ImageLightbox` 的 portal/背板语汇与 [历史播放器 v2](/home/lenovo/Documents/image-app-retired-20261126/eval-av-agent-bench/scripts/lyric-align/player/index.html) 的交互与观感；现役壳与评审入口为 `src/components/viewer/ViewerHost.tsx`、`src/components/viewer/ReviewSheet.tsx`）。
 - 不写测试（项目铁律）；真路径验收由组装后统一做。
 
 ## 轮子（必须复用，不许重造）

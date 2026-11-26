@@ -1,0 +1,39 @@
+{
+  "_note": "denylist 共用向量表（單一真源語義的釘子）。兩個實作必須對同一輸入產生同一輸出：本機 desktop/lib/policy.js:isSensitivePath（CJS）與雲端 deploy-staging/gateway/device-bridge-policy.ts:isSensitivePath（bun/TS）。跨 runtime 無法共用模組，故以本檔逐條釘住。'shared' = 兩邊都必須滿足；'localOnly' = 本機保守超集（只多擋不鬆綁，雲端可不同）。",
+  "_semantics": "掃描所有路徑段（不限 $HOME）、反斜線正規成 /、一律轉小寫、fail-closed（非字串/空 → true）。",
+  "shared": [
+    { "path": "/home/tester/.ssh/id_rsa", "sensitive": true, "why": ".ssh 段（家目錄下）" },
+    { "path": "/tmp/x/.ssh/id_rsa", "sensitive": true, "why": "家目錄外 .ssh 段" },
+    { "path": "/home/otheruser/.ssh/id_rsa", "sensitive": true, "why": "別人家目錄下 .ssh" },
+    { "path": "/mnt/data/proj/.ssh/id_rsa", "sensitive": true, "why": "掛載點 .ssh" },
+    { "path": "/tmp/.aws/credentials", "sensitive": true, "why": ".aws 段" },
+    { "path": "/opt/app/.gnupg/secring.gpg", "sensitive": true, "why": ".gnupg 段" },
+    { "path": "/var/lib/.kube/config", "sensitive": true, "why": ".kube 段" },
+    { "path": "/srv/.docker/config.json", "sensitive": true, "why": ".docker 段" },
+    { "path": "/home/tester/.mozilla/firefox/x/cookies.sqlite", "sensitive": true, "why": "瀏覽器序列 .mozilla/firefox" },
+    { "path": "/home/tester/.config/google-chrome/Default/Login Data", "sensitive": true, "why": "瀏覽器序列 .config/google-chrome" },
+    { "path": "/home/tester/.config/chromium/Default/Cookies", "sensitive": true, "why": "瀏覽器序列 .config/chromium" },
+    { "path": "/home/tester/Library/Application Support/Google/Chrome/Default/Login Data", "sensitive": true, "why": "macOS Chrome 序列" },
+    { "path": "/home/tester/Library/Application Support/Firefox/Profiles/x/cookies.sqlite", "sensitive": true, "why": "macOS Firefox 序列" },
+    { "path": "/tmp/.npmrc", "sensitive": true, "why": "敏感檔名 basename（家目錄外）" },
+    { "path": "/tmp/.git-credentials", "sensitive": true, "why": "敏感檔名 basename" },
+    { "path": "/tmp/.netrc", "sensitive": true, "why": "敏感檔名 basename" },
+    { "path": "/home/tester/.bash_history", "sensitive": true, "why": "敏感檔名 basename" },
+    { "path": "/tmp/.SSH/id_rsa", "sensitive": true, "why": "大小寫不敏感（darwin/win 碰撞）" },
+    { "path": "/home/tester/work/../.ssh/id_rsa", "sensitive": true, "why": ".. 逃逸仍命中 .ssh" },
+    { "path": "/etc/passwd", "sensitive": false, "why": "兩邊皆不列敏感段（非裝置橋敏感目標）" },
+    { "path": "/tmp/eimu/clip.mp4", "sensitive": false, "why": "一般媒體檔不誤殺" },
+    { "path": "/home/tester/Documents/notes.txt", "sensitive": false, "why": "一般文件不誤殺" },
+    { "path": "/home/tester/.sshfoo/id_rsa", "sensitive": false, "why": "前綴混淆 .sshfoo 是真檔名" },
+    { "path": "/home/tester/.ssh-backup/x", "sensitive": false, "why": "前綴混淆 .ssh-backup 是真檔名" }
+  ],
+  "localOnly": [
+    { "path": "/home/tester/.config/gh/hosts.yml", "sensitive": true, "why": "本機加固：gh CLI 憑證" },
+    { "path": "/home/tester/.config/git/config", "sensitive": true, "why": "本機加固：git 設定（可能含 url 改寫/憑證）" },
+    { "path": "/home/tester/.config/gcloud/credentials.db", "sensitive": true, "why": "本機加固：gcloud 憑證" },
+    { "path": "/home/tester/.config/Code/User/settings.json", "sensitive": true, "why": "本機加固：編輯器設定（可能含 token）" },
+    { "path": "/home/tester/.config/Electron/x", "sensitive": true, "why": "本機加固：Electron profile" },
+    { "path": "/home/tester/.python_history", "sensitive": true, "why": "本機加固：歷史檔" },
+    { "path": "/home/tester/.mozilla/other/x", "sensitive": true, "why": "本機加固：整個 .mozilla 段" }
+  ]
+}

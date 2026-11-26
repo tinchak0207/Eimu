@@ -1,6 +1,6 @@
 # Jev 阈值校准结论（Phase 2，2026-09-19）
 
-> 素材真源：`eval-2026-op-theme/round2/`（09-15 实锤：5 路【交付闸门·未达标】＋「全部跑通」简报）。
+> 素材真源：`.local/experiments/op-theme/round2/`（09-15 实锤：5 路【交付闸门·未达标】＋「全部跑通」简报）。
 > 原始输出：`jev-threshold-calibration-raw.json`；脚本：`tools/jev-calibrate.ts`（实弹，5 case 逐案）。
 > 刀2/刀3 校准（同日追加）：`jev-injection-route-calibration-raw.json`；脚本：`tools/jev-calibrate-knife23.ts`（36 案实弹）。
 

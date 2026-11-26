@@ -14,14 +14,14 @@
 // 模组集合，真源与目标以「barrel + 子模组」形状逐档对应导出；music-prompt-director
 // 例外——部署侧是旧版真源，与 src 有历史行为差异，登记为 preserve 不再从 src 重生成。
 //
-// staging 目标目录：deploy-staging/ 本片禁碰（另一 agent 在改）→ 落 staging/music-tools/，
-// 部署树（deploy-staging/opencode-runtime/lib/）由本脚本同步写出：
-//   staging/music-tools/music_lyria.ts → /opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
-//   staging/music-tools/music_flowmusic.ts → /opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
-//   staging/music-tools/music_yue2.ts → /opt/agent-harness/workspace/.opencode/lib/music_yue2.ts
-//   staging/music-tools/music_prompt_director*.ts → /opt/.../lib/music_prompt_director*.ts
+// staging 目标目录：services/ 本片禁碰（另一 agent 在改）→ 落 tools/generated/music-tools/，
+// 部署树（services/opencode-runtime/lib/）由本脚本同步写出：
+//   tools/generated/music-tools/music_lyria.ts → /opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
+//   tools/generated/music-tools/music_flowmusic.ts → /opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
+//   tools/generated/music-tools/music_yue2.ts → /opt/agent-harness/workspace/.opencode/lib/music_yue2.ts
+//   tools/generated/music-tools/music_prompt_director*.ts → /opt/.../lib/music_prompt_director*.ts
 //     （preserve：不由本脚本重生成，见下）
-//   staging/music-tools/music_tools*.ts → /opt/.../lib/music-tools-impl.ts（线上补丁变体，见下）
+//   tools/generated/music-tools/music_tools*.ts → /opt/.../lib/music-tools-impl.ts（线上补丁变体，见下）
 //
 // 线上补丁保留（2026-10-20 用户裁定，勿回退）：部署树里 music_flowmusic.ts / music_yue2.ts /
 // music-tools-impl.ts 带有**src 没有的线上补丁**（FlowMusic 错误分类 classifyFlowMusicFailure／
@@ -29,7 +29,7 @@
 // harness-only 代码），另有 music_prompt_director.ts 及其拆分子模组停留在旧版部署稿。
 //
 // music-prompt-director 为什么 preserve（2026-10-20 用户裁定，勿改回 sync）：部署侧
-// staging/music-tools/music_prompt_director.ts 与 deploy-staging/opencode-runtime/lib/
+// tools/generated/music-tools/music_prompt_director.ts 与 services/opencode-runtime/lib/
 // music_prompt_director.ts 是**旧版部署副本**，与真源 src/lib/music-prompt-director.ts
 // 存在历史行为差异——真源新增 BARE_SECTION_LABEL_PATTERN 分层权重、MIN_KEEP_RATIO
 // 保护、droppedCompressed 精确计算等逻辑。上一轮按 src 重生成这两档＝改动生产行为，
@@ -46,7 +46,7 @@
 //   npx tsx tools/export-music-tools-staging.ts
 //   npx tsx tools/export-music-tools-staging.ts --check   # 只校验不写（CI/验收用）
 //
-// 部署树守门：--check 同时比对 deploy-staging/opencode-runtime/lib/；除部署档内
+// 部署树守门：--check 同时比对 services/opencode-runtime/lib/；除部署档内
 // `// <harness-only>` … `// </harness-only>` 界定的区块（登记于 DEPLOY_TARGETS）外必须等价，
 // 否则非零退出——防止有人把 staging 导出物整档覆盖进部署树而静默删掉 harness-only 功能。
 
@@ -54,8 +54,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const root = process.cwd();
-const STAGING_DIR = join(root, "staging/music-tools");
-const DEPLOY_LIB = join(root, "deploy-staging/opencode-runtime/lib");
+const STAGING_DIR = join(root, "tools/generated/music-tools");
+const DEPLOY_LIB = join(root, "services/opencode-runtime/lib");
 const CHECK = process.argv.includes("--check");
 
 // ── 白名单 diff ②：注释头（落位说明 + 禁手改宣言）────────────────────────────
@@ -396,9 +396,9 @@ if (!CHECK) {
 
 // ── 部署树漂移守门（2026-10-04 片 U2；2026-10-20 适配模组集合）──────────────
 //
-// 为什么需要：staging/music-tools/* 只是机械导出物（本脚本产物），deploy-staging/
+// 为什么需要：tools/generated/music-tools/* 只是机械导出物（本脚本产物），services/
 // opencode-runtime/lib/ 才是部署真源。有人照本档文件头把 staging 导出物 cp 进
-// deploy-staging/... 时，会静默删掉部署树的 harness-only 功能（music-tools-impl.ts 的
+// services/... 时，会静默删掉部署树的 harness-only 功能（music-tools-impl.ts 的
 // source_audio 工作区路径解析依赖 harness-only 模组 ./sandbox，真源无从导出）。
 // 故在此加守门：导出物与部署树对应档必须等价，唯一允许的例外＝部署档内以
 // `// <harness-only>` … `// </harness-only>` 界定、且在此登记数量的区块；例外区块失踪

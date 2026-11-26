@@ -1,7 +1,7 @@
 // local-media-worker.ts — 前端↔桌面壳本机媒体工人薄 adapter（W4，2026-10-04）
 //
 // 目的：让「浏览器／桌面壳直接发起」的媒体量测／抽帧／转码，在桌面壳内优先走本机 ffmpeg
-// （`window.eimuLocal`，契约见 desktop/LOCAL-CAPABILITIES.md），减少 VPS ffmpeg 负载。
+// （`window.eimuLocal`，契约见 apps/desktop/LOCAL-CAPABILITIES.md），减少 VPS ffmpeg 负载。
 //
 // 边界（读任何修改前先读）：
 //   · 本档只做「侦测 → 呼叫 → 收敛成 { ok }」三件事，**不做 fallback 决策**——
@@ -24,7 +24,7 @@ export const LOCAL_FFMPEG_UNAVAILABLE = "ffmpeg_unavailable";
 /** 能力探测本身失败（IPC 错误等）；附 worker 回的错误讯息。 */
 export const LOCAL_CAPABILITIES_FAILED = "capabilities_failed";
 
-// ─────────────────────────── 型别（镜射桌面壳契约，不 import desktop/——那是另一包的产物）
+// ─────────────────────────── 型别（镜射桌面壳契约，不 import apps/desktop/——那是另一包的产物）
 
 export interface EimuLocalProbeStream {
   index: number;

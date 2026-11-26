@@ -69,7 +69,7 @@ The addon needs to be installed manually. Follow these steps:
 ```bash
 # 1. Open Blender 4.0+
 # 2. Edit > Preferences > Add-ons > Install
-# 3. Select: plugins/blender-toolkit/skills/addon/__init__.py
+# 3. Select: tools/plugins/blender-toolkit/skills/addon/__init__.py
 # 4. Enable "Blender Toolkit WebSocket Server"
 ```
 
@@ -136,7 +136,7 @@ Before starting, ensure:
 **Install Addon:**
 ```
 1. Open Blender → Edit → Preferences → Add-ons
-2. Click "Install" → Select plugins/blender-toolkit/skills/addon/__init__.py
+2. Click "Install" → Select tools/plugins/blender-toolkit/skills/addon/__init__.py
 3. Enable "Blender Toolkit WebSocket Server"
 4. Start server: View3D → Sidebar (N) → "Blender Toolkit" → "Start Server"
 ```

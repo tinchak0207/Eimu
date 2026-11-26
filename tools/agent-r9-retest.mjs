@@ -1,7 +1,7 @@
 // R9 复测 v2：捕获所有原始帧（含 ping）与连线终止原因，等待 75s 盖两个心跳周期
 import fs from "node:fs";
 
-const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
+const KEY = fs.readFileSync(".local/state/secrets/.env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
 const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };
 const WATCH_MS = 75_000;

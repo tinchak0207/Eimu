@@ -138,4 +138,4 @@
 - 本审计为**静态 grep 对账**，未逐刀跑真实端到端（如真开浏览器看 canvas 面板是否存在但隐藏）
 - `src/components/**` 的 glob 在某些 shell 下不展开，已用 `grep -rln` 递回方式复验（结论一致）
 - 刀 3 音色库已按暴君裁定移除，不在本审计范围
-- 未审计 `deploy-staging/` 与 `src/vendor-bridges/`（前者 gitignore，后者 VPS 执行码本地副本）
+- 未审计 `services/` 与 `src/vendor-bridges/`（前者 gitignore，后者 VPS 执行码本地副本）

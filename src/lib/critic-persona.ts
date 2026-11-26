@@ -1,13 +1,13 @@
 /**
  * 审核官 critic persona 契约真源（MOE 评测补课片，2026-09-15）。
  *
- * 裁定背景：评测实案（REPORT 见 eval-2026-op-theme/）实锤 Orchestrator 只能
+ * 裁定背景：评测实案（REPORT 见 .local/experiments/op-theme/）实锤 Orchestrator 只能
  * 「自己验收」、全程 0 次 QC / 0 次驳回 → 补一只独立审核 Expert。审核官
  * 不产内容，只驳回：
  *   - 逐栏核对交付契约（tools/export-expert-agents.ts 导出的
  *     expert-delivery-contracts.json 与 registry critic 行 requiredFields
  *     同源）：缺栏即驳回，并写明缺哪一栏；
- *   - 杀手锏都要可复现（借鉴 eval-2026-op-theme/verdict-A-anatomy.md 的
+ *   - 杀手锏都要可复现（借鉴 .local/experiments/op-theme/verdict-A-anatomy.md 的
  *     审查手法，学其方法不抄其内容）：凡交付物含数字必须附可复算算式
  *     （算式照抄可重跑），「看起来对」不收；
  *   - 跨档对表：交付物 A 引用交付物 B 的声称必须翻 B 端原文核实现场；

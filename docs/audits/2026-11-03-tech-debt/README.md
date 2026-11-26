@@ -43,11 +43,11 @@
 ### 真源与部署（详见 1-duplication.md、4-infra.md）
 
 8. **生产不可重建**：仓库里没有 agent-gateway / opencode-server / agent-poller 的 unit 和 `/opt/agent-harness/deploy.sh`；`deploy/vps/gateway-release.sh` 自陈“从未对生产执行”。
-9. **poller 靠 base64 经 ssh 覆盖文件**，依赖未入库的 `.dsh-ssh/exec-443.js`；flowmusic2api 在生产机上 clone 上游 HEAD（未固定 commit）后打补丁再 build；asr-service 只有 `engine.py`，相对 import 的 4 个模块缺失。
+9. **poller 靠 base64 经 ssh 覆盖文件**，依赖未入库的 `.local/tmp/ssh-diagnostics/exec-443.js`；flowmusic2api 在生产机上 clone 上游 HEAD（未固定 commit）后打补丁再 build；asr-service 只有 `engine.py`，相对 import 的 4 个模块缺失。
 10. **无 Postgres 与 sessions.db 备份流程**；10+ 服务挤在一台 4GB VPS；new-api / certbot 用 `:latest`。
-11. **`src/vendor-bridges` 过期**：与 `deploy-staging/gateway` 相比 13 个文件已漂移，只有 4 个相同；缺 2026-10-02 的 ffmpeg-limiter（OOM 治本修复）。`tsconfig.json:43` 排除它，CI 也不编。
+11. **`src/vendor-bridges` 过期**：与 `services/gateway` 相比 13 个文件已漂移，只有 4 个相同；缺 2026-10-02 的 ffmpeg-limiter（OOM 治本修复）。`tsconfig.json:43` 排除它，CI 也不编。
 12. **director 引擎 4 份副本、无任何导出脚本**：`src/lib/director-engine` 最新（多 27 个武侠动作和“打斗”模板），其余三处都缺。
-13. **5 个 `tools/export-*` 脚本 `--check` 全部失败**：`.gitignore:152` 的 `/staging/` 吞了导出目标（`staging/music-tools/` 有 8 个文件仍被跟踪）；CI 也没调用它们。
+13. **5 个 `tools/export-*` 脚本 `--check` 全部失败**：`.gitignore:152` 的 `/staging/` 吞了导出目标（`tools/generated/music-tools/` 有 8 个文件仍被跟踪）；CI 也没调用它们。
 14. **skills 部署版比源码版新**：`blender-director/SKILL.md` 部署版有 2 处“能力闸门”，`skills/` 源码版 0 处，而 `src/lib/*persona.ts` 读的是旧的那份。
 15. **music 真源方向反了**：`classifyFlowMusicFailure` 等线上补丁只在 staging 和部署 lib，`src/lib` 没有；`open-source/` 还有第四份分叉。
 16. **三向副本有行为差异**：`blender-tools-impl.ts` 与 `blender_tools.ts` 桥鉴权头不同；`subtitleExport.ts` 部署版用了 Linux 上不存在的 PingFang SC 字体。
@@ -87,7 +87,7 @@
 ## 五、建议的处理顺序
 
 1. **本周**：S-02、S-06、wechat/qr 限流或鉴权、给 `LOCAL_TEST_MODE` 加生产闸、`memory/*` 签名加时间戳。这些改动都小。
-2. **先定真源**：在 `src/` 与 `deploy-staging/` 之间选一边当唯一真源，另一边变成生成物，并让 `--check` 进 CI。先从 director、music、skills、vendor-bridges 四组开始。
+2. **先定真源**：在 `src/` 与 `services/` 之间选一边当唯一真源，另一边变成生成物，并让 `--check` 进 CI。先从 director、music、skills、vendor-bridges 四组开始。
 3. **让部署可重建**：unit 文件、`deploy.sh`、备份脚本入库；flowmusic2api 固定 commit。
 4. **CI 与规则对齐**：要么按 AGENTS.md 把 test job 降级、冻结必红的测试，要么改规则；`next.config.mjs` 的 ignoreBuildErrors 去掉；eslint 迁到 flat config。
 5. **机械清理**：27 个孤儿文件、5 个零引用依赖、pnpm 残留、`openui-demo`、根目录杂物、媒体移出 git 历史或上 LFS。
@@ -107,7 +107,7 @@
 | ci.yml 仅 3 个 job、全自托管 | 属实 |
 | 生产 IP 出现在 18 个文件 | 属实 |
 | `tsconfig.json` exclude 含 `src/vendor-bridges`、`deploy-staging`、`staging` | 属实 |
-| `.gitignore:152` 是 `/staging/`，而 `staging/music-tools/` 有 8 个文件被跟踪 | 属实 |
+| `.gitignore:152` 是 `/staging/`，而 `tools/generated/music-tools/` 有 8 个文件被跟踪 | 属实 |
 | `blender-director/SKILL.md` 部署版 2 处“能力闸门”，源码版 0 处 | 属实 |
 | 244 个 route.ts；mapay/health 无鉴权 | 属实 |
 | zod 使用数 | 报告写“仅 2 个文件”，实测 5 个文件，本文已改；`src/app/api` 下为 0 的结论不变 |

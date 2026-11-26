@@ -5,7 +5,7 @@
 //   renderDagSvg(nodes, connections, options) → "<svg …>…</svg>"
 //
 // 设计理由：
-// - 节点没有座标（`deploy-staging/gateway/workflow-templates.ts` 只给 role/kind/title），
+// - 节点没有座标（`services/gateway/workflow-templates.ts` 只给 role/kind/title），
 //   所以布局必须由 dagre 现算，不能靠呼叫方提供 x/y。
 // - 只输出 SVG 字串、不碰 DOM：同一份逻辑要能在 node --test 直接 import，
 //   也要能被 server route / 前端透过 svgToDataUrl（src/lib/svg-data-url.ts）喂给 <img>。

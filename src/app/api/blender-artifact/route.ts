@@ -7,7 +7,7 @@
 // 站内同源身份代读，供 Scene3dGltfViewport（鉴权 fetch → blob → engine.setGltfAsset）
 // 与既有 <a download> 连结消费。
 //
-// 安全立场：只读 `<cwd>/.blender-work/out/` 固定目录、只认单段纯档名
+// 安全立场：只读 BLENDER_WORK（默认 XDG、兼容旧目录）下 out/，只认单段纯档名
 // （无目录分隔符 → 无 traversal）、副档名白名单（只出渲染产物，不出脚本/日志）、
 // 不做任何上游 fetch（无 SSRF 面）。登入用户限定（requireVerifiedUser，
 // NEXT_PUBLIC_LOCAL_TEST_MODE=true 时按站内惯例放行）。
@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import path from "node:path";
+import { homedir } from "node:os";
 import { requireVerifiedUser } from "@/lib/server-user";
 
 export const runtime = "nodejs";
@@ -57,7 +58,13 @@ export async function GET(req: NextRequest) {
 
   const userDir = String(caller.user.id);
   if (!/^\d+$/.test(userDir)) return fail(400, "用户身份无效", "invalid_user");
-  const outDir = path.join(process.cwd(), ".blender-work", "out", userDir);
+  const legacyWork = path.join(process.cwd(), ".blender-work");
+  const xdgDataHome = process.env.XDG_DATA_HOME || "";
+  const defaultWork = path.join(path.isAbsolute(xdgDataHome) ? xdgDataHome : path.join(homedir(), ".local", "share"), "eimu", "blender");
+  const workRoot = path.resolve(process.env.BLENDER_WORK || (
+    existsSync(legacyWork) && statSync(legacyWork).isDirectory() && !existsSync(defaultWork) ? legacyWork : defaultWork
+  ));
+  const outDir = path.join(workRoot, "out", userDir);
   const filePath = path.join(outDir, name);
   if (!filePath.startsWith(outDir + path.sep) || !existsSync(filePath)) {
     return fail(404, "产物不存在（桥可能还没生成该文件）", "not_found");

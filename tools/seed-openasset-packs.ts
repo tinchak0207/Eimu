@@ -34,6 +34,9 @@
  */
 
 import * as fsp from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MAX_PACKS_PER_USER,
@@ -64,6 +67,17 @@ function parseUserIds(): number[] {
 
 /** 每包 item 上限取保守值（store 硬上限 50，切片留余量，重跑 merge 不顶掉既有）。 */
 const MAX_ITEMS_PER_SEED_PACK = 40;
+const legacyAssetCache = fileURLToPath(new URL("../.asset-cache", import.meta.url));
+const xdgCacheHome = process.env.XDG_CACHE_HOME || "";
+const defaultAssetCache = path.join(path.isAbsolute(xdgCacheHome) ? xdgCacheHome : path.join(homedir(), ".cache"), "eimu", "assets");
+// Same contract as the bridge: overrides are absolute; relative XDG homes are ignored.
+const assetCacheOverride = process.env.EIMU_ASSET_CACHE_DIR || "";
+if (assetCacheOverride && !path.isAbsolute(assetCacheOverride)) {
+  throw new Error("EIMU_ASSET_CACHE_DIR must be an absolute path");
+}
+const assetCacheRoot = path.resolve(assetCacheOverride || (
+  existsSync(legacyAssetCache) && statSync(legacyAssetCache).isDirectory() && !existsSync(defaultAssetCache) ? legacyAssetCache : defaultAssetCache
+));
 
 type RawItem = Record<string, unknown>;
 
@@ -73,8 +87,8 @@ interface IndexDoc {
 }
 
 async function loadIndex(file: string): Promise<IndexDoc> {
-  const path = fileURLToPath(new URL(`../.asset-cache/indices/${file}`, import.meta.url));
-  const parsed = JSON.parse(await fsp.readFile(path, "utf8")) as RawItem;
+  const indexPath = path.join(assetCacheRoot, "indices", file);
+  const parsed = JSON.parse(await fsp.readFile(indexPath, "utf8")) as RawItem;
   const meta = parsed.meta && typeof parsed.meta === "object" ? (parsed.meta as RawItem) : parsed;
   const items = Array.isArray(parsed.items) ? (parsed.items as RawItem[]) : [];
   return { meta, items };
@@ -353,7 +367,7 @@ async function buildCmuPacks(): Promise<LibraryBuild> {
 
 async function buildCameraShakePacks(): Promise<LibraryBuild> {
   const doc = await loadIndex("camera-shakes.json");
-  const dataPath = fileURLToPath(new URL("../.asset-cache/indices/camera-shakes-data.json", import.meta.url));
+  const dataPath = path.join(assetCacheRoot, "indices", "camera-shakes-data.json");
   const curves = JSON.parse(await fsp.readFile(dataPath, "utf8")) as Record<string, unknown>;
   const items = [...doc.items]
     .sort(byNameAsc)

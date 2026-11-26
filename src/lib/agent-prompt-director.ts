@@ -12,13 +12,13 @@
  * 经 2026-10-06 P0-10 逐个 ls 确认**全部不存在**——内容已并入本档（下方 prompt 与
  * KUNPENG_SEEDANCE_SUPPLEMENT 即其浓缩），历史路径作废。现存同源副本随 harness 落在
  * 部署树（只读追源用）：
- * deploy-staging/opencode-runtime/skills/higgsfield/skills/higgsfield-seedance/{RECIPE,HELL-GRIND,ENGINE-RULES}.md
+ * services/opencode-runtime/skills/higgsfield/skills/higgsfield-seedance/{RECIPE,HELL-GRIND,ENGINE-RULES}.md
  * （SKILL.md 因 skill 递归扫描收敛已改名 RECIPE.md）、
- * deploy-staging/opencode-runtime/skills/higgsfield/skills/higgsfield-prompt/RECIPE.md、
- * deploy-staging/opencode-runtime/skills/higgsfield/templates/seedance/global-style-prefix.md。
+ * services/opencode-runtime/skills/higgsfield/skills/higgsfield-prompt/RECIPE.md、
+ * services/opencode-runtime/skills/higgsfield/templates/seedance/global-style-prefix.md。
  *
  * ⚠️ 这份必须与 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
- * 保持一致：仓库副本 deploy-staging/gateway/internal-http.ts（VPS 落位
+ * 保持一致：仓库副本 services/gateway/internal-http.ts（VPS 落位
  * /opt/agent-harness/gateway/internal-http.ts）。改一份就要同步另一份。
  * P0-9（2026-10-06）：该副本曾漏掉本档的 KUNPENG_SEEDANCE_SUPPLEMENT（生产视频 prompt
  * 拿不到 kunpeng 6 条硬规则），已补齐为逐字副本；gateway 为独立发布单元无法 import 本档，

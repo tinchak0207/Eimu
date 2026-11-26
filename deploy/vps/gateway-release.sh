@@ -41,7 +41,7 @@
 #   「哪一版在跑」= `readlink -f /opt/agent-harness/gateway`，回滚 = 切 symlink 回上一版。
 #
 # 设计约束（来自现场，非发明）：
-#   1. 只上已 commit 的档：release 内容由 `git archive <sha> deploy-staging/gateway` 产生。
+#   1. 只上已 commit 的档：release 内容由 `git archive <sha> services/gateway` 产生。
 #      工作区未 commit 的改动永远进不了 release → 正面解掉「未 commit 部署＝生产分叉」。
 #   2. 不做整目录盲同步：上传的是「某个 commit 的快照」，不是当前工作区，
 #      因此不会把并行路线的未完成工作推上生产（memory 闸道部署配方的核心教训）。
@@ -53,7 +53,7 @@
 #      不直接 scp 进目标目录。
 #   5. 服务闸门重用既有轮子：`sudo /opt/agent-harness/deploy.sh`
 #      （flock 排他锁 + bun build 语法闸 + restart + healthz）。本脚本不重写它。
-#   6. 部署前必跑既有 recon：deploy-staging/vps-tools/vps-gateway-recon.sh
+#   6. 部署前必跑既有 recon：services/vps-tools/vps-gateway-recon.sh
 #      （memory arch-debt-closeout-0920 铁律）。本脚本不重写它，只调用它。
 #
 # ⚠️ 未验证假设（本脚本只在本机做过 `bash -n` 与 `--dry-run`，从未对生产执行）：
@@ -91,10 +91,10 @@ DRAIN_STAMP_DEFAULT="${GW_DRAIN_STAMP:-$HARNESS_ROOT/.drain-timeout.stamp}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SRC_SUBDIR="deploy-staging/gateway"
+SRC_SUBDIR="services/gateway"
 # shellcheck source=release-ancestry-guard.sh
 . "$SCRIPT_DIR/release-ancestry-guard.sh"
-RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-gateway-recon.sh"
+RECON_SCRIPT="$REPO_ROOT/services/vps-tools/vps-gateway-recon.sh"
 
 DRY_RUN=0
 SKIP_RECON=0
@@ -499,7 +499,7 @@ usage() {
   release --sha C [--skip-recon] [--skip-media-wf-coverage] [--dry-run] [--force] [--fast]
           [--override-ancestry "<理由>"]
                           --sha 必填；候选不含线上 commit 时拒发，覆盖须带理由并写审计
-                          发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
+                          发布：git archive 该 commit 的 services/gateway → release 目录
                           → drain 闸门 → md5 manifest → 原子切 symlink → deploy.sh 闸门 → 验证
                           必须发布完整的已提交 commit 快照；--files 在本地立即拒绝。
                           --force：跳过重启前 drain（仍有在途会话时也立即重启）
@@ -543,7 +543,7 @@ preflight_local() {
     || die "$REPO_ROOT 不是 git repo"
 }
 
-# 根因守门：deploy-staging/gateway 有未 commit 改动时禁止发布。
+# 根因守门：services/gateway 有未 commit 改动时禁止发布。
 # 这正是「未 commit 部署＝生产分叉」的入口（memory uncommitted-deploy-production-fork-0920）。
 assert_gateway_tree_clean() {
   local dirty
@@ -643,7 +643,7 @@ run_recon() {
   case "$base" in ""|unknown-baseline) base="HEAD";; esac
   log "== 既有 recon 对账（挡漂移；基准 $base）=="
   if ! RECON_BASE="$base" bash "$RECON_SCRIPT"; then
-    die "recon 未通过（生产被手改或连线故障）→ 先 diff 收编再发布（deploy-staging/vps-tools/vps-gateway-recon.sh）"
+    die "recon 未通过（生产被手改或连线故障）→ 先 diff 收编再发布（services/vps-tools/vps-gateway-recon.sh）"
   fi
 }
 
@@ -759,7 +759,7 @@ sudo mkdir -p "$REL_DIR/files" "$stage_dir"
 # （adopt 没踩到，因为它是 mv 进来的目录、保有原 owner；release 是新建目录）。
 # 先把 $REL_DIR 交给 ubuntu，写入与后续 rollback 的读取都一致。
 sudo chown "$OWNER" "$REL_DIR"
-# --strip-components=2：tar 内路径为 deploy-staging/gateway/<档>，剥掉两层后 files/ 即 gateway 根
+# --strip-components=2：tar 内路径为 services/gateway/<档>，剥掉两层后 files/ 即 gateway 根
 sudo tar -xf "$stage_tar" -C "$stage_dir" --strip-components=2
 sudo chown -R "$OWNER" "$stage_dir"
 

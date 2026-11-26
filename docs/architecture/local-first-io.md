@@ -3,7 +3,7 @@
 > 2026-10-04 文件化。**本档只描述、不改码**——裁定来源＝`mem show 2026-10-04-desktop-localization-assessment.md`：
 > 「T1（网页层 File System Access＋WebCodecs）→ T2（桌面壳本机媒体工人），T3（agent 搬本机）押后」。
 > 本轮落地＝W1 本机影片前处理、W3 桌面壳本地能力契约、W4 重算卸载 adapter、W5 计费/额度/幂等、W6 device bridge。
-> 薄壳钦定（`mem show electron-desktop-packaging-assessment-0916.md`「方案①、不想双端维护」，`desktop/main.js:3` 自述「明确不做本地起 Next server」）
+> 薄壳钦定（`mem show electron-desktop-packaging-assessment-0916.md`「方案①、不想双端维护」，`apps/desktop/main.js:3` 自述「明确不做本地起 Next server」）
 > **未被推翻**——本地能力是渐进增强，不是第二条分支。
 
 ## 0. 一句话切线
@@ -17,15 +17,15 @@
 |---|---|---|---|
 | 影片本机前处理（抽关键帧＋poster＋probe，只上行衍生小档） | `src/lib/local-media-ingest.ts:440`（`ingestMediaLocally`，契约「永不抛出」见档头 :10）；呼叫端 `src/components/agent-chat/AgentComposer.tsx:564` | 浏览器可解码该影片且衍生档 ≤ `MAX_DERIVED_UPLOAD_BYTES` 4MB（:43） | 逐级回落：衍生档上传失败→原片直传（`AgentComposer.tsx:595` uploadVideoDirect）→再失败→旧抽帧路径（:606） |
 | 直传物件存储（本站不经手位元组） | `src/lib/direct-upload-client.ts:243`（`uploadDirect`）；消费端 `src/components/canvas/embed/use-canvas-interaction.ts:531` | `/api/uploads/sign` 回可直传的 `uploadUrl`；`file.size ≤ 回应 maxBytes`（:9-13） | 后端不支援带 headers 的 PUT 时抛 `UNSUPPORTED_BACKEND_CODE`（:33），呼叫端自走旧路径 |
-| 产物直写本机目录（File System Access API） | `src/lib/local-save.ts:78` `saveBlobLocally`／:116 `saveManyLocally`；消费端 `src/lib/image-helpers.ts:138`、`src/lib/export-zip.ts:66`、`src/lib/history-export.ts:11` | 端点 `showSaveFilePicker`/`showDirectoryPicker` 存在（:70 `hasLocalFileSave`） | 回 `"unsupported"`（:11），呼叫端回落 blob＋`<a download>`；桌面壳的 `will-download` 拦截仍是那条落地面（`desktop/main.js:257`） |
+| 产物直写本机目录（File System Access API） | `src/lib/local-save.ts:78` `saveBlobLocally`／:116 `saveManyLocally`；消费端 `src/lib/image-helpers.ts:138`、`src/lib/export-zip.ts:66`、`src/lib/history-export.ts:11` | 端点 `showSaveFilePicker`/`showDirectoryPicker` 存在（:70 `hasLocalFileSave`） | 回 `"unsupported"`（:11），呼叫端回落 blob＋`<a download>`；桌面壳的 `will-download` 拦截仍是那条落地面（`apps/desktop/main.js:257`） |
 | 本机重算卸载 adapter（probe/抽帧/转码走桌面壳 ffmpeg） | `src/lib/local-media-worker.ts:143` `hasLocalMediaWorker`／:157／:171／:188 | 页面存在 `window.eimuLocal` 且 `capabilities().ffmpeg === true`（:14-19） | 一律回 `{ok:false, reason}`，**不 throw**（档头 :10-12）；纯浏览器＝`no_local_worker` |
-| 桌面壳本地能力通道（原生挑档／ffprobe／ffmpeg） | `desktop/preload.js`（暴露 `window.eimuLocal`）→ `desktop/local-worker.js`（主进程授权闸） | `main.js:224` 注入 preload；仅 `eimu.dev` 顶层 frame；逐次 pickFiles 授权 | 非授权来源/路径回 `E_*` 错误（契约见 `desktop/LOCAL-CAPABILITIES.md:32`） |
-| Device bridge（云端 agent 经本机出站连线读已授权档） | 云端 `deploy-staging/gateway/device-bridge.ts`；本机 `desktop/device-bridge-client.js` | `EIMU_DEVICE_BRIDGE=1` 且能取得凭证（见 §3、§6） | 闸道 `router.ts:375` 前缀闸不进；本机停 `off`，一位元组不出网（`desktop/device-bridge-client.js:16-17`） |
+| 桌面壳本地能力通道（原生挑档／ffprobe／ffmpeg） | `apps/desktop/preload.js`（暴露 `window.eimuLocal`）→ `apps/desktop/local-worker.js`（主进程授权闸） | `main.js:224` 注入 preload；仅 `eimu.dev` 顶层 frame；逐次 pickFiles 授权 | 非授权来源/路径回 `E_*` 错误（契约见 `apps/desktop/LOCAL-CAPABILITIES.md:32`） |
+| Device bridge（云端 agent 经本机出站连线读已授权档） | 云端 `services/gateway/device-bridge.ts`；本机 `apps/desktop/device-bridge-client.js` | `EIMU_DEVICE_BRIDGE=1` 且能取得凭证（见 §3、§6） | 闸道 `router.ts:375` 前缀闸不进；本机停 `off`，一位元组不出网（`apps/desktop/device-bridge-client.js:16-17`） |
 
 ## 2. 两份契约（指引，不复制）
 
-- 桌面壳本地能力（`window.eimuLocal` 介面、错误码、denylist、验证边界）：`desktop/LOCAL-CAPABILITIES.md`（W3）。
-- Device bridge 本机侧（出站协议、工具白名单、预设 OFF、凭证缺口）：`desktop/DEVICE-BRIDGE.md`（W6b）；云端半边档头契约＝`deploy-staging/gateway/device-bridge.ts:1-38`。
+- 桌面壳本地能力（`window.eimuLocal` 介面、错误码、denylist、验证边界）：`apps/desktop/LOCAL-CAPABILITIES.md`（W3）。
+- Device bridge 本机侧（出站协议、工具白名单、预设 OFF、凭证缺口）：`apps/desktop/DEVICE-BRIDGE.md`（W6b）；云端半边档头契约＝`services/gateway/device-bridge.ts:1-38`。
   两份是**各自唯一真源**，本档只指向，不抄全文。
 
 ## 3. 开关清单
@@ -57,11 +57,11 @@
 
 ## 6. 已知缺口与未验证项（照实）
 
-1. **device bridge 缺凭证来源**：壳只载远端页面、只有 session，无 biz key；`credentialProvider` 恒回 null（`desktop/main.js:306-314`）⇒ 即使 `EIMU_DEVICE_BRIDGE=1`，桥得到 `credentials_unavailable` 不启动。补法（短效 device token 经窄 IPC 注入）**尚未实作**（`desktop/DEVICE-BRIDGE.md:32-39`）。**未验证**。
+1. **device bridge 缺凭证来源**：壳只载远端页面、只有 session，无 biz key；`credentialProvider` 恒回 null（`apps/desktop/main.js:306-314`）⇒ 即使 `EIMU_DEVICE_BRIDGE=1`，桥得到 `credentials_unavailable` 不启动。补法（短效 device token 经窄 IPC 注入）**尚未实作**（`apps/desktop/DEVICE-BRIDGE.md:32-39`）。**未验证**。
 2. **`cap_coins` 前端未接**：全站 UI 无任何元件送 `cap_coins`（grep 命中仅 images/videos route 与测试）；「使用者如何在 UI 设预算」未定。后端有能力，**前端未接、未验证**。
 3. **6 条 legacy 生成入口不经 precheck（既有状况，非本轮引入）**：`batches`／`generation-jobs`／`upscale`／`storyboard-voiceover`／`sku/run-service`／`generation-core/canary-service`（明文白名单＋各自收费依据见 `quota-gate-coverage.test.ts:45-52`）。它们走 legacy reserve/sync-charge（有实际扣费），但确实不经 `enforceQuotaGate`。
 4. **`db/migrations/036_generation_attempt_source.sql.pending` 刻意未套用**：`tools/migrate-generation-db.ts:9` 只收 `.sql` 结尾档，故以 `.pending` 副档名挡住（档头自述）。**未对任何真实 DB 执行**。
-5. **桌面壳 GUI E2E 尚未跑**（无显示环境）：挑档对话框、真 ffmpeg 抽帧/转码、origin 拒绝、IPC 串接、device bridge 真连线均未验（`desktop/LOCAL-CAPABILITIES.md:43`、`desktop/DEVICE-BRIDGE.md:69-74`）。
+5. **桌面壳 GUI E2E 尚未跑**（无显示环境）：挑档对话框、真 ffmpeg 抽帧/转码、origin 拒绝、IPC 串接、device bridge 真连线均未验（`apps/desktop/LOCAL-CAPABILITIES.md:43`、`apps/desktop/DEVICE-BRIDGE.md:69-74`）。
 6. **W4 本机重算 adapter 无生产消费者**：`local-media-worker.ts` 仅有自身与 `local-media-worker.test.ts`，无 route/元件 import（grep 实查）。lib＋单元测试已交付，**尚未接线**。已确认无适用接点：前端发起的媒体重算仅 `AgentComposer.tsx`／`local-media-ingest.ts` 两处（已由 W1 覆盖，见 §1），canvas 路径吃远端 https，本机 worker 契约不适用。
 7. **额度三态显示已接 UI（原缺口解除）**：`src/components/WalletBadge.tsx:8` import `describeQuota`、`:106` 呼叫消费（`quotaState ?? derivedQuotaState`），不再是「仅 lib＋测试」。三态呈现（`WalletBadge.tsx:82-112`）：① 有有限读数 ⇒ `authoritative`，直接显示帐本权威值（含真实的 0）；② 读不到但有上次成功读数 ⇒ `estimated`，显示「约 N」并以 `stale` 标已过期、tone 依时效 `ok`/`warn`；③ 完全读不到 ⇒ `unavailable`，显示「暂不可用」、tone=`unknown`，**永不画假 0**。`quotaToneClass`（:107-112）对应 tone 上色。纯显示层收敛，未改任何取余额 API／资料层；真帐本 E2E 仍未跑。
 
@@ -69,7 +69,7 @@
 
 - **不搬 agent loop**：推理与工具编排在 VPS opencode-server；T3（agent 打包进 App）押后（assessment 建议）。
 - **不下发上游付费 key**：付费生成仍回云端（AGENTS.md「付费上游呼叫硬闸」）。
-- **不放宽 Electron 安全边界**：`nodeIntegration:false`、`contextIsolation:true`、`webSecurity:true` 均未放宽（`desktop/main.js:216-219`）；preload 无 `exec`/`spawn`/`shell`/`fs`（`desktop/preload.js:8-11`）。
+- **不放宽 Electron 安全边界**：`nodeIntegration:false`、`contextIsolation:true`、`webSecurity:true` 均未放宽（`apps/desktop/main.js:216-219`）；preload 无 `exec`/`spawn`/`shell`/`fs`（`apps/desktop/preload.js:8-11`）。
 - **不新增写入/删除/执行类本机能力**：device bridge 工具面只有 `list_dir`/`read_file`/`grep`/`stat`（`device-bridge-policy.ts:14`）。
 
 ## 8. 复核用命令
@@ -77,7 +77,7 @@
 ```bash
 # 能力入口与开关
 grep -n "ingestMediaLocally" src/components/agent-chat/AgentComposer.tsx          # W1 呼叫点
-grep -n "EIMU_DEVICE_BRIDGE" desktop/main.js deploy-staging/gateway/device-bridge.ts deploy-staging/gateway/router.ts
+grep -n "EIMU_DEVICE_BRIDGE" apps/desktop/main.js services/gateway/device-bridge.ts services/gateway/router.ts
 grep -n "enforceQuotaGate\|budgetCapCoins" src/lib/generation-core/quota-precheck.ts
 
 # 计费三态与预算闸
@@ -88,5 +88,5 @@ grep -n "exceedsBudget" src/lib/task-budget.ts
 grep -n "RESERVE_PATH_ALLOWLIST\|GATED_FILES" src/lib/generation-core/quota-gate-coverage.test.ts
 
 # 桌面壳 E2E（无显示环境时不跑）
-npx --yes tsx --test desktop/lib/*.test.js
+npx --yes tsx --test apps/desktop/lib/*.test.js
 ```

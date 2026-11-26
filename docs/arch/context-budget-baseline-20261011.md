@@ -2,7 +2,7 @@
 
 - 测量时间：2026-10-11 23:40 (UTC+8 / CST)
 - 定性：能力建设基线（beast ON 新会话首轮常驻上下文）
-- 活本：VPS `/opt/agent-harness`；本地镜像 `deploy-staging/opencode-runtime` + `deploy-staging/gateway`
+- 活本：VPS `/opt/agent-harness`；本地镜像 `services/opencode-runtime` + `services/gateway`
 - 方法：活会话 sqlite tokens + journalctl beast-frame accounting + 可复算脚本量各块字节（非瞎估）
 
 ## 1. 活会话首轮 tokens（真路径）
@@ -19,7 +19,7 @@
 
 | 块 | bytes | 估 token（÷3.4 CJK 粗算） | 来源 |
 |---|---:|---:|---|
-| AGENTS.md（runtime 真源 staging） | **47321** | ~13918 | `deploy-staging/opencode-runtime/AGENTS.md` md5=11a43e811c21 |
+| AGENTS.md（runtime 真源 staging） | **47321** | ~13918 | `services/opencode-runtime/AGENTS.md` md5=11a43e811c21 |
 | agent.orchestrator.prompt | 1621 | ~477 | opencode.json |
 | `<available_skills>`（22 条 project skill） | **9370** | ~2756 | 按 opencode SkillGuidance 模板拼 |
 | beast 帧 v2 全阶段（live journal） | **7370** chars | gateway tokens≈5367（其计法偏激进） | `journalctl -u agent-gateway`：core1767+research456+creation913+critique790+dispatch775+registry2451 |
@@ -59,12 +59,12 @@
 
 ```bash
 # 活 tokens
-node .dsh-ssh/exec-443.js 'sudo -u agentsvc sqlite3 /opt/agent-harness/workspace/.local/share/opencode/opencode.db "SELECT id,title,tokens_input,tokens_cache_read FROM session WHERE agent=\"orchestrator\" ORDER BY time_created DESC LIMIT 10"'
+node .local/tmp/ssh-diagnostics/exec-443.js 'sudo -u agentsvc sqlite3 /opt/agent-harness/workspace/.local/share/opencode/opencode.db "SELECT id,title,tokens_input,tokens_cache_read FROM session WHERE agent=\"orchestrator\" ORDER BY time_created DESC LIMIT 10"'
 # beast 帧
-node .dsh-ssh/exec-443.js 'journalctl -u agent-gateway --since "1 hour ago" | grep "beast-frame] v2" | tail -3'
+node .local/tmp/ssh-diagnostics/exec-443.js 'journalctl -u agent-gateway --since "1 hour ago" | grep "beast-frame] v2" | tail -3'
 # AGENTS / skills
-wc -c deploy-staging/opencode-runtime/AGENTS.md
-find deploy-staging/opencode-runtime/skills -name SKILL.md | wc -l
+wc -c services/opencode-runtime/AGENTS.md
+find services/opencode-runtime/skills -name SKILL.md | wc -l
 ```
 
 ## 5. 优化后指针

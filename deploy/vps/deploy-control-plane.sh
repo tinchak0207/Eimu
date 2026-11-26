@@ -23,7 +23,7 @@ if [[ "${1:-plan}" == "deploy" ]]; then
   printf '%s\n' \
     'ERROR: 禁止在承载在线服务的生产主机原地同步源码并全量构建控制面。' \
     '请在离机构建机按 deploy/vps/Dockerfile 预构建两个镜像，产物建议保存到：' \
-    '  work/control-plane-prebuilt/<commit>/images.tar（docker save 镜像归档）' \
+    '  .local/tmp/work/control-plane-prebuilt/<commit>/images.tar（docker save 镜像归档）' \
     '本脚本尚不支持预构建产物导入发布；请使用仅导入已构建镜像并切换服务的发布流程。' \
     'plan 与 rollback 命令仍保留。' >&2
   exit 1
@@ -48,8 +48,8 @@ SERVICES=(generation-api generation-worker)
 ROLLBACK_KEEP=3
 
 # git archive 白名单（与 .dockerignore 一致）；另 deploy/vps/Dockerfile → Dockerfile、.dockerignore → .dockerignore
-ARCHIVE_PATHS=(src public worker tools db bridge skills
-  deploy-staging/expert-gateway deploy-staging/gateway
+ARCHIVE_PATHS=(src public worker tools db services/blender-bridge skills
+  services/expert-gateway services/gateway
   package.json package-lock.json next.config.mjs next-env.d.ts tsconfig.json
   tailwind.config.ts postcss.config.mjs components.json)
 # HEAD 实存的白名单路径（do_plan 填）。**必须全局**：do_deploy 的 4b 残留清理也用它，

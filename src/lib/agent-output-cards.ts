@@ -7,7 +7,7 @@
 //
 // 资料来源（工作流定义层宣告，零引擎改动）：模板节点的 `defaults.emitsEntity`
 //   { kind: CharacterCardKind; nameFrom?: "nodeTitle" | "input" }
-// 由 `expandTemplate` spread 进节点 metadata（deploy-staging/gateway/workflow-engine.ts
+// 由 `expandTemplate` spread 进节点 metadata（services/gateway/workflow-engine.ts
 // 的 `filled` 合并）→ 随 SSE `canvas.node.created/updated` 抵达画布 → 本档消费。
 //
 // 本档只做四件事：
@@ -221,7 +221,7 @@ function usableImageUrl(value: unknown): string | null {
 /**
  * 音频 URL 认得的副档名（2026-09-24 收紧）。
  * 现场真例（grep 过的真交付 URL，全部带副档名）：
- *   - `deploy-staging/gateway/workflow-gw.ts`：TTS `${TTS_PUBLIC_BASE}/tts_<ts>_<rand>.mp3`
+ *   - `services/gateway/workflow-gw.ts`：TTS `${TTS_PUBLIC_BASE}/tts_<ts>_<rand>.mp3`
  *   - `src/lib/music-tools.ts` 上传：`https://store.tinchak0207.xyz/image-data/files/uploads/music-gen-<ts>.<ext>`
  *     （mime → ext 映射：audio/mpeg→mp3、audio/wav→wav、audio/ogg→ogg、audio/mp4→m4a、
  *       audio/flac→flac；`generation-core/artifact-service.ts` 同映射）

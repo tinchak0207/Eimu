@@ -1,0 +1,507 @@
+[
+  {
+    "old": "deploy-staging/blender-bridge-tunnel",
+    "new": "services/blender-bridge-tunnel"
+  },
+  {
+    "old": "deploy-staging/blender-director-persona",
+    "new": "services/blender-director-persona"
+  },
+  {
+    "old": "deploy-staging/blender-gateway",
+    "new": "services/blender-gateway"
+  },
+  {
+    "old": "deploy-staging/blender-modal",
+    "new": "services/blender-modal"
+  },
+  {
+    "old": "deploy-staging/blender-nodes",
+    "new": "services/blender-nodes"
+  },
+  {
+    "old": "deploy-staging/expert-gateway",
+    "new": "services/expert-gateway"
+  },
+  {
+    "old": "deploy-staging/flowmusic2api",
+    "new": "services/flowmusic2api"
+  },
+  {
+    "old": "deploy-staging/gateway",
+    "new": "services/gateway"
+  },
+  {
+    "old": "deploy-staging/laya-server",
+    "new": "services/laya-server"
+  },
+  {
+    "old": "deploy-staging/opencode-runtime",
+    "new": "services/opencode-runtime"
+  },
+  {
+    "old": "deploy-staging/poller",
+    "new": "services/poller"
+  },
+  {
+    "old": "deploy-staging/vps-tools",
+    "new": "services/vps-tools"
+  },
+  {
+    "old": "mcp-server",
+    "new": "services/mcp"
+  },
+  {
+    "old": "bridge/blender-bridge",
+    "new": "services/blender-bridge"
+  },
+  {
+    "old": "desktop",
+    "new": "apps/desktop"
+  },
+  {
+    "old": "miniapp",
+    "new": "apps/miniapp"
+  },
+  {
+    "old": "design-system",
+    "new": "docs/design-system"
+  },
+  {
+    "old": "promo-video",
+    "new": "tools/promo-video"
+  },
+  {
+    "old": "plugins",
+    "new": "tools/plugins"
+  },
+  {
+    "old": "vendor",
+    "new": "tools/vendor"
+  },
+  {
+    "old": "staging",
+    "new": "tools/generated"
+  },
+  {
+    "old": "eval-visual-replay",
+    "new": "tools/qa/visual-replay"
+  },
+  {
+    "old": "reports",
+    "new": "docs/reports"
+  },
+  {
+    "old": "research_notes",
+    "new": "docs/research"
+  },
+  {
+    "old": "marketing-battle-pack",
+    "new": ".local/experiments/marketing"
+  },
+  {
+    "old": "artifacts",
+    "new": ".local/outputs/artifacts"
+  },
+  {
+    "old": "outputs",
+    "new": ".local/outputs/agent"
+  },
+  {
+    "old": "_inbox",
+    "new": ".local/tmp/inbox"
+  },
+  {
+    "old": "work",
+    "new": ".local/tmp/work"
+  },
+  {
+    "old": "surgery",
+    "new": ".local/tmp/surgery"
+  },
+  {
+    "old": "tmp",
+    "new": ".local/tmp/general"
+  },
+  {
+    "old": "verification",
+    "new": ".local/outputs/verification"
+  },
+  {
+    "old": "browser-probe",
+    "new": ".local/experiments/browser-probe"
+  },
+  {
+    "old": "browser-screenshots",
+    "new": ".local/outputs/browser-screenshots"
+  },
+  {
+    "old": "eval-2026-op-theme",
+    "new": ".local/experiments/op-theme"
+  },
+  {
+    "old": "eval-music-beast-1004",
+    "new": ".local/experiments/music-beast-1004"
+  },
+  {
+    "old": "eval-op-mv",
+    "new": ".local/experiments/op-mv"
+  },
+  {
+    "old": "eval-qinshihuang-polarbear",
+    "new": ".local/experiments/qinshihuang-polarbear"
+  },
+  {
+    "old": ".agent-notes",
+    "new": ".local/state/agent-notes"
+  },
+  {
+    "old": ".agent-runs",
+    "new": ".local/state/agent-runs"
+  },
+  {
+    "old": ".agents-fix",
+    "new": ".local/tmp/agents-fix"
+  },
+  {
+    "old": ".aws",
+    "new": ".local/state/aws"
+  },
+  {
+    "old": ".dsh-adobe-pool",
+    "new": ".local/experiments/adobe-pool"
+  },
+  {
+    "old": ".dsh-mem",
+    "new": ".local/state/dsh-memory"
+  },
+  {
+    "old": ".dsh-ssh",
+    "new": ".local/tmp/ssh-diagnostics"
+  },
+  {
+    "old": ".dsh-vision-router",
+    "new": ".local/state/vision-router"
+  },
+  {
+    "old": ".gateway-work",
+    "new": ".local/state/gateway"
+  },
+  {
+    "old": ".memory-queue",
+    "new": ".local/state/memory-queue"
+  },
+  {
+    "old": ".patch-staging",
+    "new": ".local/tmp/patch-staging"
+  },
+  {
+    "old": ".npm",
+    "new": ".local/cache/npm"
+  },
+  {
+    "old": ".tools",
+    "new": ".local/tools"
+  },
+  {
+    "old": ".tsdeps",
+    "new": ".local/cache/ts-deps"
+  },
+  {
+    "old": ".xdg-cache",
+    "new": ".local/cache/xdg"
+  },
+  {
+    "old": ".zcode",
+    "new": ".local/state/zcode"
+  },
+  {
+    "old": ".tmp-home",
+    "new": ".local/state/tool-home"
+  },
+  {
+    "old": ".vercel-cli-cache",
+    "new": ".local/cache/vercel-cli"
+  },
+  {
+    "old": ".vercel-cli-cache.bak-0914",
+    "new": ".local/cache/vercel-cli-0914"
+  },
+  {
+    "old": ".vercel-cli-data",
+    "new": ".local/state/vercel-cli"
+  },
+  {
+    "old": ".vercel-home",
+    "new": ".local/state/vercel-home"
+  },
+  {
+    "old": ".vercel.bak-link",
+    "new": ".local/state/vercel-link-snapshot"
+  },
+  {
+    "old": ".vercel.bak-owner",
+    "new": ".local/state/vercel-owner-snapshot"
+  },
+  {
+    "old": ".tmp-ba-deng",
+    "new": ".local/tmp/ba-deng"
+  },
+  {
+    "old": ".tmp-gateway",
+    "new": ".local/tmp/gateway"
+  },
+  {
+    "old": ".tmp-vercel-cache",
+    "new": ".local/cache/vercel"
+  },
+  {
+    "old": ".tmp-vercel-cache.bak-0914",
+    "new": ".local/cache/vercel-0914"
+  },
+  {
+    "old": ".tmp-vercel-config",
+    "new": ".local/state/vercel-config"
+  },
+  {
+    "old": ".tmp-vercel-data",
+    "new": ".local/state/vercel-data"
+  },
+  {
+    "old": ".tmp-vps-src",
+    "new": ".local/tmp/vps-source"
+  },
+  {
+    "old": "pixai-pool",
+    "new": ".local/state/pixai-pool"
+  },
+  {
+    "old": "eval-blender-director/REPORT.md",
+    "new": "docs/archive/evaluations/blender-director/REPORT.md"
+  },
+  {
+    "old": "eval-blender-director",
+    "new": ".local/experiments/blender-director"
+  },
+  {
+    "old": "workbuddy-linux",
+    "new": "/home/lenovo/Projects/workbuddy-desktop-linux",
+    "external": true
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/README.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/README.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/candidate-content.tsv",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/candidate-content.tsv"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/candidate-verification.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/candidate-verification.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/implementation-context.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/implementation-context.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/implementation-continuation.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/implementation-continuation.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/implementation-dsl.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/implementation-dsl.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/implementation-final-review.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/implementation-final-review.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/implementation-music-recovery.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/implementation-music-recovery.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/integration-review.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/integration-review.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/release-dependencies.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/release-dependencies.md"
+  },
+  {
+    "old": "outputs/eimu-harness-global-20261029/template-capability-preservation.md",
+    "new": "docs/archive/handoffs/eimu-harness-global-20261029/template-capability-preservation.md"
+  },
+  {
+    "old": ".batch-e2e-body.json",
+    "new": ".local/tmp/root/.batch-e2e-body.json"
+  },
+  {
+    "old": ".batch-too-big.json",
+    "new": ".local/tmp/root/.batch-too-big.json"
+  },
+  {
+    "old": ".demo2.mjs",
+    "new": ".local/tmp/root/.demo2.mjs"
+  },
+  {
+    "old": ".probe-write-test.txt",
+    "new": ".local/tmp/root/.probe-write-test.txt"
+  },
+  {
+    "old": ".tmp-ad.dec",
+    "new": ".local/tmp/root/.tmp-ad.dec"
+  },
+  {
+    "old": ".tmp-gw.txt",
+    "new": ".local/tmp/root/.tmp-gw.txt"
+  },
+  {
+    "old": ".tmp-home.html",
+    "new": ".local/tmp/root/.tmp-home.html"
+  },
+  {
+    "old": ".tmp-nginx-default.conf",
+    "new": ".local/tmp/root/.tmp-nginx-default.conf"
+  },
+  {
+    "old": ".tmp-sp.err",
+    "new": ".local/tmp/root/.tmp-sp.err"
+  },
+  {
+    "old": ".tmp-sx.py",
+    "new": ".local/tmp/root/.tmp-sx.py"
+  },
+  {
+    "old": "fix-system.sh",
+    "new": ".local/tmp/root/fix-system.sh"
+  },
+  {
+    "old": "gh_repo.json",
+    "new": ".local/tmp/root/gh_repo.json"
+  },
+  {
+    "old": "sudo.conf.backup",
+    "new": ".local/tmp/root/sudo.conf.backup"
+  },
+  {
+    "old": ".env.biz-key",
+    "new": ".local/state/secrets/.env.biz-key"
+  },
+  {
+    "old": ".env.jev",
+    "new": ".local/state/secrets/.env.jev"
+  },
+  {
+    "old": ".env.pulled",
+    "new": ".local/state/secrets/.env.pulled"
+  },
+  {
+    "old": ".env.resend",
+    "new": ".local/state/secrets/.env.resend"
+  },
+  {
+    "old": ".flowmusic-creds.json",
+    "new": ".local/state/secrets/.flowmusic-creds.json"
+  },
+  {
+    "old": "pixai-pool-new.json",
+    "new": ".local/state/secrets/pixai-pool-new.json"
+  },
+  {
+    "old": "Cap 2026-09-24 at 23.26.49.mp4",
+    "new": ".local/outputs/media/Cap 2026-09-24 at 23.26.49.mp4"
+  },
+  {
+    "old": "始皇帝的北境征途.mp4",
+    "new": ".local/outputs/media/始皇帝的北境征途.mp4"
+  },
+  {
+    "old": "dreamina_output.webp",
+    "new": ".local/outputs/media/dreamina_output.webp"
+  },
+  {
+    "old": "chapters.tsv",
+    "new": ".local/outputs/media/chapters.tsv"
+  },
+  {
+    "old": "chat-history-export-v2.zip",
+    "new": ".local/outputs/exports/chat-history-export-v2.zip"
+  },
+  {
+    "old": "miniapp.zip",
+    "new": ".local/outputs/exports/miniapp.zip"
+  },
+  {
+    "old": "r-c4-base-1.out",
+    "new": ".local/outputs/evaluations/r-c4-base-1.out"
+  },
+  {
+    "old": "r-c4-base-2.out",
+    "new": ".local/outputs/evaluations/r-c4-base-2.out"
+  },
+  {
+    "old": "reddit-miner-output.md",
+    "new": ".local/outputs/evaluations/reddit-miner-output.md"
+  },
+  {
+    "old": "redteam-report-2026-10-05.md",
+    "new": ".local/outputs/evaluations/redteam-report-2026-10-05.md"
+  },
+  {
+    "old": "redteam-t1-events.json",
+    "new": ".local/outputs/evaluations/redteam-t1-events.json"
+  },
+  {
+    "old": "redteam-t2-events.json",
+    "new": ".local/outputs/evaluations/redteam-t2-events.json"
+  },
+  {
+    "old": "redteam-t4-events.json",
+    "new": ".local/outputs/evaluations/redteam-t4-events.json"
+  },
+  {
+    "old": "rt4b-log.md",
+    "new": ".local/outputs/evaluations/rt4b-log.md"
+  },
+  {
+    "old": ".av-implementation-spec.md",
+    "new": "docs/archive/specifications/.av-implementation-spec.md"
+  },
+  {
+    "old": "tsconfig.tsbuildinfo",
+    "new": ".local/cache/typescript/tsconfig.tsbuildinfo"
+  },
+  {
+    "old": "tsconfig.tmp-typecheck-tests.tsbuildinfo",
+    "new": ".local/cache/typescript/tsconfig.tmp-typecheck-tests.tsbuildinfo"
+  },
+  {
+    "old": "tsconfig.dagcheck.tsbuildinfo",
+    "new": ".local/cache/typescript/tsconfig.dagcheck.tsbuildinfo"
+  },
+  {
+    "old": "tsconfig.scoped-check.tsbuildinfo",
+    "new": ".local/cache/typescript/tsconfig.scoped-check.tsbuildinfo"
+  },
+  {
+    "old": "tsconfig.verify-new.tsbuildinfo",
+    "new": ".local/cache/typescript/tsconfig.verify-new.tsbuildinfo"
+  },
+  {
+    "old": "bench/creative-agent-bench",
+    "new": "docs/reports/creative-agent-bench"
+  },
+  {
+    "old": "deploy-staging/hardening.conf",
+    "new": "deploy/agent-harness/hardening.conf"
+  },
+  {
+    "old": "deploy-staging/opencode.json",
+    "new": "docs/archive/config-snapshots/deploy-staging-opencode.json.txt"
+  },
+  {
+    "old": "deploy-staging/patch-gateway.py",
+    "new": "docs/archive/migration-scripts/deploy-staging-patch-gateway.py.txt"
+  }
+]

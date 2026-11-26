@@ -88,7 +88,7 @@ function toIdList(v: unknown): string[] | undefined {
 
 /**
  * 节点 metadata 的实体宣告键：gateway 模板节点的 `defaults.emitsEntity`
- * （`deploy-staging/gateway/workflow-templates/*`）经 `expandTemplate` spread 进节点
+ * （`services/gateway/workflow-templates/*`）经 `expandTemplate` spread 进节点
  * metadata，随 SSE `canvas.node.created/updated` 落地；消费端
  * `src/lib/agent-output-cards.ts` 据此自动落成可 @ 引用的实体卡。
  *

@@ -64,7 +64,7 @@
 | D4 | 生产 DB **根本没有** `agent_user_profiles` / `agent_lessons` 两表；DDL 是运行时 `CREATE TABLE IF NOT EXISTS`，因 `GENERATION_DATABASE_URL` 本地/Vercel 均未配置而从未执行；实存全在 VPS blob `image_data.kv_store` | `agent-profile-store.ts:170-191`；`vercel env ls` 无该变量；控制面 DB 22 张表零 agent 表 | P0 明确：**新记忆库全走 blob**，DB 路径保留为未启用兜底并在文件头注明；不补 migration |
 | D5 | 前端 `turn.done` 同步提炼链：24/7 每次回合后 fire-and-forget 打 25s 超时的 LLM，3 分钟节流、≥2 轮触发 | `src/hooks/use-agent-chat.ts:578 / 67-68 / 96-120`；`profile/lessons/route.ts:20-23 / 51-81` | P0 **下线**（由每日批次取代），用户路径减负 |
 | D6 | 零端到端测试：现有 6 条断言全是**源码字符串**断言（`assert.match(route, /.../)`），无「会话 A 沉淀 → 会话 B 读到」的实弹测试 | `src/lib/agent-profile-store.test.ts:25-72` | P0 按 §9 R2 建真 E2E |
-| D7 | 本地 `.gateway-work/index.ts` 是 08-24 老快照，与生产差 **5,552 行**（缺 userMemory 注入、extract-lessons、subagent async wake、reaper 改造等全部机制）——**不得作对照基准** | 本地 2,998 行 / VPS 8,306 行 | P0 把生产 index.ts 拉回仓库 `deploy-staging/gateway/index.ts` 作为唯一真源（并加一条「勿以 .gateway-work 为准」的注释） |
+| D7 | 本地 `.local/state/gateway/index.ts` 是 08-24 老快照，与生产差 **5,552 行**（缺 userMemory 注入、extract-lessons、subagent async wake、reaper 改造等全部机制）——**不得作对照基准** | 本地 2,998 行 / VPS 8,306 行 | P0 把生产 index.ts 拉回仓库 `services/gateway/index.ts` 作为唯一真源（并加一条「勿以 .gateway-work 为准」的注释） |
 
 ---
 

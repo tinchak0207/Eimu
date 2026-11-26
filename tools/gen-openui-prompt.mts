@@ -5,7 +5,7 @@
  *   npx tsx tools/gen-openui-prompt.mts           # 生成并自检
  *   npx tsx tools/gen-openui-prompt.mts --check   # 只比对现档是否最新（CI/发布前）
  *
- * 输出：deploy-staging/gateway/openui-system-prompt.txt（网关注入用的构建产物，进版本库）
+ * 输出：services/gateway/openui-system-prompt.txt（网关注入用的构建产物，进版本库）
  *
  * 同源保证：组件签名行逐字取自 `generateSystemPrompt(eimuLibrary.toSpec())`，
  * 白名单行取自 `catalog.ts` 的 OPENUI_COMPONENTS；脚本断言两者集合相等、
@@ -40,7 +40,7 @@ const { RICH_EXAMPLES, fillRichExample } = require("../src/lib/openui/rich-examp
 };
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outFile = resolve(repoRoot, "deploy-staging/gateway/openui-system-prompt.txt");
+const outFile = resolve(repoRoot, "services/gateway/openui-system-prompt.txt");
 const MAX_CHARS = 25_000;
 
 const RULES_FULL =

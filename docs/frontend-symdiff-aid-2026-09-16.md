@@ -15,7 +15,7 @@
 | 依赖 | `npm install` 594 包 | 既有 |
 | 截图 | `/tmp/aid-shots/0*.png`（12 页） | `/tmp/aid-shots/ours-*.png` |
 | 结构 | `/tmp/aid-shots/aid-dom-report.json` | `/tmp/aid-shots/ours-dom-report.json` |
-| 轮子 | `eval-visual-replay/aid-dom.mjs`、`aid-shot.mjs` | `eval-visual-replay/ours-dom.mjs` |
+| 轮子 | `tools/qa/visual-replay/aid-dom.mjs`、`aid-shot.mjs` | `tools/qa/visual-replay/ours-dom.mjs` |
 | 过登入闸 | `localStorage.token` 预置（前端守卫） | `NEXT_PUBLIC_LOCAL_TEST_MODE` |
 
 **尺度说明（诚实边界）**：AID 后端未部署 → 其页面资料区全空（「案例列表加载失败」「暂无分镜」）。故本报告比的是**版面骨架与交互结构**（不依赖后端），不比资料态内容。我方页面走真 gateway，但多数页面同样无资料态，同尺度。

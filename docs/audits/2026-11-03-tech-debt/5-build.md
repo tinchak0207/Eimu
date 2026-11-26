@@ -13,12 +13,12 @@
 【严重度 P1】
 
 【证据】
-- 测试档 483 个（`git ls-files | grep -E '\.(test|spec)\.'`）：ts 474 / js 7 / mjs 2。目录分布：src/lib 298、src/app 61、src/components 45、deploy-staging/gateway 45、deploy-staging/vps-tools 13、src/hooks 6、desktop/lib 5、src/vendor-bridges 4，其余零散 5 个。
+- 测试档 483 个（`git ls-files | grep -E '\.(test|spec)\.'`）：ts 474 / js 7 / mjs 2。目录分布：src/lib 298、src/app 61、src/components 45、services/gateway 45、services/vps-tools 13、src/hooks 6、apps/desktop/lib 5、src/vendor-bridges 4，其余零散 5 个。
 - 测试代码 110,625 行，对比非测试代码 394,426 行（全仓 ts/tsx/js/mjs），即测试占全部代码 **21.9%**（测试/非测试 = 28.0%）；仅 src/ 内：测试 95,583 行对非测试 248,812 行（测试/非测试 = **38.4%**，占 src 总量 27.8%）。最大几个：src/lib/mcp/tools.test.ts 1712 行、agent-chat-ui.test.ts 1619 行、storyboard-contract.test.ts 1444 行。
 - 69 个测试档在 `src/` 之外（deploy-staging 60、desktop 7、mcp-server 1、skills 1），`npm test` 的 glob `src/**/*.test.ts` 与 CI 的 test job 都不会跑它们，等于从来没被执行的死测试。
 - `npm test`（原样，限时 300s）：**未能在 5 分钟内跑完**。卡在 `src/lib/blender-e2e.test.ts`，它在等 `http://127.0.0.1:8765` 的 3D bridge，日志 `bridge 不可达，已等待 240s（上限 600s）`，被 timeout 杀掉，没有汇总行（test.out 里已出现 40 个 `not ok`）。
 - 按 ci.yml 里的 11 档排除清单跑剩余 403 档（`tsx --test`，83 秒）：`tests 4377 / pass 4350 / fail 9 / cancelled 4 / skipped 14`。失败集中在：auth/me ×4（`Promise resolution is still pending` 被取消）、钱包订阅池/永久池 ×6、`MOTION_TEMPLATES 恰 58 条`、`gpt-image-2 系顺序＝yyds > adobe2api > newapi`（价格口径断言，价目一变就红）、`R3-② state 带 capabilities`。而 ci.yml 里作者声称本机基线是 `tests 4377 / pass 4363 / fail 0`：总数一致、通过数不一致（差 13），说明"全绿"依赖作者本机夹具/环境。
-- ci.yml 自己承认 11 个测试档在干净 checkout 里必然失败：5 个读被 `.gitignore:150 /deploy-staging/*` 排除的本地夹具；5 个读已删除的 `src/components/pro-workstation/**`；1 个要外部服务。其中 2 个"还有 2 条本地既有红灯：片E/片F 的行号锚点 L152 已不存在"。
+- ci.yml 自己承认 11 个测试档在干净 checkout 里必然失败：5 个读被 `.gitignore:150 /services/*` 排除的本地夹具；5 个读已删除的 `src/components/pro-workstation/**`；1 个要外部服务。其中 2 个"还有 2 条本地既有红灯：片E/片F 的行号锚点 L152 已不存在"。
 - 测试被 tsconfig 排除（`**/*.test.ts`），所以 483 个测试档**从未被 tsc 类型检查**，只由 tsx 运行时执行（tsx 不做类型检查）。
 - AGENTS.md:93 规定"不再新增任何测试档……既有测试不扩张、不维护、不修红灯，也不得当成交付闸门"（AGENTS.md:89 起整节）。但 `.github/workflows/ci.yml` 的 `test` job 把这 403 档当作 push 闸门（注释原话："这两个是本 repo 唯一有真实断言……的闸"），还维护着一份 11 档排除清单加"清单腐化守门"——这本身就是在维护测试。
 - 旁证：测试里有大量字符串/源码形状断言（AGENTS.md 自己也承认"守门件不是 oracle"）。vitest.config.mts 存在，但 `node_modules/vitest` 不存在、package.json 没有 vitest 依赖，该配置是死文件（见发现 3）。
@@ -86,15 +86,15 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 
 【证据】
 - `npx tsc --noEmit -p tsconfig.json --incremental false`（34 秒）：**0 个 `error TS`**（`grep -c "error TS"` = 0，输出为空）。按错误数聚类前 15：无（空）。
-- tsconfig.json：`"strict": true`；但 `exclude` 含 `deploy-staging`、`staging`、`open-source`、`mcp-server`、`plugins`、`src/vendor-bridges`、`eval-*`、`tmp`、`work`、`**/*.test.ts`、`**/*.test.tsx`。`include` 只有 `**/*.ts, **/*.tsx`，所以 `allowJs: true` 实际无效（desktop/*.js 等不进程序）。
+- tsconfig.json：`"strict": true`；但 `exclude` 含 `deploy-staging`、`staging`、`open-source`、`mcp-server`、`plugins`、`src/vendor-bridges`、`eval-*`、`tmp`、`work`、`**/*.test.ts`、`**/*.test.tsx`。`include` 只有 `**/*.ts, **/*.tsx`，所以 `allowJs: true` 实际无效（apps/desktop/*.js 等不进程序）。
 - 进入程序的非 node_modules 文件共 **1159 个**（`tsc --listFilesOnly`）：src 1127、tools 29、worker 1、tailwind.config.ts 1、next-env.d.ts 1。
-- 未被主 tsc 覆盖的真代码：deploy-staging 非测试 ts/js 112,811 行（跟踪文件 1681 个，生产网关/opencode-runtime 就是这里；仅 `deploy-staging/gateway` 有 ci.yml 里的第二个 tsc job，`opencode-runtime`（1291 个文件）、poller、vps-tools、laya-server、flowmusic2api 无任何类型检查）；src/vendor-bridges 86 个文件；desktop 30 个 JS；测试 11 万行。
+- 未被主 tsc 覆盖的真代码：deploy-staging 非测试 ts/js 112,811 行（跟踪文件 1681 个，生产网关/opencode-runtime 就是这里；仅 `services/gateway` 有 ci.yml 里的第二个 tsc job，`opencode-runtime`（1291 个文件）、poller、vps-tools、laya-server、flowmusic2api 无任何类型检查）；src/vendor-bridges 86 个文件；desktop 30 个 JS；测试 11 万行。
 - next.config.mjs：`eslint: { ignoreDuringBuilds: process.env.VERCEL === "1" }` 与 `typescript: { ignoreBuildErrors: process.env.VERCEL === "1" }`。即线上（Vercel）构建**同时跳过 lint 和类型检查**，注释理由是"每次省约 60s"。因为 CI（ci.yml）不跑 build、不跑 lint，类型检查只在 CI 的 `npx tsc --noEmit` 里有；一旦 CI 不可用（ci.yml 注释记载 GitHub-hosted runner 账单被锁，已改自托管 runner `eimu-local`），线上构建没有任何类型闸门。
 - 代码里 `@ts-ignore/@ts-expect-error/@ts-nocheck` 共 3 处；非测试 `: any` / `as any` 约 70 处；含 `eslint-disable` 的文件 72 个。
 
 【影响】主站代码类型干净（正面发现）；但"类型 0 错误"只对约 1127 个 src 文件成立，生产控制面、网关、opencode 工具运行时多数不受类型保护；Vercel 构建绕过检查，意味着类型/lint 问题只能靠 CI 发现，而 CI 依赖一台自托管机器。
 
-【建议】CI 加一个在 Vercel 之外跑 `tsc` 的必过 job（已有，保持必过）；给 `deploy-staging/opencode-runtime`、`poller`、`vps-tools` 各补一个 tsconfig 并入 gateway-typecheck 同类 job；`src/vendor-bridges` 若是 VPS 代码的镜像，应移出 `src/`（见发现 8、9）。
+【建议】CI 加一个在 Vercel 之外跑 `tsc` 的必过 job（已有，保持必过）；给 `services/opencode-runtime`、`poller`、`vps-tools` 各补一个 tsconfig 并入 gateway-typecheck 同类 job；`src/vendor-bridges` 若是 VPS 代码的镜像，应移出 `src/`（见发现 8、9）。
 
 ---
 
@@ -122,8 +122,8 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 - 跟踪的二进制/媒体共 **297 个，180 MB**（`stat` 汇总 188,604,628 字节）：mp4 12 个 113.8 MB、png 72 个 27.2 MB、m4a 12 个 23.7 MB、webp 138 个 5.4 MB、otf 1 个 5.0 MB、jpg 33 个 3.5 MB、pdf 9 个 1.0 MB、glb 16 个 0.1 MB。
 - 最大 15 个：public/promo/eimu-promo.mp4 41.2 MB；public/showcase/agent-templates/novel-film-3.mp4 16.0 MB；public/showcase/eimu-milestone-caption.mp4 9.0 MB；docs/preview/15-dam-mech-15s.mp4 8.2 MB；public/showcase/agent-templates/art-curation-3.mp4 8.2 MB；drama-poster-2.mp4 6.8 MB；ecom-model-2.mp4 5.1 MB；public/fonts/NotoSansCJKsc-subset.otf 5.0 MB；ecom-launch-2.mp4 4.8 MB；novel-film-2.mp4 4.2 MB；ip-pack-3.mp4 3.9 MB；art-style-2.mp4 3.2 MB；drama-visual-2.mp4 3.1 MB；open-source/eimu-music-agent/eval/audio/nifengbumie5.m4a 与 nifengbumie6.m4a 各 2.1 MB。
 - 无 `.gitattributes`；`git lfs ls-files` 无输出——没用 git-lfs。
-- 大文本：skills/blender-agent-os/knowledge/catalog.json 631,758 字节，**在 deploy-staging/opencode-runtime/skills/... 下完全同样再存一份**。
-- **整棵目录重复**：`skills/` 与 `deploy-staging/opencode-runtime/skills/` 有 **507 个同路径文件，其中 487 个字节级相同**（比较脚本逐个 `cmp`）。`src/vendor-bridges` 与 `deploy-staging/{gateway,opencode-runtime}` 有 30 个同路径文件。
+- 大文本：skills/blender-agent-os/knowledge/catalog.json 631,758 字节，**在 services/opencode-runtime/skills/... 下完全同样再存一份**。
+- **整棵目录重复**：`skills/` 与 `services/opencode-runtime/skills/` 有 **507 个同路径文件，其中 487 个字节级相同**（比较脚本逐个 `cmp`）。`src/vendor-bridges` 与 `services/{gateway,opencode-runtime}` 有 30 个同路径文件。
 - `.vercelignore` 306 行、`.zcodeignore` 197 行、`.gitignore` 202 行、`.dockerignore` 17 行——四套 ignore 手工同步。
 - docs/ 内还放了 44 个图/视频/html（17.7 MB 图像视频）。
 
@@ -140,8 +140,8 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 - 根目录的 `eimu-agent-architecture.html`（61.5 KB）与 `eimu-agent-architecture.json`（2 KB）：全仓无任何引用（`git grep -F` 返回空）；`pelican.svg`（3.9 KB）：唯一引用是 `.vercelignore`（把它排除）；`pnpm-workspace.yaml` 无引用；`tsconfig.tsbuildinfo`(512 KB)/`next-env.d.ts` 被 .gitignore 忽略，非问题。
 - `render.yaml`（Render 免费版 `image-tinchak0207`，`buildCommand: npm install && npm run build`，`IMAGE_API_BASE_URL=https://share-api.com/v1`，`IMAGE_API_BASE_URL_FALLBACK=https://happycode.vip/v1`）与 `vercel.json`（`framework: nextjs`，sfo1 区）并存。`DEPLOYMENT.md` 写明推荐方案："`eimu.dev` 部署在 **Vercel**；`market.tinchak0207.xyz` 留在 Render"。所以 **render.yaml 描述的是另一个站点的初始配置，不是本应用**；而 `DEPLOYMENT.md:50` 里指向它的链接是 Windows 绝对路径 `C:/Users/user/Documents/New project/image-tinchak0207/render.yaml`（作者本机路径，公开仓里是坏链接）。`vercel.json` 的 `installCommand` 用 `npm install` 而不是 `npm ci`。
 - 另有生产控制面部署在自有 VPS（AGENTS.md 多处提到 4GB 主机、docker），仓库内 `deploy/vps/Dockerfile`、`deploy/vps/docker-compose.yml`、`deploy/image-data-api/*` 提供，实际形成"Vercel + VPS + Render（旧）"三处部署描述，README/DEPLOYMENT.md/SELF-HOSTING.md 口径不一。
-- `promo-video/` 36 个跟踪文件（2.7 MB）：宣传片渲染工程（film.js、render.mjs、audio.py、3 个 cover html），与产品运行时无关；`.gitignore` 已排除其 `out/`、`fonts/`。`marketing-battle-pack/` 本次克隆里不存在（AGENTS.md 提到，已不在仓库）。
-- `desktop/`（42 个文件，Electron 桌面端，自带 package.json 与 package-lock.json）、`mcp-server/`（8 个，自带 package-lock）、`bridge/`（5 个）：三个独立 npm 项目没有 workspace 管理。
+- `tools/promo-video/` 36 个跟踪文件（2.7 MB）：宣传片渲染工程（film.js、render.mjs、audio.py、3 个 cover html），与产品运行时无关；`.gitignore` 已排除其 `out/`、`fonts/`。`.local/experiments/marketing/` 本次克隆里不存在（AGENTS.md 提到，已不在仓库）。
+- `apps/desktop/`（42 个文件，Electron 桌面端，自带 package.json 与 package-lock.json）、`services/mcp/`（8 个，自带 package-lock）、`bridge/`（5 个）：三个独立 npm 项目没有 workspace 管理。
 - `open-source/eimu-music-agent`（55 个跟踪文件含 12 个 m4a）：`.gitignore` 明确写 `/open-source/` 不入库，但仍有 55 个被跟踪（见发现 9）。
 
 【影响】新读者无法从根目录判断"这个项目怎么部署"；坏路径链接是公开仓的低级噪声；架构图 html 孤立在根目录。
@@ -188,7 +188,7 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 
 【证据】
 - AGENTS.md：159 行、29,037 字节；23 行超过 400 个字符，最长一行 1,491 字符；39 行含 `2026-` 日期（事故/纠正的叙事）。文件顶部写"膨胀铁律：本档只加行为规则；排障笔记进 runbook，历史归 memory"，而实际 39 行是带日期的事故叙事（例："2026-10-03 事故"、"2026-09-27 ¥31.29 事故后立"）。CLAUDE.md 只有一行 `@AGENTS.md`，所以这 29 KB 每次会话都完整载入上下文。
-- 引用了仓库外不存在的东西：`~/.claude/memory/`、`mem` CLI、`/opt/agent-harness`、Arch Linux、VPS 控制面、`.env.biz-key`（B 端 API key 的存放位置）。对公开仓库读者无意义，且泄露内部运维形状（4GB 生产主机、VPS 2 核、docker 构建缓存清理步骤）。
+- 引用了仓库外不存在的东西：`~/.claude/memory/`、`mem` CLI、`/opt/agent-harness`、Arch Linux、VPS 控制面、`.local/state/secrets/.env.biz-key`（B 端 API key 的存放位置）。对公开仓库读者无意义，且泄露内部运维形状（4GB 生产主机、VPS 2 核、docker 构建缓存清理步骤）。
 
 矛盾点（引原文）：
 1. UI 验证：AGENTS.md:23 "**禁自我 UI 检查**：美学归暴君，dev server/Playwright/截图验外观 = 垃圾时间，改完直接交" vs AGENTS.md:24 "**视觉改动部署前必做本地 E2E 截图自审**……违反＝直接退回"；后者自己补一句"这条不推翻上一条"，但同一动作（起 dev server + Playwright 截图）一个被称"垃圾时间"、另一个被称"必做"。
@@ -209,13 +209,13 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 【严重度 P2】
 
 【证据】
-- `git ls-files -ci --exclude-standard` = **97 个文件**既被跟踪又匹配忽略规则：`open-source/eimu-music-agent`（55，.gitignore 写 `/open-source/` 且注释"不入 App repo"）；`staging/music-tools`（8，规则 `/staging/`）；`deploy-staging` 下的 blender-director-persona 7、blender-modal 6、blender-gateway 5、blender-nodes 4、blender-bridge-tunnel 4、patch-gateway.py 1 等 28 个（`/deploy-staging/*` 只放行 gateway/laya-server/vps-tools/opencode-runtime/poller/flowmusic2api）；以及 `.env.example`（被 `.env*` 命中，`.gitignore:79`）、`next.config.mjs` 与 `postcss.config.mjs`（被 `.gitignore:108 /*.mjs` 命中）。
+- `git ls-files -ci --exclude-standard` = **97 个文件**既被跟踪又匹配忽略规则：`open-source/eimu-music-agent`（55，.gitignore 写 `/open-source/` 且注释"不入 App repo"）；`tools/generated/music-tools`（8，规则 `/staging/`）；`deploy-staging` 下的 blender-director-persona 7、blender-modal 6、blender-gateway 5、blender-nodes 4、blender-bridge-tunnel 4、patch-gateway.py 1 等 28 个（`/services/*` 只放行 gateway/laya-server/vps-tools/opencode-runtime/poller/flowmusic2api）；以及 `.env.example`（被 `.env*` 命中，`.gitignore:79`）、`next.config.mjs` 与 `postcss.config.mjs`（被 `.gitignore:108 /*.mjs` 命中）。
 - 其中 **`/*.mjs`（.gitignore:108）会让根目录任何新增的 `.mjs` 配置（例如将来的 `eslint.config.mjs`——发现 5 要求新增它）被静默忽略**，提交时必须 `-f`。
-- 反向检查 `git ls-files | grep -E '\.log$|__pycache__|\.DS_Store|(^|/)\.env'`：只命中 `.env.example`，没有 .log、__pycache__、.DS_Store、真实 .env 被跟踪。`.env.biz-key` 被 `.env*` 忽略且不在跟踪列表里（正确）。`git ls-files | grep tsbuildinfo|\.next/|node_modules/` 无命中。
+- 反向检查 `git ls-files | grep -E '\.log$|__pycache__|\.DS_Store|(^|/)\.env'`：只命中 `.env.example`，没有 .log、__pycache__、.DS_Store、真实 .env 被跟踪。`.local/state/secrets/.env.biz-key` 被 `.env*` 忽略且不在跟踪列表里（正确）。`git ls-files | grep tsbuildinfo|\.next/|node_modules/` 无命中。
 - 正面：`next-env.d.ts`、`*.tsbuildinfo` 均被忽略且未被跟踪。
 - 对比 AGENTS.md 提到的 `.gitignore` 里"评测证据大档留本地"一节（.gitignore:144）只有注释没有规则（孤立注释）。
 
-【影响】open-source/ 的 55 个文件与 staging/ 的 8 个违背了 .gitignore 自己声明的意图，也是 23.7 MB m4a 音频的来源；`/*.mjs` 是一个已经存在的陷阱。
+【影响】open-source/ 的 55 个文件与 tools/generated/ 的 8 个违背了 .gitignore 自己声明的意图，也是 23.7 MB m4a 音频的来源；`/*.mjs` 是一个已经存在的陷阱。
 
 【建议】决定 open-source/ 要不要入库：入库就删规则，不入库就 `git rm --cached`；把 `/*.mjs` 改成只忽略具体临时名；`.env.example` 加 `!.env.example` 显式放行（它现在能入库靠的是 force-add）。
 
@@ -224,11 +224,11 @@ src/ 内非测试代码 import 了但 package.json 未声明的包（幽灵依�
 ## 发现 12：`src/vendor-bridges` 与 `deploy-staging` 是"镜像代码混在产品源码里"
 【严重度 P3】
 
-【证据】`src/vendor-bridges/` 86 个文件被 tsconfig 排除（tsc 不检查）但留在 `src/`，被 `next lint` 扫到（贡献了 80 个 lint error，占 82%）；import 了 `@opencode-ai/plugin`、`bun:sqlite`（Next 的 Node 构建里不存在）；其中 30 个路径与 `deploy-staging/{gateway,opencode-runtime}` 同路径。`deploy-staging/opencode-runtime` 25 MB / 1291 个文件，包含 847 个 skills、282 个 lib、153 个 tools；`.gitignore:150-166` 对 deploy-staging 的"白名单反向例外"共 6 条。
+【证据】`src/vendor-bridges/` 86 个文件被 tsconfig 排除（tsc 不检查）但留在 `src/`，被 `next lint` 扫到（贡献了 80 个 lint error，占 82%）；import 了 `@opencode-ai/plugin`、`bun:sqlite`（Next 的 Node 构建里不存在）；其中 30 个路径与 `services/{gateway,opencode-runtime}` 同路径。`services/opencode-runtime` 25 MB / 1291 个文件，包含 847 个 skills、282 个 lib、153 个 tools；`.gitignore:150-166` 对 deploy-staging 的"白名单反向例外"共 6 条。
 
 【影响】产品源码目录、线上运行时镜像、技能资料库三者混放，lint/tsc/测试每个都要特别排除；任何"全仓"工具都会误报。
 
-【建议】把 `src/vendor-bridges` 迁到 `deploy-staging/` 或独立目录；`deploy-staging/opencode-runtime/skills` 与根 `skills/` 合并为一个真源（发现 6）。
+【建议】把 `src/vendor-bridges` 迁到 `services/` 或独立目录；`services/opencode-runtime/skills` 与根 `skills/` 合并为一个真源（发现 6）。
 
 ---
 

@@ -149,7 +149,7 @@ export const HARNESS_TOOL_ID_LIST = [
   //   src/lib/music-tools.ts（Lyria client = src/lib/music-lyria.ts，Gemini API
   //   v1beta/interactions，env GEMINI_API_KEY；音频落盘复用 gateway 会话上传存储）。
   //   诚实标注：本档登记=定义已定形；VPS .opencode/tools/ 落位与活体注册确认待接线片补
-  //   （staging 稿已由 tools/export-music-tools-staging.ts 机械导出至 staging/music-tools/）。
+  //   （staging 稿已由 tools/export-music-tools-staging.ts 机械导出至 tools/generated/music-tools/）。
   ...MUSIC_HARNESS_TOOL_IDS,
   "outlier_audit_regenerate",
   "style_dna_extract",

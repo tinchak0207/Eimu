@@ -18,7 +18,7 @@
 //   npx tsx tools/agent-debug.ts --template <id> "..."             # 先按模板铺画布（泳道快照上行，模拟生产前端）再发消息
 //   npx tsx tools/agent-debug.ts --canvas snap.json "..."          # 上传自备画布快照（agent 的 canvas_get_state 读这份）
 //
-// 认证：B 端 key（Bearer sk-biz-*），预设从 .env.biz-key 读；也可 --key 或环境变量 AGENT_DEBUG_KEY。
+// 认证：B 端 key（Bearer sk-biz-*），预设从 .local/state/secrets/.env.biz-key 读；也可 --key 或环境变量 AGENT_DEBUG_KEY。
 // 注意：走的是网关直连路径（与站点代理差一层 profile/lessons 注入），事件层与用户所见完全同源。
 // 2026-08-25：--template/--canvas 补上生产前端的「点模板→画布泳道快照上行」行为
 // （applyTemplateToCanvas 布局 + postCanvasSnapshot 上传），否则 agent 的
@@ -95,9 +95,9 @@ function readBizKey(explicit?: string): string {
   if (explicit) return explicit;
   const env = process.env.AGENT_DEBUG_KEY;
   if (env) return env;
-  const file = readFileSync(".env.biz-key", "utf8");
+  const file = readFileSync(".local/state/secrets/.env.biz-key", "utf8");
   const m = file.match(/sk-biz-[A-Za-z0-9_-]+/);
-  if (!m) throw new Error("在 .env.biz-key 里找不到 sk-biz-* key；用 --key 指定。");
+  if (!m) throw new Error("在 .local/state/secrets/.env.biz-key 里找不到 sk-biz-* key；用 --key 指定。");
   return m[0];
 }
 

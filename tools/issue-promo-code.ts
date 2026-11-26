@@ -22,7 +22,7 @@
 //   npx tsx tools/issue-promo-code.ts --dry-run                 # 只印请求，不发码
 //
 // 凭证从哪来：`--env-file <路径>` 指定，或依序找 `.env.production` /
-// `.env.production.local` / `.env.local` / `.env.pulled`。缺凭证时自行
+// `.env.production.local` / `.env.local` / `.local/state/secrets/.env.pulled`。缺凭证时自行
 // `vercel env pull .env.production.local`（或从部署环境取）即可，本档不猜。
 
 import { randomBytes } from "node:crypto";
@@ -248,7 +248,7 @@ async function createCode(
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (options.envFile) loadEnvFile(options.envFile);
-  for (const file of [".env.production", ".env.production.local", ".env.local", ".env.pulled"]) {
+  for (const file of [".env.production", ".env.production.local", ".env.local", ".local/state/secrets/.env.pulled"]) {
     loadEnvFile(file);
   }
 

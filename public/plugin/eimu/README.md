@@ -9,7 +9,7 @@ Eimu 是 **Vibe Directing / Cursor of video**：把模糊需求交给导演工�
 - 本说明：https://eimu.dev/plugin/eimu/README.md
 - 接入页（含喂到嘴边的安装 prompt）：https://eimu.dev/mcp
 - **主路径端点（远端 HTTP MCP）**：`https://eimu.dev/api/mcp`（JSON-RPC 2.0 / Streamable HTTP）
-- 仓库内 `mcp-server/` 是本机 stdio 进阶形态，**不是**对外主路径
+- 仓库内 `services/mcp/` 是本机 stdio 进阶形态，**不是**对外主路径
 
 ## 默认工具面（导演）
 
@@ -125,4 +125,4 @@ bearer_token_env_var = "EIMU_BIZ_KEY"
 
 ## 本机 stdio（非主路径）
 
-仓库 `mcp-server/` 提供本机 stdio 形态（工具集与环境变量 `IMAGE_STUDIO_*` 与远端不同）。需要仓库权限才能构建。对外安装与文档以**远端 HTTP MCP**为准。
+仓库 `services/mcp/` 提供本机 stdio 形态（工具集与环境变量 `IMAGE_STUDIO_*` 与远端不同）。需要仓库权限才能构建。对外安装与文档以**远端 HTTP MCP**为准。

@@ -2,7 +2,7 @@
 // 复制 redteam-smoke.mjs 的鉴权/建会话/SSE 收集/turn() 模式，白名单改测试用例与断言
 import fs from "node:fs";
 
-const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
+const KEY = fs.readFileSync(".local/state/secrets/.env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
 const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };
 const TURN_TIMEOUT_MS = 150_000; // 单轮 LLM 回覆超 150s 视为该用例 FAIL

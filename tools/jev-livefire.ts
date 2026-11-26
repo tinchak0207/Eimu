@@ -3,7 +3,7 @@ import { jevAsk } from "../src/lib/jev-client";
 
 async function main(): Promise<void> {
 process.env.JEV_ENABLED = "true";
-process.env.TYPESAFE_API_KEY = readFileSync(".env.jev", "utf8").trim().split("=")[1]!;
+process.env.TYPESAFE_API_KEY = readFileSync(".local/state/secrets/.env.jev", "utf8").trim().split("=")[1]!;
 
 const r = await jevAsk(
   JSON.stringify({

@@ -12,8 +12,8 @@
 // 同构 tools/music_gen.ts 模式。
 //
 // staging 落位（VPS 同步落位命令见档尾）：
-//   staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）
-//   staging/web-search-tools/search_web.ts      → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名）
+//   tools/generated/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）
+//   tools/generated/web-search-tools/search_web.ts      → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名）
 //
 // 命名域铁律（2026-09-10 VPS 八轮对照实锤）：opencode 1.18.14 保留 websearch/web_search
 // 工具命名域，自订工具档名撞名即被物理移除（ws_probe HAVE / web_search NOT_HAVE，
@@ -28,7 +28,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const SOURCE = join(root, "src/lib/web-search-tools.ts");
-const TARGET_DIR = join(root, "staging/web-search-tools");
+const TARGET_DIR = join(root, "tools/generated/web-search-tools");
 const IMPL_TARGET = join(TARGET_DIR, "web_search_impl.ts");
 const ADAPTER_TARGET = join(TARGET_DIR, "web_search_tools_adapter.ts");
 const THIN_TARGET = join(TARGET_DIR, "search_web.ts");
@@ -57,7 +57,7 @@ const ADAPTER_HEADER = `/**
  * 形状轮子 = lib/music-tools-adapter.ts 的 wrapMusicTool（逐行同构，白名单
  * diff 仅：名称/导入源两处；WebToolContext 契约含 sessionId 透传栏，与
  * MusicToolContext 同口径，会话资产落盘本工具暂未用到、栏位机械保留）。
- * 行为真源 = lib/web_search_impl.ts（staging/web-search-tools/web_search_impl.ts 落位稿，
+ * 行为真源 = lib/web_search_impl.ts（tools/generated/web-search-tools/web_search_impl.ts 落位稿，
  * 描述符形状 WebToolDef，描述符 → schema 映射纯机械翻译零二次维护面）。
  */
 
@@ -135,6 +135,6 @@ writeFile(THIN_TARGET, THIN_HEADER + THIN_TEMPLATE);
 if (!CHECK) {
   console.log("验收：npx tsx tools/export-web-search-tools-staging.ts --check");
   console.log("VPS 落位（scp 后 sudo install 落位）：");
-  console.log("  staging/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）");
-  console.log("  staging/web-search-tools/search_web.ts → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名 search_web）");
+  console.log("  tools/generated/web-search-tools/web_search_impl.ts → /opt/agent-harness/workspace/.opencode/lib/web_search_impl.ts（纯真源 verbatim）");
+  console.log("  tools/generated/web-search-tools/search_web.ts → /opt/agent-harness/workspace/.opencode/tools/search_web.ts（薄入口，注册名=档名 search_web）");
 }

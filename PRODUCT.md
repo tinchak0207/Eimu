@@ -13,7 +13,7 @@ Next.js 15 (App Router), Tailwind CSS 3, shadcn/ui, TypeScript. 前端部署 Ver
 ## Users
 
 - C 端：非技术小白（mobile-first），必须登录后才可使用。
-- B 端：企业/团队批量生产用户，买大额币（如 10 万币）靠 Agent 批量生图；走 OpenAI 相容端点（/v1/*，Bearer sk-biz-…，存于 .env.biz-key，仅服务端）。
+- B 端：企业/团队批量生产用户，买大额币（如 10 万币）靠 Agent 批量生图；走 OpenAI 相容端点（/v1/*，Bearer sk-biz-…，存于 .local/state/secrets/.env.biz-key，仅服务端）。
 
 ## Product Purpose
 
@@ -43,7 +43,7 @@ AI 图片/影片生成 SaaS（中转站）。用户「许愿」→ Agent（codin
 
 ## Evidence on Hand
 
-- design-system/MASTER.md：设计系统总纲（Liquid Glass 材料、色板、字级、间距、反模式）——视觉权威。
+- docs/design-system/MASTER.md：设计系统总纲（Liquid Glass 材料、色板、字级、间距、反模式）——视觉权威。
 - tailwind.config.ts：iOS 26 token（ios.* 系统色、Dynamic Type 字级、continuous radius、spring easing、lg-appear/dismiss/shimmer）。
 - src/app/globals.css：lg-* 材料类别与 CSS 变数（--lg-blur / --lg-saturate / --lg-brightness…）及 legacy 别名。
 - 记忆档：2026-08-08-agent-frontend-design-rules.md（Agent 交互决策）、2026-08-12-rebrand-emu.md（品牌与套餐）。

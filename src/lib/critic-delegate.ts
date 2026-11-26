@@ -14,7 +14,7 @@
  *   ② 交付物栏位：verdict / issues / evidence / qc 四栏（CRITIC_DELIVERABLES，
  *      与 expert-registry critic 行 requiredFields 同源——本档为该清单唯一真源，
  *      registry 行与 persona 均 import，禁手抄第二份）。
- *   ③ 宪法注入：beastMode === true 时把 deploy-staging/expert-gateway/
+ *   ③ 宪法注入：beastMode === true 时把 services/expert-gateway/
  *      expert-constitution.md 原文注入 prompt 头；OFF 时一个字不多、档案不触碰。
  *      beastMode 由调用方经 expert-registry.readBeastMode(settings) 计算后传入——
  *      本档不 import expert-registry（registry → persona → delegate 单向依赖，
@@ -50,7 +50,7 @@ import {
 // ─────────────────────────────────────────── ① 委托单构造器
 
 /** 宪法落位稿路径（BEAST_MODE=ON 注入源；VPS gateway 同源引用）。 */
-export const EXPERT_CONSTITUTION_PATH = "deploy-staging/expert-gateway/expert-constitution.md" as const;
+export const EXPERT_CONSTITUTION_PATH = "services/expert-gateway/expert-constitution.md" as const;
 
 /** 交付字段白名单（审核官四区块）：expert-registry critic 行 requiredFields 与本档同源。 */
 export const CRITIC_DELIVERABLES = ["verdict", "issues", "evidence", "qc"] as const;
@@ -218,7 +218,7 @@ export type CriticPromptAssemblyResult =
 
 /**
  * 缺省宪法载入：读静态 import 的 src/lib/expert-gateway-assets.json 镜像
- * （Vercel 拿不到 deploy-staging/，见该 JSON 生成注释；VPS 侧可经 loadConstitution
+ * （Vercel 拿不到 services/，见该 JSON 生成注释；VPS 侧可经 loadConstitution
  * 整体替换）。镜像空资产抛错，由下方 catch 转 constitution_unavailable。
  */
 function defaultLoadConstitution(): string {

@@ -8,7 +8,7 @@
 - 版本 / commit：`872a58b`
 - 许可证：MIT License，Copyright (c) 2026 Kunpeng Contributors
 - 引入方式：源码逐行复制（白名单仅 import 路径改写），副本位于 `src/vendor-bridges/editor/`，随附的许可证副本见 `src/vendor-bridges/editor/LICENSE`。
-- 改动记录：`vendor/kunpeng/PATCHES.md`。
+- 改动记录：`tools/vendor/kunpeng/PATCHES.md`。
 - 完整许可证文本（摘自随附副本）：
 
 ```

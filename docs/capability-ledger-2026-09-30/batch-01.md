@@ -33,7 +33,7 @@
 - [模型与供应商] 对外模型可用性探测 — `GET /v1/model-status` 回所有 image+video 模型的可用性＋能力＋功能标注；只发 `GET {baseURL}/models` 不触发生成不扣费；结果模组级快取 60 秒 ｜ 证据: ec748a51
 - [模型与供应商] 对外通道标签不透露供应链 — 回应中的 endpointLabel 把内部 label（adobe2api/sub2api/池名等）归一成 primary/fallback，客户端拼不出上游供应链 ｜ 证据: 425ac035
 - [模型与供应商] sensenova-u1-fast 从供给面移除 — 生产版本同步时该模型自 `SUPPORTED_IMAGE_MODEL_IDS` 与模型目录删除，channel-registry 不再有 `sensenova` channel kind 与专用 baseURL ｜ 证据: 425ac035
-- [模型与供应商] PixAI pool bridge（上游池服务） — `pixai-pool/bridge`（app.py/server.py/pool_store.py）作为 PixAI 帐号池的本地服务面 ｜ 证据: 4860f1ed
+- [模型与供应商] PixAI pool bridge（上游池服务） — `.local/state/pixai-pool/bridge`（app.py/server.py/pool_store.py）作为 PixAI 帐号池的本地服务面 ｜ 证据: 4860f1ed
 
 ## 控制平面与计费
 

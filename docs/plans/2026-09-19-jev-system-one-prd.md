@@ -2,7 +2,7 @@
 
 > version: 1.0（2026-09-19 全量落地收口）
 > 定性：【能力建设】——保守修复纪律不适用；但动 gateway 生产件，遵守 scp→diff→deploy.sh 惯例。
-> key 落位：本地 `.env.jev`（600，gitignore `.env*` 已覆盖）＋ VPS `/opt/agent-harness/.env`。**key 明文永不入本档/git/memory。**
+> key 落位：本地 `.local/state/secrets/.env.jev`（600，gitignore `.env*` 已覆盖）＋ VPS `/opt/agent-harness/.env`。**key 明文永不入本档/git/memory。**
 >
 > **收口状态（2026-09-19）**：三刀全部上线＝**权威模式**（暴君裁定：防越狱/critic/路由不是 LLM 的决策，机器层执行，prompt 条款删除而非并存）。量级瘦身同日完成：playbook 1.8→2.0（32,608B→19,315B，**-41%**，三模板迁 `gateway/spec-templates.json` 由机器按任务分类注入子代理任务书）；workspace AGENTS.md 27,058B→23,044B（-15%，QC 修法表/film 配方/bash 白名单迁 `attach/` 两本手册按需载入）。E2E 全绿：越狱拦截 400/正常 202/`ROUTE_AUTO music confidence=1.00`/模板注入 journal 实锤/smoke 2/2/beast 复原 OFF。
 
@@ -69,18 +69,18 @@ AI 助理链路上所有「本质是分类/布尔」的语义判定（越狱/测
 |---|---|---|
 | VPS gateway `index.ts`/`subagent.ts`（真身，本地 deploy-staging 副本落后 42 行） | 三刀挂点 | **scp 下来→改→逐行 diff→scp 回→deploy.sh；只重启 gateway 不碰 opencode-server**（09-18 铁律：单独重启 opencode-server 会让 gateway SSE 盲眼 4 分钟） |
 | `src/lib/orchestrator-beast-frame.ts` | 帧瘦身（Phase 5，最后动）：判定类条款（expert 对照表、async 三条件、存货裁决规则）抽出，换一句「机器闸已执行，结果以注记注入」；条款原文降级为 playbook 附录兜底 | 动帧＝动 55k 前缀，独立 Phase 验证 cache_read 不退化 |
-| `deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md` | 对应条款改写「机器闸已执行」＋兜底句保留 | 既有条款零删改原则松绑为「改写＋附录保留」，版本号 1.9 |
+| `services/expert-gateway/orchestrator-dispatch-playbook.md` | 对应条款改写「机器闸已执行」＋兜底句保留 | 既有条款零删改原则松绑为「改写＋附录保留」，版本号 1.9 |
 | journal/记帐 | 新增 jev usage 栏（input/output tokens、题数、延迟、失败码） | 对齐 control-plane-billing 范式，先记量后扣费 |
 | 手册模板二【研究输入】 | 嵌入前消毒流程条款（刀2 挂点 B 的培训面） | 培训面与后端建设同步（PRD 无配套＝空中楼间铁律） |
 
 ## 4. 落地步骤（配方级，Phase 间可回滚）
 
 **Phase 0 key 落位（5 分钟）**
-- 本地：`.env.jev` 已存（600）。
-- VPS：`scp .env.jev root@<vps>:/opt/agent-harness/.env.jev`（部署 Phase 3 时一并做，先存本地即可）。
+- 本地：`.local/state/secrets/.env.jev` 已存（600）。
+- VPS：`scp .local/state/secrets/.env.jev root@<vps>:/opt/agent-harness/.env.jev`（部署 Phase 3 时一并做，先存本地即可）。
 
 **Phase 1 G1 客户端（本地，0 风险）**
-- `src/lib/jev-client.ts`＋mock 单测＋一发实弹 happy-path 测试（读 `.env.jev`，CI 外跑）；tsc 0 错。
+- `src/lib/jev-client.ts`＋mock 单测＋一发实弹 happy-path 测试（读 `.local/state/secrets/.env.jev`，CI 外跑）；tsc 0 错。
 
 **Phase 2 G3 阈值校准（本地评测，不碰生产）**
 - 用历史实锤档案跑标注集，产出各题阈值建议表，落 `docs/plans/jev-threshold-calibration.md`。

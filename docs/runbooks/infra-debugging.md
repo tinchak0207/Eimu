@@ -4,8 +4,8 @@
 
 ## VPS 访问（2026-08-21 起主用 SSH-over-443）
 
-- **主通道**：`bash .pixai-refresh/start-ssh443.sh`（幂等启动本地隧道）→ `node .dsh-ssh/exec-443.js "<命令>"`。链路：本机 127.0.0.1:22222 → ws 隧道 → `wss://store.tinchak0207.xyz/ssh` → nginx `/ssh` → gost `forward+ws://0.0.0.0:18083/127.0.0.1:22`（VPS systemd warp-proxy-gost，0.0.0.0 监听因 nginx 容器经网关 172.20.0.1 访问，UFW 已放行 172.16.0.0/12→18082/18083）→ sshd。**443 永通，连续 5 连间隔 1s 稳定，完全免疫 ISP 对 SSH 端口的 DPI 限流**
-- **旧通道 22443** 仍可用（`node .dsh-ssh/exec.js`，`ssh -i /home/lenovo/.ssh/new.pem -p 22443 ubuntu@43.172.85.76`）但连续 2-3 次即被 RST，仅低频兜底；22 端口已废弃（路径级封锁，不可修）
+- **主通道**：`bash .pixai-refresh/start-ssh443.sh`（幂等启动本地隧道）→ `node .local/tmp/ssh-diagnostics/exec-443.js "<命令>"`。链路：本机 127.0.0.1:22222 → ws 隧道 → `wss://store.tinchak0207.xyz/ssh` → nginx `/ssh` → gost `forward+ws://0.0.0.0:18083/127.0.0.1:22`（VPS systemd warp-proxy-gost，0.0.0.0 监听因 nginx 容器经网关 172.20.0.1 访问，UFW 已放行 172.16.0.0/12→18082/18083）→ sshd。**443 永通，连续 5 连间隔 1s 稳定，完全免疫 ISP 对 SSH 端口的 DPI 限流**
+- **旧通道 22443** 仍可用（`node .local/tmp/ssh-diagnostics/exec.js`，`ssh -i /home/lenovo/.ssh/new.pem -p 22443 ubuntu@43.172.85.76`）但连续 2-3 次即被 RST，仅低频兜底；22 端口已废弃（路径级封锁，不可修）
 - SCP 上传：`scp -i /home/lenovo/.ssh/new.pem -P 22443 -r <本地> ubuntu@43.172.85.76:<远程>`
 - gost 若偶发卡死（forward+ws 连接泄漏，症状=ws 隧道 up 但 SSH 握手失败），VNC `sudo systemctl restart warp-proxy-gost` 即恢复
 - Docker 已安装（docker.io + docker-compose-v2），工作目录 `/opt/`；旧 VPS `186.241.75.127` 已废弃

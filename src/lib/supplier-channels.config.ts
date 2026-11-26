@@ -366,7 +366,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
   // blender-modal（managed_pool，片X Modal L4）与 blender-cnb（relay）只埋桩不注册：
-  // 片X 未落盘（deploy-staging/blender-modal/ 不存在）、CNB 无实体节点——注册即虚报能力。
+  // 片X 未落盘（services/blender-modal/ 不存在）、CNB 无实体节点——注册即虚报能力。
   // NODES-PLAN §5：节点 ≥3 且异构＋需要场景档分发时才评估 Flamenco 3。
   //
   // 2026-09-27 暴君裁定（视频渠道重整）：metaso／tokenmix／cangyuansuanli／napi／

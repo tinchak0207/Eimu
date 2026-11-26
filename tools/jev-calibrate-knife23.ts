@@ -7,7 +7,7 @@ import { jevAsk } from "../src/lib/jev-client";
  */
 
 process.env.JEV_ENABLED = "true";
-process.env.TYPESAFE_API_KEY = readFileSync(".env.jev", "utf8").trim().split("=")[1]!;
+process.env.TYPESAFE_API_KEY = readFileSync(".local/state/secrets/.env.jev", "utf8").trim().split("=")[1]!;
 
 // ── 刀2 题库（与 jev-gate.ts 生产版同文）────────────────────────────────
 const INJECTION_QUESTIONS = {

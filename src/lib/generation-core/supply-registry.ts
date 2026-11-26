@@ -108,7 +108,7 @@ const blenderBridgeAdapter: SupplyAdapter = {
 };
 
 // harness TTS（2026-10-01）：同步调用「harness 闸道既有 TTS 端点」`POST {base}/v1/tts`
-//（deploy-staging/gateway/router.ts:531 → media-internal-routes handleTts；上游自 2026-08-30
+//（services/gateway/router.ts:531 → media-internal-routes handleTts；上游自 2026-08-30
 // 指向本机 edge-tts-proxy）。同步 adapter：无 provider task id，不进异步对帐；见
 // harness-tts-upstream.ts 档头（为何既有生图/视频轮子不能用）。
 const harnessTtsAdapter: SupplyAdapter = {

@@ -43,7 +43,7 @@
 
 | 轮子钉（源档） | 复制到 | 白名单栏位（数据源/文案/接入点） | 判定 |
 |---|---|---|---|
-| [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp)（27k★，执行协议/场景状态读回/错误形状） | `bridge/blender-bridge/` 执行器 | 协议讯息形状、场景 tree dump 格式；交互逻辑按 headless CLI 改写 | diff 除 headless 适配外逐行等价 |
+| [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp)（27k★，执行协议/场景状态读回/错误形状） | `services/blender-bridge/` 执行器 | 协议讯息形状、场景 tree dump 格式；交互逻辑按 headless CLI 改写 | diff 除 headless 适配外逐行等价 |
 | [arjun988/blender-skills](https://github.com/arjun988/blender-skills)（94 专业 skill：blockout→lookdev→render 管线配方） | 3D 导演 SKILL 的脚本配方库（移植 previz 子集 10–15 个） | 脚本模板全文、参数、阶段门禁文案 | cp 原文改白名单 |
 | `src/lib/director-engine/`（L1 引擎） | **不动**；P1 仅新增 glTF 载入入口 | engine.ts/types.ts 既有介面 | 禁改既有行为 |
 | `src/lib/harness-tool-registry.ts` 注册模式 | `blender_*` 工具族注册 | 既有 registry 栏位形状 | 同构复制 |
@@ -66,7 +66,7 @@
 - 产物：版本钉死 + 一页启动配方（进 runbook，不入 AGENTS.md）。
 
 ### P0-2 blender-bridge 执行器（核心后台件）
-- 新建 `bridge/blender-bridge/`：本地服务，收 `{bpy 脚本, 资产引用, 渲染参数}` → 起 Blender 进程执行 → 回 `{产物清单, 场景树摘要, stdout 尾段, 耗时}`。
+- 新建 `services/blender-bridge/`：本地服务，收 `{bpy 脚本, 资产引用, 渲染参数}` → 起 Blender 进程执行 → 回 `{产物清单, 场景树摘要, stdout 尾段, 耗时}`。
 - 轮子：blender-mcp 的指令/回执形状 + blender-skills 的管线脚本模板。
 - **沙箱红线**：`--factory-startup`、无网（进程级）、timeout（预设 300s）、磁碟配额、产物白名单路径。脚本只准写 workspace 目录。
 - 验收门：恶意脚本（`import urllib`/死循环/越路径写）三连测试全被拦；正常脚本出帧。

@@ -1,6 +1,6 @@
 # traditional-vs-eimu 依据表
 
-读取时间 2026-10-11 21:50 (UTC+8)。gateway 以 VPS `/opt/agent-harness/gateway/` 为准。本地 `deploy-staging/gateway/` 与 VPS md5 不同的文件：messages-gw.ts、subagent.ts、opencode-event-handler.ts、events-translate.ts、environment-facts.ts、types-gateway.ts；canvas-write-gate.ts 只在本地，VPS 上没有。下表这几份文件的行号都来自 VPS 文件，其余 gateway 文件两端 md5 相同。运行时底座以 VPS `/opt/agent-harness/workspace/` 为准，本地 `deploy-staging/opencode-runtime/AGENTS.md` 与 VPS 版本 md5 不同。
+读取时间 2026-10-11 21:50 (UTC+8)。gateway 以 VPS `/opt/agent-harness/gateway/` 为准。本地 `services/gateway/` 与 VPS md5 不同的文件：messages-gw.ts、subagent.ts、opencode-event-handler.ts、events-translate.ts、environment-facts.ts、types-gateway.ts；canvas-write-gate.ts 只在本地，VPS 上没有。下表这几份文件的行号都来自 VPS 文件，其余 gateway 文件两端 md5 相同。运行时底座以 VPS `/opt/agent-harness/workspace/` 为准，本地 `services/opencode-runtime/AGENTS.md` 与 VPS 版本 md5 不同。
 
 ## 传统 agent（对照基线，不对应本仓代码）
 | 节点 | 依据 |

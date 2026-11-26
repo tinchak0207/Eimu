@@ -160,7 +160,7 @@
 | 画布收盘闸＋覆盖率发版门 | 10-28 停用 | 函数保留不调用（`gateway-release.sh:684`） | `159c1c6e4` |
 | 实验底模切换 | 10-22 当天 revert | 以 VPS 运行时配置为准（本档未读线上，未查证） | `feee265c9` |
 | first_look 首句速出 | 10-29 revert | 已撤 | `7c5699316` |
-| 工程图（ProjectGraph）引擎 | 10-30 整树还原撤下 | `deploy-staging/gateway/project/` 只剩 `types.ts`/`constants.ts`/`contract-fixtures.json`（站点编译用）；`docs/architecture/project-graph.md`、`docs/specs/2026-10-29-eimu-7day-sprint.md` 已不在 HEAD | `4af310238`；mem `2026-11-01-mcp-p0-release`、`rollback-1028-cherrypick-1030` |
+| 工程图（ProjectGraph）引擎 | 10-30 整树还原撤下 | `services/gateway/project/` 只剩 `types.ts`/`constants.ts`/`contract-fixtures.json`（站点编译用）；`docs/architecture/project-graph.md`、`docs/specs/2026-10-29-eimu-7day-sprint.md` 已不在 HEAD | `4af310238`；mem `2026-11-01-mcp-p0-release`、`rollback-1028-cherrypick-1030` |
 | README 主口径「说出来就成片」/「剪辑和分镜已死」 | 10-23 起 main 改为「不用学提示词设计和分镜，现在你也是导演。」 | `image` 分支 README 与 `docs/CAPABILITIES.md`（标题「说出来，就成片。」）未同步 | `origin/main` `3bba66ac5`；`docs/CAPABILITIES.md` |
 
 ## 4. 现状（HEAD `36c23d818`，2026-11-03）

@@ -6,7 +6,7 @@
  * POST {supplier.baseUrl}/v1/execute、bridge 产物收敛成 SupplierGenerationOutput。
  * 上层（分拣/入库/对帐）不感知节点差异（NODES-PLAN §3.5）。
  *
- * 契约真源：bridge/blender-bridge/README.md
+ * 契约真源：services/blender-bridge/README.md
  *   POST /v1/execute {script, timeout_ms} →
  *     200 {ok:true, artifacts:[{path,bytes,kind}], scene_summary, stdout_tail, duration_ms, queued, queue_position}
  *     500 {ok:false, error, stdout_tail} ／ 429 {ok:false, error:"queue_full"}

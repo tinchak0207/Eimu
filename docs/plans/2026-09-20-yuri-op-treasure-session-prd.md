@@ -2,7 +2,7 @@
 
 > version: 1.0（2026-09-20）
 > 定性：【能力建设】——保守修复纪律不适用；刀 1/刀 2 动 gateway 生产件，遵守 scp→diff→`deploy.sh` 惯例，**只重启 gateway 不碰 opencode-server**。
-> 证据源：eimu.dev 生产会话 `ses_f47dc630effeDRKL3e9nkcDsMH`（2026-09-19 全程 289 则，opencode DB）＋ VPS `outputs/subagent/` 落盘交付。挖掘定案见 memory `yuri-op-treasure-session-mining-0920.md`。
+> 证据源：eimu.dev 生产会话 `ses_f47dc630effeDRKL3e9nkcDsMH`（2026-09-19 全程 289 则，opencode DB）＋ VPS `.local/outputs/agent/subagent/` 落盘交付。挖掘定案见 memory `yuri-op-treasure-session-mining-0920.md`。
 
 ## 0. 一句话终态（可度量）
 
@@ -22,7 +22,7 @@
 - `seedance-2.5-720p`：prompt 上限 **4000 字元**（4000→202、4001→400 `prompt_too_long`）；**28 币/秒**、时长上限 **29s 无 30s 档**；`last_24h=null` 仍标 available。
 - 条1（S01–S04）六槽逐字拼装 **4861 字元**（风格锚 ~340 字元 ×4 镜 = 1360 为超限主因，且任务书禁改）；条3a 3703 / 条3b 3559 可过。
 - 音频真源（`media-1789821225748-t6qbpy.m4a`，150.4854s）实测 **≈169.73 BPM**（自相关精修 169.728 / comb-filter 169.900），非规格 176；无可量测サビ能量台阶。
-- 唤醒链：装配方案落盘 `outputs/subagent/deepseek-v4.1-flash-潮汐绣线OP装配方案.md`（29.6KB/408 行），`subagent_status` 返回 not_found（run 记录过期）但产物在盘上。
+- 唤醒链：装配方案落盘 `.local/outputs/agent/subagent/deepseek-v4.1-flash-潮汐绣线OP装配方案.md`（29.6KB/408 行），`subagent_status` 返回 not_found（run 记录过期）但产物在盘上。
 - 已修勿重做：402 归因谬误（shuai 欠费人话表，0919 三刀已上线）；B key 绑 117（biz-key-binding-fix-117-0919）。
 
 ## 2. 建设能力（三刀）
@@ -30,7 +30,7 @@
 ### 刀 1 subagent 产物探测兜底（gateway，最小刀）
 
 - **痛点**：唤醒通知丢失 + run 记录过期 → `subagent_status` not_found → orchestrator 判「没跑完」→ 用户看到的是死气一小时。
-- **后端建设**：`subagent_status`（gateway `subagent.ts`）在 run 记录 not_found 分支增加落盘路径探测——按 run id 前缀扫 `outputs/subagent/<runId前8>*.md`，命中即在回应中带 `artifact_path`＋mtime＋字节数；orchestrator 端 prompt 修一句：「not_found 且带 artifact_path 时，产物已交付，直接验收盘上档案，勿重派」。
+- **后端建设**：`subagent_status`（gateway `subagent.ts`）在 run 记录 not_found 分支增加落盘路径探测——按 run id 前缀扫 `.local/outputs/agent/subagent/<runId前8>*.md`，命中即在回应中带 `artifact_path`＋mtime＋字节数；orchestrator 端 prompt 修一句：「not_found 且带 artifact_path 时，产物已交付，直接验收盘上档案，勿重派」。
 - **评测 ruler**：模拟 run 记录过期（删 gateway 记录不删落盘档）→ 问 status → 断言回应含 artifact_path；agent-evolve 真会话验收 orchestrator 不重派。
 - **全链生效定义**：一单落盘但唤醒丢失的 subagent，用户在下一轮询问时 30 秒内拿到产物路径，而非重跑。
 

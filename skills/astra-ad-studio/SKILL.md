@@ -108,7 +108,7 @@ Make one focused revision pass for concrete issues. Do not endlessly regenerate 
 Default campaign folder:
 
 ```text
-outputs/<campaign-slug>/
+.local/outputs/agent/<campaign-slug>/
 ```
 
 The final chat response should be short: identify the recommended direction, list the finished assets, and link to `ASTRA-AD-STUDIO-REPORT.md` with an absolute path so it opens directly in the workspace.

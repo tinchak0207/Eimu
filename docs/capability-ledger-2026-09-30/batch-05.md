@@ -114,23 +114,23 @@
 
 ## 非程式码能力
 
-- VPS／部署：`.vercelignore` 排除 200MB 影片产物（promo-video/out、artifacts 等）与 `promo-video/fonts/`（23MB 本机渲染输入）｜ 证据: 0651e7cd, 36ba61a2, e4c16950
-- VPS／部署：`.gitignore` 把 200MB 级影片产物（artifacts／promo-video/out）排除，让工作区回到可辨识状态 ｜ 证据: e4c16950
+- VPS／部署：`.vercelignore` 排除 200MB 影片产物（tools/promo-video/out、artifacts 等）与 `tools/promo-video/fonts/`（23MB 本机渲染输入）｜ 证据: 0651e7cd, 36ba61a2, e4c16950
+- VPS／部署：`.gitignore` 把 200MB 级影片产物（artifacts／tools/promo-video/out）排除，让工作区回到可辨识状态 ｜ 证据: e4c16950
 - VPS／部署：`deploy/vps/gateway-release.sh` 收进版控 ｜ 证据: e4c16950
 - 外部服务：new-api 管理面改走 TLS vhost `store.tinchak0207.xyz/newapi` 前缀（bare-IP 明文已 444 关闭）｜ 证据: 432ae6c8
 - 外部服务：上游 new-api 自助注册端点 `/api/user/register` 可由 RegisterEnabled 关闭；站点 OAuth 建号改走管理员 API 即为此准备 ｜ 证据: 1129196a
-- 运营流程：宣传片渲染链（`promo-video/`：audio.py、render.mjs、index.html、film.js、lib/shaders|ui|util、assets 26 素材）与三版封面（cover.html／cover-b／cover-c）；字型为本机渲染输入不入库 ｜ 证据: 36ba61a2
+- 运营流程：宣传片渲染链（`tools/promo-video/`：audio.py、render.mjs、index.html、film.js、lib/shaders|ui|util、assets 26 素材）与三版封面（cover.html／cover-b／cover-c）；字型为本机渲染输入不入库 ｜ 证据: 36ba61a2
 - 运营流程：站点展示资产进版控 — `public/showcase/cards`（768×1024 展示卡＝3D 卡堆贴图来源）、`cards-thumb`、`mascot` ｜ 证据: e4c16950
 - 运营流程：README 首屏宣传片展示（加片→双片并排→换新片只留一条全宽）｜ 证据: 8897511b, 64d404b1, 696cec9a, 6eb5e08d
 - 运营流程：宣传片片源换 1080p 分享版（1920x1080／30fps／6.76Mbps／43.2MB，faststart moov 在 mdat 前），海报重抽；代价＝未登入访客多下 33MB ｜ 证据: 47c80991
-- 运营流程：投放素材链接带渠道参数（promo-video/out/bilibili.md、wechat.md）｜ 证据: 639bd737
+- 运营流程：投放素材链接带渠道参数（tools/promo-video/out/bilibili.md、wechat.md）｜ 证据: 639bd737
 - 运营流程：通知机制**不交付**运营配套（无 seed／cron，不 create 即永远空清单，落地后系统行为与交付前等价）｜ 证据: ee89433b
 - 运营流程：SEO 交付面 — 20 条 301、sitemap 62 条真源、IndexNow 金钥档、robots 放行九个 AI 爬虫、llms.txt 页面清单 ｜ 证据: dc16ff3d, e7917b3b, d58eba66
 - 运营流程：技能库与 MCP 的页面清单同步进 sitemap 与 llms.txt ｜ 证据: eca25f27, 017cbc0b, b49c7401
 
 ## 边界与拒绝
 
-- 闸道实体解析 fail-open 硬契约 — `deploy-staging/gateway/entity-resolve.ts` 薄客户端：零 token 零 HTTP、TTL 30s、timeout 6s，任何失败回原文、永不阻断生成；warn 只印长度与 status ｜ 证据: 7f9dbe4e
+- 闸道实体解析 fail-open 硬契约 — `services/gateway/entity-resolve.ts` 薄客户端：零 token 零 HTTP、TTL 30s、timeout 6s，任何失败回原文、永不阻断生成；warn 只印长度与 status ｜ 证据: 7f9dbe4e
 - 实体解析不自动锁卡 — `mergeTokenReferencedCards` 不自动锁任何卡，锁定语义不动；`CanvasEmbed` 明确关闭注入的呼叫端（传 `{cards:[]}`）保持关闭不并入 ｜ 证据: 7f9dbe4e
 - 畸形 token 只诊断不改写 — `findMalformedEntityTokens` 只回报空名称／缺右括号／未知种类；`ENTITY_TOKEN_PATTERN` 与 `parseEntityTokens` 逐字未动，原文照留 ｜ 证据: 7f9dbe4e
 - 模板落卡有明确不标清单 — 分镜／影片／剪辑／门禁／工具卡一律不标 `emitsEntity`（免落重复卡）｜ 证据: 7f9dbe4e

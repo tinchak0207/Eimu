@@ -13,7 +13,7 @@
 
 | Spec | 轮子钉（kunpeng 源档） | 复制到（我们） | 白名单（只准改这些） | 判定 |
 |---|---|---|---|---|
-| A1 风格资产载入 | `aigc-memory/style-library/index.json`（440KB，161 条四件套：promptTemplate/visualDNA/cameraLanguage/promptSuffix）+ `src/lib/styleLibrary.ts`（TS 型别与载入） | `vendor/kunpeng/style-library/` 原样 + 我们 loader | 无（资料契约一行不动） | diff 等价；161 条全量载入 |
+| A1 风格资产载入 | `aigc-memory/style-library/index.json`（440KB，161 条四件套：promptTemplate/visualDNA/cameraLanguage/promptSuffix）+ `src/lib/styleLibrary.ts`（TS 型别与载入） | `tools/vendor/kunpeng/style-library/` 原样 + 我们 loader | 无（资料契约一行不动） | diff 等价；161 条全量载入 |
 | A2 风格→提示词改写 | `src/lib/styleRewriter.ts`（DNA+镜头语言=system prompt，模板=输出范例，走 LLM 改写） | `src/vendor-bridges/style/` 原样 | LLM 呼叫端点/金钥注入点 | diff 除白名单逐行等价；试错轮数 ≤1 |
 | A3 风格卡 UI | `StyleLibraryPicker.tsx`（分类页签+搜寻+onApply 交互） | 挂载到工作台 | 事件汇流排名称、import 路径 | 交互逻辑 diff 等价 |
 | A4 提交前门禁 | `aigc-memory/checklists/pre-generation.md`（17 条规则） | 内容原样复制；转 agent 门禁规则 = 桥层改编 | 只准转格式，不准改规则语义 | 17 条逐一对应 |
@@ -64,7 +64,7 @@
 ## 附录 A：Vendor 规则（执行时强制）
 
 - 源：pengfeiqiao/kunpeng，pin commit `872a58b`（2026-08-27）；调查存档 `docs/2026-08-27-kunpeng-symmetry-survey.md`
-- 复制 = 整档复制，白名单之外一行不许改；每笔白名单改动记 `vendor/kunpeng/PATCHES.md`（档:行 → 改前/改后 → 理由）
+- 复制 = 整档复制，白名单之外一行不许改；每笔白名单改动记 `tools/vendor/kunpeng/PATCHES.md`（档:行 → 改前/改后 → 理由）
 - 验收门：`git diff` 对照源仓库，过滤白名单后逐行等价；不等价 = 没做完，不许交货
 - 挂载点：`AgentToolRegistry.register()`（扩展点已有测试）；产出走 `canvas.ops`；计费走三阶段；B 端 `/v1/audio/transcriptions`（verbose_json 带词级）+ `/v1/audio/speech`
 - 风险：MIT 合规（THIRD-PARTY-NOTICES 追加）；素材图商用前确认授权（index.json 文字无碍）；groq 缺 blank_duration → 词间隙/silencedetect 降级（kunpeng 现成 fallback，不新发明）

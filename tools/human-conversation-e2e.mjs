@@ -6,7 +6,7 @@
 // 单元测试绿灯、workflow_write 覆盖率、自签 QC、模型编出来的句子，都不能代替本脚本。
 //
 // 用法：node tools/human-conversation-e2e.mjs [--only=id,id] [--no-spend]
-// 密钥从仓库根 .env.biz-key 读，不打印。证据写到 /tmp/human-e2e-<时间>/。
+// 密钥从仓库根 .local/state/secrets/.env.biz-key 读，不打印。证据写到 /tmp/human-e2e-<时间>/。
 
 import fs from "node:fs"
 import path from "node:path"
@@ -24,7 +24,7 @@ const ONLY = new Set((process.argv.find((a) => a.startsWith("--only=")) || "").s
 const NO_SPEND = process.argv.includes("--no-spend")
 
 function loadKey() {
-  const raw = fs.readFileSync(path.join(ROOT, ".env.biz-key"), "utf8")
+  const raw = fs.readFileSync(path.join(ROOT, ".local/state/secrets/.env.biz-key"), "utf8")
   const key = raw.match(/sk-biz-[A-Za-z0-9_-]+/)?.[0]
   if (!key) throw new Error("找不到 sk-biz key")
   return key

@@ -340,7 +340,7 @@ export interface CanvasNodeMetadata {
   // ── 模板交付自动落卡（WS11 收口，2026-09-24；保留键，型别层具名）──
   /**
    * 本节点交付物自动落成的实体标记（保留键）。真源＝gateway 模板节点的
-   * `defaults.emitsEntity`（`deploy-staging/gateway/workflow-templates/*`），
+   * `defaults.emitsEntity`（`services/gateway/workflow-templates/*`），
    * `expandTemplate` spread 进节点 metadata 后随 SSE `canvas.node.created/updated` 落地；
    * 画布侧据此自动建卡（`src/lib/agent-output-cards.ts` 的 `emittedEntityOf`）。
    *

@@ -22,16 +22,16 @@
 ## 2. 三个工作流（各自独立 worktree，文件不交叉）
 | 流 | worktree／分支 | 拥有的文件 | 不许碰 |
 |---|---|---|---|
-| A 网关＋运行时 | `~/Documents/image-wt-mem1106-a`／`memory/1106-a` | `deploy-staging/gateway/**`、`deploy-staging/opencode-runtime/**`（含 `opencode.json`、tools、AGENTS） | `src/**` |
-| B 站点＋UI＋repo store | `~/Documents/image-wt-mem1106-b`／`memory/1106-b` | `src/**`（含 `src/lib/agent-memory-store/**`、`src/app/api/**`、`src/components/**`） | `deploy-staging/**` |
-| C 检索模块＋基准 | `~/Documents/image-wt-mem1106-c`／`memory/1106-c` | 新建 `deploy-staging/gateway/chat-history-search.ts`（及其 test）、`tools/memory-bench/**` | 其余全部 |
+| A 网关＋运行时 | `~/Documents/image-wt-mem1106-a`／`memory/1106-a` | `services/gateway/**`、`services/opencode-runtime/**`（含 `opencode.json`、tools、AGENTS） | `src/**` |
+| B 站点＋UI＋repo store | `~/Documents/image-wt-mem1106-b`／`memory/1106-b` | `src/**`（含 `src/lib/agent-memory-store/**`、`src/app/api/**`、`src/components/**`） | `services/**` |
+| C 检索模块＋基准 | `~/Documents/image-wt-mem1106-c`／`memory/1106-c` | 新建 `services/gateway/chat-history-search.ts`（及其 test）、`tools/memory-bench/**` | 其余全部 |
 
 规则：只 `git add` 自己拥有的路径；提交信息中文；不部署、不碰生产（部署由编排者最后统一做）；不动 `AGENTS.md`。
 
 ## 3. 契约
 
 ### C1 历史检索模块（C 实现，A 接线）
-文件 `deploy-staging/gateway/chat-history-search.ts`，纯函数＋注入式 DB（bun:sqlite 与 node:sqlite 都能跑，接口只用 `exec/prepare(...).run/all/get`），不 import 网关其它模块。
+文件 `services/gateway/chat-history-search.ts`，纯函数＋注入式 DB（bun:sqlite 与 node:sqlite 都能跑，接口只用 `exec/prepare(...).run/all/get`），不 import 网关其它模块。
 ```ts
 export interface HistoryTurn { ownerKey: string; sessionId: string; turnIdx: number; role: "user" | "assistant"; text: string; ts: number /* ms */; sessionTitle?: string }
 export interface HistoryHit { sessionId: string; sessionTitle?: string; turnIdx: number; ts: number; role: "user"|"assistant"; score: number; snippet: string /* 命中轮 ± 邻轮，已截断 */ }
@@ -53,7 +53,7 @@ export function searchHistory(db: Db, q: { ownerKey: string; query: string; now?
 6. **用量回写**：被注入／被 memory_recall 命中的 private 文档，节流（同 doc 10 分钟一次，批量）调用 repo `POST /api/agent/memory/touch`（HMAC，见 C3）。
 7. **curator 脱敏**：批次送 LLM 前对 transcript 做 secret 正则脱敏（`sk-…`、`Bearer …`、`password=…`、私钥块等 → `[REDACTED_SECRET]`）；`memory_generate=false` 的 owner 与临时会话不进候选。
 8. 新增网关端点（均需网关既有 Bearer 鉴权，owner 取自 key）：`GET /agent/v1/memory/history/status`、`DELETE /agent/v1/memory/history`（清空该 owner 全部历史索引）。
-9. 测试：每个新模块有 bun test（owner 隔离、开关、临时会话、回填节流、脱敏）；`bash deploy-staging/vps-tools/run-tests.sh <file>` 通过。
+9. 测试：每个新模块有 bun test（owner 隔离、开关、临时会话、回填节流、脱敏）；`bash services/vps-tools/run-tests.sh <file>` 通过。
 
 ### C3 站点（B 实现）
 全部走 `resolveSkillOwner` 同款身份（`resolveAgentCaller`＋`deriveMemoryOwnerKey`）。
@@ -65,7 +65,7 @@ export function searchHistory(db: Db, q: { ownerKey: string; query: string; now?
 - 网关→站点内部：`POST /api/agent/memory/touch`（HMAC，body `{ownerKey, ids[]}`，store 新增 `useCount`、写 `lastUsedAt`）；`POST /api/agent/memory/forget`（HMAC，`{ownerKey, id}` 硬删，供 `memory_forget` 工具）。
 - 前端：`MyMemoriesDialog.tsx`（沿用 MySkillsDialog 的 lg-sheet 风格）——列表＋搜索＋行内编辑＋删除＋「清空全部」二次确认＋导出＋顶部两个开关（「使用记忆」＝`memory_use`、「自动记录新记忆」＝`memory_generate`，读写走 `getAgentSettings/saveAgentSettings`）＋一个「清空历史对话索引」按钮（调 `DELETE /api/agent/memory/mine/history`，站点薄壳转发网关 `DELETE /agent/v1/memory/history`；`history/status` 同理转发为 `GET /api/agent/memory/mine/history`，用于显示「已索引 N 段对话」），入口放 `AgentSettingsPopover`；新建会话区域加「临时对话」开关（`temporary: true` 透传到 `POST /api/agent/sessions`，会话列表显示「临时」徽标）。文案简体中文。
 - private 注入侧：`buildMemoryInjection` 不再只取 8 条，改取目录＋条数上限由网关 C2.5 决定；repo 暴露 `GET /api/agent/memory/private-corpus`（HMAC）供网关取某 owner 的 active private 文档全集（≤500 条，含 body）——网关语料缓存用。
-- 测试：repo 端 `npx tsx --test` 覆盖路由（owner 隔离、硬删除、配额、HMAC、临时标志透传）；UI 用 `eval-visual-replay/` 现成脚本截图（桌面＋手机宽）。
+- 测试：repo 端 `npx tsx --test` 覆盖路由（owner 隔离、硬删除、配额、HMAC、临时标志透传）；UI 用 `tools/qa/visual-replay/` 现成脚本截图（桌面＋手机宽）。
 
 ### C4 基准（C 实现）
 - 数据：`~/bench-sources/longmemeval/longmemeval_s_cleaned.json`（500 题，已下载）与 `longmemeval_oracle.json`。

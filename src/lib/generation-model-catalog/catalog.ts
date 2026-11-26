@@ -535,7 +535,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: false,
   },
 
-  // ── blender 节点能力标签（2026-09-06 片AA，照 deploy-staging/blender-nodes 稿 §C）。
+  // ── blender 节点能力标签（2026-09-06 片AA，照 services/blender-nodes 稿 §C）。
   // blender_bridge 供应商（blender-local 本机桥）认领的 capability model_id——模型名
   // 即引擎标签（eevee=previz 存活配方 samples=1+RT off、cycles=品质档）。不入
   // SUPPORTED_* 列表 → C 端选单不可见（同 TTS/AV 服务条目先例）；ratios/resolutions

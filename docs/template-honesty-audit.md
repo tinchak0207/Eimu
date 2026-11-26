@@ -184,7 +184,7 @@
 
 | # | 侦查点 | 方法 | 证据 | 结论 |
 |---|---|---|---|---|
-| ① | pixai-pool bridge（`pixai-pool/bridge/app.py`） | 通读端点面 + grep `train\|finetune\|lora` | 档头自述「OpenAI-compatible /v1/images/generations in front of the PixAI pool」，仅 `generate_image/handle_generation/run_generation` 生图路径；全档零 train/finetune/lora 匹配 | 无训练能力（纯生图代理） |
+| ① | pixai-pool bridge（`.local/state/pixai-pool/bridge/app.py`） | 通读端点面 + grep `train\|finetune\|lora` | 档头自述「OpenAI-compatible /v1/images/generations in front of the PixAI pool」，仅 `generate_image/handle_generation/run_generation` 生图路径；全档零 train/finetune/lora 匹配 | 无训练能力（纯生图代理） |
 | ② | pixai 官方 API（`api.pixai.art`，pool token 只探不练） | REST GET 探 `/v2/trainings` `/v2/training` `/v2/lora-trainings` `/v2/training-jobs` `/v2/models`；GraphQL introspection + 训练字段名探测（`trainingList`/`loras`/`myTrainings`/`userTrainings`） | REST 五路径全 404；GraphQL introspection 回 400（禁用），字段探测全回 `Cannot query field ... on type "Query"`（建议被闸道 `<redacted>` 遮蔽）；token 认证被接受（非 401），排除鉴权误判 | 无可编程训练端点 |
 | ③ | 站点 repo（`src/app/api/`） | grep `train\|finetune\|lora` 路由 | 仅 `lora-models/route.ts`（GET 转发 bridge `/v1/lora-models` 社群 LoRA **目录**）与 `lora-preferences/route.ts`（用户 LoRA **偏好**）；`use-cases/base-training.ts` 为展示文案非训练码；无任何提交训练的路由 | 无训练通道 |
 

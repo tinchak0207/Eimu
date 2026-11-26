@@ -25,7 +25,7 @@ export interface RemoteOptions {
   helper: string;
 }
 
-export const DEFAULT_HELPER = ".dsh-ssh/exec-443.js";
+export const DEFAULT_HELPER = ".local/tmp/ssh-diagnostics/exec-443.js";
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 export function defaultRemoteOptions(cwd = process.cwd()): RemoteOptions {

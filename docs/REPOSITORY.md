@@ -1,62 +1,85 @@
-# 仓库导航
+# 仓库目录
 
-先按任务进入下面的目录。目录名含 `staging`、日期很旧，或被站点发布排除，都不等于已经废弃。
+根目录按职责组织。产品代码、发布配置、维护工具、文档和本机工作资料分开。
 
-| 要改什么 | 从哪里看 |
-| --- | --- |
-| 页面、接口路由 | `src/app/`，接口在 `src/app/api/` |
-| 界面组件 | `src/components/` |
-| 站点业务逻辑、供应商与代理 | `src/lib/` |
-| Agent 网关、会话与调度 | `deploy-staging/gateway/index.ts` 及同目录模块 |
-| Agent 工具、提示词、插件 | `deploy-staging/opencode-runtime/` 的 `tools/`、`lib/`、`skills/`、`plugin/` 与配置 |
-| 生成任务后台执行 | `worker/generation-worker.ts`，根 `package.json` 的 `generation:worker` 指向这里 |
-| 数据库结构与迁移 | `db/migrations/`；执行入口查根 `package.json` 的 `ops:migrate`、`generation:migrate` |
-| 发布与基础设施配置 | `deploy/`，主要发布入口在 `deploy/vps/` |
-| 微信小程序 | `miniapp/`，独立 `package.json`，Taro 构建 |
-| 桌面端与本机能力 | `desktop/`，独立 `package.json`，Electron 打包 |
-| 专项工作流与技能资产 | 根 `skills/`；不要与下面的 Agent 运行时技能混为一份 |
-| 历史设计、旧方案 | `docs/archive/`，作为背景材料查阅，不据此认定当前行为 |
-
-`deploy-staging/gateway/` 是网关发布脚本实际打包的源码，不能整目录当临时文件删除。`gateway-release.sh` 直接从提交执行 `git archive` 打包，运行时需要的 `nanoid` 及其命令入口共 **26 个文件**仍保留跟踪。`@types/node`、`bun-types`、`undici-types` 共 **508 个开发类型文件**只退出版本跟踪，本地实体保留；新工作区或 CI 可执行 `npm install --prefix deploy-staging/gateway`，按该目录包清单恢复开发依赖。不要把开发类型与发布运行时依赖一起清空。
-
-Agent 运行时技能在 `deploy-staging/opencode-runtime/skills/`，`opencode-release.sh` 的发布范围明确包含它，并安装到服务端 `.opencode`。根 `skills/` 是另一组仓库资产；控面预构建脚本也包含根 `skills/`。修改某个技能前，先查调用方和对应发布范围，不能认定两处自动同步，也不要假设存在根 `runtime/skills/`。
-
-## 发布入口只在需要发布时查阅
-
-| 发布对象 | 查阅脚本 |
-| --- | --- |
-| 自托管站点 | `deploy/vps/site-release.sh` |
-| 控面 API 与 worker 的离机预构建发布 | `deploy/vps/control-plane-prebuilt-release.sh` |
-| Agent 网关 | `deploy/vps/gateway-release.sh` |
-| Agent 工具与运行时技能 | `deploy/vps/opencode-release.sh` |
-
-这些是源码入口，不表示已经发布或与线上一致。先读脚本顶部用法与发布约束；导航整理不执行它们。旧 `deploy/vps/deploy-control-plane.sh` 的 `deploy` 分支已硬停用，不能拿它在生产主机原地全量构建。
-
-## 限定范围找代码
-
-根目录同时存在依赖、媒体和历史工作区。不要使用 `rg --hidden --no-ignore .` 扫整棵目录。先列出相关的已跟踪文件，再在明确目录内搜索：
-
-```bash
-# 只看产品源码的文件清单
-git ls-files -- src/app src/components src/lib worker db
-
-# 按症状查站点
-rg -n '关键词' src/app src/components src/lib
-
-# 按症状查网关与 Agent 运行时，排除依赖和服务缓存
-rg -n -g '!**/node_modules/**' -g '!**/vendor/**' -g '!**/services/**' \
-  '关键词' deploy-staging/gateway deploy-staging/opencode-runtime
-
-# 查发布链对某个目录的引用
-rg -n 'opencode-runtime|git archive' deploy/vps
+```text
+image-app/
+├── src/                 网页端页面、组件和业务逻辑
+├── public/              网页公开静态资源
+├── apps/
+│   ├── desktop/         Electron 桌面端
+│   └── miniapp/         微信小程序
+├── services/
+│   ├── gateway/         Agent 网关、会话与调度
+│   ├── opencode-runtime/ Agent 工具、插件与运行时技能
+│   ├── blender-bridge/  本机 Blender 桥
+│   ├── mcp/             独立 MCP 服务包
+│   └── …                各服务自己的源码和包配置
+├── worker/              生成任务执行入口
+├── db/                  数据库结构和迁移
+├── deploy/              发布脚本、镜像与基础设施配置
+├── tools/
+│   ├── generated/       导出工具的中间稿；不是另一份运行时真源
+│   ├── promo-video/     宣传片制作源码
+│   ├── qa/              本机验收工具
+│   ├── plugins/         辅助插件项目
+│   └── vendor/          外部工具与补丁说明
+├── skills/              仓库技能资产
+├── docs/
+│   ├── design-system/   品牌与设计规范
+│   ├── reports/         报告
+│   ├── research/        研究资料
+│   └── archive/         冻结历史，不作为当前实现说明
+└── .local/              本机缓存、状态、临时工作和产物，不入库
 ```
 
-根 `package.json` 管站点启动和通用运维入口；小程序、桌面端各有自己的包脚本。根 `tsconfig.json` 排除了 `miniapp/`、`deploy-staging/` 等目录，站点类型检查不覆盖整个仓库。
+`.git`、`.github`、`.agents`、`.claude`、`.codex`、`.vercel` 是工具约定的元数据；`node_modules` 是依赖，不是业务分区。
 
-## 本地杂物与恢复
+## 从任务找到入口
 
-凭证、缓存、日志和生成产物按现有 `.gitignore` 处理，不放进源码目录。一次性补丁放 `.patch-staging/`，记忆队列放 `.memory-queue/`；两处只用于本地暂存，已明确忽略，不能存放唯一一份功能实现。需要长期维护的代码应放到上表对应入口。
+| 任务 | 入口 |
+| --- | --- |
+| 页面或站内 API | `src/app/` |
+| 界面组件 | `src/components/` |
+| 站点业务与供应商 | `src/lib/` |
+| Agent 会话和调度 | `services/gateway/index.ts` |
+| 工具、插件、提示词、运行时技能 | `services/opencode-runtime/` |
+| 生成队列 | `worker/generation-worker.ts` |
+| 网页开发 | 根目录 `npm run dev` |
+| 桌面端、小程序、MCP 包 | 在 `apps/desktop`、`apps/miniapp`、`services/mcp` 使用各自包脚本 |
 
-`.gitignore` 管版本跟踪，`.zcodeignore` 管该工具的检索，`.vercelignore` 管站点上传，三者作用不同。被忽略的文件仍可能占磁盘，也可能包含有效数据；不要用 `git clean -fdx` 清理共享工作区。
+根 `skills/` 与运行时 `services/opencode-runtime/skills/` 各有调用与发布范围，不自动同步。`tools/generated/music-tools/` 含受保护的历史差异，导出器的 preserve/known-drift 规则继续有效，不能拿中间稿覆盖运行时。
 
-2026-11-26 本轮移出工作区的历史材料保存在仓库外的 `/home/lenovo/Documents/image-app-retired-20261126/`，恢复时先查该目录清单。旧本地分支的原始 ref、SHA 和恢复命令见其中 `branches.tsv`，提交由 `refs/archive/workspace-cleanup-20261126/` 保留；这次没有删除任何 worktree。其他分支、worktree 或日期旧的目录，未经过引用与数据检查不能视为废弃。
+## 发布入口
+
+- 站点：`deploy/vps/site-release.sh`
+- 控面 API 和 worker：`deploy/vps/control-plane-prebuilt-release.sh`
+- 网关：`deploy/vps/gateway-release.sh`
+- 工具与运行时技能：`deploy/vps/opencode-release.sh`
+
+源码已经归入 `services/`，线上 `/opt/agent-harness/…` 身份不随仓库目录改名。本次不部署或重启。发布前必须提交完整候选；不要拿工作区碎片发布。旧控面原地构建入口仍保持停用。
+
+## 独立项目与运行数据
+
+- 音频服务和评分实验室：`/home/lenovo/Projects/eimu-audio-lab`，独立 Git、模型源码、依赖锁和协议。
+- WorkBuddy 构建项目：`/home/lenovo/Projects/workbuddy-desktop-linux`，保留原 Git 和未提交工作，与 Eimu 源码无关。
+- 公共资产：`$XDG_CACHE_HOME/eimu/assets`，默认 `~/.cache/eimu/assets`；可用绝对路径 `EIMU_ASSET_CACHE_DIR` 覆盖。
+- Blender 工程：`$XDG_DATA_HOME/eimu/blender`，默认 `~/.local/share/eimu/blender`；既有 `BLENDER_WORK` 覆盖仍有效。
+
+旧 `bridge/blender-bridge`、`deploy-staging/yue2-modal`、`deploy-staging/blender-bridge-tunnel` 和数据链接仅供尚在运行的本机进程兼容。新源码与发布脚本使用新目录；不能再往这些旧入口添加功能。`.pixai-refresh` 是仍在运行的本机刷新与 SSH 隧道入口，保留其稳定路径。
+
+## 搜索与添加文件
+
+先选职责，再搜具体目录：
+
+```bash
+rg -n '关键词' src
+rg -n '关键词' services/gateway services/opencode-runtime -g '!**/node_modules/**'
+git ls-files -- apps services deploy tools docs
+```
+
+站点类型入口明确限定 src、维护工具、worker 和根构建配置；文档中的冻结源码、独立客户端、服务与本机资料不参与站点编译。它们被排除，不表示这些包没有自己的构建要求。文档和源码之间的路径以当前目录为准；`docs/archive/` 的原文保留旧路径作为历史证据。
+
+新目录先归入上面的已有职责。临时补丁进 `.local/tmp/patch-staging`，记忆队列进 `.local/state/memory-queue`，截图和生成输出进 `.local/outputs`。根目录不再新增以日期、模型名、`eval-*`、`tmp-*` 命名的并列工作区。
+
+根目录仅保留工具自动发现的构建配置、项目入口说明和 Next.js 自动读取的 `.env.production.local`。旧视频与导出包在 `.local/outputs/`；临时脚本在 `.local/tmp/`；凭证副本在权限受限的 `.local/state/secrets/`，维护工具已改用新路径。

@@ -4,13 +4,13 @@ import { jevAsk } from "../src/lib/jev-client";
 /**
  * Phase 2 阈值校准（PRD §4 Phase 2）：用 09-15 round2 实锤档案当 ground truth，
  * 对 brief_honesty（测谎）与 field_substance（空壳栏）两题打分，产出阈值建议表。
- * 素材真源：eval-2026-op-theme/round2/（5 路【交付闸门·未达标】＋「全部跑通」简报）。
+ * 素材真源：.local/experiments/op-theme/round2/（5 路【交付闸门·未达标】＋「全部跑通」简报）。
  */
 
 process.env.JEV_ENABLED = "true";
-process.env.TYPESAFE_API_KEY = readFileSync(".env.jev", "utf8").trim().split("=")[1]!;
+process.env.TYPESAFE_API_KEY = readFileSync(".local/state/secrets/.env.jev", "utf8").trim().split("=")[1]!;
 
-const DIR = "eval-2026-op-theme/round2";
+const DIR = ".local/experiments/op-theme/round2";
 
 function read(p: string): string {
   return readFileSync(`${DIR}/${p}`, "utf8");

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# drive-to-song.sh <BRIEF_ID> [MAX_ROUNDS] —— 自主设计 Bench 第二/三阶段：一路推到真的出曲。
+#
+# 为什么要循环：agent 会**连续出多张确认卡**（出曲确认 → 开工确认 → …），
+# 每张卡的选项文案都不一样，所以不能在开头一次性 --confirm yes；必须每轮
+# 读最新的 question.request，取它自己的推荐项，--resume 补进去，直到 audio.done 出现。
+# 这等同真实用户在界面上连点几次「推荐」。
+set -uo pipefail
+REPO=/home/lenovo/Desktop/image-app
+D=$REPO/bench/music-bench/arms/design-bench
+ID="${1:?usage: drive-to-song.sh <BRIEF_ID> [MAX_ROUNDS]}"
+MAX="${2:-6}"
+PICK="$D/pick_answer.py"
+
+for r in $(seq 1 "$MAX"); do
+  # 合并已有事件，判断是否已出曲 / 是否还有待答卡
+  read -r AUDIO OPT <<<"$(python3 "$PICK" "$D" "$ID")"
+  if [ "$AUDIO" != "0" ]; then echo "id=$ID 已出曲 audio.done=$AUDIO（第 $r 轮）"; break; fi
+  if [ -z "$OPT" ]; then echo "id=$ID 无待答卡、也无产出，停在第 $r 轮"; break; fi
+
+  SID=$(python3 - "$D" "$ID" <<'PY'
+import glob, json, os, sys
+d, i = sys.argv[1], sys.argv[2]
+files = glob.glob(f"{d}/{i}-events*.json")
+print(json.load(open(max(files, key=os.path.getmtime), encoding="utf-8")).get("sessionId") or "" if files else "")
+PY
+)
+  [ -n "$SID" ] || { echo "id=$ID 拿不到 session_id"; exit 9; }
+
+  echo "id=$ID 第 $r 轮  resume sid=$SID  msg=「$OPT」"
+  cd "$REPO" || exit 9
+  # 用**普通消息**而不是 --answer：实测 --answer 在多轮里消费不掉卡片 request_id，
+  # 会话会原地重放不出曲；把推荐项文案当用户消息发出去才推得动。
+  timeout 1800 ./node_modules/.bin/tsx "$D/run-idx0.ts" --keep --resume "$SID" \
+    --json "$D/${ID}-events-r${r}.json" "$OPT" > "$D/${ID}-run-r${r}.log" 2>&1
+  echo "  resume_exit=$?"
+done
+
+node "$D/extract-all.mjs" "$(ls -t $D/${ID}-events*.json | head -1)" "$D/out" "$ID"

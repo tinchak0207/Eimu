@@ -119,8 +119,8 @@ canvas 侧：每次变更后 gateway 同步发 `canvas.node.created`（首次）
 
 ## 6. 标准操作配方（贴进每个 subagent spec，不许现场考古）
 
-- SSH：`bash .pixai-refresh/start-ssh443.sh` → `node .dsh-ssh/exec-443.js "<cmd>"`；备援 `ssh -i ~/.ssh/new.pem -p 22443 ubuntu@43.172.85.76`
-- 传档：`node .gateway-work/sftp-put-443.js <local> <remote>`（内建 md5 验 MATCH）；或 `scp -S "$SSH_BIN" -i ~/.ssh/new.pem -P 22443 <local> ubuntu@43.172.85.76:/tmp/`（SSH_BIN=/var/lib/flatpak/runtime/org.freedesktop.Platform/x86_64/25.08/*/files/bin/scp；漏 -S 必失败）
+- SSH：`bash .pixai-refresh/start-ssh443.sh` → `node .local/tmp/ssh-diagnostics/exec-443.js "<cmd>"`；备援 `ssh -i ~/.ssh/new.pem -p 22443 ubuntu@43.172.85.76`
+- 传档：`node .local/state/gateway/sftp-put-443.js <local> <remote>`（内建 md5 验 MATCH）；或 `scp -S "$SSH_BIN" -i ~/.ssh/new.pem -P 22443 <local> ubuntu@43.172.85.76:/tmp/`（SSH_BIN=/var/lib/flatpak/runtime/org.freedesktop.Platform/x86_64/25.08/*/files/bin/scp；漏 -S 必失败）
 - root 档安装：scp 到 /tmp → `sudo install -m 644 /tmp/<f> /opt/agent-harness/…/<f>`
 - 重启：`sudo -n systemctl restart opencode-server agent-gateway`；验 `systemctl is-active` + `journalctl -u agent-gateway -n 20 --no-pager`
 - gateway index.ts 编辑前先 `grep -n` 锚点行（VPS 源常比本地 HEAD 新）；改前备份 `cp .env .env.bak-*` 惯例适用于所有 VPS 修改

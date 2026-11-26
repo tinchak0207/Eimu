@@ -2,7 +2,7 @@
 
 日期：2026-09-10。性质：**唯读审计**，不含修复。审计对象＝野兽模式（beast_mode ON）下的
 「Orchestrator + Expert 军团」架构。真源＝VPS `/opt/agent-harness/`（活码）＋本机
-`src/lib/`（契约）＋`deploy-staging/expert-gateway/`（提示词稿）。
+`src/lib/`（契约）＋`services/expert-gateway/`（提示词稿）。
 
 ---
 

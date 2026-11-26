@@ -1,5 +1,5 @@
 /**
- * 出图尺寸「就近落档」（2026-11-04，单一真源；deploy-staging/opencode-runtime/lib/image-size-fit.ts
+ * 出图尺寸「就近落档」（2026-11-04，单一真源；services/opencode-runtime/lib/image-size-fit.ts
  * 是本档的逐字镜像，改这里必须同步那份——运行时不能 import src）。
  *
  * 病灶（生产真会话 16b511d6，暴君「给我一张极简风的咖啡馆海报」）：模型/子代理要 3:4 竖版海报，

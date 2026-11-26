@@ -13,7 +13,7 @@
  *      委派 prompt 直接按白名单字段拼接。
  *   ② 交付物栏位：beats / shotlist / qc 三栏（SCREENWRITER_DELIVERABLES，
  *      与 expert-registry screenwriter 行 requiredFields 同源）。
- *   ③ 宪法注入：beastMode === true 时把 deploy-staging/expert-gateway/
+ *   ③ 宪法注入：beastMode === true 时把 services/expert-gateway/
  *      expert-constitution.md 原文注入 prompt 头；OFF 时一个字不多、档案不触碰。
  *      beastMode 由调用方经 expert-registry.readBeastMode(settings) 计算后传入——
  *      本档不 import expert-registry（registry → persona → delegate 单向依赖，
@@ -44,7 +44,7 @@ import {
 // ─────────────────────────────────────────── ① 委托单构造器
 
 /** 宪法落位稿路径（BEAST_MODE=ON 注入源；VPS gateway 同源引用）。 */
-export const EXPERT_CONSTITUTION_PATH = "deploy-staging/expert-gateway/expert-constitution.md" as const;
+export const EXPERT_CONSTITUTION_PATH = "services/expert-gateway/expert-constitution.md" as const;
 
 /** 交付字段白名单：与 expert-registry screenwriter 行 requiredFields 一一对应。 */
 export const SCREENWRITER_DELIVERABLES = ["beats", "shotlist", "qc"] as const;
@@ -280,7 +280,7 @@ export type ScreenwriterPromptAssemblyResult =
 
 /**
  * 缺省宪法载入：读静态 import 的 src/lib/expert-gateway-assets.json 镜像
- * （Vercel 拿不到 deploy-staging/，见该 JSON 生成注释；VPS 侧可经 loadConstitution
+ * （Vercel 拿不到 services/，见该 JSON 生成注释；VPS 侧可经 loadConstitution
  * 整体替换）。镜像空资产抛错，由下方 catch 转 constitution_unavailable。
  */
 function defaultLoadConstitution(): string {

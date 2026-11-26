@@ -12,7 +12,7 @@
  * 3. **禁止出现上游模型／供应商名、内部主机与内部路径、内部工具 id**（见测试的脱敏清单）。
  * 4. **逆注入**：`build(args)` 的 `args` 只准附加在文案尾端当「本次任务描述」，绝不与
  *    契约／规则文字拼接、替换或插值；未知 argument 名一律忽略。
- * 5. 契约真源 = `deploy-staging/expert-gateway/expert-delivery-contracts.json`；
+ * 5. 契约真源 = `services/expert-gateway/expert-delivery-contracts.json`；
  *    本档内嵌的 JSON 字串必须与它逐域逐栏位一致（测试会读该档比对）。
  */
 

@@ -48,3 +48,7 @@
 `src/lib/cursor-demo.ts` 已原样收纳为 [source/cursor-demo.ts.txt](source/cursor-demo.ts.txt)，不计入上面的 34 个文档与图片。它的旧调用者 `workstation-tours.ts` 在提交 `4be9965a2` 删除，`atc-tour-content.ts` 在提交 `2d2617127` 删除；当前已跟踪文件没有其他模块引用它的导出或路径。保留全部 7386 字节并改用 `.txt`，避免历史源码进入编译范围。相关 CSS 和旧验收工具保留原样。
 
 网关依赖整理记录：开发类型包的508档仅退追踪、保留本地实体，现有CI安装流程可重装；26档nanoid运行依赖继续追踪。详细清单保存在仓库外归档目录的GATEWAY-TYPES.md与GATEWAY-TYPES-UNTRACKED.tsv。
+
+## 旧桌面包源码恢复
+
+[desktop-source-recovery/](desktop-source-recovery/README.md)保留9份旧打包物中无法以Git blob回溯的第一方源文件，均为原字节加`.txt`后缀，并附版本/路径/SHA256清单。旧AppImage与解包目录已按授权永久删除，不计入上面的34份文档与图片。

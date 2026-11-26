@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""对照臂（自主设计 Bench）：10 个曲风 brief x 2 take = 20 calls，裸打 FlowMusic2API。
+copy of _armA-work/batch_armA.py；白名单改动见文件末 ANNOTATED CHANGES。
+Copy of eval-music-besteffort-1004/batch.py. Whitelist changes only:
+  - prompt list  : 读 suite/genre-briefs.jsonl 的 brief 栏（「生成X风格的音乐」）
+  - take count   : 2
+  - output dir   : arms/design-bench/bare-lyria (m4a) + sb-in/design-bare-lyria (44.1k wav)
+  - naming       : gb-XX-take{T}.m4a / .wav
+  - credential discipline: raw upstream responses are redacted to clip whitelist before persisting
+"""
+import base64, json, subprocess, sys, time, os, urllib.request
+
+REPO = "/home/lenovo/Desktop/image-app"
+OUT = os.path.join(REPO, "bench/music-bench/arms/design-bench/bare-lyria")
+RAW = os.path.join(REPO, "bench/music-bench/arms/design-bench/_bare-raw")
+SBIN = os.path.join(REPO, "bench/music-bench/sb-in/design-bare-lyria")
+HOST = "https://storage.googleapis.com"
+
+BRIEFS = [json.loads(l) for l in open(os.path.join(REPO, "bench/music-bench/suite/genre-briefs.jsonl"), encoding="utf-8") if l.strip()]
+ROWS = [b["id"] for b in BRIEFS]   # gb-01 … gb-10
+TAKES_PER_PROMPT = 2         # => 2 calls per brief, 20 total
+
+
+def call(prompt, timeout=360):
+    payload = {"model": "lyria-pro",
+               "messages": [{"role": "user", "content": prompt}],
+               "stream": False}
+    raw = json.dumps(payload, ensure_ascii=False)
+    b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    remote = (
+        "echo " + b64 + " | base64 -d > /tmp/p.json && "
+        "KEY=$(sudo grep \"^FLOWMUSIC2API_KEY=\" /opt/agent-harness/.env | cut -d= -f2-) && "
+        "curl -s -m 300 -X POST http://127.0.0.1:8000/v1/chat/completions "
+        "-H \"Authorization: Bearer $KEY\" -H \"Content-Type: application/json\" "
+        "--data-binary @/tmp/p.json"
+    )
+    t0 = time.time()
+    r = subprocess.run(["node", ".dsh-ssh/exec-443.js", remote],
+                       cwd=REPO, capture_output=True, text=True, timeout=timeout)
+    return r.stdout.strip(), round(time.time() - t0, 1), r.stderr.strip()
+
+
+def download(url, dest, tries=3):
+    path = url.replace(HOST, "", 1)
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(HOST + path, headers={"User-Agent": "curl/8"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as f:
+                f.write(resp.read())
+            if os.path.getsize(dest) > 1000:
+                return True, os.path.getsize(dest)
+        except Exception as e:
+            err = str(e)
+            time.sleep(2)
+    return False, err
+
+
+def clip_url(cl):
+    u = cl.get("audio_url")
+    if not u and isinstance(cl.get("audio"), dict):
+        u = cl["audio"].get("url")
+    if not u:
+        u = cl.get("url")
+    return u
+
+
+def redact(out):
+    """Parse upstream response; keep ONLY clip whitelist fields (service leaks plaintext creds)."""
+    try:
+        o = json.loads(out)
+    except Exception:
+        return [], 0
+    clips = o.get("clips")
+    if not isinstance(clips, list):
+        return [], 0
+    safe = []
+    for cl in clips:
+        if not isinstance(cl, dict):
+            continue
+        rec = {"url": clip_url(cl)}
+        for k in ("duration", "title", "format", "sound_prompt"):
+            if k in cl:
+                rec[k] = cl[k]
+        if rec.get("url"):
+            safe.append(rec)
+    return safe, len(clips)
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    os.makedirs(RAW, exist_ok=True)
+    os.makedirs(SBIN, exist_ok=True)
+    calls_made = 0
+    summary = []
+
+    for pi, row in enumerate(ROWS):
+        prompt = BRIEFS[pi]["brief"]   # 题面原样，不做任何变换
+        all_clips = []
+        for ci in range(1, TAKES_PER_PROMPT + 1):
+            rawf = os.path.join(RAW, "%s-call%d.redacted.json" % (row, ci))
+            print("CALL %s c%d ..." % (row, ci), flush=True)
+            out, dt, err = call(prompt)
+            calls_made += 1
+            safe, n = redact(out)
+            json.dump({"row": row, "call": ci, "seconds": dt, "stderr": err[:200],
+                       "n_clips": n, "clips": safe},
+                      open(rawf, "w"), ensure_ascii=False)
+            all_clips.extend(safe)
+            print("  -> %ss n_clips=%d len=%d" % (dt, n, len(out)), flush=True)
+            if not safe and n == 0:
+                print("  !! no clips; head=%s" % out[:200].replace("\n", " "), flush=True)
+
+        takes = all_clips[:TAKES_PER_PROMPT]
+        print("%s: %d clips -> %d takes" % (row, len(all_clips), len(takes)), flush=True)
+        for ti, cl in enumerate(takes, 1):
+            u = cl["url"]
+            m4a = os.path.join(OUT, "%s-take%d.m4a" % (row, ti))
+            wav = os.path.join(SBIN, "%s-take%d.wav" % (row, ti))
+            ok, info = download(u, m4a)
+            if not ok:
+                print("  %s-take%d download FAIL %s" % (row, ti, info), flush=True)
+                summary.append({"row": row, "take": ti, "ok": False, "err": info})
+                continue
+            r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", m4a,
+                                "-ar", "44100", "-ac", "2", wav],
+                               capture_output=True, text=True)
+            sz = os.path.getsize(wav) if os.path.exists(wav) else None
+            print("  %s-take%d %s bytes -> wav %s %s" % (row, ti, info, sz, r.stderr[:200]), flush=True)
+            summary.append({"row": row, "take": ti, "ok": True, "m4a": m4a, "wav": wav,
+                            "m4a_bytes": info, "wav_bytes": sz, "upstream_duration": cl.get("duration")})
+
+    print("CALLS_MADE=%d" % calls_made, flush=True)
+    json.dump({"calls_made": calls_made, "rows": ROWS, "summary": summary},
+              open(os.path.join(RAW, "_summary.json"), "w"), ensure_ascii=False, indent=2)
+
+
+if __name__ == "__main__":
+    main()
+
+
+# ── ANNOTATED CHANGES（对 _armA-work/batch_armA.py 的白名单改动）
+# 1. 题面来源：/tmp/mp{pi}.txt  →  suite/genre-briefs.jsonl 的 brief 栏
+# 2. ROWS 语义：wsb 行号  →  gb-XX 编号
+# 3. take 数：3 → 2
+# 4. 输出目录 / 命名前缀：idx{row} → gb-XX
+# 5. 重采样：48 kHz → 44.1 kHz（SongBench 口径要求 44.1k 立体声）
+# call() / download() / redact() / 主循环结构：一行未动。

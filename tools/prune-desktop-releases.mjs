@@ -40,7 +40,7 @@
 //   node tools/prune-desktop-releases.mjs --keep 3   # 保留最近 3 个版本
 //
 // 【凭证】
-//   读 repo 的 `.env.pulled` 内 `BLOB_READ_WRITE_TOKEN`。值常被引号包住，必须去引号
+//   读 repo 的 `.local/state/secrets/.env.pulled` 内 `BLOB_READ_WRITE_TOKEN`。值常被引号包住，必须去引号
 //   （否则 SDK 回 BlobAccessError）。token 值不得印出。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -91,14 +91,14 @@ let KEEP = 2;
 
 // ── 凭证读取（去引号；值不落 log）────────────────────────────────────────────
 function loadToken() {
-  const envPath = path.join(REPO_ROOT, ".env.pulled");
+  const envPath = path.join(REPO_ROOT, ".local/state/secrets/.env.pulled");
   if (!fs.existsSync(envPath)) {
     throw new Error(`找不到凭证档：${envPath}（BLOB_READ_WRITE_TOKEN 应在此）`);
   }
   const text = fs.readFileSync(envPath, "utf8");
   const line = text.split(/\r?\n/).find((l) => l.trim().startsWith("BLOB_READ_WRITE_TOKEN="));
   if (!line) {
-    throw new Error(`.env.pulled 内没有 BLOB_READ_WRITE_TOKEN`);
+    throw new Error(`.local/state/secrets/.env.pulled 内没有 BLOB_READ_WRITE_TOKEN`);
   }
   let value = line.slice(line.indexOf("=") + 1).trim();
   // 去引号：值常被 " " 包住，直接塞环境变数会得到 BlobAccessError。
@@ -203,7 +203,7 @@ async function main() {
     console.error(
       `[prune] list() 失败：${e?.message || e}\n` +
         `        若为 store 被停用（limits-exceeded-suspended），带凭证的 list() 通常仍可读；` +
-        `请确认 token 正确（.env.pulled 的值需去引号）。`
+        `请确认 token 正确（.local/state/secrets/.env.pulled 的值需去引号）。`
     );
     process.exit(1);
   }

@@ -1,6 +1,6 @@
 # blender-bridge 桥接说明与 deny 例外暂存（Astra 3D P0-4，片C，2026-09-06）
 
-分工：桥（`bridge/blender-bridge`，Blender headless 沙箱执行器）由片 A 施工；本档记录工具层与桥的
+分工：桥（`services/blender-bridge`，Blender headless 沙箱执行器）由片 A 施工；本档记录工具层与桥的
 HTTP 契约、错误分类，以及 deny 表暂存条目。**桥的启动方式与内部实现以片 A 的桥源码/README 为准，
 本档不重复，避免漂移。**
 
@@ -53,7 +53,7 @@ POST /v1/execute body {script:string, timeout_ms?:number} →
 
 **本地勘察**（2026-09-06）：`grep -rn "deny" src/lib --include=*.ts` 零命中——repo 内无本地
 deny/沙箱配置真源。deny 表唯一真源 = VPS `/opt/agent-harness/workspace/.opencode/opencode.json`
-的 `permission.bash`；repo 内 `deploy-staging/opencode.json` 是 08-24 旧快照，已与 live 漂移，
+的 `permission.bash`；repo 内 `services/opencode.json` 是 08-24 旧快照，已与 live 漂移，
 勿当真源（记忆 agent-harness-deny-table-architecture）。08-29 放宽后 live 表为「预设 allow +
 主机破坏红线 deny」，gateway 每 60s 自动重读，改表免重启 gateway。
 
@@ -120,7 +120,7 @@ DirectorOptions 增 sceneCard/cameraTrajectory 九行：会话有 sceneCard 才�
 ## 11. blender 节点 supplier channel（片Y/片AA，2026-09-06）
 
 blender-bridge 以 supplier channel 形态进 generation-core 派发（staging 稿
-`deploy-staging/blender-nodes/NODES-PLAN.md`；registry 条目
+`services/blender-nodes/NODES-PLAN.md`；registry 条目
 `src/lib/supplier-channels.config.ts` marker 区 blender-local、adapter 分支
 `src/lib/generation-core/blender-node-upstream.ts`）。能力标签＝capability
 model_id：`blender-render-eevee` / `blender-render-cycles`（catalog 条目，
@@ -152,4 +152,4 @@ sceneCard/轨迹穿进视频工具面：`scene3d-video-fusion.ts` 融合层（�
 `last_frame_video_chain` 输入增 `scene_card_ref`/`camera_trajectory` → 输出
 `sceneDirector`；C 端 `/api/generate-videos` body 增同名可选栏直通 DirectorOptions，
 data URL 帧转 File 进 multipart（cap 2）。缺栏零行为变化。VPS 消费配方：
-`deploy-staging/blender-gateway/ac-video-scene-stitch.md`。
+`services/blender-gateway/ac-video-scene-stitch.md`。

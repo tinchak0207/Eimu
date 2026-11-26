@@ -3,7 +3,7 @@
 //   node tools/memory-bench/lme-retrieval.mjs [--file s|oracle] [--limit N] [--k 5,10] [--ctx 1] [--json out.json]
 import { readFileSync, writeFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
-import { ensureHistorySchema, indexTurns, searchHistory } from "../../deploy-staging/gateway/chat-history-search.ts"
+import { ensureHistorySchema, indexTurns, searchHistory } from "../../services/gateway/chat-history-search.ts"
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith("--") ? [...a, [v.slice(2), arr[i + 1] ?? "1"]] : a), []))
 const file = args.file === "oracle" ? "longmemeval_oracle.json" : "longmemeval_s_cleaned.json"

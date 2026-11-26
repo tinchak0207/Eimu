@@ -259,7 +259,7 @@ function HistoryCardComponent({
             />
             {/*
               视频记录的缩略图是静态首帧，没有任何东西告诉用户「这能播」。
-              角标用 lg-float 二级材质（design-system/MASTER.md 的材料层级），
+              角标用 lg-float 二级材质（docs/design-system/MASTER.md 的材料层级），
               和操作条上的 32px 圆钮同族，压在缩略图左上角不挡操作条。
             */}
             {isVideo && (

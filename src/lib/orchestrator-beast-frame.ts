@@ -13,7 +13,7 @@
  * 既有范式就是它（DIRECTOR_EXPERT_CONSTITUTION_PATH 注释明言「内容由
  * readFileSync 在组装 prompt 时读取」），故 playbook 走同款 fs 读取而非
  * inline 常量，单一真源 =
- * deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md。
+ * services/expert-gateway/orchestrator-dispatch-playbook.md。
  * 与 persona 的唯一差异：fs 改静态 import（本档经 expert-registry →
  * blender-tools 链本就 server-only，动态 import 在 tsx CJS 本地测试运行时
  * 解构不稳；VPS bun ESM 两态皆通）。
@@ -28,9 +28,9 @@ import { EXPERT_REGISTRY, readBeastMode, type ExpertDef } from "./expert-registr
 import { estimateTokens } from "./blender-delegate";
 
 /** playbook 单一真源（repo 相对路径，声明部署来源位置；内容经静态 import 的
- *  src/lib/expert-gateway-assets.json 镜像读取——Vercel 拿不到 deploy-staging/）。 */
+ *  src/lib/expert-gateway-assets.json 镜像读取——Vercel 拿不到 services/）。 */
 export const ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH =
-  "deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md" as const;
+  "services/expert-gateway/orchestrator-dispatch-playbook.md" as const;
 
 /**
  * 配方库栏空值如实标记（R4 修复片，2026-09-11）：skillPaths 为空 = 该域尚无
@@ -127,7 +127,7 @@ export async function buildOrchestratorFrame(
     return { ok: true, frame: basePrompt, injected: false, estimated_tokens: estimateTokens(basePrompt) };
   }
 
-  // 野兽模式 ON：读静态 import 的 bundle 镜像（Vercel 拿不到 deploy-staging/，
+  // 野兽模式 ON：读静态 import 的 bundle 镜像（Vercel 拿不到 services/，
   // 见 src/lib/expert-gateway-assets.ts 档头；死因留痕进 hint，不进 log——secret
   // 卫生铁律）。空资产抛错由下 catch 转 playbook_unavailable。
   let playbook: string | undefined;

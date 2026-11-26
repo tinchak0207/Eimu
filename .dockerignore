@@ -2,6 +2,8 @@
 # 排除无关大文件；public 下的 mp4 是站点资源（宣传片/showcase），加回。
 node_modules
 .git
+/.asset-cache
+/.blender-work
 .next
 *.mp4
 !public/**/*.mp4
@@ -15,3 +17,24 @@ playwright-report
 test-results
 **/test-results
 output/playwright
+
+# Client packages, local runtime state, and optional production tooling.
+/.local
+/apps
+/tools/vendor
+/tools/promo-video
+/tools/plugins
+/tools/qa
+/bridge
+/deploy-staging
+
+# Local data and standalone clients are not control-plane image input.
+.local
+apps
+bench
+.pixai-refresh
+.vercel
+tools/promo-video
+tools/qa
+tools/plugins
+tools/vendor

@@ -173,7 +173,7 @@ CPU+记忆 : 2,592,000 s/月 × $0.00008792 = $  227.9
 
 ### 4.2 对 Eimu（付费套餐 ＋ B 端 API key）的结论
 
-前提事实（`[背]`，来自任务背景与 repo）：Eimu 是**付费产品**（卖套餐）＋**对外贩售 B 端 API key**（明文在 `.env.biz-key`，调 `https://image.tinchak0207.xyz/v1/*`）；音乐域用于 MV／主题曲／插曲交付。
+前提事实（`[背]`，来自任务背景与 repo）：Eimu 是**付费产品**（卖套餐）＋**对外贩售 B 端 API key**（明文在 `.local/state/secrets/.env.biz-key`，调 `https://image.tinchak0207.xyz/v1/*`）；音乐域用于 MV／主题曲／插曲交付。
 
 | 用法 | 判定 | 依据 |
 |---|---|---|

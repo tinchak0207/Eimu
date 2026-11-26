@@ -9,7 +9,7 @@
 // node:test 验证；故把「纯显示映射」与「无框架状态机（controller）」都放本档，
 // React 元件只是 useSyncExternalStore 的薄壳。
 //
-// 契约（冻结，照抄桌面壳将注入的形状；本档只镜射需要的子集，不 import desktop/）：
+// 契约（冻结，照抄桌面壳将注入的形状；本档只镜射需要的子集，不 import apps/desktop/）：
 //   window.eimuLocal.authorizedRoots(): Promise<string[]>
 //   window.eimuLocal.bridge.status()/enable()/disable(): Promise<BridgeStatus>
 //   window.eimuLocal.onBridgeStatus(cb): () => void
@@ -17,7 +17,7 @@
 //
 // 本档**零 IO、零 React、零外部 import**（比照 quota-display.ts / local-media-worker.ts 的形态）。
 
-// ─────────────────────────── 契约型别（镜射桌面壳，别 import desktop/——那是另一包产物）
+// ─────────────────────────── 契约型别（镜射桌面壳，别 import apps/desktop/——那是另一包产物）
 
 export type BridgeState =
   | "off"

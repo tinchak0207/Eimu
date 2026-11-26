@@ -10,7 +10,7 @@
  * 【未接线·on-demand 资产（2026-10-06 P0-10）】本档 buildKunpengKnowledgeInjection()
  * 当前**未接**入任何运行时注入链路，零生产消费者；全库仅 kunpeng-assets.test.ts 引用。
  * 线上真链路是：模板卡 → 客户端上送 body.session_directive → 网关
- * `deploy-staging/gateway/messages-gw.ts:701-702` sanitize 后存 state.sessionDirective
+ * `services/gateway/messages-gw.ts:701-702` sanitize 后存 state.sessionDirective
  * → `:740-754` 以 dangerousUncachedSystemSection("directive-i") 拼进 system；该链路的
  * 文案真源是 `src/lib/agent-templates-payload/`（本档不在其中，也未被其 import）。
  * 若要启用本档：须在上述注入点显式接线（messages-gw.ts:751-754 的 directiveLines，或

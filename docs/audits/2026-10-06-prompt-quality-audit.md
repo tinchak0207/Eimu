@@ -20,9 +20,9 @@
 
 | 基准机制 | 我方现状 | 证据 |
 |---|---|---|
-| **B2** 静态/动态边界 + session latch + `DANGEROUS_uncached` 必须写理由 | **已落地** | `deploy-staging/gateway/messages-gw.ts:112-260`，`dangerousUncachedSystemSection` 缺理由会抛错 |
+| **B2** 静态/动态边界 + session latch + `DANGEROUS_uncached` 必须写理由 | **已落地** | `services/gateway/messages-gw.ts:112-260`，`dangerousUncachedSystemSection` 缺理由会抛错 |
 | **B9** 记忆召回条数上限 + 人话新鲜度 | **部分落地** | `memory-recall.ts:35-37`、`:193-196` 已有 ≤5 条 + 「N 天前」过期警示；**但每轮注入的 L0 私有记忆块没有**（见 P0-10 邻域） |
-| **B7** 工具结果 50k/100k/单讯息 200k，超限落盘 | **已落地（在另一进程）** | `deploy-staging/opencode-runtime/lib/context-slim-core.ts`（opencode transform plugin），gateway 只做水位校验 |
+| **B7** 工具结果 50k/100k/单讯息 200k，超限落盘 | **已落地（在另一进程）** | `services/opencode-runtime/lib/context-slim-core.ts`（opencode transform plugin），gateway 只做水位校验 |
 | **B8** 压缩阈值与摘要角色/旗标 | **由 opencode 拥有** | gateway 仅做在途闸；`context-compaction-toolresult.test.ts` 注记移交 |
 | **B1** 常驻提示词不含事故叙事/日期戳 | **未达标** | 见 P1-1：playbook 33 处日期戳、14 处「事故/实锤/血案」 |
 | **B3** 条件装配、死指令不上船 | **未达标** | 见 P0-3：路由表仍教直调已被物理裁剪的工具 |
@@ -35,17 +35,17 @@
 ## 2. P0（会打到使用者）
 
 ### P0-1 ｜ MCP `quality` 参数静默降级——付费意图落空且不报错
-- **尺子**：A10 描述说谎 ｜ **档**：`mcp-server/src/index.ts:44` 声明 `quality: z.enum(["fast","quality"])`；实作 `src/app/api/v1/images/generations/route.ts:259-260` 只认 `"hd"`/`"high"`，其余一律落 `fast`。
+- **尺子**：A10 描述说谎 ｜ **档**：`services/mcp/src/index.ts:44` 声明 `quality: z.enum(["fast","quality"])`；实作 `src/app/api/v1/images/generations/route.ts:259-260` 只认 `"hd"`/`"high"`，其余一律落 `fast`。
 - **后果**：模型按描述传 `"quality"` 必被静默降级，用户为品质档付费的意图落空，回执不报错。
 - **修法**：两侧收敛到同一真源（路由接受 `"quality"`，或 MCP 枚举改为上游真词汇）。
 
 ### P0-2 ｜ 同一工具 `canvas_apply_ops` 三份互相矛盾的模型面描述
-- **尺子**：A1 复制漂移 + A10 ｜ **档**：站点宣告层 `src/lib/agent-tool-contract.ts:217` 教「把 add_node 与 connect_nodes 放同一批」；VPS 活本 `deploy-staging/opencode-runtime/tools/canvas_apply_ops.ts:10` 明文「**禁**手拼 add_node＋connect_nodes」；`deploy-staging/vps-tools/canvas_apply_ops.ts` 第三份二者皆无。
+- **尺子**：A1 复制漂移 + A10 ｜ **档**：站点宣告层 `src/lib/agent-tool-contract.ts:217` 教「把 add_node 与 connect_nodes 放同一批」；VPS 活本 `services/opencode-runtime/tools/canvas_apply_ops.ts:10` 明文「**禁**手拼 add_node＋connect_nodes」；`services/vps-tools/canvas_apply_ops.ts` 第三份二者皆无。
 - **后果**：模型读到哪份取决于部署面，行为对立；「绕过编译器」与「同批插入」必然有一半场景出错。
 - **修法**：canvas 三件纳入机械导出（照 `tools/export-music-tools-staging.ts` 范式），`src/lib` 单一真源，`vps-tools/` 副本删除。
 
 ### P0-3 ｜ 注入的 AGENTS.md 仍教主 agent 直调已被物理裁剪的工具
-- **尺子**：B3 死指令不上船 ｜ **档**：`opencode-agents.json` 对 orchestrator 标 `image_quote:false`、`music_gen:false`、`timeline_*:false`、`workflow_*:false`；而 `deploy-staging/opencode-runtime/AGENTS.md:112` 仍写「先查证：`image_quote`（免费）拿图片模型清单」，`:54` 路由行仍以直调为主语。
+- **尺子**：B3 死指令不上船 ｜ **档**：`opencode-agents.json` 对 orchestrator 标 `image_quote:false`、`music_gen:false`、`timeline_*:false`、`workflow_*:false`；而 `services/opencode-runtime/AGENTS.md:112` 仍写「先查证：`image_quote`（免费）拿图片模型清单」，`:54` 路由行仍以直调为主语。
 - **后果**：同一 system prompt 内并存「调用 image_quote」与「直接调用会失败」，模型先试直调再失败，浪费回合。
 - **修法**：路由表按 cut 集合条件装配——凡工具在裁剪集内即改为「经 Expert 执行」措辞。
 
@@ -55,7 +55,7 @@
 - **修法**：宪法第三条按 Expert 是否持有 `skillPaths` 条件装配；或改 per-expert 生成，而不是全局统一 4.9KB 常量。
 
 ### P0-5 ｜ 注册在线的 `astra-ad-studio` 自称「GPT-6 Astra / Codex」
-- **尺子**：A7 身份互斥 + A10 ｜ **档**：`deploy-staging/opencode-runtime/skills/astra-ad-studio/SKILL.md:18` `Use GPT-6 Astra as the creative and production lead, then use Codex's native image generation`；`:20` `This skill is designed for GPT-6 Astra but cannot switch the active model`；`:108` `Deliver in Codex`。该档**在线注册**，模型是 `happycoding/deepseek-v4.1-flash`。
+- **尺子**：A7 身份互斥 + A10 ｜ **档**：`services/opencode-runtime/skills/astra-ad-studio/SKILL.md:18` `Use GPT-6 Astra as the creative and production lead, then use Codex's native image generation`；`:20` `This skill is designed for GPT-6 Astra but cannot switch the active model`；`:108` `Deliver in Codex`。该档**在线注册**，模型是 `happycoding/deepseek-v4.1-flash`。
 - **后果**：触发即输出不存在的模型名与运行平台。
 - **修法**：人格与平台假设中性化，删「Codex / cannot switch the active model」。
 
@@ -75,12 +75,12 @@
 - **修法**：钉死单一语义（机器强制＝唯一路径，删第 18 条手工派遣；或反之），其余处只留一行引用。
 
 ### P0-9 ｜ 生产视频优化器与源码双份漂移 ⇒ kunpeng 6 条硬规则从未上船
-- **尺子**：A1 + B4 + A10 ｜ **档**：`src/lib/agent-prompt-director.ts:42` `PROMPT_DIRECTOR_SYSTEM_PROMPT` 含 `KUNPENG_SEEDANCE_SUPPLEMENT`；生产路径 `deploy-staging/gateway/internal-http.ts:331` `OPTIMIZE_DIRECTOR_PREFIX` **不含**该补充，`router.ts:599/393` 用的是后者。源档自己的注释写「必须与 VPS 保持一致，改一份同步另一份」——现实已漂移。
+- **尺子**：A1 + B4 + A10 ｜ **档**：`src/lib/agent-prompt-director.ts:42` `PROMPT_DIRECTOR_SYSTEM_PROMPT` 含 `KUNPENG_SEEDANCE_SUPPLEMENT`；生产路径 `services/gateway/internal-http.ts:331` `OPTIMIZE_DIRECTOR_PREFIX` **不含**该补充，`router.ts:599/393` 用的是后者。源档自己的注释写「必须与 VPS 保持一致，改一份同步另一份」——现实已漂移。
 - **后果**：`realPersonMode=true`、中文分镜格式、`@图片N` 引用、VO 行 vs 画面对白、多主体防双胞胎、官方尾约束——生产视频 prompt 一条都拿不到。而唯一守门件是 `kunpeng-assets.test.ts` 的字符串断言（绿）。
 - **修法**：删 gateway 副本，`internal-http.ts` 直接 import 单一真源。
 
 ### P0-10 ｜ kunpeng 知识层 53KB ＋ 契约检查器是死码
-- **尺子**：A6 + A10 + B4 ｜ **档**：`src/lib/kunpeng-knowledge.ts` 的 `buildKunpengKnowledgeInjection()` 注释自称沿 `sessionDirective → 网关 system 注入` 链路，但全库 grep 只被测试引用，`deploy-staging/` 与任何路由零呼叫点。`agent-prompt-contracts.ts` + `agent-prompt-contract-check.ts` 同样只被测试调用。
+- **尺子**：A6 + A10 + B4 ｜ **档**：`src/lib/kunpeng-knowledge.ts` 的 `buildKunpengKnowledgeInjection()` 注释自称沿 `sessionDirective → 网关 system 注入` 链路，但全库 grep 只被测试引用，`services/` 与任何路由零呼叫点。`agent-prompt-contracts.ts` + `agent-prompt-contract-check.ts` 同样只被测试调用。
 - **后果**：整层规范与机械检查器「声称在船、实体没人调」——文档与测试给出假信心。
 - **修法**：要么接进注入链路并配一条真路径行为证据，要么删除。
 
@@ -118,14 +118,14 @@
 - **例外套例外**（A2）：`playbook` 同主题补丁链 `R2-0911→R5-0911→R6→R7→R8-0911`；`AGENTS.md §0` 在 `:28/:30/:34` 连打三层「补漏，2026-10-04 F12」；`music-wiring.ts` 内「不要沿用旧专案」四段并存（`:38/:69/:72/:139`）。
 - **同一约束多处复制**（A1）：手册第 1 条（`:59`）与第 5 条（`:63`）各自完整重述「预期 N 分钟」首行时限；`messages-gw.ts:469/:505` 再各抄一遍；AGENTS.md「一律简体」在 `:11/:19/:24` 三处重述。且真机制（`subagent.ts:96,141-149`：同步 deadline = `min(2N, 4min)`）与手册渲染的「超 2x 杀线」已脱钩。
 - **悬空指针**（A6）：`playbook:26` 「十步长范例已迁出」无目标档；`opencode-runtime/AGENTS.md:55,85,86,185,198,210` 六处指向 `attach/*.md`，而 repo 与镜像内**均无 `attach/` 目录**；`agent-prompt-director.ts:10-11` 引用的 5 个来源路径全部不存在。
-- **语言污染残尾**（A8）：`agent-prompt-contract-check.ts:8` 注释自称「繁体注释」范式（正文实为简体）；`mcp-server/src/index.ts:28/38/57/78` 四条工具描述全用繁体（「支援／非同步／回传／音讯／预设」）；`web-search-tools.ts:137` 夹台湾词「程式库」「影音」。
+- **语言污染残尾**（A8）：`agent-prompt-contract-check.ts:8` 注释自称「繁体注释」范式（正文实为简体）；`services/mcp/src/index.ts:28/38/57/78` 四条工具描述全用繁体（「支援／非同步／回传／音讯／预设」）；`web-search-tools.ts:137` 夹台湾词「程式库」「影音」。
 - **繁转简化石**：`messages-gw.ts:284` `(系统注入|系统注入|野兽模式|野兽模式|…)`、`memory-wiring.ts:55-56` `原创|原创`、`subagent.ts:141` `[预预]` 等同项塌成重复的 alternation。
 
 ### 3.3 过度耦合、没有分拆
 
 - **两套野兽帧实现**：`src/lib/orchestrator-beast-frame.ts:110` `buildOrchestratorFrame`（注入 playbook 全文）在生产 src **零调用**，线上真源是 `messages-gw.ts:845-871`。同协议两份定义、其一死码。
 - **帧声明 `cacheHint:"stable"` 却无 latch**（A9/A10）：`messages-gw.ts:422/856` 标 stable、日志照打 `cache=stable`，但帧实际贴本轮 user 尾端、无 session latch，且 `lastTailPayloadHash` 会被后续 tail payload 覆盖 ⇒ 下一轮同帧 hash 不等、**重贴 6.2k 字进对话历史**，且无尺寸上限。
-- **技能层「两棵树」**：仓库根 `skills/`（124 个 SKILL.md、118 个嵌套、0 个 RECIPE.md）与发布真源 `deploy-staging/opencode-runtime/skills/`（20 个顶层 SKILL.md、151 个 RECIPE.md、0 个嵌套）档名约定相反。opencode 递归扫描 `{skill,skills}//SKILL.md`，一旦有人把 repo 树当 harness 源，124 条即刻回灌（旧事故 171 条/57.6KB）。
+- **技能层「两棵树」**：仓库根 `skills/`（124 个 SKILL.md、118 个嵌套、0 个 RECIPE.md）与发布真源 `services/opencode-runtime/skills/`（20 个顶层 SKILL.md、151 个 RECIPE.md、0 个嵌套）档名约定相反。opencode 递归扫描 `{skill,skills}//SKILL.md`，一旦有人把 repo 树当 harness 源，124 条即刻回灌（旧事故 171 条/57.6KB）。
 - **`beast-*` 4 档阶段知识三份并存**：SKILL 版与 `messages-gw.ts:480-489` inline 版逐句相同且已漂移；默认走 v2 inline，skill 版从不载入 ⇒ 改 SKILL.md 不改变行为。
 - **六层 style 公式四处重述**：`music-prompt-director.ts:39-43/:107-114`、`music-tools.ts:677` **且** `:690`、`skills/music-director/SKILL.md:54-60`。
 - **模式耦合**：`agent-prompt-director.ts` 用 gateway 私有副本而非 import——「为某模型调到极致的 prompt 分段是双面刃」，此处已实际付出代价（P0-9）。
@@ -147,6 +147,6 @@
 
 ## 5. 本轮审计未覆盖／待确认
 
-- **线上 vs repo 漂移**：已核 `deploy-staging/gateway/*` 与 `/opt/agent-harness/gateway/*` md5 一致（S4 取证）。但 `deploy-staging/opencode/AGENTS.md`（33438B）是**废弃快照**，其 §0 仍是旧规则「镜像用户语言」，与现版「一律简体」冲突——建议删除以免误当真源。
+- **线上 vs repo 漂移**：已核 `services/gateway/*` 与 `/opt/agent-harness/gateway/*` md5 一致（S4 取证）。但 `services/opencode/AGENTS.md`（33438B）是**废弃快照**，其 §0 仍是旧规则「镜像用户语言」，与现版「一律简体」冲突——建议删除以免误当真源。
 - **`registry-digest.txt` 是 2026-09-11 过期生成物**：档头日期与内容不符（含晚于该日期才有的 10 件 video-director 工具），且 editor 路径用旧约定。gateway 曾 `readFileSync` 此静态档，动态版 `buildExpertRegistryDigest()` 才是新值。
 - **P1-3（客户端全史无上限）／P1-4（孤儿 tool_use 补 is_error）**：后者全仓零实现，但当前无证据表明 opencode 会漏，属可选加固，需先确证再动手。

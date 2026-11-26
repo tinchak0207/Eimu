@@ -1,7 +1,7 @@
 # R7 — 野兽模式提示词系统全面探测与根治（注入管线审计）
 
 日期：2026-09-10。暴君裁定「底层有问题，到处都有问题」，本片为注入管线的系统性深挖，不是打补丁。
-执行范围：VPS `/opt/agent-harness/gateway/`（index.ts / subagent.ts / expert/）＋本地契约 `src/lib/orchestrator-beast-frame.ts`＋真源 `deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md`。
+执行范围：VPS `/opt/agent-harness/gateway/`（index.ts / subagent.ts / expert/）＋本地契约 `src/lib/orchestrator-beast-frame.ts`＋真源 `services/expert-gateway/orchestrator-dispatch-playbook.md`。
 
 ## 0. 起点根因链（前情，已实锤）
 
@@ -75,7 +75,7 @@ R6（agent_c7d8e8ed，subagent async 手术）于本片探测与修复之间（0
 
 - `sudo cp /opt/agent-harness/gateway/{index,subagent}.ts.bak-r7-0910 <原档>`＋`registry-digest.txt.bak-r7-0910` → bun build → restart。
 - playbook 回滚＝删除「**职能边界（与 AGENTS.md 的分工裁决，R7）**」整段（锚点唯一）。
-- 本地：`git checkout src/lib/orchestrator-beast-frame.ts src/lib/orchestrator-beast-frame.test.ts deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md`。
+- 本地：`git checkout src/lib/orchestrator-beast-frame.ts src/lib/orchestrator-beast-frame.test.ts services/expert-gateway/orchestrator-dispatch-playbook.md`。
 
 ## 6. 遗留工单（未动，等裁决）
 

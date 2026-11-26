@@ -9,7 +9,7 @@
 - Kunpeng 桥接片 0-6 **全部完成上线**：VPS `/opt/agent-harness/gateway/editor/` 已挂载，`assembleFilmNode`（gateway/index.ts L1463）真跑成片（08-30 夜 E2E：final.mp4 18.58s 含 AAC 音轨）。
 - 已入库轮子（gateway/editor/ 与 image-app src/vendor-bridges/editor/ 同构）：composeEngine.ts、renderGraph.ts、adapter/{editorStore,tauri-adapter,fxRenderStub,artifactsStub}.ts、canvas/videoCompose.ts、aspect.ts、presets/{filterPresets,transitionPresets}.ts、subtitleExport.ts、renderBackends.ts。
 - composeEngine 内建：`loudnorm=I=-16:TP=-1.5:LRA=11`、per-clip volume/afade/adelay/amix、xfade 转场、ASS 字幕。**无 ducking（仅静态 volume）、无版本持久化、无时间线 HTTP 面**。
-- 白名单记账：`vendor/kunpeng/PATCHES.md`（改轮子必记，供 vendor 升级双向 diff）。
+- 白名单记账：`tools/vendor/kunpeng/PATCHES.md`（改轮子必记，供 vendor 升级双向 diff）。
 
 ## 1. 架构决策（定死，subagent 不得改）
 

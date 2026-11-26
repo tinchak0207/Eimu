@@ -3,8 +3,9 @@
 ## 〇、硬闸（先于本档一切内容；任何一条没做＝本轮作废，被纠正就改这一节而不是在文末追加）
 
 1. **开工闸**：第一个动手工具之前，先跑 `mem find <本题 2-3 个关键词>`（产品/组件/症状词各一个），读命中里最近 3 篇正文。记忆里有现成轮子、配方、裁定的，照它做。没跑 mem find 就动手＝违规。
-2. **交付闸**：凡是动到生产（部署、回滚、改生产库／env／路由），汇报前必须跑 `/agent-evolve` 阶段一：用暴君原话开真会话（`tools/human-conversation-e2e.mjs`，原话补进 corpus）＋真浏览器截图（`eval-visual-replay/` 现成脚本）＋ `read_image` 审图。API 200、model-status、smoke 绿都不是终点。不过就修→重跑，循环到过，期间不汇报、不请示。
+2. **交付闸**：凡是动到生产（部署、回滚、改生产库／env／路由），汇报前必须跑 `/agent-evolve` 阶段一：用暴君原话开真会话（`tools/human-conversation-e2e.mjs`，原话补进 corpus）＋真浏览器截图（`tools/qa/visual-replay/` 现成脚本）＋ `read_image` 审图。API 200、model-status、smoke 绿都不是终点。不过就修→重跑，循环到过，期间不汇报、不请示。
 3. **汇报闸**：只报三样——结论；真会话 sid／截图路径；还没达成的那一件事。不问「要不要」，不列免责清单。
+4. **仓库清理闸（2026-11-26）**：清理核心是整肃各级目录，让源码、客户端、服务、部署、工具、资料与本机状态按职责收敛，不能只盯磁盘数字。目录迁移必须同步修正真实入口、相对引用、构建与发布打包路径，并用原始文件集合证明未丢内容；旧路径仅为现役进程与历史工程保留必要兼容。真实删除与职责拆分分别记账，同盘搬迁不得冒充释放空间；已确认可重建的垃圾直接清除，保留唯一作品、原始样本与必要证据，不以隐藏目录或改名冒充整治。
 
 人说出结果。手边的脑子把整场做完。人忘记后面有技术。
 
@@ -59,7 +60,7 @@
 - **交付包含提交与部署（2026-10-18 用户纠正）**：用户已要求提交部署时，必须把本轮代码提交并发布到生产、确认真实运行后再交付；不能以“仅本地通过、尚未提交或部署”结束。只提交本轮变更，无关工作树改动不得混入。
 - 禁为审美反复自我围观：美学归暴君。功能正确性的真路径截图（「〇、交付闸」）不在此禁令内。**例外（2026-09-26 暴君纠正）**：3D/WebGL/沉浸式渲染任务，或暴君明说「自主验证迭代」时，tsc 绿 ≠ 画面可用——必须截图自验、反覆迭代到验收判准全达成再交。
 - **视觉改动部署前必做本地 E2E 截图自审（2026-10-03 暴君纠正「你连本地e2e都没有截图审核就推上去」，违反＝直接退回）**：任何使用者看得见的 UI 改动，推生产前必须 ①建暂存路由真渲染该元件（`src/app/zz-tmp-*/page.tsx`，假资料即可；**预览页常是复制版元件，先确认它 import 的是本尊**）②`npx --yes next dev -p 3999` ＋ Playwright chromium `deviceScaleFactor: 2` 截图 ③**状态截齐**（折叠态／展开态／最长字／hover）并逐条写下核对结论（能量 rect 就量，别凭目测）④不达标改到过（上限 4 轮）⑤收工删暂存路由、杀 dev server、`rm -rf .next/types` 再跑 tsc（暂存路由会留假错）。tsc 绿、测试全过**一律不是**视觉的 oracle；这条不推翻上一条「禁自我 UI 检查」——禁的是为审美反覆围观，交付前的正确性截图是义务。
-- **Eimu 对外视频品牌验收**：对外视频必须遵循 `DESIGN.md`、`design-system/MASTER.md` 与 `tailwind.config.ts` token，使用品牌真实字体及 Liquid Glass 材料、色彩、圆角和层级；功能可读／解码成功不等于视觉通过。交付前由非作者抽查实际成片的开头、所有章节、最长字幕、过渡和结尾，逐项核对品牌规范；未经过视觉判准不得写「审核通过」。用户要求成片级剪辑时，静帧／字体／品牌通过不得替代动态观看；必须验证大字幕可读、内容驱动运镜／切镜／转场及开场／中段／结尾节奏，不能以静态九章模板交差。优先解剖用户已有优质素材，不能只用容易找到的低质量录像；必须实际审图／看片选片，不以文件存在作为已利用证据。 仅改转场或运动时必须保留既有页面视觉；禁止因动态剪辑擅自替换整套品牌。 用户改为音频驱动时，禁止沿用旧固定镜头时长；每句保留完整尾音及前后留白，转场放在无语音间隙内。指定完整原图时必须 contain 保全边缘，禁止局部裁字、手绘框与假光标；不得把旧剪辑约束当作持续硬闸。 用户明确改为全屏与短版时，删除旧外框、标题和底部留白，禁止沿用已否决的长版装配。歌曲仅可进入指定试听窗，窗外必须样本级为零；背景只能用已核实的原素材器乐，不能拿歌曲前奏或间奏替代。
+- **Eimu 对外视频品牌验收**：对外视频必须遵循 `DESIGN.md`、`docs/design-system/MASTER.md` 与 `tailwind.config.ts` token，使用品牌真实字体及 Liquid Glass 材料、色彩、圆角和层级；功能可读／解码成功不等于视觉通过。交付前由非作者抽查实际成片的开头、所有章节、最长字幕、过渡和结尾，逐项核对品牌规范；未经过视觉判准不得写「审核通过」。用户要求成片级剪辑时，静帧／字体／品牌通过不得替代动态观看；必须验证大字幕可读、内容驱动运镜／切镜／转场及开场／中段／结尾节奏，不能以静态九章模板交差。优先解剖用户已有优质素材，不能只用容易找到的低质量录像；必须实际审图／看片选片，不以文件存在作为已利用证据。 仅改转场或运动时必须保留既有页面视觉；禁止因动态剪辑擅自替换整套品牌。 用户改为音频驱动时，禁止沿用旧固定镜头时长；每句保留完整尾音及前后留白，转场放在无语音间隙内。指定完整原图时必须 contain 保全边缘，禁止局部裁字、手绘框与假光标；不得把旧剪辑约束当作持续硬闸。 用户明确改为全屏与短版时，删除旧外框、标题和底部留白，禁止沿用已否决的长版装配。歌曲仅可进入指定试听窗，窗外必须样本级为零；背景只能用已核实的原素材器乐，不能拿歌曲前奏或间奏替代。
 - **动态视频不能由静态PPT改字代替（2026-10-18 用户纠正）**：静态卡片整洁、文案完整不等于动态成片；必须按用户指定的镜头运动、真实转场与唯一素材段逐项交付，禁止反复以静态PPT改文字冒充重制。先交真实动态样片，由非作者判定运动与转场，再展开全片。
 - **视觉被否决后的工匠返工（2026-10-18 用户纠正）**：参数合格、无越界、文案齐全不等于视觉过关；禁止用反复 PIL 通用玻璃卡片拼接替代内容驱动成片。用户否决后，先解剖现有优质宣传成片的构图、字号层级、镜头节奏、运镜与转场，再在同一剪辑工程实装；不得以更多免责声明或验收报告代替成片。实机与作品作为视觉主体，每段围绕一个主动作设计；先交关键帧由非作者审阅，再应用全片。
 - **时长约束必须随用户纠正更新（2026-10-18）**：不得把旧稿时长当持续硬约束；用户纠正后，按完整内容、自然声音与成片节奏确定长度，禁止为凑总秒数剪发声或收缩自然停顿。
@@ -190,7 +191,7 @@
 3. **覆盖率发版门：已停用（2026-10-28，同上）**。`gateway-release.sh` 不再调用 `check-media-workflow-write-coverage.py`（脚本文件保留，仅作诊断，不是门）。
    诊断全量统计：`python3 tools/media-session-canvas-stats.py`（需 VPS ledger + opencode.db）。
 
-真源接线：`deploy-staging/gateway/canvas-write-gate.ts`（意图/骨架纯函数；拦截与 nudge 路径已不接线）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
+真源接线：`services/gateway/canvas-write-gate.ts`（意图/骨架纯函数；拦截与 nudge 路径已不接线）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
 
 ## 按需附件（排障/设计/产品决策时才读，平时不载入）
 
@@ -200,7 +201,7 @@
 
 - 基础设施排障（VPS 链路/控制面命令/生图卡根因/agent 网关 CORS/session 404）：`docs/runbooks/infra-debugging.md`
 - Adobe2API 定向排障：skill `adobe2api-direct-debugging`
-- UI 设计权威：`design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（lg-* 体系；正文 ≥13px）；任何 UI 任务先载 impeccable skill（~/.agents/skills/impeccable，它会载 PRODUCT.md/DESIGN.md）；Agent 交互锁定决策见记忆档 2026-08-08-agent-frontend-design-rules.md
+- UI 设计权威：`docs/design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（lg-* 体系；正文 ≥13px）；任何 UI 任务先载 impeccable skill（~/.agents/skills/impeccable，它会载 PRODUCT.md/DESIGN.md）；Agent 交互锁定决策见记忆档 2026-08-08-agent-frontend-design-rules.md
 - 产品决策准则全文 + 品牌/套餐/交互规则：PRODUCT.md（「Product Decision Doctrine」节）
 - 中控记帐/计费/排帐唯一权威：记忆 control-plane-billing-paradigm
 - 双真相边界（画布 world1 ↔ 产线执行图 world2；含节点 metadata 双白名单三处、CanvasProject 新栏位七处清单、VPS 活本 vs repo 镜像）：`docs/architecture/dual-truth-boundary.md`（W5，2026-09-29）
@@ -209,12 +210,12 @@
 
 先看见活的代码。缓存和旧快照不是现场。
 
-**活程式码（改动/读取只进这些）**：`src/app/api/`（Next.js 路由）、`src/lib/`（generation-core 生图/视频/TTS 管线、supplier-channels registry、billing 等）、`src/components/`、`src/app/`（页面）、`tools/`（seed/add-supplier-channel 等操作工具）、`bridge/`（pixai-bridge 等上游桥）、`deploy/gatus/`（探针配置）、`design-system/`（UI 权威）。
+**活程式码（改动/读取只进这些）**：`src/app/api/`（Next.js 路由）、`src/lib/`（generation-core 生图/视频/TTS 管线、supplier-channels registry、billing 等）、`src/components/`、`src/app/`（页面）、`tools/`（seed/add-supplier-channel 等操作工具）、`services/`（网关、运行时与上游桥）、`deploy/gatus/`（探针配置）、`docs/design-system/`（UI 权威）。
 
 **可跳过目录（垃圾/快取/快照，禁止花时间扫描）**：
 - `.tmp-home/`、`.tsdeps/`、`.xdg-cache/`、`.vercel.bak-link/`、`.dsh-*`、`.gateway-work/`、`.vercel-home/`、`.vercel-cli-cache/`、`.tmp-vercel-cache/`、`.dsh-mem/`、`.agents-fix/`、`.vercel-cli-data/`、`.pixai-refresh/` → 本地工具 HOME/快取，已 gitignore，勿读。
 - `marketing-battle-pack/` → 社群行销素材包（prompts/posts/logs），非运行时代码。
-- `eval-daming-film/`、`deploy-staging/opencode.json` → 历史评测/旧快照，**勿当真源**（live 真源在 VPS `/opt/agent-harness`）。
+- `eval-daming-film/`、`docs/archive/config-snapshots/deploy-staging-opencode.json.txt` → 历史评测/旧快照，**勿当真源**（live 真源在 VPS `/opt/agent-harness`）。
 - `public/showcase/agent-templates/*.mp4/webp` → 展示用大档素材，非逻辑。
 
 **记忆标记「作废/换血」≠ 真死**：08-28 中控手术后，`scheduler.ts` lease 门禁、`adobe-health.ts`、`supplier-channels.config.ts`、`tools/add-supplier-channel.ts`、`metaso-upstream.ts` 等**仍被 worker/adapter 引用，是活的**。砍任何档前先 `grep -rn "档名" src` 验证 import，勿凭记忆删除（记忆档 control-plane-reblood-to-new-api 已自标「旧记忆作废声明」，但那是指机制语义，不是档案可删）。

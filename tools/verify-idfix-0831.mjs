@@ -10,7 +10,7 @@ if (process.env.ALLOW_PROD_VERIFY !== "1") {
   process.exit(1);
 }
 
-const KEY = fs.readFileSync(".env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
+const KEY = fs.readFileSync(".local/state/secrets/.env.biz-key", "utf8").match(/sk-biz-[A-Za-z0-9_-]+/)[0];
 const BASE = "https://store.tinchak0207.xyz/agent/v1";
 const AUTH = { authorization: `Bearer ${KEY}` };
 const TURN_MS = 260_000; // 单轮上限：含一次真实生图（实测 gpt-image-2 fast ~150s）

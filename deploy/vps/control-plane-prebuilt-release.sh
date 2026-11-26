@@ -60,12 +60,12 @@ BUILD_NETWORK="${CP_BUILD_NETWORK:-host}"
 STATE_DIR="${CP_STATE_DIR:-$HOME/.local/state/eimu-cp-release}"
 BUILD_ROOT="${CP_BUILD_ROOT:-$HOME/.cache/eimu-cp-release}"
 # 与 deploy-control-plane.sh ARCHIVE_PATHS 同一份白名单（线上 app/ 构建上下文的来源）。
-ARCHIVE_PATHS=(src public worker tools db bridge skills
-  deploy-staging/expert-gateway deploy-staging/gateway
+ARCHIVE_PATHS=(src public worker tools db services/blender-bridge skills
+  services/expert-gateway services/gateway
   package.json package-lock.json next.config.mjs next-env.d.ts tsconfig.json
   tailwind.config.ts postcss.config.mjs components.json)
 # overlay 构建时先清掉底座里的旧源码目录（node_modules 不在其中），避免已删文件残留。
-OVERLAY_CLEAN=(src public worker tools db bridge skills deploy-staging)
+OVERLAY_CLEAN=(src public worker tools db bridge skills deploy-staging services)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

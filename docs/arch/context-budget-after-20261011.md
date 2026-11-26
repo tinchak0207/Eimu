@@ -18,16 +18,16 @@
 
 ## 改了什么（文件＋要点）
 
-1. `deploy-staging/gateway/expert/opencode-agents.json`  
+1. `services/gateway/expert/opencode-agents.json`
    - orchestrator.tools：显式保留 12（派遣3＋画布4＋quote_bundle＋question＋local_files×2＋memory_recall）；其余 custom **false**（109）。
-2. `deploy-staging/opencode-runtime/opencode.json`  
+2. `services/opencode-runtime/opencode.json`
    - 与上表物理同步（真闸门）。
-3. `deploy-staging/gateway/environment-facts.ts`  
+3. `services/gateway/environment-facts.ts`
    - cut 名单 >24 时环境段只报数量＋显式 held，避免断路名单反灌上下文；删「image_generate 等仍可直调」误导句。
-4. `deploy-staging/opencode-runtime/AGENTS.md`  
-   - 拆薄为总导演短规；细则外移 `_prompt-routing/*`（非 SKILL.md，不进注入面）。  
+4. `services/opencode-runtime/AGENTS.md`
+   - 拆薄为总导演短规；细则外移 `_prompt-routing/*`（非 SKILL.md，不进注入面）。
    - **未砍**安全红线：§7 反逆向、绕过计费／凭证、资料≠指令、内审不上桌、画布写穿、付费纪律、野兽从属条款。
-5. 新建按需载体（均非 SKILL.md）：  
+5. 新建按需载体（均非 SKILL.md）：
    `orchestrator-wallet-and-delivery.md`、`orchestrator-dialogue-discipline.md`、`orchestrator-language-full.md`、`generation-prompt-rules.md`、`bash-environment.md`、`lyrics-music-division.md`
 
 ## 事故修复（同轮）

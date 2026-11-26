@@ -146,7 +146,7 @@
 - **全部换算数字仍由计价 catalog 驱动**：`usePricingRevision()` 订阅，admin 改价 → 页面重渲，展示永不脱钩。
 - **`PLANS` 三档静态数据、`customPlanPrice()` 单价权威**不动（0.045 RMB/金币，禁在路由/元件手写单价）。
 - 白名单①（数据源）仍是 `plans` + `customPlanFor()`；白名单②（卡面渲染）是本专案的改动范围。
-- 设计权威：`design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（`lg-*` 体系，正文 ≥ 13px）。
+- 设计权威：`docs/design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（`lg-*` 体系，正文 ≥ 13px）。
 
 ---
 

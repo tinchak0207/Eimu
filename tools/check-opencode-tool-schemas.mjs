@@ -9,8 +9,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const CHECKER_PATH = "tools/check-opencode-tool-schemas.mjs";
-const RUNTIME_PATH = "deploy-staging/opencode-runtime";
-const HOOK_PATH = "deploy-staging/gateway/lyric-align-hook.ts";
+const RUNTIME_PATH = "services/opencode-runtime";
+const HOOK_PATH = "services/gateway/lyric-align-hook.ts";
 const SOURCE_PATHS = ["tools", "lib", "package.json", "bun.lock"].map((name) => `${RUNTIME_PATH}/${name}`).concat(HOOK_PATH, CHECKER_PATH);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 

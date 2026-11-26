@@ -3,7 +3,7 @@
 // 为什么需要这条端点：工作流跑到 success/partial 之前只活在 gateway 进程记忆体
 // （WorkflowRunState 从不落盘），站点无从得知，历史页看不到任何「一次工作流跑完」
 // 的痕迹。Phase 1 已在 gateway 加了 pushWorkflowCompletion（见
-// deploy-staging/gateway/workflow-gw.ts:190），本 route 是它的站点侧接收端。
+// services/gateway/workflow-gw.ts:190），本 route 是它的站点侧接收端。
 //
 // 流程：鉴权（Bearer，constant-time）→ 正规化 payload → 投影成 HistoryEntry →
 // 非同步渲染 DAG 缩图并上传 Blob → 写入历史 → 202。
@@ -189,7 +189,7 @@ async function persistWorkflowMemory(input: {
 /**
  * 把 gateway 推送 payload 的 `sessionId` 解析成创作项目 id（归属真源＝项目档
  * CreativeProject.chats[].sessionId）。gateway 侧零改动——payload 本来就带 sessionId
- * （见 deploy-staging/gateway/workflow-gw.ts `payload = { …, sessionId: state.sessionId }`）。
+ * （见 services/gateway/workflow-gw.ts `payload = { …, sessionId: state.sessionId }`）。
  * 读失败只记 log 回空：盖章是旁路，不影响历史写入（fail-soft，与本站点其它旁路一致）。
  */
 async function resolveProjectIdsForSession(userId: number, sessionId: string): Promise<string[]> {

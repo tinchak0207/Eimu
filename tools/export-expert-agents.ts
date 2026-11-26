@@ -7,20 +7,20 @@
 // 能力断路只落地 4/25（orchestrator 只关 blender×3+music_gen，21 个域工具仍开），
 // 且 Expert 端零工具限制。本脚本把「手工编 opencode.json agent 工具表」换成机械导出：
 // 真源 EXPERT_REGISTRY（src/lib/expert-registry.ts）→ 白名单栏位改写 → 写
-// deploy-staging/expert-gateway/ 四产物（构建物，gitignore）。registry 改行后重跑即再生，
+// services/expert-gateway/ 四产物（构建物，gitignore）。registry 改行后重跑即再生，
 // 根治手工漂移。2026-10-06 引用修复片起：① registry-digest.txt / expert-ids.json /
 // expert-delivery-contracts.json **三产物同时写**被 git 追踪的发布副本
-// deploy-staging/gateway/expert/（gateway-release.sh 打包的是它），消除人手 cp 漏档/半截；
+// services/gateway/expert/（gateway-release.sh 打包的是它），消除人手 cp 漏档/半截；
 // ② digest 的 skillPath 从 6 条手工 map 改为一条规则（.opencode/ 前缀 + 嵌套 SKILL.md→RECIPE.md）；
-// ③ 加 skillPath 存在性护栏（发布树 = deploy-staging/opencode-runtime/），registry 漂移当场炸。
+// ③ 加 skillPath 存在性护栏（发布树 = services/opencode-runtime/），registry 漂移当场炸。
 //
 // 2026-10-06 修正（四产物双写 → 三产物双写）：**opencode-agents.json 不双写**——只写构建目录
-// deploy-staging/expert-gateway/，**禁止覆盖**被 git 追踪的 deploy-staging/gateway/expert/
+// services/expert-gateway/，**禁止覆盖**被 git 追踪的 services/gateway/expert/
 // opencode-agents.json 的完整工具表。syncLyricistBindings 仅同步 lyricist prompt，不重建其他
 // 声明与工具表。理由（实测，见 buildAgentsJson 上方长注释）：该档是**运行期消费的
 // 宣告真源**，其内容＝environment-facts 对每个 agent 断言的【能力断路·物理事实】；生成器的
 // 「全集 − 该 Expert 自有工具 → 全 false」补集规则在全集含共享基建工具时会**过度禁用**，
-// 与人工调和过的物理闸 deploy-staging/opencode-runtime/opencode.json 不一致（重生成版每个
+// 与人工调和过的物理闸 services/opencode-runtime/opencode.json 不一致（重生成版每个
 // Expert 多报 19 条假断言，含 read_image / local_files_authorize / character_card_* 等）。
 //
 // 产物（opencode 1.18.14 agent 定义语义；tools:false = 该 agent 工具表物理移除，
@@ -79,20 +79,20 @@ import { LYRICIST_PERSONA_PROMPT, LYRICIST_LITERARY_ACCEPTANCE_DIRECTIVE } from 
 
 const root = process.cwd();
 /** 生成器主输出目录（gitignore，构建物）。 */
-const OUT_DIR = join(root, "deploy-staging", "expert-gateway");
-/** 被 git 追踪的发布副本：gateway-release.sh 由 `git archive <sha> deploy-staging/gateway`
+const OUT_DIR = join(root, "services", "expert-gateway");
+/** 被 git 追踪的发布副本：gateway-release.sh 由 `git archive <sha> services/gateway`
  * 打包，网关运行时读的就是这份（expert/registry-digest.txt 等）。此前靠人手 cp，屡次漏档/
  * 半截（2026-10-06 实测 opencode-agents.json 两目录已漂移）——registry-digest.txt /
  * expert-ids.json / expert-delivery-contracts.json 三者统一写两份，消除「生成专家资产后
  * 手工同步」这一步（2026-10-06 引用修复片）。
  * **例外：opencode-agents.json 不写本目录**（禁止覆盖被追踪的人工调和真源）——见 PRODUCTS
  * 与 buildAgentsJson 上方长注释。 */
-const SYNC_DIR = join(root, "deploy-staging", "gateway", "expert");
+const SYNC_DIR = join(root, "services", "gateway", "expert");
 /** 双写目录对（仅用于「三个纯派生产物」）：构建目录 + git 追踪的发布副本。 */
 const OUT_DIRS = [OUT_DIR, SYNC_DIR] as const;
 /** 发布树根（本机存在；对应 VPS /opt/agent-harness/workspace/.opencode，即 agent 的 cwd
  * 之下那一层）。skillPath 漂移护栏的存在性断言根。 */
-const HARNESS_RUNTIME_ROOT = join(root, "deploy-staging", "opencode-runtime");
+const HARNESS_RUNTIME_ROOT = join(root, "services", "opencode-runtime");
 const CHECK = process.argv.includes("--check");
 
 // ── 工具全集来源（--tools-file > fallback 近似全集）──────────────────────────
@@ -202,12 +202,12 @@ const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set<string>();
 /**
  * opencode-agents.json —— **不双写、禁止盲目覆盖发布副本**（2026-10-06 修正）。
  *
- * 为什么不能直接写 deploy-staging/gateway/expert/opencode-agents.json：
- *  1. 它是**运行期消费的宣告真源**：deploy-staging/gateway/environment-facts.ts:195 读它，
+ * 为什么不能直接写 services/gateway/expert/opencode-agents.json：
+ *  1. 它是**运行期消费的宣告真源**：services/gateway/environment-facts.ts:195 读它，
  *     :531 / :559 把结果直接注入每个 agent 的提示：「【能力断路·物理事实】真源
  *     expert/opencode-agents.json 已物理移除以下 N 个工具，直接调用会失败：…」。
  *     故这份档的内容＝**每轮对模型断言的事实**，不是可随手重生成的派生物。
- *  2. 被追踪的那版与物理闸 deploy-staging/opencode-runtime/opencode.json **一致**，而本生成器
+ *  2. 被追踪的那版与物理闸 services/opencode-runtime/opencode.json **一致**，而本生成器
  *     的补集规则输出**不一致**。实测（物理 false 数 / HEAD 生成 false 数 / 本生成器 fallback
  *     输出 false 数）：
  *       agent          | 物理  | HEAD  | 生成器 | HEAD 多报 | 生成器 多报
@@ -286,7 +286,7 @@ const WORKSPACE_ROOT_PREFIX = ".opencode/";
  *   ① 统一加 `.opencode/` 前缀（agent 的 cwd = workspace 根）；
  *   ② 嵌套 `SKILL.md`（`skills/<域>/<子…>/SKILL.md`）改名 `RECIPE.md`；顶层
  *      `skills/<域>/SKILL.md` 保留 `SKILL.md`。
- *      （真树实测 deploy-staging/opencode-runtime/skills/：depth-2 的 SKILL.md 共 20 个全保留，
+ *      （真树实测 services/opencode-runtime/skills/：depth-2 的 SKILL.md 共 20 个全保留，
  *       更深层 SKILL.md 数量 0、全部是 RECIPE.md 共 151 个。）
  * 目录引用（`skills/motion-design/`、`skills/music-director/files/`）只加前缀，不改名。
  * 前缀幂等：已带 `.opencode/` 的输入原样保留。
@@ -320,7 +320,7 @@ function collectOutputSkillPaths(): string[] {
 
 /**
  * 漂移护栏（2026-10-06 引用修复片，本片重点＝打生成源）：生成时对每条输出 skillPath 做
- * fs 存在性断言，根取发布树 deploy-staging/opencode-runtime/（＝生产 .opencode 树，本机在）。
+ * fs 存在性断言，根取发布树 services/opencode-runtime/（＝生产 .opencode 树，本机在）。
  * registry 一漂移、注入的座标就会指空，过去静默生成——现在当场炸：
  *   - 缺失 + `--check`：EXPORT_CHECK_FAIL 并 exit 1；
  *   - 缺失 + 正常模式：EXPORT_WARN 并列出缺失清单（不中断写盘，供人对照修 registry/发布树）；
@@ -552,7 +552,7 @@ function main(): void {
   // 正常模式：声明 opencode-agents.json 的双写范围（防未来有人再把 SYNC_DIR 写回去）。
   console.warn(
     `EXPORT_WARN：${AGENTS_JSON} 只写构建目录 ${join(OUT_DIR, AGENTS_JSON)}；被 git 追踪的 ` +
-      `${join(SYNC_DIR, AGENTS_JSON)} 是与物理 deploy-staging/opencode-runtime/opencode.json 调和过的` +
+      `${join(SYNC_DIR, AGENTS_JSON)} 是与物理 services/opencode-runtime/opencode.json 调和过的` +
       "人工真源，**禁止盲目覆盖**（生成器的补集规则会过度禁用共享基建工具——read_image / local_files_authorize / " +
       "character_card_* 等，并给每个 Expert 多报 19 条假断言）。",
   );

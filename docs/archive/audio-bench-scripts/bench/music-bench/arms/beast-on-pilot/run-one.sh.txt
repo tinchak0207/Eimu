@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# run-one.sh <IDX> <TAKE> —— 重链 arm B 单次会话：确定性题面 → 无头 agent 会话 → 抽产物+脱敏落盘。
+# 复用轮子副本 run-idx0.ts（cp 自 tools/agent-debug.ts，白名单改动：import 路径/超时/停机条件）。
+set -uo pipefail
+REPO=/home/lenovo/Desktop/image-app
+D=$REPO/bench/music-bench/arms/beast-on-pilot
+IDX=$1
+TAKE=$2
+PF=/tmp/beast-idx${IDX}-take${TAKE}.txt
+EV="$D/idx${IDX}-take${TAKE}-events.json"
+LOG="$D/idx${IDX}-take${TAKE}-run.log"
+
+# 确定性题面变换（与 arm A / idx0-take1 完全一致）
+node -e '
+const fs=require("fs");
+const idx=Number(process.argv[1]);
+const lines=fs.readFileSync("/home/lenovo/Desktop/image-app/bench/music-bench/suite/wsb-prompts.jsonl","utf8").split("\n");
+const obj=JSON.parse(lines[idx]);
+const out=obj.prompt.split("\n").filter((l,i)=> i!==0 && l.trim()!=="[start_of_user_prompt]");
+process.stdout.write(out.join("\n"));
+' "$IDX" > "$PF"
+
+cd "$REPO" || exit 9
+timeout 1800 ./node_modules/.bin/tsx "$D/run-idx0.ts" --keep --confirm yes --json "$EV" "$(cat "$PF")" > "$LOG" 2>&1
+RC=$?
+echo "runner_exit=$RC idx=$IDX take=$TAKE prompt_bytes=$(wc -c < "$PF")"
+grep -m1 "会话已建立" "$LOG" || echo "session_id=NONE"
+node "$D/extract.mjs" "$EV" "$D/idx${IDX}-take${TAKE}"

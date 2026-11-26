@@ -153,7 +153,7 @@ export function createGenerationWorkflow(
 
 // ─────────────────────────── 工作流跑批推送投影（2026-09-20 Phase 2）
 //
-// gateway（deploy-staging/gateway/workflow-gw.ts:190 pushWorkflowCompletion）在
+// gateway（services/gateway/workflow-gw.ts:190 pushWorkflowCompletion）在
 // 跑批收尾时把整条 workflow 的完成态 POST 给站点，站点要把它落成一条历史记录。
 // 本节就是那段投影：payload → HistoryEntry 的 workflow 栏位 + 两个 DAG 阵列。
 //

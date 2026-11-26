@@ -46,12 +46,12 @@ jobs:
       # gateway 自带 package.json（nanoid + bun-types），没有入库的 lockfile；
       # --no-package-lock 明确不生成 lock，node_modules 也不入库（.gitignore 已覆盖）。
       - name: Install gateway deps
-        run: npm install --prefix deploy-staging/gateway --no-package-lock --no-audit --no-fund
-      # 闸的覆盖范围：deploy-staging/gateway/** 下所有 *.ts（含 director-engine/、editor/
-      # 子目录；排除 *.test.ts 与 node_modules）。不含 deploy-staging/opencode-runtime
+        run: npm install --prefix services/gateway --no-package-lock --no-audit --no-fund
+      # 闸的覆盖范围：services/gateway/** 下所有 *.ts（含 director-engine/、editor/
+      # 子目录；排除 *.test.ts 与 node_modules）。不含 services/opencode-runtime
       # ——那是独立运行树，由它自己的工具链负责。根 tsconfig 的 exclude 含
-      # "deploy-staging"，因此本 job 是生产控制面唯一进 tsc 的入口。
-      - run: npx tsc -p deploy-staging/gateway --noEmit
+      # "services"，因此本 job 是生产控制面唯一进 tsc 的入口。
+      - run: npx tsc -p services/gateway --noEmit
 
   test:
     name: Unit tests
@@ -75,8 +75,8 @@ jobs:
           #      需真 3D bridge http://127.0.0.1:8765/v1/execute；不可达时 health 重试
           #      上限 10 分钟／每案等 600s，整批看起来像「测试挂了」，实际是等不到外部服务。
           #
-          # B. 读 `deploy-staging/expert-gateway/` 下的本地夹具，而该目录被 .gitignore:150
-          #    `/deploy-staging/*` 排除（例外只有 gateway/、laya-server/、vps-tools/）。
+          # B. 读 `services/expert-gateway/` 下的本地夹具，而该目录被 .gitignore:150
+          #    `/services/*` 排除（例外只有 gateway/、laya-server/、vps-tools/）。
           #    干净 checkout 不存在这些档 → readFileSync ENOENT 或逐字/行号对账失败。
           #    本地绿只是因为夹具存在于本机工作区。真正修法是把它们入库（需授权），
           #    不是删断言、也不是 `|| true`。

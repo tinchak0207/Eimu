@@ -30,23 +30,35 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tools/**/*.ts",
+    "tools/**/*.mts",
+    "worker/**/*.ts",
+    "tailwind.config.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "miniapp",
     "tmp",
-    "mcp-server",
-    "plugins",
-    "eval-*", "src/vendor-bridges",
-    "deploy-staging",
+    "eval-*",
+    "src/vendor-bridges",
     "staging",
     "open-source",
     "work",
     "**/*.test.ts",
-    "**/*.test.tsx"
+    "**/*.test.tsx",
+    "apps",
+    "services",
+    "tools/vendor",
+    "tools/plugins",
+    "tools/qa",
+    "tools/promo-video",
+    ".local",
+    "bridge",
+    "deploy-staging",
+    "bench",
+    "tools/generated"
   ]
 }
