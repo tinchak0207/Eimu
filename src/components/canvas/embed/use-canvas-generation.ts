@@ -16,13 +16,13 @@ import {
   resolveGenerationInputs,
   type CanvasGenerationReference,
 } from "@/lib/canvas/semantic-nodes";
-import { toReferenceImageRole } from "@/lib/image-types";
-import type { ReferenceImageRole } from "@/lib/image-types";
-import { applyCharacterCardsToPayload, mergeTokenReferencedCards } from "@/lib/character-cards";
-import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/character-cards";
+import { toReferenceImageRole } from "@/lib/media/image-types";
+import type { ReferenceImageRole } from "@/lib/media/image-types";
+import { applyCharacterCardsToPayload, mergeTokenReferencedCards } from "@/lib/media/character-cards";
+import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/media/character-cards";
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
 import { resolveSceneDirectorReferences, sceneDirectorTraceMetadata } from "@/lib/canvas/scene-3d-reference";
-import { generationCapabilities } from "@/lib/generation-model-catalog";
+import { generationCapabilities } from "@/lib/generation-core/generation-model-catalog";
 import { generatedImageMetadata, type CanvasGeneratedImage } from "@/lib/canvas/generated-image-metadata";
 import {
   extractFramesAtTimes,
@@ -30,7 +30,7 @@ import {
   tileFrameCount,
   waitForMetadata,
   type VideoElementSample,
-} from "@/lib/video-frames";
+} from "@/lib/media/video-frames";
 import type { SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import { buildAuthHeaders, imageUrlOf } from "./embed-helpers";
 

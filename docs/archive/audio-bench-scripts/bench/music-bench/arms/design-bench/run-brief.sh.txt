@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# run-brief.sh <BRIEF_ID> —— 自主设计 Bench：把一条人类 brief **原样**交给 Beast On agent。
+#
+# 与 beast-on-pilot/run-one.sh 的唯一差别、也是本 bench 的全部意义：
+#   **不做任何题面变换**。喂进去的就是用户在输入框里打的那一句话
+#   （见 suite/design-briefs.jsonl 的 brief 栏），没有 tags、没有歌词、没有段落标记。
+#   设计工作有没有做，是这一轮要量的事。
+#
+# 复用轮子：beast-on-pilot/run-idx0.ts（cp 自 tools/agent-debug.ts，白名单改动：import 路径/超时/停机条件）。
+set -uo pipefail
+REPO=/home/lenovo/Desktop/image-app
+D=$REPO/bench/music-bench/arms/design-bench
+ID="${1:?usage: run-brief.sh <BRIEF_ID>  例：db-01}"
+EV="$D/${ID}-events.json"
+LOG="$D/${ID}-run.log"
+
+BRIEF=$(python3 - "$ID" <<'PY'
+import json, sys, glob
+want = sys.argv[1]
+for f in ("design-briefs.jsonl", "genre-briefs.jsonl"):
+    p = f"/home/lenovo/Desktop/image-app/bench/music-bench/suite/{f}"
+    for line in open(p, encoding="utf-8"):
+        if line.strip():
+            o = json.loads(line)
+            if o["id"] == want:
+                sys.stdout.write(o.get("brief") or o["word"])
+                sys.exit(0)
+raise SystemExit(f"两个题面集里都没有 {want}")
+PY
+) || exit 9
+
+echo "brief=$ID  bytes=${#BRIEF}  text=$BRIEF"
+
+cd "$REPO" || exit 9
+timeout 1800 ./node_modules/.bin/tsx "$D/run-idx0.ts" --keep --confirm yes --json "$EV" "$BRIEF" > "$LOG" 2>&1
+RC=$?
+echo "runner_exit=$RC id=$ID"
+grep -m1 "会话已建立" "$LOG" || echo "session_id=NONE"
+node "$D/extract-all.mjs" "$EV" "$D/out" "$ID"

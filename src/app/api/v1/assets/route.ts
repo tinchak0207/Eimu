@@ -7,16 +7,16 @@
 // /v1/images/generations 保持一致，VPS 侧 classifyError 直接按同一结构解析。
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import {
   AssetPackLimitError,
   deleteAssetPacks,
   listAssetPacks,
   normalizeAssetPack,
   saveAssetPack,
-} from "@/lib/asset-pack-store";
-import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
+} from "@/lib/media/asset-pack-store";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/media/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

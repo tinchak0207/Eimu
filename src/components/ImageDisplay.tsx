@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { useResolvedImageSrc } from "@/components/image-src";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
-import { ProviderTiming } from "@/lib/image-types";
-import { imageHelpers } from "@/lib/image-helpers";
+import { ProviderTiming } from "@/lib/media/image-types";
+import { imageHelpers } from "@/lib/media/image-helpers";
 import { cn } from "@/lib/utils";
 
 interface ImageDisplayProps {

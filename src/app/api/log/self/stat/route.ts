@@ -1,5 +1,5 @@
 // GET /api/log/self/stat — usage statistics
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

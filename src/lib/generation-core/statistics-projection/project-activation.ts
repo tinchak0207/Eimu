@@ -1,4 +1,4 @@
-import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
+import { UNATTRIBUTED_SOURCE } from "@/lib/accounts/first-touch-attribution";
 import { FUNNEL_STEP_ORDER, NON_CASH_RECHARGE_SOURCE, RETURN_WINDOW_DAYS, STATISTICS_DAY_TIMEZONE, sampleRate, type ActivationFunnelProjection, type DurationSummary, type FunnelAttribution, type FunnelJob, type FunnelRecharge, type FunnelRegistration, type FunnelSourceRow, type FunnelStep, type FunnelStepKey } from "./types";
 
 // ── 激活漏斗 ────────────────────────────────────────────────────────────────

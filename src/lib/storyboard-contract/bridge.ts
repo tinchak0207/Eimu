@@ -1,8 +1,8 @@
-import { canUseAsset } from "../asset-scope";
+import { canUseAsset } from "../media/asset-scope";
 import { filterApprovedShotCardIds, resolveReferenceAssetsToCardIds } from "./normalize";
 import { isNonBlankString, uniqueCardIds, usableCardIds } from "./validate";
 import { QC_REQUIRED_FIELDS, RATIO_SHAPE, SHOT_CARD_ID_FIELDS } from "./types";
-import type { AgentInteractionMode } from "../agent-chat-client";
+import type { AgentInteractionMode } from "../agent/agent-chat-client";
 import type { StoryboardQcBridgeResult, StoryboardQcCardRef, StoryboardQcContext, StoryboardQcContextFields, StoryboardQcFieldSource, StoryboardQcGateArgs, StoryboardQcNodeRef, StoryboardQcProductionFields, StoryboardQcProjectRef, StoryboardQcScopeContext, StoryboardQcShot, StoryboardQcShotNodeMetadata, StoryboardScriptShot } from "./types";
 
 /**
@@ -246,7 +246,7 @@ export function productionFieldsFromContext(
  *
  * 目前只有四条专案级推导成立（每条都有来源）：
  *   1. `lockedCharacterCardIds` / `lockedSceneCardIds` ← `project.cardIds` 按卡 `kind` 分流
- *      （卡实体真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`）。
+ *      （卡实体真源 = `listCharacterCards`，`src/lib/media/character-card-store.ts:122`）。
  *      门禁 `character_lock`/`scene_lock` 要求「每镜引用的卡都在锁定集合内」——集合就是专案锁定卡。
  *      `kind` 分流只认门禁真有集合的两族：`style`/`prop`（2026-09-24 起 prop 是真 kind）都
  *      **静默略过**（既不进锁定集合也不算未解析）——门禁 `Shot` 没有 lockedStyle/lockedProp 这两集。

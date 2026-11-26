@@ -32,9 +32,9 @@
 //
 // KEY 永不入 log：这里只记 biz key id（非密钥本体）、user id 与金额。
 
-import { fetchGatewayUser } from "@/lib/gateway-admin";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { exceedsBudget } from "@/lib/task-budget";
+import { fetchGatewayUser } from "@/lib/accounts/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { exceedsBudget } from "@/lib/billing/task-budget";
 import { accountLedgerStoreEnabled, ensureAccountOpening, readAvailableQuota } from "./account-ledger";
 import type { GenerationSql } from "./database";
 import {

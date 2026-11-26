@@ -13,10 +13,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
-import { __resetCharacterCardStoreForTests, listCharacterCards, saveCharacterCard } from "@/lib/character-card-store";
-import type { CharacterCard } from "@/lib/character-cards";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
+import { __resetCharacterCardStoreForTests, listCharacterCards, saveCharacterCard } from "@/lib/media/character-card-store";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import {
   EditInputError,
   MAX_REFERENCE_IMAGES,
@@ -26,9 +26,9 @@ import {
   parseReferenceImageSpecs,
   planBizGenerationInput,
   resolveEditReference,
-} from "@/lib/biz-image-references";
+} from "@/lib/generation-core/biz-image-references";
 import { POST } from "./route";
-import { generationCapabilities } from "@/lib/generation-model-catalog";
+import { generationCapabilities } from "@/lib/generation-core/generation-model-catalog";
 import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 
 const VALID_KEY = `sk-biz-${"a1b2c3d4e5f60718".repeat(2)}`;

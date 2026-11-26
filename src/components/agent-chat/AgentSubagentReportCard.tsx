@@ -9,7 +9,7 @@
 import { memo, useId, useState } from "react";
 import { Bot, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSubagentReportItem } from "@/lib/agent-chat-types";
+import type { AgentSubagentReportItem } from "@/lib/agent/agent-chat-types";
 
 export interface AgentSubagentReportCardProps {
   item: AgentSubagentReportItem;

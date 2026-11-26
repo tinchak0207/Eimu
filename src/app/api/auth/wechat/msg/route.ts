@@ -4,14 +4,14 @@ import {
   verifyWechatSignature,
   parseIncomingMessage,
   getWechatOfficialToken,
-} from "@/lib/wechat-official";
+} from "@/lib/accounts/wechat-official";
 import {
   getWechatLoginStateByState,
   completeWechatLogin,
   loginWechatPeer,
   WechatLoginState,
-} from "@/lib/wechat-login";
-import { buildWechatUsername } from "@/lib/wechat-identity";
+} from "@/lib/accounts/wechat-login";
+import { buildWechatUsername } from "@/lib/accounts/wechat-identity";
 
 export const preferredRegion = "sfo1";
 

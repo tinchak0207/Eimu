@@ -3,7 +3,7 @@
 // 设计来源 AID（aid-server，MIT，copyright 光子讯息(杭州)科技有限公司）：
 //   compose/util/SubtitleScreenSplitter.java（`split` / `rebalanceShortScreens` / `splitByMarks`
 //   / `appendPart` / `hasContent` / `splitEvenly`）。本档为 TS 重写（逐行移植，行为对齐）。
-// 对齐 PRD 资产表：docs/symdiff-aid-swallow-prd.md §10「字幕分屏算法」。
+// 对齐 PRD 资产表：docs/proposals/symdiff-aid-swallow-prd.md §10「字幕分屏算法」。
 //
 // 产品口径（AID 原文注释）：常规台词保证每屏 7～12 字且尽量落在语义边界；整段不足 7 字原样保留；
 // 13 字属无法同时满足上下限的边界情况，会均衡为 7 字 + 6 字两屏。

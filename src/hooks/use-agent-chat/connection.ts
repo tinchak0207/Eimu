@@ -1,9 +1,9 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
-import type { AgentChatState, AgentSseEvent } from "@/lib/agent-chat-types";
-import { AGENT_EVENT_NAMES } from "@/lib/agent-chat-types";
-import { buildEventsUrl, createDirectSendCapability, isTerminalAuthError, requestSseTicket, type DirectSendCapability } from "@/lib/agent-chat-client";
-import { parseAgentSseEvent, type AgentEventName } from "@/lib/agent-chat-types";
-import { createFrameBatcher, type FrameBatcher } from "@/lib/agent-chat-frame-batch";
+import type { AgentChatState, AgentSseEvent } from "@/lib/agent/agent-chat-types";
+import { AGENT_EVENT_NAMES } from "@/lib/agent/agent-chat-types";
+import { buildEventsUrl, createDirectSendCapability, isTerminalAuthError, requestSseTicket, type DirectSendCapability } from "@/lib/agent/agent-chat-client";
+import { parseAgentSseEvent, type AgentEventName } from "@/lib/agent/agent-chat-types";
+import { createFrameBatcher, type FrameBatcher } from "@/lib/agent/agent-chat-frame-batch";
 import { INITIAL_BACKOFF_MS, ZOMBIE_HEAL_GAP_MS, type AgentChatAction } from "./core";
 import type { UseAgentChatReturn } from "./types";
 

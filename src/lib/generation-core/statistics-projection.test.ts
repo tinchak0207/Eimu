@@ -316,7 +316,7 @@ test("unknown 不被折叠成 0 / success：渠道三态第三态原样保留", 
 });
 
 test("渠道判活与执行侧同一把尺：判据只在 supplier-health-signal 一处定义，统计层不自造健康度", () => {
-  const signal = read("src/lib/supplier-health-signal.ts");
+  const signal = read("src/lib/generation-core/supplier-health-signal.ts");
   const projection = readStatisticsProjection();
 
   assert.match(signal, /export async function readSupplierHealthSignal/);

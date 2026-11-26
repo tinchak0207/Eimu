@@ -6,11 +6,11 @@
 
 import { NextRequest } from "next/server";
 import { after } from "next/server";
-import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { jsonWithTrace, pixaiAuthError, pixaiError, pixaiRequestError, proxyPixai } from "@/lib/pixai-proxy";
+import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { jsonWithTrace, pixaiAuthError, pixaiError, pixaiRequestError, proxyPixai } from "@/lib/generation-core/pixai-proxy";
 import { getOrCreateTraceId } from "@/lib/request-trace";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

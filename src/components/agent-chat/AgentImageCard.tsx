@@ -16,11 +16,11 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentImageItem } from "@/lib/agent-chat-types";
-import { agentHistoryEntryForMedia, saveAgentMediaToHistory } from "@/lib/agent-media-history";
-import { createShareLink } from "@/lib/agent-image-share";
-import { firstShareableIndex } from "@/lib/share-remix";
-import { canHistoryEntryRerun } from "@/lib/history-rerun";
+import type { AgentImageItem } from "@/lib/agent/agent-chat-types";
+import { agentHistoryEntryForMedia, saveAgentMediaToHistory } from "@/lib/agent/agent-media-history";
+import { createShareLink } from "@/lib/agent/agent-image-share";
+import { firstShareableIndex } from "@/lib/media/share-remix";
+import { canHistoryEntryRerun } from "@/lib/media/history-rerun";
 import type { AgentMediaItem } from "./agent-artifacts-context";
 import { useAgentMediaViewerOpen } from "./agent-viewer";
 

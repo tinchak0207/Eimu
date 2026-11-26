@@ -1,6 +1,6 @@
 // GET /api/admin/control-plane-diagnostics — 一次看穿四层。
 //
-// 采集逻辑在 src/lib/control-plane-diagnostics.ts；这里只做会话校验、
+// 采集逻辑在 src/lib/generation-core/control-plane-diagnostics.ts；这里只做会话校验、
 // 把控制面那一半通过签名通道取回来，再合并出结论。
 //
 // 为什么不直接把这个路由 rewrite 到控制面：控制面上没有 ADMIN_SESSION_SECRET
@@ -9,13 +9,13 @@
 // 数据库那一半走 HMAC 通道去取。
 
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import {
   gatherLocalDiagnostics,
   summarizeProblems,
   type LocalDiagnostics,
-} from "@/lib/control-plane-diagnostics";
-import { bizKeySyncConfig, invokeBizKeySync } from "@/lib/biz-key-sync";
+} from "@/lib/generation-core/control-plane-diagnostics";
+import { bizKeySyncConfig, invokeBizKeySync } from "@/lib/accounts/biz-key-sync";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 
 export const runtime = "nodejs";

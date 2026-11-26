@@ -622,7 +622,7 @@ interface ConfirmResult {
   http_status: number;
 }
 
-/** POST /sessions/:id/confirm {request_id, approved}（照抄 src/lib/agent-chat-client/session.ts resolveAgentConfirm）。 */
+/** POST /sessions/:id/confirm {request_id, approved}（照抄 src/lib/agent/agent-chat-client/session.ts resolveAgentConfirm）。 */
 async function postConfirm(
   jobId: string,
   requestId: string,
@@ -1246,7 +1246,7 @@ function buildQuestionAnswers(item: PendingQuestionItem, raw: unknown, message: 
   return out;
 }
 
-/** POST /sessions/:id/question {request_id, answers}（照抄 src/lib/agent-chat-client/session.ts replyAgentQuestion）。 */
+/** POST /sessions/:id/question {request_id, answers}（照抄 src/lib/agent/agent-chat-client/session.ts replyAgentQuestion）。 */
 async function postQuestionAnswer(
   jobId: string,
   item: PendingQuestionItem,

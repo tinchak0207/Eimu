@@ -1,7 +1,7 @@
 // 云端素材库 API：list / upsert / delete。
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   CanvasAssetLimitError,
   MAX_IMAGE_DATA_URL_BYTES,
@@ -11,7 +11,7 @@ import {
   saveCanvasAsset,
 } from "@/lib/canvas/asset-store";
 import type { CanvasAsset } from "@/lib/canvas/asset-store";
-import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/asset-scope";
+import { MAX_ASSET_PROJECT_TAGS, projectTagIdsOverLimit } from "@/lib/media/asset-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,4 +1,4 @@
-import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
+import { aspectRatioFromImageSize } from "@/lib/generation-core/generation-model-catalog";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
@@ -92,7 +92,7 @@ function adobeModel(input: SupplierGenerationInput): string {
  * 历史来源：sub2api 的 images endpoint 只认它自己字典里的上游模型名，平台 id
  * 「gemini-3-image」直传被拒 `images endpoint requires an image model`
  *（generation_attempt 2026-08-23~27 多笔 400），sub2api 的命名是「gemini-3-pro-image」
- * ——该映射现由 tools/seed-generation-suppliers.ts 的 CHANNEL_MODEL_ALIASES seed 进 sub2api。
+ * ——该映射现由 tools/ops/suppliers/seed-generation-suppliers.ts 的 CHANNEL_MODEL_ALIASES seed 进 sub2api。
  */
 export function aliasedSupplierModel(supplier: SupplierRecord, modelId: string): string {
   if (supplier.supplierModelId) return supplier.supplierModelId;

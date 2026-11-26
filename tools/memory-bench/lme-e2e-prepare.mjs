@@ -3,7 +3,7 @@
 //   node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/memory-bench/lme-e2e-prepare.mjs --per-type 10 --topk 5 --out /tmp/lme-e2e-input.json
 import { readFileSync, writeFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
-import { ensureHistorySchema, indexTurns, searchHistory } from "../../deploy-staging/gateway/chat-history-search.ts"
+import { ensureHistorySchema, indexTurns, searchHistory } from "../../services/gateway/chat-history-search.ts"
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith("--") ? [...a, [v.slice(2), arr[i + 1] ?? "1"]] : a), []))
 const perType = Number(args["per-type"] ?? 10)

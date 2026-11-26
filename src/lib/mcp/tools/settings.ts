@@ -16,7 +16,7 @@ import {
   PERSONA_MODES,
   type AgentSettings,
   type AgentThinkingLevel,
-} from "@/lib/agent-chat-client/types";
+} from "@/lib/agent/agent-chat-client/types";
 import { machineError, structuredResult, type McpToolCallResult } from "../protocol";
 import { AGENT_SETTINGS_PATH } from "./constants";
 import type { McpToolContext, ToolInputSchema } from "./types";

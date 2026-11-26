@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isModelAllowedForKey, readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { SUPPORTED_GENERATION_MODEL_IDS, MUSIC_1_MODEL_ID } from "@/lib/image-model-ids";
-import { imageGenerationCoins, modelDisplayName } from "@/lib/provider-config";
-import { generationCapabilities, generationCoins, generationModel } from "@/lib/generation-model-catalog";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { isModelAllowedForKey, readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { SUPPORTED_GENERATION_MODEL_IDS, MUSIC_1_MODEL_ID } from "@/lib/generation-core/image-model-ids";
+import { imageGenerationCoins, modelDisplayName } from "@/lib/generation-core/provider-config";
+import { generationCapabilities, generationCoins, generationModel } from "@/lib/generation-core/generation-model-catalog";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
-import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
+import { upscaleFourKUpstreamEnabled } from "@/lib/generation-core/upscale-4k-flag";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
-import { MUSIC_CHARGE_ENDPOINT, musicCoinsPerGeneration } from "@/lib/music-pricing";
+import { MUSIC_CHARGE_ENDPOINT, musicCoinsPerGeneration } from "@/lib/billing/music-pricing";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";
@@ -151,7 +151,7 @@ async function handleModels(req: NextRequest, rejection: RejectionContext): Prom
  * 音乐生成条目（2026-10-10）：音乐走 harness 的 `music_gen`，不走平台的生成管线，
  * 所以它不是「可按模型投递的生成端点」，而是一条**价目宣告**——agent 的报价工具
  * 读 `x_coins_per_music`，与实扣同源（同一个 `musicCoinsPerGeneration()`，
- * 见 `src/lib/music-pricing.ts`）。`x_endpoint` 指向扣费端点 `POST /v1/music/charges`，
+ * 见 `src/lib/billing/music-pricing.ts`）。`x_endpoint` 指向扣费端点 `POST /v1/music/charges`，
  * 呼叫方在那里按 `{ ref }` 申报一次生成（金额由服务端定价，不接受调用方传入）。
  */
 function musicEntry(created: number, siteUrl: string) {

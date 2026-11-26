@@ -4,7 +4,7 @@
 // 的身份落地（`/api/canvas/scene-3d` 的物件键含 userId）。做法＝站内（已登入）铸一段
 // 短命凭证，用户手动搬进 Blender，上传路由验签换回 userId。
 //
-// 轮子来源（禁造轮子）：本档逐行照抄 `src/lib/emu-oauth.ts` 的同类实现——同样是
+// 轮子来源（禁造轮子）：本档逐行照抄 `src/lib/accounts/emu-oauth.ts` 的同类实现——同样是
 // 「浏览器外客户端拿一次性 HMAC 凭证」那条路。白名单差异只有五处，其余
 // （base64url + "." + HMAC-SHA256 hex、按最后一个 "." 切分、timingSafeEqual、
 // 数字严格校验、任何失败都不抛）逐字同源：

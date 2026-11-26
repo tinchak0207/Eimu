@@ -7,7 +7,7 @@ import {
   type AgentQuotaState,
   type AgentSseEvent,
   type AgentSteerStatus,
-} from "@/lib/agent-chat-types";
+} from "@/lib/agent/agent-chat-types";
 import {
   agentChatReducer,
   appendUserTurn,
@@ -17,9 +17,9 @@ import {
   expireQueuedSteers,
   markQueuedSteersAborted,
   resumeZombieTurn,
-} from "@/lib/agent-chat-reducer";
-import { AgentChatError } from "@/lib/agent-chat-client";
-import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
+} from "@/lib/agent/agent-chat-reducer";
+import { AgentChatError } from "@/lib/agent/agent-chat-client";
+import type { AgentTranscriptItem } from "@/lib/agent/agent-chat-types";
 
 // ─────────────────────────── 常数
 

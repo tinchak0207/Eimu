@@ -35,6 +35,8 @@
 //     `shotCandidates`＝我方既有「一分镜候选集＋星标采用稿」轮子（`storyboard-shots.ts`，
 //     D9），就是本镜的影像（含影）关联，**不另造新键**。
 
+import { staleShotVersions } from "./storyboard-shots";
+
 // ─────────────────────────────────────────── 键与视野
 
 /**
@@ -191,3 +193,70 @@ export function invalidateShotMediaLinksFromPatch<T extends StoryboardShotMediaV
 ): T {
   return clearShotMediaLinks(before, invalidatedShotMediaLinks(before, patch));
 }
+// ─────────────────────────────────────────── 统一写入漏斗 ＋ 改动回执（吸收 AID「改了什么、什么过期」）
+
+/** 一次分镜编辑的回执（给使用者／Agent 读：实际改了哪些栏、清了哪些关联、哪些产物过期、哪些没动）。 */
+export interface ShotEditReceipt {
+  /** 实际发生变化的栏位名（21 栏 ＋ prompt/narration；值真的不同才算）。 */
+  changedFields: string[];
+  /** 被清空的关联键（旧候选／旧配音）。 */
+  clearedLinks: ShotMediaLinkKey[];
+  /** 指纹不再匹配当前输入的旧版本（仍留在 taskVersions 可回看）。 */
+  staleVersions: { image: string[]; video: string[] };
+  /** 出片需重跑／出图需重跑／配音需重配（据此告诉使用者「准备重跑的范围」）。 */
+  needsRerun: { image: boolean; video: boolean; dialogueAudio: boolean; narrationAudio: boolean };
+}
+
+const RECEIPT_TRACKED_FIELDS = [
+  "visualDescription", "prompt", "dialogue", "narration", "actionState", "shotSize", "cameraAngle",
+  "focalLength", "cameraMovement", "composition", "lighting", "atmosphere", "colorTone", "scriptContent",
+] as const;
+
+/**
+ * 分镜 metadata patch 的**唯一写入漏斗**（`patch_metadata` 与 agent `update_node` 共用，
+ * 避免「人改会失效、Agent 改不失效」两套语义）。
+ *
+ * 顺序：合并前按 patch 清失效关联 → 并入 patch → 给尚无指纹的 taskVersions 盖章
+ * （patch 自带 taskVersions＝新生成版本，盖合并后输入；否则盖合并前输入）。
+ * 非分镜节点（无 `storyboardShot`）原样合并，不动任何关联键。
+ */
+export function applyShotMetadataPatch(
+  before: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  stamp: (metadata: Record<string, unknown>) => unknown,
+): { metadata: Record<string, unknown>; receipt: ShotEditReceipt | null } {
+  const isShot = !!before.storyboardShot || !!patch.storyboardShot;
+  if (!isShot) return { metadata: { ...before, ...patch }, receipt: null };
+  const invalidated = invalidatedShotMediaLinks(before, patch);
+  const merged: Record<string, unknown> = { ...clearShotMediaLinks(before, invalidated), ...patch };
+  const stamped = "taskVersions" in patch ? stamp(merged) : stamp(before);
+  if (stamped) merged.taskVersions = stamped;
+  return { metadata: merged, receipt: buildShotEditReceipt(before, merged, invalidated) };
+}
+
+function buildShotEditReceipt(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  cleared: readonly ShotMediaLinkKey[],
+): ShotEditReceipt {
+  const changedFields = RECEIPT_TRACKED_FIELDS.filter((field) => {
+    const a = readContentField(before as StoryboardShotMediaView, field);
+    const b = readContentField(after as StoryboardShotMediaView, field);
+    return b.present && a.value !== b.value;
+  });
+  const imageFields = new Set(["visualDescription", "prompt"]);
+  const imageChanged = changedFields.some((f) => imageFields.has(f));
+  const videoChanged = changedFields.some((f) => f !== "dialogue" && f !== "narration" && f !== "scriptContent");
+  return {
+    changedFields: [...changedFields],
+    clearedLinks: [...cleared],
+    staleVersions: staleShotVersions(after),
+    needsRerun: {
+      image: imageChanged,
+      video: videoChanged,
+      dialogueAudio: changedFields.includes("dialogue"),
+      narrationAudio: changedFields.includes("narration"),
+    },
+  };
+}
+

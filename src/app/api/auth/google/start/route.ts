@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildGoogleAuthorizeUrl, createGoogleState } from "@/lib/google-auth";
-import { embedTicketInState } from "@/lib/github-auth";
+import { buildGoogleAuthorizeUrl, createGoogleState } from "@/lib/accounts/google-auth";
+import { embedTicketInState } from "@/lib/accounts/github-auth";
 
 export const preferredRegion = "sfo1";
 

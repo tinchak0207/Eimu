@@ -244,7 +244,7 @@ test("体积上限与既有上限同源；data URL 输入超限具名拒（未�
 });
 
 test("4K 档位走同一条成本路径（generationCoins 吃得住 tier 值，且与 1k 同价＝现行一口价）", async () => {
-  const { generationCoins } = await import("../generation-model-catalog.ts");
+  const { generationCoins } = await import("./generation-model-catalog.ts");
   const coins1k = generationCoins("pixai-upscale", { resolution: "1k" });
   const coins4k = generationCoins("pixai-upscale", { resolution: "4k" });
   assert.ok(coins1k > 0, "超分档位必须有价（非零）");

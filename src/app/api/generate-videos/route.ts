@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { getRuntimeGatewayPools } from "@/lib/admin-pool-store";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
+import { safeFetchPublicImage } from "@/lib/ssrf-guard";
+import { getRuntimeGatewayPools } from "@/lib/generation-core/admin-pool-store";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
 import {
   buildModelQueue,
   isEndpointCoolingDown,
@@ -9,11 +10,11 @@ import {
   recordEndpointFailure,
   recordEndpointSuccess,
   safeEndpointHost,
-} from "@/lib/channel-registry";
-import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
-import { publicImageUrl } from "@/lib/image-url";
-import { QUOTA_PER_COIN } from "@/lib/new-api-client";
-import { recordRoutingEvent, type RoutingAttempt } from "@/lib/routing-telemetry";
+} from "@/lib/generation-core/channel-registry";
+import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
+import { publicImageUrl } from "@/lib/media/image-url";
+import { QUOTA_PER_COIN } from "@/lib/accounts/new-api-client";
+import { recordRoutingEvent, type RoutingAttempt } from "@/lib/generation-core/routing-telemetry";
 import {
   defaultGenerateAudio,
   generationCoins,
@@ -25,11 +26,11 @@ import {
   resolveSupportedResolution,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import { resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { optimizeVideoPrompt } from "@/lib/agent-prompt-optimizer";
-import { fuseSceneVideo } from "@/lib/scene3d-video-fusion";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { optimizeVideoPrompt } from "@/lib/agent/agent-prompt-optimizer";
+import { fuseSceneVideo } from "@/lib/generation-core/scene3d-video-fusion";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -306,19 +307,31 @@ export async function POST(req: NextRequest) {
   // 上游只吃 files（multipart 图位）——非 File 的 JSON 参考卡不进上游（版位契约不动）。
   const referenceFiles = [...parsed.referenceImages];
   if (sceneVideoFusion) {
-    const upstreamFiles = sceneVideoFusion.frameCard.references
-      .filter((reference) => reference.url.startsWith("data:"))
-      .slice(0, Math.max(0, 2 - referenceFiles.length));
-    if (upstreamFiles.length > 0) {
-      const files = await Promise.all(
-        upstreamFiles.map(async (reference) => new File(
-          [Buffer.from(reference.url.slice(reference.url.indexOf(",") + 1), "base64")],
-          `${reference.name || "scene3d-ref"}.png`,
-          { type: reference.mimeType },
-        )),
-      );
-      referenceFiles.push(...files);
+    // 白模/机位关键帧是运动参考：data: 内联直接附；已上传的 https 帧（导演台关键帧上传后就是这种形态）
+    // 经 SSRF 守卫抓取后同样附上——否则这些帧只影响提示词、从未真正送到上游（吸收 AID 白模运动参考）。
+    const slots = Math.max(0, 2 - referenceFiles.length);
+    const picked = sceneVideoFusion.frameCard.references.slice(0, slots);
+    const files: File[] = [];
+    for (const reference of picked) {
+      const name = `${reference.name || "scene3d-ref"}.png`;
+      try {
+        if (reference.url.startsWith("data:")) {
+          files.push(new File(
+            [Buffer.from(reference.url.slice(reference.url.indexOf(",") + 1), "base64")],
+            name,
+            { type: reference.mimeType },
+          ));
+        } else if (reference.url.startsWith("https://")) {
+          const fetched = await safeFetchPublicImage(reference.url, { signal: req.signal, maxBytes: 8 * 1024 * 1024 });
+          const type = fetched.headers.get("content-type")?.split(";")[0]?.trim() || reference.mimeType || "image/png";
+          if (!fetched.ok || !type.startsWith("image/")) continue; // 不是可用图片＝跳过，不拿别的东西充数
+          files.push(new File([await fetched.arrayBuffer()], name, { type }));
+        }
+      } catch {
+        // 单帧抓取失败不阻断出片：该帧退回「只影响提示词」的旧行为。
+      }
     }
+    referenceFiles.push(...files);
   }
   const result = await requestVideo(
     endpoint,

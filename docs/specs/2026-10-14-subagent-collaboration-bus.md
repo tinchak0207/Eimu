@@ -440,12 +440,12 @@ POST /internal/subagent/notify                    # 子 → 父
 - 新工具 `tools/notify_orchestrator.ts`（子用；含 `kind`/`text`/`question`）。
 - `tools/subagent_status.ts` 透传新栏位；`tools/subagent_stop.ts` 增 `mode`。
 - `opencode.json`：**无需改动即已可用**（2026-10-14 取证修正）。opencode 的语义是「tools map 只写 `false` 项，
-  **未列 = 默认开**」——见 `tools/export-expert-agents.ts:235` 自注；`subagent_message`/`notify_orchestrator`
+  **未列 = 默认开**」——见 `tools/codegen/export-expert-agents.ts:235` 自注；`subagent_message`/`notify_orchestrator`
   均未在任何 agent 的 `false` 清单里 ⇒ 本来就在**全部** agent 上开启。本轮加的 12 个 `=true` 属**声明性冗余**
   （不是使能开关），不承担「让工具可用」的职责。副作用（既有事实，非本轮引入）：子代理同样持有
   `subagent_message`/`subagent_status`/`subagent_stop`（可对兄弟动手），主代理持有 `notify_orchestrator`
   （对它自己无效：`byChildOc`→`subagentParentState` 反查不到 ⇒ 404）。是否按角色收紧属**产品面**，未擅自改。
-  注意生成链：`tools/export-expert-agents.ts` → `gateway/expert/opencode-agents.json`（**该档禁止重生成覆盖**，
+  注意生成链：`tools/codegen/export-expert-agents.ts` → `gateway/expert/opencode-agents.json`（**该档禁止重生成覆盖**，
   见 exporter 档头 2026-10-06 修正）；工具有效性以 `opencode-runtime/opencode.json` 的 agent 节为准。
 - `expert/orchestrator-dispatch-playbook.md`：补「先 status 看实况 → 再 message 纠偏 → 软停保成果 → 续跑」标准动作。
 
@@ -481,7 +481,7 @@ POST /internal/subagent/notify                    # 子 → 父
 
 **发布语义（决定性事实）**：两个发布脚本都**只发布已 commit 的快照**。
 
-- gateway：`git archive <sha> deploy-staging/gateway` → 新 release 目录 + 原子切 symlink。**整目录**，无法按档排除 ⇒「不 commit 某档」＝发布该档的 HEAD 版本。
+- gateway：`git archive <sha> services/gateway` → 新 release 目录 + 原子切 symlink。**整目录**，无法按档排除 ⇒「不 commit 某档」＝发布该档的 HEAD 版本。
 - runtime：白名单同步 `SCOPE=(tools lib skills plugin)` ＋ `CONFIGS=(opencode.json package.json bun.lock package-lock.json)` ＋ workspace 根 `AGENTS.md`，**带删除语义**（本机无 rsync，靠档案清单比对补删除）⇒ 生产上不在快照里的档会被**删除**。
 
 **因此判据不是「工作树 vs 生产」，而是「HEAD vs 生产」**。2026-10-14 逐档 md5 全量对帐（生产 gateway 211 档 = `<release>/files/**`；生产 runtime 1241 档）：
@@ -520,7 +520,7 @@ runtime 工作树里另有一批「生成工具」未提交改动（`tools/image
 | H3 | 安全 / 泄漏 / 注入 | ⑥ 四端点**无发起方身份绑定**（唯一门是 `isLoopback`）：自报 `session_id` 即可对他会话投递/steer/硬停/读取/冒充其子代理灌回报并唤醒（真跑 `message→200 steered`、`stop→200 stopped:1`、`notify→accepted,parent_woken:true`）；⑦ **唤醒洪泛**：`kind:"question"` 绕过 60s 节流、run 结束后兜底路径零节流（40 条 notify ＝ 40 次父会话 LLM 回合）；⑧ 不可信前缀未覆盖 live log／`text_tail`／兄弟名册（注入绕道）；⑨ 内审正文抑制 `hideBody` 被 live log／`text_tail` 旁路 | P1 ×2 ＋ P2 ×2 |
 | H4 | 兼容与契约错配 | ⑩ runtime `subagent_status.ts` 把 `artifact_path` 分支排在 `done` **之前** → 所有自然终态走它，**`status:error` 被伪装成 `ok:true`（失败装成功）**；⑪ `subagent_message` 工具不发送 `kind`/`question_id` ⇒ **阻塞式提问永不可解**（gateway 唤醒文案却要求模型这么做）；⑫ soft stop 回执与 hard **逐字相同**（把模型误导去重派） | P0 ×2 ＋ P1 ×1 |
 | **H5** | **复验（打修复本身）** | ①–⑯ 全部 16 条反例重跑：**15 条打不动**（第 5 条时序敏感未真跑，仅推演）；**但打出一条修复引入的新 P1**——节流把**合法阻塞提问**一并吞掉（真跑：progress 唤醒后 60s 窗内登记的 `is_blocking:true` 提问 → `parent_woken:false`，父空闲无人取，**登记→唤醒 = ∞**，子代理白等到 600s TTL 被 `question_abandoned`）＝「仿佛不认识」的另一种形态；另 3 条低/中：`notify_orchestrator` 描述与行为矛盾、`0600` 被同内容 `0644` 产物旁路、`stop{all:true,mode:"soft"}` 静默按 hard 执行 | P1 ×1 ＋ P2 ×3 |
-| **H7** | **生产真路径 E2E（2026-10-14 上生产后用真会话/真端点打；作者≠Hacker）** | ① **软停（终态 `interrupted`）后的 run 用「精确 id」查 `subagent_status` 回 404 `not_found`**，而同一个 404 自带的 `recent_runs` 里正列着该 id、提示还写「可改用上述完整 id」（自相矛盾）；`"latest"` 却能解析到它。根因：`removeFromRegistries` 已把 run 摘出 `byChildOc`，而精确 id 解析链只查 `durable → completed → byChildOc`，**`byParent` 索引未参与**。② **产物与 live log 的 `0600` 让父会话读不回成品**：生产日志 `session.error code=tool_error message=PermissionDenied: FileSystem.open(outputs/subagent/44f1a863-…-e2e-probe.md)`，紧跟「子代理完成·系统自动唤醒」（正文正是叫父会话 `read` 该 `artifact_path`）之后；`sudo -u agentsvc head <该档>` 实测 `Permission denied`（网关以 `ubuntu` 写、opencode 以 `agentsvc` 读，目录 `drwxrwsr-x ubuntu agentsvc` setgid）。⇒ 唤醒把成品位置交给父会话、却让**该读的人读不了**＝原痛点复现 | P1 ×2 |
+| **H7** | **生产真路径 E2E（2026-10-14 上生产后用真会话/真端点打；作者≠Hacker）** | ① **软停（终态 `interrupted`）后的 run 用「精确 id」查 `subagent_status` 回 404 `not_found`**，而同一个 404 自带的 `recent_runs` 里正列着该 id、提示还写「可改用上述完整 id」（自相矛盾）；`"latest"` 却能解析到它。根因：`removeFromRegistries` 已把 run 摘出 `byChildOc`，而精确 id 解析链只查 `durable → completed → byChildOc`，**`byParent` 索引未参与**。② **产物与 live log 的 `0600` 让父会话读不回成品**：生产日志 `session.error code=tool_error message=PermissionDenied: FileSystem.open(.local/outputs/agent/subagent/44f1a863-…-e2e-probe.md)`，紧跟「子代理完成·系统自动唤醒」（正文正是叫父会话 `read` 该 `artifact_path`）之后；`sudo -u agentsvc head <该档>` 实测 `Permission denied`（网关以 `ubuntu` 写、opencode 以 `agentsvc` 读，目录 `drwxrwsr-x ubuntu agentsvc` setgid）。⇒ 唤醒把成品位置交给父会话、却让**该读的人读不了**＝原痛点复现 | P1 ×2 |
 | H6 | 复验（打 FIX-G3 修复本身） | T1–T4 与新引入问题；结论见 §6 FIX-G3 行（真跑全绿、防洪泛不退化、红线 2 逐字） | 已完成 |
 
 未被击穿（诚实记录）：并发上限 3、队列/时间线上界、计时器生命周期（均 unref、不累积）、`finishRun` 收尾幂等、路径穿越（live 档名=UUID＋`safeLabelForFile`）、密钥入 live log/status、崩溃后 `resumable` 的诚实回退、零回归红线 1/2/3/5。

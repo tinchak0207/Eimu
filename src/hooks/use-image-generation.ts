@@ -5,19 +5,19 @@ import {
   ProviderTiming,
   ReferenceImage,
   ReferenceImageRole,
-} from "@/lib/image-types";
-import { initializeProviderRecord, normalizeProviderKey, PROVIDER_KEY, type ModelMode, ProviderKey } from "@/lib/provider-config";
+} from "@/lib/media/image-types";
+import { initializeProviderRecord, normalizeProviderKey, PROVIDER_KEY, type ModelMode, ProviderKey } from "@/lib/generation-core/provider-config";
 import {
   generationModel,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import {
   fetchStoredHistory,
   getStoredToken,
   getStoredUser,
   type StoredHistoryEntry,
-} from "@/lib/new-api-client";
+} from "@/lib/accounts/new-api-client";
 import {
   mergePersistedHistory,
   type PersistedGenerationEntry,
@@ -25,19 +25,19 @@ import {
   recordGenerationResult,
   selectPersistedHistoryForUser,
   writeGenerationCache,
-} from "@/lib/generation-cache";
+} from "@/lib/generation-core/generation-cache";
 import {
   WORKFLOW_SCHEMA_VERSION,
   buildWorkflowPrompt,
   createGenerationWorkflow,
-} from "@/lib/generation-workflow";
+} from "@/lib/generation-core/generation-workflow";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   generationTaskListSignature,
   mergeGenerationTaskProjections,
   nextGenerationSyncDelay,
   type GenerationTaskProjection,
-} from "@/lib/generation-task-types";
+} from "@/lib/generation-core/generation-task-types";
 
 interface UseImageGenerationReturn {
   images: ImageResult[];
@@ -184,6 +184,7 @@ async function waitForGenerationTask(
   // 网关瞬时故障（控制面容器重建窗口的 502、Vercel 边缘抖动）返回 HTML 错误页：
   // 解析失败/5xx 一律重试轮询而不是把任务误杀——server 端生成还在跑，客户端死了=钱花图丢。
   let consecutiveGatewayErrors = 0;
+  let lastUnknown: GenerationTaskProjection | null = null;
   while (Date.now() < deadline) {
     let task: (GenerationTaskProjection & { error?: string }) | null = null;
     let fetchFailed = false;
@@ -230,11 +231,27 @@ async function waitForGenerationTask(
         resultId: first?.resultId,
       };
     }
-    if (task.status === "failed" || task.status === "cancelled" || task.status === "refunded" || task.status === "unknown") {
+    // `unknown`（提交结果未知／计费未知）不是终态：原订单还在核对，可能转 succeeded 或退款。
+    // 继续轮询同一个任务（不重提、不重复扣费），到期仍未知再如实告诉用户「别重提」。
+    if (task.status === "unknown") lastUnknown = task;
+    if (task.status === "failed" || task.status === "cancelled" || task.status === "refunded") {
       // API 回 errorCode/errorMessage；旧字段名 task.error 仅为兼容保留。
-      throw new Error(task.errorMessage || task.error || `Generation task ended with status ${task.status}.`);
+      // 带上人话结局与工单号：「上游未知」要告诉用户别重提，求助时不必复制提示词／日志。
+      const base = task.errorMessage || task.error || `Generation task ended with status ${task.status}.`;
+      const outcome = task.outcome;
+      throw new Error(
+        outcome && outcome.state !== "failed"
+          ? `${outcome.headline}。${outcome.detail}（工单号 ${outcome.supportRef}）`
+          : outcome
+            ? `${base}（工单号 ${outcome.supportRef}）`
+            : base,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  if (lastUnknown?.outcome) {
+    const o = lastUnknown.outcome;
+    throw new Error(`${o.headline}。${o.detail}（工单号 ${o.supportRef}）`);
   }
   throw new Error("Generation task is still running; reopen the workspace to continue polling.");
 }

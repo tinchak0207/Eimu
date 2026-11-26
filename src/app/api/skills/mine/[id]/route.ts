@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { deleteMySkill } from "@/lib/agent-skills/user-skill";
+import { deleteMySkill } from "@/lib/agent/agent-skills/user-skill";
 import { noStore, resolveSkillOwner } from "../owner";
 
 export const runtime = "nodejs";

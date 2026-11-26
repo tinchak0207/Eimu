@@ -3,8 +3,10 @@
 ## 〇、硬闸（先于本档一切内容；任何一条没做＝本轮作废，被纠正就改这一节而不是在文末追加）
 
 1. **开工闸**：第一个动手工具之前，先跑 `mem find <本题 2-3 个关键词>`（产品/组件/症状词各一个），读命中里最近 3 篇正文。记忆里有现成轮子、配方、裁定的，照它做。没跑 mem find 就动手＝违规。
-2. **交付闸**：凡是动到生产（部署、回滚、改生产库／env／路由），汇报前必须跑 `/agent-evolve` 阶段一：用暴君原话开真会话（`tools/human-conversation-e2e.mjs`，原话补进 corpus）＋真浏览器截图（`eval-visual-replay/` 现成脚本）＋ `read_image` 审图。API 200、model-status、smoke 绿都不是终点。不过就修→重跑，循环到过，期间不汇报、不请示。
+2. **交付闸**：凡是动到生产（部署、回滚、改生产库／env／路由），汇报前必须跑 `/agent-evolve` 阶段一：用暴君原话开真会话（`tools/qa/human-conversation-e2e.mjs`，原话补进 corpus）＋真浏览器截图（`tools/qa/visual-replay/` 现成脚本）＋ 自己用 Read 直接看截图审图（原生多模态；read_image 脚本已废弃，禁用）。API 200、model-status、smoke 绿都不是终点。不过就修→重跑，循环到过，期间不汇报、不请示。
 3. **汇报闸**：只报三样——结论；真会话 sid／截图路径；还没达成的那一件事。不问「要不要」，不列免责清单。
+4. **防回退闸（2026-10-31 暴君追问「为什么 10/31 要修 9 月已经出过的 bug」）**：改任何已修过的代码路径前，先 `git log -S` 该段关键符号＋`mem find` 历史修复；新改动若会关掉旧修复要救的场景，必须在提交说明里写明「推翻了哪条修复、为什么」，并把旧场景补成语料。每个由暴君原话触发的修复，语料场景必须真的走到出故障的那一步（在故障点之前就中止的场景不算覆盖）。
+5. **仓库清理闸（2026-11-26）**：验收以真实维护任务为准：能从统一入口定位唯一源码、有效规范、运行命令与发布边界，新增文件有明确归属，并行改动有明确共享接口。目录数减少、搬迁或隐藏文件不代表易维护；必须检查各级目录中职责混杂、重复真源、失效入口与历史草稿。目录迁移同步修正真实入口、相对引用、构建与发布打包路径，并用原始文件集合证明未丢内容；旧路径仅为现役进程与历史工程保留必要兼容。真实删除与职责拆分分别记账，同盘搬迁不得冒充释放空间；可重建垃圾清除，唯一作品、原始样本与必要证据保全。
 
 人说出结果。手边的脑子把整场做完。人忘记后面有技术。
 
@@ -50,7 +52,7 @@
 
 这些是交车和刹车，不是第二套产品。读成「再加一轮确认就更稳」，就读错了。
 
-- **结果导向，禁止请示式收尾（2026-10-31 暴君纠正「你真的太拖拉了，我是结果导向的人」，违反＝低效）**：暴君下了目标（「修好出图」「图片生成要一次成功」），终态就是**真路径上目标已达成**，不是汇报。①凡是为达成目标必需的动作（改生产配置／补 env／重发布／重跑验证）**直接做完**，禁止在结尾问「要我现在去补吗」「要不要继续」——能做的做完，做不了的才说卡在哪一个硬事实；②只有「花钱超出已授权／不可逆删除／对外发布」三类才先问，其余一律自行拍板；③一次推进到终态再汇报：根因→修→真路径验证→提交部署，**不拆成每步一报**；④汇报只给结论＋证据＋仍未达成的一件事，不写过程叙事、不列「我没做的 N 件事」当免责声明；⑤诊断阶段并行查（一条命令取齐多个事实），禁一次一查。⑥**终态必须自己走使用者真路径验到**：目标是「agent 能出图」，就开真会话发用户原话、读 SSE／回执到出图为止（现成驱动：`tools/human-conversation-e2e.mjs`，语料换成用户原话即可），不是调 API／看 model-status 就收工；真路径上出现任何降级（改走 Blender、报渠道不可用、多余确认）＝没达成，**继续诊断→修→重跑**，循环到一次成功，期间不汇报。每修一个真缺陷，把触发它的用户原话补进语料，下一轮自动复验（防回退，这就是自我进化的闭环）。
+- **结果导向，禁止请示式收尾（2026-10-31 暴君纠正「你真的太拖拉了，我是结果导向的人」，违反＝低效）**：暴君下了目标（「修好出图」「图片生成要一次成功」），终态就是**真路径上目标已达成**，不是汇报。①凡是为达成目标必需的动作（改生产配置／补 env／重发布／重跑验证）**直接做完**，禁止在结尾问「要我现在去补吗」「要不要继续」——能做的做完，做不了的才说卡在哪一个硬事实；②只有「花钱超出已授权／不可逆删除／对外发布」三类才先问，其余一律自行拍板；③一次推进到终态再汇报：根因→修→真路径验证→提交部署，**不拆成每步一报**；④汇报只给结论＋证据＋仍未达成的一件事，不写过程叙事、不列「我没做的 N 件事」当免责声明；⑤诊断阶段并行查（一条命令取齐多个事实），禁一次一查。⑥**终态必须自己走使用者真路径验到**：目标是「agent 能出图」，就开真会话发用户原话、读 SSE／回执到出图为止（现成驱动：`tools/qa/human-conversation-e2e.mjs`，语料换成用户原话即可），不是调 API／看 model-status 就收工；真路径上出现任何降级（改走 Blender、报渠道不可用、多余确认）＝没达成，**继续诊断→修→重跑**，循环到一次成功，期间不汇报。每修一个真缺陷，把触发它的用户原话补进语料，下一轮自动复验（防回退，这就是自我进化的闭环）。
 - **先查证再补问（2026-10-18 用户纠正「不会搜是不是」）**：升学、参赛等个性化任务，先检索既有记忆、用户已提供材料与公开官方要求；不把可自行查证的资料转成问卷，不因非关键个人信息缺失停止推进。没有证据的年龄、年级、申请目标明确标为未知，不编造；只有遇到明确资格硬闸时，才合并提出无法自行查证的必要问题。
 
 - **不许自己停（2026-10-14 暴君纠正「停你妈啊 让你停了吗」）**：工程中途收到暴君的任何实质消息（质疑/纠正/追问/骂人），一律视作「边做边说」——继续推进主线，把纠正消化进正在做的事，**不许**把回合停在「等你发话／你说继续我就开始」。暴君要停会自己明说「停」。会话目标被系统标记 paused、而暴君消息并未要求停止时，照常继续做事。
@@ -59,7 +61,7 @@
 - **交付包含提交与部署（2026-10-18 用户纠正）**：用户已要求提交部署时，必须把本轮代码提交并发布到生产、确认真实运行后再交付；不能以“仅本地通过、尚未提交或部署”结束。只提交本轮变更，无关工作树改动不得混入。
 - 禁为审美反复自我围观：美学归暴君。功能正确性的真路径截图（「〇、交付闸」）不在此禁令内。**例外（2026-09-26 暴君纠正）**：3D/WebGL/沉浸式渲染任务，或暴君明说「自主验证迭代」时，tsc 绿 ≠ 画面可用——必须截图自验、反覆迭代到验收判准全达成再交。
 - **视觉改动部署前必做本地 E2E 截图自审（2026-10-03 暴君纠正「你连本地e2e都没有截图审核就推上去」，违反＝直接退回）**：任何使用者看得见的 UI 改动，推生产前必须 ①建暂存路由真渲染该元件（`src/app/zz-tmp-*/page.tsx`，假资料即可；**预览页常是复制版元件，先确认它 import 的是本尊**）②`npx --yes next dev -p 3999` ＋ Playwright chromium `deviceScaleFactor: 2` 截图 ③**状态截齐**（折叠态／展开态／最长字／hover）并逐条写下核对结论（能量 rect 就量，别凭目测）④不达标改到过（上限 4 轮）⑤收工删暂存路由、杀 dev server、`rm -rf .next/types` 再跑 tsc（暂存路由会留假错）。tsc 绿、测试全过**一律不是**视觉的 oracle；这条不推翻上一条「禁自我 UI 检查」——禁的是为审美反覆围观，交付前的正确性截图是义务。
-- **Eimu 对外视频品牌验收**：对外视频必须遵循 `DESIGN.md`、`design-system/MASTER.md` 与 `tailwind.config.ts` token，使用品牌真实字体及 Liquid Glass 材料、色彩、圆角和层级；功能可读／解码成功不等于视觉通过。交付前由非作者抽查实际成片的开头、所有章节、最长字幕、过渡和结尾，逐项核对品牌规范；未经过视觉判准不得写「审核通过」。用户要求成片级剪辑时，静帧／字体／品牌通过不得替代动态观看；必须验证大字幕可读、内容驱动运镜／切镜／转场及开场／中段／结尾节奏，不能以静态九章模板交差。优先解剖用户已有优质素材，不能只用容易找到的低质量录像；必须实际审图／看片选片，不以文件存在作为已利用证据。 仅改转场或运动时必须保留既有页面视觉；禁止因动态剪辑擅自替换整套品牌。 用户改为音频驱动时，禁止沿用旧固定镜头时长；每句保留完整尾音及前后留白，转场放在无语音间隙内。指定完整原图时必须 contain 保全边缘，禁止局部裁字、手绘框与假光标；不得把旧剪辑约束当作持续硬闸。 用户明确改为全屏与短版时，删除旧外框、标题和底部留白，禁止沿用已否决的长版装配。歌曲仅可进入指定试听窗，窗外必须样本级为零；背景只能用已核实的原素材器乐，不能拿歌曲前奏或间奏替代。
+- **Eimu 对外视频品牌验收**：对外视频必须遵循 `DESIGN.md`、`docs/design-system/MASTER.md` 与 `tailwind.config.ts` token，使用品牌真实字体及 Liquid Glass 材料、色彩、圆角和层级；功能可读／解码成功不等于视觉通过。交付前由非作者抽查实际成片的开头、所有章节、最长字幕、过渡和结尾，逐项核对品牌规范；未经过视觉判准不得写「审核通过」。用户要求成片级剪辑时，静帧／字体／品牌通过不得替代动态观看；必须验证大字幕可读、内容驱动运镜／切镜／转场及开场／中段／结尾节奏，不能以静态九章模板交差。优先解剖用户已有优质素材，不能只用容易找到的低质量录像；必须实际审图／看片选片，不以文件存在作为已利用证据。 仅改转场或运动时必须保留既有页面视觉；禁止因动态剪辑擅自替换整套品牌。 用户改为音频驱动时，禁止沿用旧固定镜头时长；每句保留完整尾音及前后留白，转场放在无语音间隙内。指定完整原图时必须 contain 保全边缘，禁止局部裁字、手绘框与假光标；不得把旧剪辑约束当作持续硬闸。 用户明确改为全屏与短版时，删除旧外框、标题和底部留白，禁止沿用已否决的长版装配。歌曲仅可进入指定试听窗，窗外必须样本级为零；背景只能用已核实的原素材器乐，不能拿歌曲前奏或间奏替代。
 - **动态视频不能由静态PPT改字代替（2026-10-18 用户纠正）**：静态卡片整洁、文案完整不等于动态成片；必须按用户指定的镜头运动、真实转场与唯一素材段逐项交付，禁止反复以静态PPT改文字冒充重制。先交真实动态样片，由非作者判定运动与转场，再展开全片。
 - **视觉被否决后的工匠返工（2026-10-18 用户纠正）**：参数合格、无越界、文案齐全不等于视觉过关；禁止用反复 PIL 通用玻璃卡片拼接替代内容驱动成片。用户否决后，先解剖现有优质宣传成片的构图、字号层级、镜头节奏、运镜与转场，再在同一剪辑工程实装；不得以更多免责声明或验收报告代替成片。实机与作品作为视觉主体，每段围绕一个主动作设计；先交关键帧由非作者审阅，再应用全片。
 - **时长约束必须随用户纠正更新（2026-10-18）**：不得把旧稿时长当持续硬约束；用户纠正后，按完整内容、自然声音与成片节奏确定长度，禁止为凑总秒数剪发声或收缩自然停顿。
@@ -175,7 +177,7 @@
 
 钥匙是刹车。不进 log，不进记忆，不进提交。
 
-- 明文在 `.env.biz-key`（600，.gitignore 已覆盖）；调 `https://image.tinchak0207.xyz/v1/*`（Bearer sk-biz-…）。
+- 明文在 `.local/state/secrets/.env.biz-key`（600，.gitignore 已覆盖）；调 `https://image.tinchak0207.xyz/v1/*`（Bearer sk-biz-…）。
 - 丢失/泄露只能吊销重签——用户明确不再签发，务必保管。
 
 
@@ -188,9 +190,9 @@
 1. **收盘硬闸（gateway）：已停用（2026-10-28 用户裁定删闸，见记忆 2026-10-28-eimu-context-rot-root-cause）**。原因：闸门奖励形式——`workflow_write` 86% 发生在 nudge 之后、失败率 40%、32% 生图 prompt 从 DSL 抄、执行 0 次。`session.idle` 不再因未 `workflow_write` 拦截 `turn.done` 或注入补写 nudge；写穿记账保留供诊断。
 2. **默认起画布骨架**：命中意图即 PROMPT_SKELETON／DSL 模板上画布；模型只改 DSL（`canvas_get_state` → 改 steps → `workflow_write`），禁止只交 document 链接冒充灶上有菜。
 3. **覆盖率发版门：已停用（2026-10-28，同上）**。`gateway-release.sh` 不再调用 `check-media-workflow-write-coverage.py`（脚本文件保留，仅作诊断，不是门）。
-   诊断全量统计：`python3 tools/media-session-canvas-stats.py`（需 VPS ledger + opencode.db）。
+   诊断全量统计：`python3 tools/qa/media-session-canvas-stats.py`（需 VPS ledger + opencode.db）。
 
-真源接线：`deploy-staging/gateway/canvas-write-gate.ts`（意图/骨架纯函数；拦截与 nudge 路径已不接线）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
+真源接线：`services/gateway/canvas-write-gate.ts`（意图/骨架纯函数；拦截与 nudge 路径已不接线）、`events-translate.ts`（写穿记账）、`messages-gw.ts`（意图＋骨架指令）。
 
 ## 按需附件（排障/设计/产品决策时才读，平时不载入）
 
@@ -200,7 +202,7 @@
 
 - 基础设施排障（VPS 链路/控制面命令/生图卡根因/agent 网关 CORS/session 404）：`docs/runbooks/infra-debugging.md`
 - Adobe2API 定向排障：skill `adobe2api-direct-debugging`
-- UI 设计权威：`design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（lg-* 体系；正文 ≥13px）；任何 UI 任务先载 impeccable skill（~/.agents/skills/impeccable，它会载 PRODUCT.md/DESIGN.md）；Agent 交互锁定决策见记忆档 2026-08-08-agent-frontend-design-rules.md
+- UI 设计权威：`docs/design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（lg-* 体系；正文 ≥13px）；任何 UI 任务先载 impeccable skill（~/.agents/skills/impeccable，它会载 PRODUCT.md/DESIGN.md）；Agent 交互锁定决策见记忆档 2026-08-08-agent-frontend-design-rules.md
 - 产品决策准则全文 + 品牌/套餐/交互规则：PRODUCT.md（「Product Decision Doctrine」节）
 - 中控记帐/计费/排帐唯一权威：记忆 control-plane-billing-paradigm
 - 双真相边界（画布 world1 ↔ 产线执行图 world2；含节点 metadata 双白名单三处、CanvasProject 新栏位七处清单、VPS 活本 vs repo 镜像）：`docs/architecture/dual-truth-boundary.md`（W5，2026-09-29）
@@ -209,12 +211,12 @@
 
 先看见活的代码。缓存和旧快照不是现场。
 
-**活程式码（改动/读取只进这些）**：`src/app/api/`（Next.js 路由）、`src/lib/`（generation-core 生图/视频/TTS 管线、supplier-channels registry、billing 等）、`src/components/`、`src/app/`（页面）、`tools/`（seed/add-supplier-channel 等操作工具）、`bridge/`（pixai-bridge 等上游桥）、`deploy/gatus/`（探针配置）、`design-system/`（UI 权威）。
+**活程式码（改动/读取只进这些）**：`src/app/api/`（Next.js 路由）、`src/lib/`（generation-core 生图/视频/TTS 管线、supplier-channels registry、billing 等）、`src/components/`、`src/app/`（页面）、`tools/`（seed/add-supplier-channel 等操作工具）、`services/`（网关、运行时与上游桥）、`deploy/gatus/`（探针配置）、`docs/design-system/`（UI 权威）。
 
 **可跳过目录（垃圾/快取/快照，禁止花时间扫描）**：
-- `.tmp-home/`、`.tsdeps/`、`.xdg-cache/`、`.vercel.bak-link/`、`.dsh-*`、`.gateway-work/`、`.vercel-home/`、`.vercel-cli-cache/`、`.tmp-vercel-cache/`、`.dsh-mem/`、`.agents-fix/`、`.vercel-cli-data/`、`.pixai-refresh/` → 本地工具 HOME/快取，已 gitignore，勿读。
-- `marketing-battle-pack/` → 社群行销素材包（prompts/posts/logs），非运行时代码。
-- `eval-daming-film/`、`deploy-staging/opencode.json` → 历史评测/旧快照，**勿当真源**（live 真源在 VPS `/opt/agent-harness`）。
+- `.local/state/tool-home/`、`.local/cache/ts-deps/`、`.local/cache/xdg/`、`.local/state/vercel-link-snapshot/`、`.dsh-*`、`.local/state/gateway/`、`.local/state/vercel-home/`、`.local/cache/vercel-cli/`、`.local/cache/vercel/`、`.local/state/dsh-memory/`、`.local/tmp/agents-fix/`、`.local/state/vercel-cli/`、`.pixai-refresh/` → 本地工具 HOME/快取，已 gitignore，勿读。
+- `.local/experiments/marketing/` → 社群行销素材包（prompts/posts/logs），非运行时代码。
+- `.local/experiments/daming-film/`、`docs/archive/config-snapshots/deploy-staging-opencode.json.txt` → 历史评测/旧快照，**勿当真源**（live 真源在 VPS `/opt/agent-harness`）。
 - `public/showcase/agent-templates/*.mp4/webp` → 展示用大档素材，非逻辑。
 
-**记忆标记「作废/换血」≠ 真死**：08-28 中控手术后，`scheduler.ts` lease 门禁、`adobe-health.ts`、`supplier-channels.config.ts`、`tools/add-supplier-channel.ts`、`metaso-upstream.ts` 等**仍被 worker/adapter 引用，是活的**。砍任何档前先 `grep -rn "档名" src` 验证 import，勿凭记忆删除（记忆档 control-plane-reblood-to-new-api 已自标「旧记忆作废声明」，但那是指机制语义，不是档案可删）。
+**记忆标记「作废/换血」≠ 真死**：08-28 中控手术后，`scheduler.ts` lease 门禁、`adobe-health.ts`、`supplier-channels.config.ts`、`tools/ops/suppliers/add-supplier-channel.ts`、`metaso-upstream.ts` 等**仍被 worker/adapter 引用，是活的**。砍任何档前先 `grep -rn "档名" src` 验证 import，勿凭记忆删除（记忆档 control-plane-reblood-to-new-api 已自标「旧记忆作废声明」，但那是指机制语义，不是档案可删）。

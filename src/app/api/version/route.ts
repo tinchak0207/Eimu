@@ -16,7 +16,7 @@ import { NextResponse } from "next/server";
  *     controlPlaneEnabled 等开关）——那是内部部署指纹，不是版本号。
  *   - 本次再剥离 `commit`/`ref`（生产＝git SHA）：精确 SHA 让对手对到 commit 后
  *     可直接打该版本已知 CVE；SHA 不属公开契约也无消费者（全 repo grep 无
- *     `/api/version` 的程式化消费者；`tools/check-deploy-freshness.ts` 走 Vercel
+ *     `/api/version` 的程式化消费者；`tools/ops/releases/check-deploy-freshness.ts` 走 Vercel
  *     部署 API 的 meta.gitCommitSha，与本端点无关），故不再回传。
  *     「生产是否新鲜」仍由 `builtAt`（建置期冻结的 ISO 时间）回答；不编造假值，
  *     取不到就明说 unknown。

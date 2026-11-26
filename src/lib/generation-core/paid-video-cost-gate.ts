@@ -54,8 +54,8 @@
  * （本档 import catalog 与 registry 是**读取**；反向 import 才是违规。）
  */
 
-import { GENERATION_MODEL_CATALOG } from "../generation-model-catalog";
-import { REGISTRY_CHANNELS } from "../supplier-channels.config";
+import { GENERATION_MODEL_CATALOG } from "./generation-model-catalog";
+import { REGISTRY_CHANNELS } from "./supplier-channels.config";
 import { SupplierRequestError } from "./failure-classifier";
 
 /**

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isModelAllowedForKey, readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
-import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids";
-import { generationCapabilities } from "@/lib/generation-model-catalog";
-import { modelDisplayName } from "@/lib/provider-config";
+import { isModelAllowedForKey, readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
+import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/generation-core/image-model-ids";
+import { generationCapabilities } from "@/lib/generation-core/generation-model-catalog";
+import { modelDisplayName } from "@/lib/generation-core/provider-config";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";

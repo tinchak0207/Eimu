@@ -20,16 +20,16 @@ import { createPortal } from "react-dom";
 import { ArrowLeft, Ban, ChevronDown, CornerUpLeft, GitBranch, HelpCircle, ShieldAlert, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { text, type UiStringKey } from "@/lib/ui-strings";
-import { formatRelativeTime } from "@/lib/history-types";
-import { loadLineagePool } from "@/lib/lineage-view";
-import type { LineagePoolLoadResult } from "@/lib/lineage-view";
+import { formatRelativeTime } from "@/lib/media/history-types";
+import { loadLineagePool } from "@/lib/media/lineage-view";
+import type { LineagePoolLoadResult } from "@/lib/media/lineage-view";
 import {
   LINEAGE_DEFAULT_DEPTH,
   LINEAGE_DEPTH_STEP,
   LINEAGE_KIND_LABEL,
   buildLineageTree,
-} from "@/lib/lineage";
-import type { LineageRecordView, LineageTreeNode } from "@/lib/lineage";
+} from "@/lib/media/lineage";
+import type { LineageRecordView, LineageTreeNode } from "@/lib/media/lineage";
 
 export interface LineageDrawerProps {
   /** 正在看的那条记录（历史卡或资产卡适配后的视图）。 */

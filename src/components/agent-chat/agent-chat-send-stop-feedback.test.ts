@@ -64,9 +64,9 @@ test("panel 的 onSend 型别放宽，composer 接线回传 promise", () => {
 
 test("空态单一 DOM：忙碌不再分流，建号在飞推荐语渲染但强制禁用（零位移）", () => {
   // 既有空态条件逐字保留（另一条测试也钉着它）。
-  assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
+  assert.match(panel, /items\.length === 0 && !viewingLive && connection !== "reconnecting" && connection !== "closed"/);
 
-  const emptyStart = panel.indexOf('items.length === 0 && connection !== "reconnecting"');
+  const emptyStart = panel.indexOf('items.length === 0 && !viewingLive && connection !== "reconnecting"');
   assert.ok(emptyStart > -1, "空态条件不存在");
   const emptyEnd = panel.indexOf("<AgentTranscript", emptyStart);
   assert.ok(emptyEnd > emptyStart, "空态三元表达式边界找不到");

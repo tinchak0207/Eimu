@@ -60,12 +60,12 @@ BUILD_NETWORK="${CP_BUILD_NETWORK:-host}"
 STATE_DIR="${CP_STATE_DIR:-$HOME/.local/state/eimu-cp-release}"
 BUILD_ROOT="${CP_BUILD_ROOT:-$HOME/.cache/eimu-cp-release}"
 # 与 deploy-control-plane.sh ARCHIVE_PATHS 同一份白名单（线上 app/ 构建上下文的来源）。
-ARCHIVE_PATHS=(src public worker tools db bridge skills
-  deploy-staging/expert-gateway deploy-staging/gateway
+ARCHIVE_PATHS=(src public worker tools db services/blender-bridge skills
+  services/expert-gateway services/gateway
   package.json package-lock.json next.config.mjs next-env.d.ts tsconfig.json
   tailwind.config.ts postcss.config.mjs components.json)
 # overlay 构建时先清掉底座里的旧源码目录（node_modules 不在其中），避免已删文件残留。
-OVERLAY_CLEAN=(src public worker tools db bridge skills deploy-staging)
+OVERLAY_CLEAN=(src public worker tools db bridge skills deploy-staging services)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -263,7 +263,7 @@ smoke_local() {
   docker rm -f "$name" >/dev/null 2>&1 || true
   echo "SMOKE api healthz=${code:-无回应}"
   [ "$code" = 200 ] || die "api 冒烟失败：healthz≠200（镜像已建未上线）"
-  docker run --rm --entrypoint sh "$wt" -c 'test -f /app/worker/generation-worker.ts && test -f /app/tools/control-plane-bootstrap.ts && test -d /app/node_modules/tsx' \
+  docker run --rm --entrypoint sh "$wt" -c 'test -f /app/worker/generation-worker.ts && test -f /app/tools/ops/database/control-plane-bootstrap.ts && test -d /app/node_modules/tsx' \
     || die "worker 冒烟失败：源码/tsx 不在位"
   [ "$(docker image inspect "$wt" --format '{{json .Config.Cmd}}')" = '["npm","run","generation:bootstrap"]' ] || die "worker CMD 与线上配方不同"
   echo "SMOKE worker OK"

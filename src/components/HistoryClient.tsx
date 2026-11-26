@@ -6,11 +6,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckSquare } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useHistoryStore } from "@/hooks/use-history";
-import { fetchUsageStat } from "@/lib/new-api-client";
-import { buildHistoryStats } from "@/lib/history-types";
-import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
-import { exportHistoryCsv, exportHistoryJson, exportHistoryZip } from "@/lib/history-export";
-import { imageHelpers } from "@/lib/image-helpers";
+import { fetchUsageStat } from "@/lib/accounts/new-api-client";
+import { buildHistoryStats } from "@/lib/media/history-types";
+import type { HistoryEntry, HistoryQuery } from "@/lib/media/history-types";
+import { exportHistoryCsv, exportHistoryJson, exportHistoryZip } from "@/lib/media/history-export";
+import { imageHelpers } from "@/lib/media/image-helpers";
 import { cn } from "@/lib/utils";
 import { ENTRY_KIND_VALUES, parseEntryKind } from "@/components/history/history-kind-filter";
 import {
@@ -25,14 +25,15 @@ import {
 } from "@/components/history";
 import type { HistoryRerunMode } from "@/components/history";
 import { LineageDrawer } from "@/components/lineage/LineageDrawer";
-import { entryToLineageView } from "@/lib/lineage-view";
-import type { LineageRecordView } from "@/lib/lineage";
+import { entryToLineageView } from "@/lib/media/lineage-view";
+import type { LineageRecordView } from "@/lib/media/lineage";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
-import { listProjectAssets } from "@/lib/project-assets-client";
-import { filterByProjectTag } from "@/lib/asset-scope";
-import type { AssetLibraryItem } from "@/lib/asset-scope";
+import { listProjectAssets } from "@/lib/media/project-assets-client";
+import { filterByProjectTag } from "@/lib/media/asset-scope";
+import type { AssetLibraryItem } from "@/lib/media/asset-scope";
 import { ProjectAssetsOverview } from "@/components/history/ProjectAssetsOverview";
 import { text } from "@/lib/ui-strings";
+import { WorksTabs } from "@/components/WorksTabs";
 import "@/components/history/history.css";
 
 /**
@@ -514,6 +515,7 @@ export function HistoryClient() {
   return (
     <div className="min-h-screen bg-transparent px-4 pb-28 pt-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1440px]">
+        <WorksTabs active="history" />
         <div className="mb-4 lg:mb-5 lg:flex lg:items-center lg:gap-4">
           {/* 移动端：标题左、计数+多选右同一行；桌面端 lg:contents 拆散进同一条水平工具栏。
               两份计数/多选各在对方断点 display:none，无障碍树里只暴露一份。 */}

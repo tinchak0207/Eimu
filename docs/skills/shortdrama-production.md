@@ -18,7 +18,7 @@ triggers:
 requires:
   - src/lib/shortdrama-domain/index.ts
   - src/lib/canvas/types.ts
-  - src/lib/agent-chat-types.ts
+  - src/lib/agent/agent-chat-types.ts
 optional:
   - imageGeneration.render
   - audioGeneration.provider

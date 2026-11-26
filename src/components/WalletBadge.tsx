@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Coins, CreditCard, Gift, CheckCircle2, Plus } from "lucide-react";
-import { quotaToRewardCount } from "@/lib/checkin-copy";
-import { describeQuota, type QuotaDisplayState } from "@/lib/quota-display";
+import { quotaToRewardCount } from "@/lib/billing/checkin-copy";
+import { describeQuota, type QuotaDisplayState } from "@/lib/billing/quota-display";
 import { useAuth } from "@/hooks/use-auth";
-import { quotaToCoins, fetchCheckinStatus, doCheckin } from "@/lib/new-api-client";
+import { quotaToCoins, fetchCheckinStatus, doCheckin } from "@/lib/accounts/new-api-client";
 import { cn } from "@/lib/utils";
 
 interface WalletBadgeProps {

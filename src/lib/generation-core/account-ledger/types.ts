@@ -1,4 +1,4 @@
-import type { GatewayAdminUser } from "@/lib/gateway-admin";
+import type { GatewayAdminUser } from "@/lib/accounts/gateway-admin";
 import type { GenerationSql } from "../database";
 import type { LedgerPool } from "../subscription-sku";
 

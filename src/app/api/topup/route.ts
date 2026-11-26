@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
+import { getGatewayBaseUrl } from "@/lib/accounts/new-api-auth-server";
 
 export const preferredRegion = "sfo1";
 

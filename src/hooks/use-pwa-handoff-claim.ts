@@ -6,7 +6,7 @@
 // POST claim 领回会话（服务端 Set-Cookie 种登入态），只 finish 一次。
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clearHandoffLogin, getHandoffVerifier } from "@/lib/github-login";
+import { clearHandoffLogin, getHandoffVerifier } from "@/lib/accounts/github-login";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 10 * 60_000;
@@ -77,7 +77,7 @@ export function usePwaHandoffClaim(
             // 这里把 cookie 同步进 localStorage，同步失败也照常 finish
             //（onSuccess 的 refresh 会走通）。动态 import 避免模块环。
             try {
-              const { syncStoredAuthFromCookie } = await import("@/lib/new-api-client");
+              const { syncStoredAuthFromCookie } = await import("@/lib/accounts/new-api-client");
               syncStoredAuthFromCookie();
             } catch {
               // 同步失败不阻断 finish。

@@ -9,20 +9,20 @@
 // 不再从零问「你的行业/规格/风格」。空画像则什么都不带，不占上下文。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
 import {
   buildAgentMemoryInjection,
   listAgentLessons,
   loadAgentProfile,
-} from "@/lib/agent-profile-store";
+} from "@/lib/agent/agent-profile-store";
 import {
   buildMemoryInjectionPayload,
   deriveMemoryOwnerKey,
-} from "@/lib/agent-memory-injection";
-import { getActiveAssetPack } from "@/lib/asset-pack-store";
-import { buildAssetPackInjection } from "@/lib/agent-assets";
-import { isAssetUsable, projectIdFromBody } from "@/lib/asset-library";
+} from "@/lib/agent/agent-memory-injection";
+import { getActiveAssetPack } from "@/lib/media/asset-pack-store";
+import { buildAssetPackInjection } from "@/lib/agent/agent-assets";
+import { isAssetUsable, projectIdFromBody } from "@/lib/media/asset-library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

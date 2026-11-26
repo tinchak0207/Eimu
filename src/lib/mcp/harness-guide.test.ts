@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { QUALITY_POLICIES } from "@/lib/media-quality-gate";
+import { QUALITY_POLICIES } from "@/lib/media/media-quality-gate";
 import {
   HARNESS_DELIVERY_CONTRACTS,
   HARNESS_GUIDE_TEXT,

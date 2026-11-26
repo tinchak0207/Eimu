@@ -17,7 +17,7 @@ import {
   shotIndexFromIdempotencyKey,
   skuRunIdempotencyKey,
 } from "./run-service.ts";
-import { QUOTA_PER_COIN } from "../quota-constants.ts";
+import { QUOTA_PER_COIN } from "../billing/quota-constants.ts";
 
 const ECOM = getSkuById("sku-ecommerce-15s")!;
 const PAIN = getSkuById("sku-pain-point-ad")!;

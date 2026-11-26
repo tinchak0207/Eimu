@@ -14,8 +14,8 @@
 // 拉取把选单打挂——与后端 fail-open 纪律一致。
 
 import { NextResponse } from "next/server";
-import { signBizKeySync } from "@/lib/biz-key-sync";
-import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids";
+import { signBizKeySync } from "@/lib/accounts/biz-key-sync";
+import { SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/generation-core/image-model-ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

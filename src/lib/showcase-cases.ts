@@ -1,5 +1,5 @@
-import type { StylePreset } from "@/lib/prompt-enhancer";
-import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
+import type { StylePreset } from "@/lib/generation-core/prompt-enhancer";
+import type { WorkflowRecallConfig } from "@/lib/agent/workflow-recall";
 
 /**
  * 案例配方（契约扩展点，2026-08-25 配方资产总线）。

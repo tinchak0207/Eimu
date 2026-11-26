@@ -1,11 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import type { GatewayEndpoint } from "@/lib/sub2api";
-import { buildModelQueue } from "@/lib/channel-registry";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
-import { getRuntimeGatewayPools } from "@/lib/admin-pool-store";
-import { resolveUpstreamModelId } from "@/lib/provider-config";
-import { sanitizeUpstreamMessage } from "@/lib/proxy";
+import type { GatewayEndpoint } from "@/lib/generation-core/sub2api";
+import { buildModelQueue } from "@/lib/generation-core/channel-registry";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
+import { getRuntimeGatewayPools } from "@/lib/generation-core/admin-pool-store";
+import { resolveUpstreamModelId } from "@/lib/generation-core/provider-config";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -3,7 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { generationDatabaseConfigured, getGenerationSql } from "@/lib/generation-core/database";
-import { setMarketingOptOut, unsubscribeSecret, verifyUnsubscribeToken } from "@/lib/lifecycle-email";
+import { setMarketingOptOut, unsubscribeSecret, verifyUnsubscribeToken } from "@/lib/accounts/lifecycle-email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -28,7 +28,7 @@ import {
   parseMySkills,
   splitSkillTags,
 } from "./MySkillsDialog";
-import { HARNESS_TOOL_IDS } from "../../lib/harness-tool-registry";
+import { HARNESS_TOOL_IDS } from "../../lib/agent/harness-tool-registry";
 
 /**
  * 打「/」直呼 Skill 的入框回归：真行为断言优先——闸门、查询词、写回、上下键、URL 编码、

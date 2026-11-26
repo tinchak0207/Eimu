@@ -1,0 +1,428 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────── 设计 token（逐行复制 src/app/globals.css :root） */
+:root {
+  --background: 0 0% 97%;
+  --foreground: 0 0% 8%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 8%;
+  --primary: 0 0% 8%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 94%;
+  --secondary-foreground: 0 0% 8%;
+  --muted: 0 0% 92%;
+  --muted-foreground: 0 0% 44%;
+  --accent: 211 100% 50%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 4 86% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 88%;
+  --input: 0 0% 92%;
+  --ring: 158 17% 44%;
+  --radius: 1.25rem;
+
+  /* Liquid Glass material tokens */
+  --lg-blur: 40px;
+  --lg-saturate: 180%;
+  --lg-brightness: 1.08;
+  --lg-bg-primary: rgba(255, 255, 255, 0.72);
+  --lg-bg-secondary: rgba(255, 255, 255, 0.56);
+  --lg-bg-tertiary: rgba(255, 255, 255, 0.38);
+  --lg-border-top: rgba(255, 255, 255, 0.92);
+  --lg-border-side: rgba(255, 255, 255, 0.48);
+  --lg-border-bottom: rgba(0, 0, 0, 0.06);
+  --lg-shadow-ambient: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --lg-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --lg-shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.10), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --lg-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lg-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+page {
+  /* body（globals.css）：#f5fbff + 15px + 同一套 iOS 字栈。 */
+  background: #f5fbff;
+  color: rgb(20, 20, 20);
+  font-size: 30rpx;
+  line-height: 1.55;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
+view,
+text,
+textarea,
+image,
+scroll-view {
+  box-sizing: border-box;
+}
+
+image {
+  display: inline-block;
+}
+
+/* ─────────────────────────── Liquid Glass（逐行复制 globals.css @layer utilities） */
+.lg-card {
+  background: var(--lg-bg-primary);
+  border-top: 1px solid var(--lg-border-top);
+  border-left: 1px solid var(--lg-border-side);
+  border-right: 1px solid var(--lg-border-side);
+  border-bottom: 1px solid var(--lg-border-bottom);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+}
+
+.lg-float {
+  background: var(--lg-bg-secondary);
+  border-top: 1px solid rgba(255, 255, 255, 0.82);
+  border-left: 1px solid rgba(255, 255, 255, 0.38);
+  border-right: 1px solid rgba(255, 255, 255, 0.38);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: var(--lg-shadow-ambient);
+  -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+  backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+}
+
+.lg-bar {
+  background: rgba(255, 255, 255, 0.62);
+  border-top: 1px solid rgba(255, 255, 255, 0.88);
+  border-left: 1px solid rgba(255, 255, 255, 0.42);
+  border-right: 1px solid rgba(255, 255, 255, 0.42);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.04), var(--lg-shadow-card);
+  -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+  backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+}
+
+.lg-sheet {
+  background: rgba(255, 255, 255, 0.82);
+  border-top: 1px solid rgba(255, 255, 255, 0.96);
+  border-left: 1px solid rgba(255, 255, 255, 0.52);
+  border-right: 1px solid rgba(255, 255, 255, 0.52);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: var(--lg-shadow-elevated);
+  -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+  backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+}
+
+.lg-transition {
+  transition: all 0.25s var(--lg-ease);
+}
+
+.page-shell {
+  width: 100%;
+  padding-left: 16px;
+  padding-right: 16px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3) 25%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.3) 75%
+  );
+  background-size: 200% 100%;
+  animation: lg-shimmer 1.8s ease-in-out infinite;
+  border-radius: inherit;
+}
+
+@keyframes lg-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ─────────────────────────── agent-chat.css（逐行复制） */
+.agent-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-transcript,
+.agent-scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.agent-transcript {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+.agent-transcript pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@keyframes agent-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.agent-rise {
+  animation: agent-rise 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes agent-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.agent-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  animation: agent-caret-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes agent-pop-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+.agent-pop-in {
+  animation: agent-pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.agent-composer-shell {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.34), rgba(140, 123, 240, 0.26), rgba(229, 141, 186, 0.34)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 30px rgba(140, 123, 240, 0.08);
+  transition: box-shadow 200ms ease;
+}
+.agent-composer-shell:focus-within {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.5), rgba(140, 123, 240, 0.4), rgba(229, 141, 186, 0.5)) border-box;
+  box-shadow: 0 12px 36px rgba(140, 123, 240, 0.14);
+}
+.agent-send-btn {
+  color: #8a86f0;
+}
+.agent-send-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.4;
+}
+
+.agent-pop {
+  background: rgba(255, 255, 255, 0.96);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 18px 48px rgba(45, 49, 66, 0.16), 0 2px 8px rgba(45, 49, 66, 0.06);
+}
+.agent-pop-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  padding-bottom: 12px;
+}
+
+/* 圆点 spinner（lucide Loader2 的本地 PNG 替代）：PNG 本身是静止弧线，靠 CSS 转。 */
+.ic-spin {
+  animation: ic-spin 1s linear infinite;
+}
+@keyframes ic-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ─────────────────────────── 窄屏字级阶梯（agent-chat.css ≤639.98px 块） */
+@media (max-width: 639.98px) {
+  .agent-chat-surface .agent-turn-text {
+    font-size: 17px;
+    line-height: 25px;
+  }
+  .agent-chat-surface .agent-turn-title {
+    font-size: 18px;
+    line-height: 26px;
+  }
+  .agent-chat-surface .text-ios-footnote {
+    font-size: 15px;
+  }
+  .agent-chat-surface .text-ios-caption1 {
+    font-size: 14px;
+  }
+  .agent-chat-surface .text-ios-caption2,
+  .agent-chat-surface .text-\[0\.75rem\],
+  .agent-chat-surface .text-\[0\.8125rem\] {
+    font-size: 14px;
+  }
+  .agent-composer textarea {
+    font-size: 17px;
+  }
+  .agent-panel button,
+  .agent-composer button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ─────────────────────────── 页面外壳（mobile-chat 覆盖，源＝CanvasChatWorkstation.tsx:380-400） */
+.agent-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: #f5fbff;
+}
+
+.agent-page-card {
+  /* canvas-chat-scroll-fill > section.lg-card */
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.56);
+  -webkit-backdrop-filter: blur(40px) saturate(1.8) brightness(1.08);
+  backdrop-filter: blur(40px) saturate(1.8) brightness(1.08);
+}
+
+.agent-page-nav {
+  position: relative;
+  z-index: 80;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+/* ─────────────────────────── 移动侧栏（逐行复制 mobile-nav/mobile-sidebar.css） */
+.mobile-sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  background: rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: mobile-sidebar-scrim-in 0.24s ease-out both;
+}
+.mobile-sidebar-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 78%;
+  max-width: 312px;
+  height: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  overflow: hidden;
+  border-radius: 0 22px 22px 0;
+  box-shadow: 18px 0 48px rgba(45, 49, 66, 0.16);
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+  animation: mobile-sidebar-panel-in 0.34s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.mobile-sidebar-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #fff;
+  pointer-events: none;
+}
+.mobile-sidebar-scroll {
+  padding-bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px));
+}
+.mobile-sidebar-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  /* 实底＋顶部渐隐：会话列表滚到底部时不会和「我的账号 / 退出登录」叠字。 */
+  padding: 1.25rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, #fff 72%, rgba(255, 255, 255, 0));
+}
+@keyframes mobile-sidebar-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes mobile-sidebar-panel-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@media (max-width: 639.98px) {
+  .mobile-sidebar-panel .text-ios-footnote,
+  .mobile-sidebar-panel .text-ios-caption1,
+  .mobile-sidebar-panel .text-ios-caption2 {
+    font-size: 14px;
+  }
+}
+
+/* ─────────────────────────── 既有页面沿用（旧样式，不改） */
+.page {
+  min-height: 100vh;
+  padding: 32rpx 32rpx 64rpx;
+}
+.card {
+  background: #ffffff;
+  border-radius: 32rpx;
+  padding: 32rpx;
+  box-shadow: 0 8rpx 32rpx rgba(17, 19, 24, 0.05);
+}
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #6b717c;
+  letter-spacing: 0.5rpx;
+  margin-bottom: 16rpx;
+}
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96rpx;
+  border-radius: 24rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  background: #eef0f3;
+  color: #17191d;
+  transition: opacity 0.15s ease;
+}
+.btn::after { border: none; }
+.btn--primary { background: #17191d; color: #ffffff; }
+.btn--ghost { background: transparent; border: 2rpx solid #e3e6ea; color: #3c4149; }
+.btn[disabled],
+.btn--disabled { opacity: 0.45; }
+.muted { color: #8a8f99; font-size: 26rpx; }
+.error-text { color: #c0392b; font-size: 27rpx; line-height: 1.5; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  background: #eef0f3;
+  color: #5b616b;
+  font-size: 24rpx;
+}
+.pill--live { background: #e8f0ff; color: #2456b3; }
+.pill--ok { background: #e9f7ef; color: #1e7a49; }
+.pill--bad { background: #fdecea; color: #b3322a; }

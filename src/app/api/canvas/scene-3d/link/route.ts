@@ -14,7 +14,7 @@
 // 也**无法单独吊销**（无存储＝无吊销表）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   SCENE_3D_LINK_TTL_MS,
   isLinkableUserId,

@@ -3,9 +3,9 @@
 // 浏览器不带 biz key，由 Next.js server side 用 PIXAI_INTERNAL_BIZ_KEY 代打。
 
 import { NextResponse } from "next/server";
-import { authenticateImageUser } from "@/lib/image-billing";
-import { sanitizeUpstreamBody } from "@/lib/proxy";
-import { isErrorShapedPayload, sanitizeErrorShapedPayload } from "@/lib/upstream-sanitizer";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
+import { sanitizeUpstreamBody } from "@/lib/generation-core/proxy";
+import { isErrorShapedPayload, sanitizeErrorShapedPayload } from "@/lib/generation-core/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

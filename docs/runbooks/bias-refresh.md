@@ -26,7 +26,7 @@ agent 仍因「近 24h 3 单零交付」拒绝下单——**好渠道被旧证�
 - 读方接线（3 处）：`/v1/model-status`、`/api/internal/model-status`（24h 统计 + 欠费信号）、
   `model-availability-gate`（72h 断路器）。网关的 M4 读的就是 `/v1/model-status`，
   所以对外判定只有这一个收口。
-- 写方唯一入口：`tools/refresh-channel-bias.ts`。
+- 写方唯一入口：`tools/ops/suppliers/refresh-channel-bias.ts`。
 
 **边界（重要）**：L1 的调度态是**状态**，工具直接复位；L2/L3 是**证据**，只能用水位
 「重新计时」，不能伪造。工具不会、也不能把「没有交付证据」变成「有交付证据」。
@@ -35,10 +35,10 @@ agent 仍因「近 24h 3 单零交付」拒绝下单——**好渠道被旧证�
 
 ```bash
 cd /opt/image-control-plane            # 控制面（密钥/DSN 不出容器）
-sudo docker exec -w /app image-control-worker npx tsx tools/refresh-channel-bias.ts --diagnose
+sudo docker exec -w /app image-control-worker npx tsx tools/ops/suppliers/refresh-channel-bias.ts --diagnose
 
 # 刷新（默认 dry-run，先看它打算写什么）
-sudo docker exec -w /app image-control-worker npx tsx tools/refresh-channel-bias.ts \
+sudo docker exec -w /app image-control-worker npx tsx tools/ops/suppliers/refresh-channel-bias.ts \
   --model minimax-h3 \
   --reason "上游严格 JSON body 适配器已修 + 容器实测 200 出片 54s" \
   --actor tinchak0207

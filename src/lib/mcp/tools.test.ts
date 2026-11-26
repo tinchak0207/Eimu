@@ -13,10 +13,10 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
 import { CONTROL_PLANE_PROXY_SOURCES } from "../control-plane-proxy-routes.mjs";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
-import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent-skills/registry";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
+import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent/agent-skills/registry";
 import { compileWorkflow, workflowNodeId } from "@/lib/workflow-dsl/compile";
 import { JSON_RPC_ERROR_CODES, McpRpcError, type McpToolCallResult } from "./protocol";
 import {
@@ -115,6 +115,7 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   run_agent: { prompt: "画一只猫", session_id: "sess-1", timeout_seconds: 30, session_directive: "简短回复" },
   abort_agent_session: { session_id: "sess-1" },
   get_agent_generation_task: { session_id: "sess-1", task_id: "task-1" },
+  save_agent_settings: { thinking_level: "high" },
   check_delivery_contract: {
     expert_id: "music",
     kind: "music_track",

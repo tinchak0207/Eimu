@@ -5,7 +5,7 @@
 // 浏览器完成，这里轮询一次性 ticket 自动续接。刻意不是全屏遮罩（沿用 popover
 // 语汇，只占小框那一格，结尾画面其余部分仍在原地）。
 
-import { isElectronShell } from "@/lib/github-login";
+import { isElectronShell } from "@/lib/accounts/github-login";
 import { useToast } from "@/hooks/use-toast";
 import { usePwaHandoffClaim } from "@/hooks/use-pwa-handoff-claim";
 

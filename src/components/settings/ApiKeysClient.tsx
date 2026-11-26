@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, CircleAlert, Copy, KeyRound, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import type { PublicBizApiKey } from "@/lib/biz-api-keys";
+import type { PublicBizApiKey } from "@/lib/accounts/biz-api-keys";
 import { DEV_QUICKSTART_BALANCE_NOTE, DEV_QUICKSTART_BASE_URL, DEV_QUICKSTART_OPENAI_BASE_URL, quickstartCurlExamples } from "@/lib/dev-quickstart";
 import { cn } from "@/lib/utils";
 

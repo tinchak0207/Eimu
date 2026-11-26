@@ -23,14 +23,14 @@ import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MySkillsDialog } from "./MySkillsDialog";
 import { MyMemoriesDialog } from "./MyMemoriesDialog";
-import { setHideAgentReasoning, useHideAgentReasoning } from "@/lib/agent-display-preferences";
+import { setHideAgentReasoning, useHideAgentReasoning } from "@/lib/agent/agent-display-preferences";
 import {
   getAgentSettings,
   readCachedAgentSettings,
   saveAgentSettings,
   writeCachedAgentSettings,
   type AgentSettings,
-} from "@/lib/agent-chat-client";
+} from "@/lib/agent/agent-chat-client";
 
 /** 互动三档：slider 刻度顺序与网关枚举一一对应（index 0/1/2）。
  *  文案＝机制真话（2026-09-24）：协作档的三个停点（剧本批准／资产确认／分镜确认）

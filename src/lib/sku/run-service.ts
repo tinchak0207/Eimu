@@ -11,9 +11,9 @@
 // 专用索引或 runs 表（见 docs TODO）。
 
 import { randomUUID } from "node:crypto";
-import { ADOBE_FIREFLY_MODEL_ID, imageGenerationCoins } from "@/lib/provider-config";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { generationCoins, imageSizeForAspectRatio, type AspectRatio } from "@/lib/generation-model-catalog";
+import { ADOBE_FIREFLY_MODEL_ID, imageGenerationCoins } from "@/lib/generation-core/provider-config";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { generationCoins, imageSizeForAspectRatio, type AspectRatio } from "@/lib/generation-core/generation-model-catalog";
 import type { GenerationJob, GenerationWorkflow } from "@/lib/generation-core/types";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { IdempotencyConflictError, mapGenerationJob } from "@/lib/generation-core/job-repository";

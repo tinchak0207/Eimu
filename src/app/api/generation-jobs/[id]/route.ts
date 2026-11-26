@@ -16,14 +16,14 @@
 // promptCiphertext, no workflow_json, no supplier/attempt detail. Only what a
 // customer needs to see their own request's outcome.
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, looksLikeBizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { authenticateImageUser } from "@/lib/image-billing";
+import { readBearerToken, looksLikeBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
 import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
 import { cancelGenerationJobWithRefund } from "@/lib/generation-core/cancel-service";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
-import { displayGenerationPrompt } from "@/lib/web-task-prompt";
+import { displayGenerationPrompt } from "@/lib/agent/web-task-prompt";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 与 VPS（闸道/控制面 DB，矽谷）同区：每次上游往返省一趟横跨美国（2026-10-01 效能审计）

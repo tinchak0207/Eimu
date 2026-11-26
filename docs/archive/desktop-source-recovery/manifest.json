@@ -1,0 +1,146 @@
+[
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/bridge-executor.js",
+    "bytes": 9738,
+    "sha256": "78f648acc91c610d5a81d30fcc565c1d5ed84f50a07e6e8df7a1125df4361edb",
+    "git_blob_sha": "c95fc8107c4d378eee44f9743eb27b17bf78743c",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/bridge-executor.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/bridge-executor.test.js",
+    "bytes": 9349,
+    "sha256": "123bb0cb80f5f7939a77380c6ceb6ee162c8b45bfc10744452cd086417701d8c",
+    "git_blob_sha": "a50de7d1f3829fcd367c5928c6bb193405744738",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/bridge-executor.test.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/bridge-protocol.js",
+    "bytes": 10212,
+    "sha256": "6554a9935b74bcd2a1c217a34a33d5c9508748c29d11400d21dffb41a0fb5376",
+    "git_blob_sha": "ab299126f5d7119108e6ec0c578e3094517ef117",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/bridge-protocol.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/bridge-protocol.test.js",
+    "bytes": 10728,
+    "sha256": "9d1b7770e55e69cb000fc7c59dac9a1e2f481834e3aa916635b7eb7a18dc4671",
+    "git_blob_sha": "0b5caa406d42e53c594d27cbb49c6397724acf48",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/bridge-protocol.test.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/denylist-vectors.json",
+    "bytes": 3982,
+    "sha256": "9ac83ab91c19545405bd5831c25aeb1d22c993a6ef3b08fcbb9798a26dc7b118",
+    "git_blob_sha": "d4a378fcc10e037dd2984f70c664e74a311b068c",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/denylist-vectors.json.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/policy.js",
+    "bytes": 19935,
+    "sha256": "59dc81cdd96c2b4c8a08f7e0f1c58bd067ea75237829fecbbf857cc15227760d",
+    "git_blob_sha": "997caccc9e5efdc622472e3706dc2b8037da21f1",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/policy.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-030b",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-030b/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "lib/policy.test.js",
+    "bytes": 15094,
+    "sha256": "28d09d5c20c12999f4064ca5d661aa275f48a9a1c494ddec90d6834eefaa6f13",
+    "git_blob_sha": "6fe6e1bfc64c6ea8eda2a2c6bc213051e07d76ff",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-030b/lib/policy.test.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-032dev2",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-032dev2/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "local-worker.js",
+    "bytes": 28344,
+    "sha256": "b1c1b0d05d3166ff52d9e0a4ef405f01cfedc8ffbaa36ec4d509fc2724ffd779",
+    "git_blob_sha": "0f98c938fe47986de0918ff57592ac85d63b5c2b",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-032dev2/local-worker.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  },
+  {
+    "version_directory": "dist-032dev4",
+    "original_archive": "/home/lenovo/Documents/image-app-retired-20261126/desktop/dist-032dev4/linux-unpacked/resources/app.asar",
+    "original_packaged_path": "device-bridge-client.js",
+    "bytes": 18122,
+    "sha256": "173a20af3b7a6dd211c1b0c1a651a8a3c800c8bf6c6ec7e388555c8ac612acaf",
+    "git_blob_sha": "09c1de0b23ec0a4612e69a1d3397e284fb935497",
+    "recovered_path": "docs/archive/desktop-source-recovery/dist-032dev4/device-bridge-client.js.txt",
+    "secret_pattern_counts": {
+      "private_key": 0,
+      "provider_key": 0,
+      "jwt": 0,
+      "credential_literal": 0
+    },
+    "git_safe": true
+  }
+]

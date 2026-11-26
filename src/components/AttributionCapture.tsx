@@ -9,7 +9,7 @@ import {
   firstTouchFromLocation,
   looksLikeInviteCode,
   resolveFirstTouchCookieValue,
-} from "@/lib/first-touch-attribution";
+} from "@/lib/accounts/first-touch-attribution";
 
 /**
  * 首次触达归因的采集点（挂在 root layout，任何入口页都跑得到）。

@@ -195,14 +195,12 @@ function routeFileExists(href: string): boolean {
 
 /** 第三轮定案的 4 列（顺序固定）；bridge＝null 表示纯连结。 */
 const NAV_TABLE = [
-  { href: "/", label: "直接生成", bridge: "exit", tag: "button" },
-  { href: "/history", label: "生成历史", bridge: null, tag: "link" },
-  { href: "/?agent=1", label: "我的资产", bridge: "assets", tag: "button" },
+  { href: "/works", label: "作品库", bridge: null, tag: "link" },
   { href: "/pricing", label: "定价", bridge: null, tag: "link" },
 ] as const;
 
-test("导览列只剩 4 列且顺序固定（技能/工作流/状态/帮助已下放页尾）", () => {
-  assert.equal(MOBILE_SIDEBAR_NAV.length, 4, "第三轮：7 列 → 4 列");
+test("导览列 2 列且顺序固定（11-25：精确控制撤销；历史/作品/资产 并入「作品库」）", () => {
+  assert.equal(MOBILE_SIDEBAR_NAV.length, 2, "作品库／定价");
   assert.deepEqual(
     MOBILE_SIDEBAR_NAV.map((it) => it.href),
     NAV_TABLE.map((it) => it.href),
@@ -243,7 +241,7 @@ test("侧栏元素树含剩余纯连结路由，且无发明路由", () => {
   const hrefs = new Set(
     els.map((el) => el.props.href).filter((h): h is string => typeof h === "string"),
   );
-  assert.ok(hrefs.has("/history"));
+  assert.ok(hrefs.has("/works"));
   assert.ok(hrefs.has("/pricing"));
   // 「账号设置」列已移除（回归 header）；帐号设置仍可经 dock 齿轮 fallback 到达。
   assert.ok(
@@ -373,21 +371,8 @@ test("底部 dock 齿轮＝button（情境感知动作桥），aria-label 仍是
   // 不准静态 import AgentChatSurface 取助理面动作（仍走动作桥）。
   assert.match(
     sidebarCode,
-    /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent-surface-actions"/,
+    /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent\/agent-surface-actions"/,
   );
-});
-
-test("『直接生成』/ 不冒充当前页（neverActive），只有不带 query 的纯连结才亮", () => {
-  const navItem = MOBILE_SIDEBAR_NAV.find((it) => it.href === "/");
-  assert.equal(navItem?.neverActive, true, "/ 这列必须标 neverActive");
-  // 纯函式语意不变：/ 对 / 仍回 true（元件端靠 neverActive 关掉）。
-  assert.equal(isSidebarNavActive("/", "/"), true);
-  // 首页渲染：直接生成那颗 button 不得亮 aria-current。
-  const exitBtn = renderPanel({ pathname: "/" }).find(
-    (el) => el.props["data-agent-action"] === "exit",
-  );
-  assert.ok(exitBtn);
-  assert.equal(exitBtn.props["aria-current"], undefined, "首页不得亮『直接生成』");
 });
 
 test("active 态只认不带 query 的路径连结", () => {
@@ -520,7 +505,7 @@ test("侧栏内每个可按元素触控目标 ≥44px（页尾细字连结带为
     return isButton || isLink;
   });
   // 第四轮删掉「账号设置／退出登录／dock 搜索」三颗 ⇒ 常驻可按元素由 11 降为 8。
-  assert.ok(interactive.length >= 8, `可按元素太少（${interactive.length}），侧栏没接上`);
+  assert.ok(interactive.length >= 6, `可按元素太少（${interactive.length}），侧栏没接上`);
   for (const el of interactive) {
     const cls = String(el.props.className ?? "");
     assert.match(
@@ -545,8 +530,8 @@ test("新元件不嵌套 button，也不改 agent-chat 档", () => {
 
 test("导览列标签 17px（text-ios-body 挂标签 span、不进 cn）＋列高 ≥52px＋icon 20px", () => {
   const els = renderPanel();
-  const navItem = els.find((el) => el.props.href === "/history");
-  assert.ok(navItem, "导览列缺 /history");
+  const navItem = els.find((el) => el.props.href === "/works");
+  assert.ok(navItem, "导览列缺 /works");
   const anchorCls = String(navItem.props.className ?? "");
   assert.match(anchorCls, /min-h-\[52px\]/, "导览列高必须 ≥52px（17px 不撑破/不挤掉垂直置中）");
   // twMerge 陷阱：cn() 会把不认识的 `text-ios-body` 归到 text-color 群组，再被同串

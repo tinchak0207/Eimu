@@ -41,7 +41,7 @@ import {
   type CanvasNode,
   type CanvasViewport,
 } from "./types";
-import type { AgentSseEvent } from "../agent-chat-types";
+import type { AgentSseEvent } from "../agent/agent-chat-types";
 
 // ─────────────────────────── helpers
 

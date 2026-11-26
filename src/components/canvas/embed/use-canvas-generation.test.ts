@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveEntityCardsOverride, withProjectStyleId } from "./use-canvas-generation";
-import { applyCharacterCardsToPayload, type CharacterCard } from "@/lib/character-cards";
+import { applyCharacterCardsToPayload, type CharacterCard } from "@/lib/media/character-cards";
 
 /**
  * WS6（按镜参考集收窄，空白节点原地生成 A4 补接通路）行为验收。

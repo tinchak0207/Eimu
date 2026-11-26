@@ -19,7 +19,7 @@
 //   - WEBP：RIFF 容器里的 VP8 / VP8L / VP8X chunk，各自有自己的打包格式。
 
 import { createHash, randomUUID } from "node:crypto";
-import { put } from "@/lib/blob-backend";
+import { put } from "@/lib/media/blob-backend";
 import { getGenerationSql, type GenerationSql } from "./database";
 import type postgres from "postgres";
 

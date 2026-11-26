@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveWaitingProgress } from "@/lib/waiting-contract";
+import { resolveWaitingProgress } from "@/lib/agent/waiting-contract";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
@@ -21,7 +21,7 @@ test("generation progress durations remain for playground ETA auto-hide only", (
 
 test("particle sea waiting follows WaitingContract: no fake %% without real total", () => {
   const live = read("src/components/ParticleSeaWaiting.tsx");
-  const contract = read("src/lib/waiting-contract.ts");
+  const contract = read("src/lib/agent/waiting-contract.ts");
   assert.match(contract, /resolveWaitingProgress/);
   assert.match(live, /resolveWaitingProgress/);
   assert.match(live, /sea-waiting-indeterminate/);

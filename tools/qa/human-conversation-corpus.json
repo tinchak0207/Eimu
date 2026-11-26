@@ -1,0 +1,287 @@
+{
+  "rule": "每条 prompt 是生产会话里用户亲自发送的原文，按 opencode part 文本截到系统注入之前。禁止模型改写、缩短、变容易，也禁止用 runProject 夹具或自签 QC 代替。source.session 是当时的 opencode 会话 id 前缀。",
+  "scenes": [
+    {
+      "id": "quote-before-generate",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_e7b9d0"
+      },
+      "turns": [
+        "做 2 个版本的 8 秒铃声要多少钱？先只给报价，别生成。",
+        "帮我做一条 8 秒钟的手机来电铃声，只要一句歌词的记忆点，别太长。先别生成，先告诉我：8 秒到底做不做得到、怎么做，会花多少钱。"
+      ],
+      "turn_sources": [
+        "ses_e7b9d0",
+        "ses_e7bad0"
+      ]
+    },
+    {
+      "id": "same-turn-text",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_e7d63f"
+      },
+      "turns": [
+        "帮我排一份婚礼晚宴歌单。场地是四小时，宾客大概这样：45 到 60 岁的长辈占一半，25 到 35 岁的朋友占三成，10 岁以下小孩两成。要求：不放分手、离世这类丧气歌；长辈那几段要能跟着唱；小孩在场不能有露骨内容；中间要留一首给爷爷奶奶结婚四十周年跳一支慢舞。给我曲目、顺序、每首大概用在哪一段、以及为什么这么排。先不要生成任何音频。"
+      ]
+    },
+    {
+      "id": "generate-then-receipt",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 40,
+      "cap_note": "这句原话要 4K。生产目录里 4K 没有价，同一条只报得出 720p 25 币。上限只盖住这一笔成片，盖不住第二笔。",
+      "source": {
+        "session": "ses_e7ebd1"
+      },
+      "turns": [
+        "清晨薄雾中的竹林，一位穿白色长衫的年轻剑客缓缓拔剑，竹叶被风卷起，镜头从低角度手部特写缓慢推至全身并环绕半圈，阳光穿过竹叶形成丁达尔光，冷绿色调，浅景深，35mm胶片质感，动作流畅自然，画面稳定，4K，24fps，16:9，时长5秒。负面提示：不要文字、水印、logo、画面畸变、多余手指、人物变形、闪烁、卡顿、过度锐化。"
+      ]
+    },
+    {
+      "id": "image-first-try",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "source": {
+        "session": "ses_e7230d"
+      },
+      "turns": [
+        "随便生成一张图片"
+      ]
+    },
+    {
+      "id": "mv-keyframes-no-video",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 80,
+      "max_coins_per_confirm": 80,
+      "cap_note": "暴君原话会走关键帧＋音乐＋视频。只批准图片确认卡（关键帧那批）；视频确认卡一律拒绝并中止会话，验的是关键帧/音乐阶段 UI 不漏内部错误。",
+      "source": {
+        "session": "ses_e7211ef0dffe7S6KleX7YB4F1Q"
+      },
+      "turns": [
+        "做一个Billboard级别的MV, 邓紫棋风格"
+      ],
+      "stop_after_first_image_ms": 30000
+    },
+    {
+      "id": "mv-vocal-song",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 90,
+      "max_coins_per_confirm": 80,
+      "cap_note": "暴君原话会走关键帧＋音乐＋视频。批准图片确认卡和音乐确认卡；视频确认卡一律拒绝（不中止）；报价工具（*_quote/quote_bundle）不算视频提交；回合收尾还没调 music_gen 就发第二句推进。等到 music_gen 的结果回来就收工。验的是 YuE2 不可用时带歌词的整歌回落 FlowMusic 出人声（回执带 fallback_from），不退成器乐版、不拿 audio_first_timeline（TTS）念白冒充演唱。 画布投影：成功 music_gen 必须有成功音频节点、音频节点不许卡 loading、出图必须投影到结果节点、被拒调用不留节点。",
+      "source": {
+        "session": "ses_e7211ef0dffe7S6KleX7YB4F1Q"
+      },
+      "turns": [
+        "做一个Billboard级别的MV, 邓紫棋风格",
+        "按你推荐的来，先把带人声的整歌做出来，视频先不做"
+      ]
+    },
+    {
+      "id": "layer-revision-still",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "cap_note": "两张静图，每张确认卡 ≤8 币",
+      "source": {
+        "session": "ses_00e96b1d7ffeRgVFKDmFTjTQ1I"
+      },
+      "turns": [
+        "画一只戴帽子的橘猫，水彩风格",
+        "主角换成猫娘抱着刚刚生成图片的小猫"
+      ],
+      "keep_layers": [
+        "水彩|watercolou?r",
+        "帽|hat",
+        "橘|orange|ginger"
+      ],
+      "changed_layer": [
+        "猫娘|cat ?girl|catgirl"
+      ]
+    },
+    {
+      "id": "layer-revision-mv-text",
+      "phase": "pre",
+      "spend": false,
+      "source": {
+        "session": "ses_eb0c6f275ffeJ4dhdW8Y1e23wq"
+      },
+      "turns": [
+        "做一个百合番MV,设计世界观->人物->核心冲突->MV原曲->反推分镜->生成完整MV",
+        "他妈的你就换成英文曲不就行了吗 脑子没长？"
+      ],
+      "changed_layer": [
+        "英文|English"
+      ]
+    },
+    {
+      "id": "long-revision-yuri-3turn",
+      "phase": "pre",
+      "spend": false,
+      "cap_note": "三轮真实改稿原话（同一生产会话按时间序），不花钱；验人物/关系不崩",
+      "source": {
+        "session": "ses_eb0c6f275ffeJ4dhdW8Y1e23wq"
+      },
+      "turns": [
+        "做一个百合番MV,设计世界观->人物->核心冲突->MV原曲->反推分镜->生成完整MV",
+        "闹麻了 音乐花那么久时间干嘛？",
+        "他妈的你就换成英文曲不就行了吗 脑子没长？"
+      ],
+      "keep_layers": [
+        "百合|yuri|她们|两位?少女|两个女孩|girls"
+      ],
+      "keep_names": true,
+      "changed_layer": [
+        "英文|English"
+      ]
+    },
+    {
+      "id": "viewer-gate-image-then-music",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "max_coins_music": 30,
+      "cap_note": "2026-11-04 赏阅交付闸：第一句出图（上限 8 币），第二句给这张图配 10 秒轻音乐（上限 30 币）。原话取自暴君派工单，非历史会话摘录，source.session 为本轮建会话前的占位前缀，真 sid 见 REPORT.md「生产交付闸」。",
+      "source": {
+        "session": "ses_viewer_gate_20261104"
+      },
+      "turns": [
+        "给我一张极简风的咖啡馆海报",
+        "给这张图配一段 10 秒的轻音乐"
+      ]
+    },
+    {
+      "id": "deliver-link-plain",
+      "phase": "post",
+      "spend": false,
+      "source": {
+        "session": "ses_4d9a0e"
+      },
+      "turns": [
+        "这首歌我要拿走：https://store.tinchak0207.xyz/image-data/files/uploads/media-1793983183219-a8fo6k.m4a 你他妈都没给我链接，把完整链接用纯文字一行贴给我，我要复制。"
+      ]
+    },
+    {
+      "id": "album-jay-style",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 8,
+      "source": {
+        "session": "ses_e08a92"
+      },
+      "turns": [
+        "做一个周杰伦风格的专辑"
+      ]
+    },
+    {
+      "id": "default-video-seedance25-720p",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 60,
+      "cap_note": "2026-11-22 v6k Seedance 2.5 720p 设为全站默认视频模型的交付闸：原话不点名模型、不提 4K/1080p，应默认走 seedance-2.5-720p（v6k 渠道）出片。原话取自暴君派工单语义，非历史会话摘录，source.session 为占位前缀。",
+      "source": {
+        "session": "ses_v6k_default_20261122"
+      },
+      "turns": [
+        "帮我做一条 10 秒的产品短片：一瓶香水放在晨光里的大理石台面上，镜头缓缓推近，竖屏。直接做，别问我用什么模型。"
+      ]
+    },
+    {
+      "id": "native-audio-listen",
+      "phase": "post",
+      "spend": false,
+      "cap_note": "2026-11-22 原生读音频：主模型 hydrogen 能听音频。上传 tools/fixtures/native-audio-speech.mp3（edge-tts 合成的已知中文语音：紫色雨伞落在青云路三号咖啡馆，明天下午四点前送回），模型必须凭实际听到的转写出关键信息，不得说没有听音通路。bash 频谱分析答不出语音内容，故能区分原生听与工具算。原话取自暴君派工单语义，source.session 为占位前缀。",
+      "source": {
+        "session": "ses_native_audio_20261122"
+      },
+      "turns": [
+        "不要调用任何工具，直接用你自己的耳朵听我上传的这段语音：里面说了什么？把原话一字不差转写出来，再告诉我说话的是男声还是女声。"
+      ]
+    },
+    {
+      "id": "music-critic-listen",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 40,
+      "max_coins_per_confirm": 40,
+      "cap_note": "2026-11-22 暴君追问：critic／音乐创作反馈全周期有没有覆盖。整圈=要歌→music_gen→机器 critic 原生听→听感反馈。source.session 为占位（非真实会话），题面是按暴君原话口吻写的。",
+      "source": {
+        "session": "ses_music_critic_listen_20261122"
+      },
+      "turns": [
+        "给我做一首30秒左右的轻快纯器乐，钢琴加木吉他，咖啡馆背景那种。做好之后一定要让独立评审员真的听一遍，告诉我它听到的听感和是不是通过。"
+      ]
+    },
+    {
+      "id": "native-audio-mv-highlight",
+      "phase": "post",
+      "spend": false,
+      "max_coins": 0,
+      "cap_note": "2026-11-22 暴君截图（会话 7697816d／50c87706）：传歌＋「帮这首歌做一个90秒左右的MV 可以选取曲子的精华段落」，模型去调转写／ffmpeg RMS 曲线／派测算拍点子代理，没用原生听力。MV_AUDIO 环境变量指向歌曲文件。source.session 为占位。",
+      "source": {
+        "session": "ses_native_audio_mv_20261122"
+      },
+      "turns": [
+        "帮这首歌做一个90秒左右的MV 可以选取曲子的精华段落"
+      ]
+    },
+    {
+      "id": "linkii-music-models-20261123",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 2,
+      "source": {
+        "session": "ses_df9520b62ffeQMcDqErlhnwRG3"
+      },
+      "turns": [
+        "提示 Agent 调用 music_gen(probe=true) 确认 linkii_music 为 ready，并分别/至少实测 gl-3.0-pro（纯器乐）与 minimax-music-3.0（带歌词）产出可播放音频 URL。"
+      ],
+      "cap_note": "2026-11-23 Linkii交接文档原话片段；真实gw会话dfda8f61-9212-41d6-9277-a94c0d07f937。实际发送另附单账号串行及实时报价授权执行边界，完整载荷留存证据。使用原始curl真会话，不伪造source.session；通用runner尚无此scene.id处理器。"
+    },
+    {
+      "id": "linkii-minimax-vocal-20261123",
+      "phase": "post",
+      "spend": true,
+      "max_coins": 1,
+      "source": {
+        "session": "ses_df93c9ff7ffe4gLDjacDeEL5wg"
+      },
+      "turns": [
+        "提示 Agent 调用 music_gen(probe=true) 确认 linkii_music 为 ready，并分别/至少实测 gl-3.0-pro（纯器乐）与 minimax-music-3.0（带歌词）产出可播放音频 URL。"
+      ],
+      "cap_note": "Linkii交接原话片段；本轮GL两次上游限流终态后，新会话仅验minimax。实际载荷另附只提交一次、复用已审歌词与1币报价授权边界；完整载荷留存。gw=564a2521-3a79-4a4e-abfb-92453ff319ea。通用runner尚无此scene.id分派。"
+    },
+    {
+      "id": "linkii-hunyuan3d-cabin-20261123",
+      "phase": "post",
+      "spend": false,
+      "source": {
+        "session": "ses_df936645dffeUaHnWo1uEER4Yc"
+      },
+      "turns": [
+        "提示 Agent 调用 model3d_generate(upstream=\"hunyuan3d\") 文生 3D（如「低多边形木质小木屋」），核对返回 glb_url 可下载且 asset_report.triangles > 0。"
+      ],
+      "cap_note": "Linkii交接文档原话片段；完整实际消息另附0币/现成10次配额/LowPoly/只投一次/不另生图/不换Blender边界，留存真实载荷。gw=6f32fc4b-17c2-46d5-88bb-bab607b341da。通用runner尚无此scene.id分派。"
+    },
+    {
+      "id": "memory-visible-note",
+      "phase": "post",
+      "spend": false,
+      "cap_note": "2026-11-24 暴君：「记忆无感」「写入记忆的时候我压根就看不到」。第一句要当轮 memory_note 并回复记住了什么；第二句新会话问，验证跨会话召回。不花钱。",
+      "source": {
+        "session": "ses_f14f499dcffe6aWBTh360VSC5i",
+        "note": "生产真实原话：用户要以后都按这张图的感觉出图；暴君 11-24：记忆无感、写入看不到"
+      },
+      "turns": [
+        "这张图是什么风格？我想以后都按这个感觉出图 https://eimu.dev/showcase/showcase3.webp",
+        "你还记得我想要什么出图风格吗？"
+      ]
+    }
+  ]
+}

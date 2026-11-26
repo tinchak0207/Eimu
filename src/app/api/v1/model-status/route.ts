@@ -13,16 +13,16 @@
 // 遥测），样本只覆盖最近 200 条事件，样本不足时 jobs 如实偏小。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { readAdminPools } from "@/lib/admin-pool-store";
-import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
-import { probeAllModelsStatus, type ModelStatusEntry } from "@/lib/model-status-probe";
-import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
-import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
-import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
+import { readAdminPools } from "@/lib/generation-core/admin-pool-store";
+import { getRuntimeChannelOverrides } from "@/lib/generation-core/channel-overrides";
+import { probeAllModelsStatus, type ModelStatusEntry } from "@/lib/generation-core/model-status-probe";
+import { readSupplierHealthSignal } from "@/lib/generation-core/supplier-health-signal";
+import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/generation-core/routing-telemetry";
+import { summarizeChannelBalance } from "@/lib/generation-core/routing-balance-signal";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
 import { resolveModelRoute } from "@/lib/generation-core/model-routing";
 import { applyModelBiasReset, EMPTY_BIAS_RESET_WATERMARKS, readBiasResetWatermarks } from "@/lib/bias-reset";

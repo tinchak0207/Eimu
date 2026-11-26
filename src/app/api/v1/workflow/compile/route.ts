@@ -7,9 +7,9 @@
 // 「编译结果」，没有「已应用/已上画布」。鉴权骨架照抄 /v1/upscale（B key 链）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { jsonWithTrace, pixaiAuthError } from "@/lib/pixai-proxy";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { jsonWithTrace, pixaiAuthError } from "@/lib/generation-core/pixai-proxy";
 import { getOrCreateTraceId } from "@/lib/request-trace";
 import { compileWorkflow, type WorkflowCompileInput } from "@/lib/workflow-dsl/compile";
 import { compileProjectDsl, normalizeProjectCurrent } from "@/lib/workflow-dsl/project-ops";

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ImageBillingGatewayError, ImageBillingRevertedError, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
+import { ImageBillingGatewayError, ImageBillingRevertedError, refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
 import { verifyBillingRelayRequest, type BillingRelayOperation } from "@/lib/generation-core/billing-relay";
 
 export const runtime = "nodejs";

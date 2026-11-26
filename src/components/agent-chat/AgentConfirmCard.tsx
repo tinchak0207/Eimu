@@ -3,7 +3,7 @@
 import { memo, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentPendingConfirm } from "@/lib/agent-chat-types";
+import type { AgentPendingConfirm } from "@/lib/agent/agent-chat-types";
 
 export interface AgentConfirmCardProps {
   confirm: AgentPendingConfirm;

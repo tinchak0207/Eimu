@@ -6,7 +6,7 @@
  * 本目录只放落地页文案。模组载入时校验环节数与 slug，漂移直接抛错。
  */
 
-import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
+import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent/agent-templates";
 import type { WorkflowPage } from "./types";
 import { artCurationSeriesPage } from "./art-curation-series";
 import { artStyleImmersionPage } from "./art-style-immersion";

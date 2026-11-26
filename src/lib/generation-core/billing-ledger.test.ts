@@ -12,7 +12,7 @@ import {
 import { terminalReservedJobs } from "./billing-ledger/schema.ts";
 import { classifyRefundFailure, detailOf } from "./billing-ledger/types.ts";
 import { resolveReplayPolicy } from "./operation-registry.ts";
-import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
+import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/billing/image-billing";
 import type { GenerationSql } from "./database.ts";
 import type { GenerationJob } from "./types.ts";
 

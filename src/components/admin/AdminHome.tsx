@@ -7,8 +7,8 @@
 import { useEffect, useState } from "react";
 import { CircleAlert, Loader2, RefreshCw } from "lucide-react";
 import { RoutingTreemap } from "@/components/admin/RoutingTreemap";
-import { modelBaseName } from "@/lib/provider-config";
-import type { ChannelAggregate, ModelBreakdown, RoutingEvent, RoutingOutcome } from "@/lib/routing-telemetry";
+import { modelBaseName } from "@/lib/generation-core/provider-config";
+import type { ChannelAggregate, ModelBreakdown, RoutingEvent, RoutingOutcome } from "@/lib/generation-core/routing-telemetry";
 
 interface EventsPayload {
   events: RoutingEvent[];

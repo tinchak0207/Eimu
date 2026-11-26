@@ -11,18 +11,18 @@ import test from "node:test";
 import { createServer, type Server } from "node:http";
 import { NextRequest } from "next/server";
 
-import { BIZ_KEY_SYNC_SIGNATURE_HEADER, BIZ_KEY_SYNC_TIMESTAMP_HEADER, verifyBizKeySync } from "@/lib/biz-key-sync";
+import { BIZ_KEY_SYNC_SIGNATURE_HEADER, BIZ_KEY_SYNC_TIMESTAMP_HEADER, verifyBizKeySync } from "@/lib/accounts/biz-key-sync";
 import {
   MAPAY_CREDIT_RELAY_SIGNATURE_DOMAIN,
   runMapayCreditOnce,
   type MapayCreditDeps,
   type MapayCreditRecord,
   type MapayCreditStore,
-} from "@/lib/mapay-credit";
-import { buildMapayOrderParam } from "@/lib/mapay-order-param";
-import { signMapayParams } from "@/lib/mapay";
-import { mapayPlanQuota } from "@/lib/mapay-redemption";
-import { resolvePricingPlan } from "@/lib/plans";
+} from "@/lib/billing/mapay-credit";
+import { buildMapayOrderParam } from "@/lib/billing/mapay-order-param";
+import { signMapayParams } from "@/lib/billing/mapay";
+import { mapayPlanQuota } from "@/lib/billing/mapay-redemption";
+import { resolvePricingPlan } from "@/lib/billing/plans";
 import { GET as mapayReturn } from "./route";
 
 const PID = "test-pid";

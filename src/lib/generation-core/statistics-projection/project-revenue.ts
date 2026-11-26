@@ -1,4 +1,4 @@
-import type { SupplierChannelHealthRow } from "@/lib/supplier-health-signal";
+import type { SupplierChannelHealthRow } from "@/lib/generation-core/supplier-health-signal";
 import { MAX_QUOTA_USERS, quotaToCoins, sampleRate, type ChannelHealthEntry, type ChannelLiveness, type QuotaCoverage, type RemainingQuotaEntry, type RemainingQuotaProjection } from "./types";
 
 // ── 渠道判活（三态） ─────────────────────────────────────────────────────────

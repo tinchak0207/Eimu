@@ -1,4 +1,4 @@
-import { CUSTOM_PLAN_MAX_COINS, CUSTOM_PLAN_MIN_COINS } from "@/lib/plans";
+import { CUSTOM_PLAN_MAX_COINS, CUSTOM_PLAN_MIN_COINS } from "@/lib/billing/plans";
 
 /* ── 自定义档 Log Scale 滑杆数学 ──
    t∈[0,1] 线性 → coins = 10^(lerp(log10(2000), log10(1000000), t))，

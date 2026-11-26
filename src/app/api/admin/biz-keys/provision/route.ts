@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { findGatewayUserByUsername, fetchGatewayUser, provisionBizBillingAccount } from "@/lib/gateway-admin";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { findGatewayUserByUsername, fetchGatewayUser, provisionBizBillingAccount } from "@/lib/accounts/gateway-admin";
 import { ensureAccountBaselines, recordAdjustment } from "@/lib/generation-core/account-ledger";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

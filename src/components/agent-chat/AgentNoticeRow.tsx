@@ -3,7 +3,7 @@
 import { memo, useEffect, useState } from "react";
 import { AlertTriangle, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentNoticeItem } from "@/lib/agent-chat-types";
+import type { AgentNoticeItem } from "@/lib/agent/agent-chat-types";
 
 export interface AgentNoticeRowProps {
   item: AgentNoticeItem;

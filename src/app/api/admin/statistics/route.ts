@@ -6,7 +6,7 @@
 // 消费既有的 /api/user/model-status（与 /v1/model-status 同一份判活），避免两套判活。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import {
   DEFAULT_FUNNEL_DAYS,
   DEFAULT_WINDOW_DAYS,

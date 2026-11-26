@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Clock3, Heart, Maximize2, Search, X } from "lucide-react";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { getStoredToken, getStoredUser } from "@/lib/accounts/new-api-client";
 import { cn } from "@/lib/utils";
-import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
+import type { AssetPack, AssetPackItem } from "@/lib/media/asset-pack-store";
 
 export interface SelectedLora {
   versionId: string;

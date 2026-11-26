@@ -5,7 +5,7 @@
 // 影片、TTS、数字人等非图片模型一概不列——它们不是 OpenAI Images 形状，列出来只会让
 // 中转站把它们 POST 到 /openai/v1/images/generations 再收 400。
 import { NextRequest, NextResponse } from "next/server";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { guardBizApiKey } from "@/lib/openai-compat/errors";
 import { listCompatibleImageModelIds, openAICompatModelList } from "@/lib/openai-compat/models";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";

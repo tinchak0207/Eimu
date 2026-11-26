@@ -18,6 +18,8 @@
 
 </div>
 
+> 开发维护从[任务与职责地图](docs/REPOSITORY.md)进入，规范、方案与证据见[文档入口](docs/README.md)。
+
 ## 先看成片
 
 <p align="center">
@@ -54,7 +56,7 @@ Eimu 的架构**全量开源**：站点前端、后端 API、生成控制面、A
 - **许可证**：[AGPL-3.0](LICENSE)。你可以自托管、修改、分发；通过网络向第三方提供服务时，需要按许可证公开对应源码。
 - **官方托管服务**：[eimu.dev](https://eimu.dev/) 继续以商业服务方式运营，提供上游模型通道、额度、存储与运维。开源的是架构与代码，不包含官方服务的容量、账号与供应商合约。
 - **自托管**：见 [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)。你需要自备上游账号、Postgres 与对象存储。
-- **架构说明**：见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- **架构说明**：见 [docs/ARCHITECTURE.md](docs/presentation/architecture/overview.md)。
 - **安全问题**：见 [SECURITY.md](SECURITY.md)。
 
 ## 今天拍片，像去年写代码
@@ -166,7 +168,7 @@ Eimu 要做的是视频这边的 Cursor：**Vibe Directing**——你凭感觉�
 
 GPT Image · Nano Banana · Seedream / Dreamina · FLUX · Adobe Firefly · Runway · PixAI 日系 · Blender 5.2 渲染 · Veo 3.1 · Kling · Seedance 2.0 / 2.5 · Firefly Video · MiniMax · Luma Ray · 数字人 · 对口型 · Lyria · FlowMusic · YuE2 · 多音色 TTS
 
-共 13 条产线、57 个模型、90 个 Agent 工具；完整清单与定价见 [`src/lib/generation-model-catalog/catalog.ts`](src/lib/generation-model-catalog/catalog.ts)。模型本身不是差异点——让它们走同一本账、同一套画布状态、同一套失败恢复，才是 harness 干的事。
+共 13 条产线、57 个模型、90 个 Agent 工具；完整清单与定价见 [`src/lib/generation-model-catalog/catalog.ts`](src/lib/generation-core/generation-model-catalog/catalog.ts)。模型本身不是差异点——让它们走同一本账、同一套画布状态、同一套失败恢复，才是 harness 干的事。
 
 ---
 
@@ -196,7 +198,7 @@ Endpoint: https://eimu.dev/api/mcp
 Header:   Authorization: Bearer $EIMU_API_KEY
 ```
 
-端点表见 [图像生成 API 文档](docs/biz-api.md)，调用流程见 [B 端 API 调用指南](docs/biz-api-guide.md)。密钥即计费主体，请勿写入前端代码或提交进版本库。
+端点表见 [图像生成 API 文档](docs/runbooks/biz-api.md)，调用流程见 [B 端 API 调用指南](docs/runbooks/biz-api-guide.md)。密钥即计费主体，请勿写入前端代码或提交进版本库。
 
 ### 成本与账本
 
@@ -283,12 +285,12 @@ npm run build        # 生产构建
 | 文档 | 说明 |
 | --- | --- |
 | [站内文档中心](https://eimu.dev/docs) | 面向使用者的分篇教学：快速上手、助理设定与野兽模式、画布与工作流、素材复用、充值与计费、MCP 接入 |
-| [架构全览](docs/ARCHITECTURE.md) | 各子系统职责与相互关系 |
-| [图像生成 API 文档](docs/biz-api.md) | 接入：基址、认证、端点表与字段说明 |
-| [B 端 API 调用指南](docs/biz-api-guide.md) | 调用示例与异步取结果的完整流程 |
+| [架构全览](docs/presentation/architecture/overview.md) | 各子系统职责与相互关系 |
+| [图像生成 API 文档](docs/runbooks/biz-api.md) | 接入：基址、认证、端点表与字段说明 |
+| [B 端 API 调用指南](docs/runbooks/biz-api-guide.md) | 调用示例与异步取结果的完整流程 |
 | [基础设施排障 Runbook](docs/runbooks/infra-debugging.md) | 部署与线上问题的定位步骤 |
 | [技能文档](docs/skills/README.md) | 领域配方：短剧生产、小说 IP 视觉包、电商与换装、LoRA 与风格研究 |
-| [设计系统](design-system/MASTER.md) | UI 材料、色板、字级、间距与反模式 |
+| [设计系统](docs/design-system/MASTER.md) | UI 材料、色板、字级、间距与反模式 |
 | [产品准则](PRODUCT.md) | 用户、定位、能力边界与产品决策原则 |
 | [第三方声明](THIRD-PARTY-NOTICES.md) | 引入的第三方开源组件与许可 |
 

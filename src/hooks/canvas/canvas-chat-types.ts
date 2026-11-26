@@ -12,9 +12,9 @@ import {
   type AgentFieldCondition,
   type AgentFieldTransform,
 } from "@/lib/canvas/node-metadata-fields";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { normalizeApprovalState } from "@/lib/character-cards";
-import type { CharacterCard } from "@/lib/character-cards";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
+import { normalizeApprovalState } from "@/lib/media/character-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import type { CanvasScriptType } from "@/lib/canvas/project-narration";
 import { compactStoryboardShot, type StoryboardScriptShot } from "@/lib/storyboard-contract";
 import type {

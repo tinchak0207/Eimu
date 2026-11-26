@@ -14,9 +14,9 @@ import {
   upstreamTextNameFor,
   withSecondSourceName,
 } from "./use-canvas-cards";
-import { emittedCardsForNodes, entityCardIdForNode } from "@/lib/agent-output-cards";
-import type { AgentOutputNodeRef, EmittedCardsResult } from "@/lib/agent-output-cards";
-import type { CharacterCard } from "@/lib/character-cards";
+import { emittedCardsForNodes, entityCardIdForNode } from "@/lib/agent/agent-output-cards";
+import type { AgentOutputNodeRef, EmittedCardsResult } from "@/lib/agent/agent-output-cards";
+import type { CharacterCard } from "@/lib/media/character-cards";
 
 const IMG = "https://cdn.example.com/char.png";
 const IMG2 = "https://cdn.example.com/side.png";

@@ -25,7 +25,7 @@ import {
   writeCachedAgentSettings,
   writeCachedAgentThinkingLevel,
   type AgentThinkingLevel,
-} from "@/lib/agent-chat-client";
+} from "@/lib/agent/agent-chat-client";
 
 interface PanelCoords {
   top: number;

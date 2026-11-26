@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { canvasReducer } from "./canvas-reducer-adapter";
 import { CANVAS_INITIAL_STATE, type CanvasReducerState } from "@/lib/canvas/reducer";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
 import { normalizeStoryboardShot } from "@/lib/storyboard-contract";
 import { CanvasNodeType, type CanvasNode, type CanvasNodeMetadata } from "@/lib/canvas/types";
 

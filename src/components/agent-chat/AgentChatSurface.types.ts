@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { ReflectedParams } from "@/lib/agent-param-reflect";
+import type { ReflectedParams } from "@/lib/agent/agent-param-reflect";
 
 export interface AgentChatSurfaceProps {
   /** page = 独立路由页；inline = 从卡片入口进来的内嵌聊天区（D-1）。 */
@@ -38,7 +38,7 @@ export interface AgentChatSurfaceProps {
    */
   onImageResult?: (url: string) => void;
   /** 画布 SSE 事件分流（v3 embed）：canvas.* 事件转交右侧 CanvasEmbed。 */
-  onCanvasEvent?: (event: import("@/lib/agent-chat-types").AgentSseEvent) => void;
+  onCanvasEvent?: (event: import("@/lib/agent/agent-chat-types").AgentSseEvent) => void;
   /** 发送前提供画布摘要（v3 embed）。 */
   canvasStateProvider?: () => unknown;
   /** 当 agent session 变化时通知父组件（用于同步清空画布）。 */

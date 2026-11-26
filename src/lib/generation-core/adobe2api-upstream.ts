@@ -31,12 +31,12 @@ import {
   SEEDANCE_20_MODEL_ID,
   VEO_31_FAST_MODEL_ID,
   VEO_31_MODEL_ID,
-} from "../image-model-ids.js";
+} from "./image-model-ids.js";
 import {
   generationModel,
   type AspectRatio,
   type OutputResolution,
-} from "../generation-model-catalog";
+} from "./generation-model-catalog";
 
 type ModelMode = "fast" | "quality";
 

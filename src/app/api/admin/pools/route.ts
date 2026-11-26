@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { normalizePoolDraft, summarizeEnvironmentEndpoints, toPublicAdminPool, type AdminPool } from "@/lib/admin-pools";
-import { readAdminPools, writeAdminPools } from "@/lib/admin-pool-store";
-import { requireAdminSession } from "@/lib/admin-session";
-import { buildGatewayEndpoints } from "@/lib/sub2api";
+import { normalizePoolDraft, summarizeEnvironmentEndpoints, toPublicAdminPool, type AdminPool } from "@/lib/generation-core/admin-pools";
+import { readAdminPools, writeAdminPools } from "@/lib/generation-core/admin-pool-store";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { buildGatewayEndpoints } from "@/lib/generation-core/sub2api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

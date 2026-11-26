@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createWechatLoginState, WECHAT_LOGIN_TTL_SEC } from "@/lib/wechat-login";
-import { getWechatOfficialQrUrl } from "@/lib/wechat-official";
+import { createWechatLoginState, WECHAT_LOGIN_TTL_SEC } from "@/lib/accounts/wechat-login";
+import { getWechatOfficialQrUrl } from "@/lib/accounts/wechat-official";
 
 export const preferredRegion = "sfo1";
 

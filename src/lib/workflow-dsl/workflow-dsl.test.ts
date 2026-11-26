@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CanvasNodeType, type CanvasAgentOp } from "../canvas/types";
-import { HARNESS_TOOL_IDS } from "../harness-tool-registry";
+import { HARNESS_TOOL_IDS } from "../agent/harness-tool-registry";
 import { validateWorkflowDsl, type WorkflowDslSource } from "./schema";
 import { compileWorkflow, workflowNodeId, type WorkflowCompileInput, type WorkflowNodeMetadata } from "./compile";
 import { decompileWorkflow } from "./decompile";

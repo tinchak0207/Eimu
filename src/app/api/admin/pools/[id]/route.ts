@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { normalizePoolDraft, toPublicAdminPool } from "@/lib/admin-pools";
-import { readAdminPools, writeAdminPools } from "@/lib/admin-pool-store";
-import { requireAdminSession } from "@/lib/admin-session";
+import { normalizePoolDraft, toPublicAdminPool } from "@/lib/generation-core/admin-pools";
+import { readAdminPools, writeAdminPools } from "@/lib/generation-core/admin-pool-store";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

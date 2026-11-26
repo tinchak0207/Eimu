@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import type { AgentAudioItem, AgentChatState, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentAudioItem, AgentChatState, AgentImageItem, AgentVideoItem } from "@/lib/agent/agent-chat-types";
 import type { AgentImageCardProps } from "./AgentImageCard";
 import type { AgentVideoCardProps } from "./AgentVideoCard";
 import type { AgentAudioCardProps } from "./AgentAudioCard";

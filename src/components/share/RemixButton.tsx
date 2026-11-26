@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { stashBlockedSend } from "@/components/promo/promo-gate";
-import { buildRemixHandoffUrl, buildRemixSeed } from "@/lib/share-remix";
+import { buildRemixHandoffUrl, buildRemixSeed } from "@/lib/media/share-remix";
 
 export interface RemixButtonProps {
   shareId: string;

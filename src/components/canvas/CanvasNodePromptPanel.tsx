@@ -31,10 +31,10 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Bot, Settings2, X } from "lucide-react";
-import { PROVIDERS, imageGenerationCoins } from "@/lib/provider-config";
-import { generationModel } from "@/lib/generation-model-catalog";
-import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
-import type { CharacterCardKind } from "@/lib/character-cards";
+import { PROVIDERS, imageGenerationCoins } from "@/lib/generation-core/provider-config";
+import { generationModel } from "@/lib/generation-core/generation-model-catalog";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
+import type { CharacterCardKind } from "@/lib/media/character-cards";
 import type { CanvasNodeMetadata } from "@/lib/canvas/types";
 import {
   ShotReferencePanel,

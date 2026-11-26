@@ -13,14 +13,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent-skills";
+import { AGENT_SKILL_FAMILY_LABELS } from "@/lib/agent/agent-skills";
 import {
   PUBLIC_SKILL_SOURCES,
   listPublicSkills,
   listSkillFamilies,
   searchPublicSkills,
   type AgentSkillSource,
-} from "@/lib/agent-skills/registry";
+} from "@/lib/agent/agent-skills/registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

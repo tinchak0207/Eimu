@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opencode-release.sh — 把 deploy-staging/opencode-runtime（git 真源）同步到
+# opencode-release.sh — 把 services/opencode-runtime（git 真源）同步到
 #   /opt/agent-harness/workspace/.opencode 并重启 opencode-server
 #
 # 用法：
@@ -46,8 +46,8 @@ OWNER="${OC_OWNER:-ubuntu:ubuntu}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SRC_SUBDIR="deploy-staging/opencode-runtime"
-RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-opencode-recon.sh"
+SRC_SUBDIR="services/opencode-runtime"
+RECON_SCRIPT="$REPO_ROOT/services/vps-tools/vps-opencode-recon.sh"
 # shellcheck source=release-ancestry-guard.sh
 . "$SCRIPT_DIR/release-ancestry-guard.sh"
 SCOPE=(tools lib skills plugin)
@@ -428,7 +428,7 @@ cmd_release() {
   local sha sha12 ts stage exp tar_file
   sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA}^{commit}")" || die "无法解析 commit：$SHA"
   opencode_ancestry_gate "$sha"
-  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
+  if [ "$DRY_RUN" -eq 0 ]; then bun "$REPO_ROOT/tools/qa/check-opencode-tool-schemas.mjs" --commit "$sha" --repo "$REPO_ROOT"; fi
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   stage="$(mktemp -d /tmp/oc-stage.XXXXXX)"; exp="$(mktemp /tmp/oc-exp.XXXXXX)"; tar_file="$(mktemp /tmp/oc-stage.XXXXXX.tar)"

@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentMarkdown } from "./AgentMarkdown";
-import type { AgentUserTurnItem } from "@/lib/agent-chat-types";
+import type { AgentUserTurnItem } from "@/lib/agent/agent-chat-types";
 
 const root = process.cwd();
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -99,7 +99,8 @@ test("桌面基础值原封不动：正文仍 text-[0.9375rem]、输入区 15px�
   assert.match(surfaceSrc, /page-shell flex flex-col pb-4 pt-3/);
   assert.match(surfaceSrc, /flex min-h-0 flex-1 flex-col overflow-hidden pb-1/);
   // 确认卡内文桌面仍是 15px。
-  assert.match(confirmSrc, /text-\[0\.9375rem\] leading-snug/);
+  // 字级已收成语义 token text-ios-subhead（=0.9375rem，见 AgentConfirmCard 注释），桌面像素值不变。
+  assert.match(confirmSrc, /text-ios-subhead leading-snug/);
 });
 
 // ────────────────────────── 渲染行为：阶梯锚点真的挂在元素上 ───────────────

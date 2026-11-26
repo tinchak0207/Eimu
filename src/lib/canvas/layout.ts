@@ -1,7 +1,7 @@
 // 画布纯函式层：事件分流、事件正规化、几何、历史快照、专案序列化。
 //
 // 为什么要有这一层：gateway 的 canvas.* payload 是「宽松解析」过的
-// （src/lib/agent-chat-types.ts 的 AgentCanvas* 型别：node 只有 id/type/title/metadata，
+// （src/lib/agent/agent-chat-types.ts 的 AgentCanvas* 型别：node 只有 id/type/title/metadata，
 // 没有 position/width/height），而 src/lib/canvas/reducer.ts 吃的是完整的 CanvasNode。
 // 中间这一步转换必须是纯函式，否则 React 元件里混进契约补齐逻辑，测不了也讲不清。
 //

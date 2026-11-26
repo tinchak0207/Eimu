@@ -32,7 +32,7 @@ import {
 import { compactMetadataForAgent } from "@/hooks/canvas/canvas-chat-types";
 import { toNodeMetadata } from "./canvas/layout";
 import { runShortDramaTool } from "./shortdrama-domain";
-import { normalizeAssetShare } from "./asset-scope";
+import { normalizeAssetShare } from "./media/asset-scope";
 
 /** 照 AID 契约顺序的全形 21 栏样本。 */
 function fullShot(overrides: Partial<StoryboardScriptShot> = {}): StoryboardScriptShot {

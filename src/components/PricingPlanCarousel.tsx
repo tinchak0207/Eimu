@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatCoins, gptImage2EquivalentImages } from "@/lib/plans";
-import type { PricingPlan } from "@/lib/plans";
+import { formatCoins, gptImage2EquivalentImages } from "@/lib/billing/plans";
+import type { PricingPlan } from "@/lib/billing/plans";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { createWheelStepper } from "@/lib/wheel-stepper";
 import { PricingStage3D } from "@/components/pricing3d/PricingStage3D";

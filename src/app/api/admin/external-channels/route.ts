@@ -4,20 +4,20 @@
 // （diffJson + nextConfigVersion + recordConfigChange）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/admin-audit";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/accounts/admin-audit";
 import {
   emptyExternalChannelDocument,
   normalizeExternalChannel,
   toPublicExternalChannel,
   type ExternalChannel,
   type ExternalChannelDocument,
-} from "@/lib/external-channels";
+} from "@/lib/generation-core/external-channels";
 import {
   invalidateExternalChannelCache,
   readExternalChannelDocument,
   writeExternalChannelDocument,
-} from "@/lib/external-channels-store";
+} from "@/lib/generation-core/external-channels-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

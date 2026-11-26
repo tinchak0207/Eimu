@@ -1,4 +1,4 @@
-import { REGISTRY_CHANNELS } from "@/lib/supplier-channels.config";
+import { REGISTRY_CHANNELS } from "@/lib/generation-core/supplier-channels.config";
 import { generateWithBlenderNode } from "./blender-node-upstream";
 import { generateWithDmc, pollDmcTask } from "./dmc-upstream";
 import { generateWithFilmera, pollFilmeraTask } from "./filmera-upstream";
@@ -18,7 +18,7 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 //
 // 新增一条**新协议**供给＝2 档：
 //   ① 新 adapter 档：`export const fooAdapter: SupplyAdapter = { protocol: "foo", submit, poll? }`
-//   ② `src/lib/supplier-channels.config.ts` 条目：`adapterType: "foo", adapter: fooAdapter`
+//   ② `src/lib/generation-core/supplier-channels.config.ts` 条目：`adapterType: "foo", adapter: fooAdapter`
 // 本档在载入时扫 REGISTRY_CHANNELS 的 `adapter` 栏位自动注册，不需改本档。
 // 未知协议一律明确失败（不再 default 成 newapi_video）。
 //
@@ -108,7 +108,7 @@ const blenderBridgeAdapter: SupplyAdapter = {
 };
 
 // harness TTS（2026-10-01）：同步调用「harness 闸道既有 TTS 端点」`POST {base}/v1/tts`
-//（deploy-staging/gateway/router.ts:531 → media-internal-routes handleTts；上游自 2026-08-30
+//（services/gateway/router.ts:531 → media-internal-routes handleTts；上游自 2026-08-30
 // 指向本机 edge-tts-proxy）。同步 adapter：无 provider task id，不进异步对帐；见
 // harness-tts-upstream.ts 档头（为何既有生图/视频轮子不能用）。
 const harnessTtsAdapter: SupplyAdapter = {

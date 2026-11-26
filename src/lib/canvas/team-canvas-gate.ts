@@ -31,7 +31,7 @@ import {
   TEAM_CANVAS_FORBIDDEN_CODE,
   TEAM_CANVAS_FORBIDDEN_MESSAGE,
 } from "@/lib/generation-core/team-governance";
-import { lookupTeamMembershipViaRelay, type TeamMembership } from "@/lib/team-membership-lookup";
+import { lookupTeamMembershipViaRelay, type TeamMembership } from "@/lib/accounts/team-membership-lookup";
 
 import {
   listCanvasProjects,

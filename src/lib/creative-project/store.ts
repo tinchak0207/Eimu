@@ -8,8 +8,8 @@
 // 文档没有可比较的写入版本字段（schemaVersion 只是结构版本），这里不发明迁移，也不假装有分布式锁。
 // 未消除多实例覆盖。
 import { randomBytes } from "node:crypto";
-import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
-import { sanitizeBlobSegment } from "@/lib/history-types";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/media/blob-backend";
+import { sanitizeBlobSegment } from "@/lib/media/history-types";
 // 存量迁移的唯一来源：既有画布专案（只读，本刀不删画布）。
 import { listCanvasProjects } from "@/lib/canvas/project-store";
 import type { CreativeProject, ProjectChat, ProjectTitleSource } from "./types";

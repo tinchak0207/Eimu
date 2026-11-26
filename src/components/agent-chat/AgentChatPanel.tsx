@@ -3,9 +3,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowDown, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentAssistantTextItem, AgentChatState, AgentSubagentItem, AgentToolAuthScope } from "@/lib/agent-chat-types";
-import type { BatchAnchor } from "@/lib/agent-batch-anchor";
-import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
+import type { AgentAssistantTextItem, AgentChatState, AgentSubagentItem, AgentToolAuthScope } from "@/lib/agent/agent-chat-types";
+import type { BatchAnchor } from "@/lib/agent/agent-batch-anchor";
+import { describeGroup, groupPendingConfirms } from "@/lib/agent/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
 import { AgentChatSendProvider } from "./agent-chat-send-context";
 import { AgentArtifactsProvider } from "./agent-artifacts-context";
@@ -17,7 +17,7 @@ import { AgentSubagentBar } from "./AgentSubagentBar";
 import { AgentSubagentView } from "./AgentSubagentView";
 import { AgentAnchorCard } from "./AgentAnchorCard";
 import { NEAR_BOTTOM_PX } from "./scroll-threshold";
-import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent/agent-example-prompts";
 import "./agent-chat.css";
 
 export interface AgentChatPanelProps {

@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { ImageBillingGatewayError } from "@/lib/image-billing";
+import { ImageBillingGatewayError } from "@/lib/billing/image-billing";
 import { ensureAccountBaselines } from "./account-ledger";
 import { reconcileGenerationBilling } from "./billing-ledger";
 import type { GenerationBillingAdapter, GenerationBillingAdjustment } from "./billing-relay";

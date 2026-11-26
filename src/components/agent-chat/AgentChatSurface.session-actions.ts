@@ -10,28 +10,28 @@ import {
   type SetStateAction,
 } from "react";
 import { authHeaders } from "@/lib/canvas/client";
-import { hasReflectedParams, reflectParams } from "@/lib/agent-param-reflect";
-import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
-import { subscribeAgentSurfaceActions } from "@/lib/agent-surface-actions";
-import { buildAnchorMessage, buildReanchorMessage, deriveBatchAnchor, shouldOfferBatchAnchor } from "@/lib/agent-batch-anchor";
-import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
-import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
+import { hasReflectedParams, reflectParams } from "@/lib/agent/agent-param-reflect";
+import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent/agent-chat-client";
+import { subscribeAgentSurfaceActions } from "@/lib/agent/agent-surface-actions";
+import { buildAnchorMessage, buildReanchorMessage, deriveBatchAnchor, shouldOfferBatchAnchor } from "@/lib/agent/agent-batch-anchor";
+import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent/agent-chat-types";
+import type { AssetPack, AssetPackItem } from "@/lib/media/asset-pack-store";
 import type { AgentTranscriptProps } from "@/components/agent-chat/AgentTranscript";
-import { assetUrlFieldOf } from "@/lib/deliverable-kind";
-import { buildChatSaveItem, CHAT_ASSETS_PACK_ID, type AgentChatLibraryItem } from "@/lib/agent-chat-asset-builders";
+import { assetUrlFieldOf } from "@/lib/media/deliverable-kind";
+import { buildChatSaveItem, CHAT_ASSETS_PACK_ID, type AgentChatLibraryItem } from "@/lib/agent/agent-chat-asset-builders";
 import {
   AGENT_MEDIA_HISTORY_MAX_ATTEMPTS,
   agentHistoryEntryForMedia,
   agentMediaItemIds,
   planAgentMediaHistoryWrites,
   saveAgentMediaToHistory,
-} from "@/lib/agent-media-history";
-import { imageExtensionFromUrl, stationAuthHeaders } from "@/lib/agent-image-share";
-import type { HistoryEntry } from "@/lib/history-types";
+} from "@/lib/agent/agent-media-history";
+import { imageExtensionFromUrl, stationAuthHeaders } from "@/lib/agent/agent-image-share";
+import type { HistoryEntry } from "@/lib/media/history-types";
 import type { HistoryRerunMode } from "@/components/history/RerunDialog";
-import type { NewApiUser } from "@/lib/new-api-client";
-import type { ReflectedParams } from "@/lib/agent-param-reflect";
-import type { AgentChatState } from "@/lib/agent-chat-types";
+import type { NewApiUser } from "@/lib/accounts/new-api-client";
+import type { ReflectedParams } from "@/lib/agent/agent-param-reflect";
+import type { AgentChatState } from "@/lib/agent/agent-chat-types";
 import type { UseAgentChatResumable } from "@/hooks/use-agent-chat";
 import { triggerDownload } from "./AgentChatSurface.helpers";
 

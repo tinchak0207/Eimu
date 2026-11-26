@@ -4,11 +4,11 @@
 // **可机器验证**的部分，渲染只是把它印出来。放这里让 `lens-picker.test.ts` 直接驱动，
 // 不必开浏览器；组件只负责把结果画成 DOM。
 //
-// 数据源唯一：`src/lib/lens-language-library.ts`（AID MIT 逐字 142 条 / 12 类）。
+// 数据源唯一：`src/lib/media/lens-language-library.ts`（AID MIT 逐字 142 条 / 12 类）。
 // 本档**不新增任何词条、不改任何原文**——`composeLensFragment()` 是既有的注入轮子，
 // 这里只做「多选 → 分组 → 拼装 → 六槽归属」的外壳，不写第二套拼装逻辑。
 //
-// 六槽归属表逐字取自 skill 生成物（`tools/gen-lens-skill.ts` 的「与 §2 六槽的对应」），
+// 六槽归属表逐字取自 skill 生成物（`tools/codegen/gen-lens-skill.ts` 的「与 §2 六槽的对应」），
 // 不自行发明映射。三处如实声明在 `LENS_SLOT_META.note`：本站词库覆盖不了
 // Format/Aspect Ratio、Setting/Environment、Subject/Scene 三槽（无对应类别）。
 
@@ -18,7 +18,7 @@ import {
   composeLensFragment,
   lensEntriesByGroup,
   type LensLanguageEntry,
-} from "@/lib/lens-language-library";
+} from "@/lib/media/lens-language-library";
 
 /**
  * 单次注入上限 = 6 条。
@@ -36,7 +36,7 @@ export interface LensPickerGroup {
 }
 
 /**
- * 12 类分组（顺序 = 词库首见顺序，与 `tools/gen-lens-skill.ts` 的 GROUP_ORDER 逐字一致）。
+ * 12 类分组（顺序 = 词库首见顺序，与 `tools/codegen/gen-lens-skill.ts` 的 GROUP_ORDER 逐字一致）。
  *
  * 为何由 library 首见顺序推导而不是再抄一份 GROUP_ORDER：词库是唯一真源，抄一份就多一个
  * 会漂移的副本；测试直接断言语组顺序 = 12 类期望序列，漂移必红。

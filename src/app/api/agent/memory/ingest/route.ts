@@ -15,8 +15,8 @@ import {
   type EvidenceKind,
   type MemoryScope,
   type MemoryType,
-} from "@/lib/agent-memory-store";
-import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hmac";
+} from "@/lib/agent/agent-memory-store";
+import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/accounts/memory-hmac";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

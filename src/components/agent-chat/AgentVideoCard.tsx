@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Coins, Download, Library, Loader2, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentVideoItem } from "@/lib/agent/agent-chat-types";
 import { viewAssetFromVideoItem } from "@/lib/viewer/from-items";
 import { Viewer } from "@/components/viewer/Viewer";
 import { AgentRerunMenu } from "./AgentRerunMenu";

@@ -1,10 +1,11 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import type { AgentChatState, AgentToolAuthScope } from "@/lib/agent-chat-types";
+import type { AgentChatState, AgentToolAuthScope } from "@/lib/agent/agent-chat-types";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentToolCard } from "./AgentToolCard";
 import { AgentImageCard, type AgentImageCardProps } from "./AgentImageCard";
+import { Agent3DCard } from "./Agent3DCard";
 import { AgentVideoCard, type AgentVideoCardProps } from "./AgentVideoCard";
 import { AgentAudioCard, type AgentAudioCardProps } from "./AgentAudioCard";
 import { AgentDirectorCard } from "./AgentDirectorCard";
@@ -105,6 +106,12 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
             return (
               <li key={item.id}>
                 <AgentVideoCard item={item} {...videoActions} />
+              </li>
+            );
+          case "model3d":
+            return (
+              <li key={item.id}>
+                <Agent3DCard item={item} />
               </li>
             );
           case "audio":

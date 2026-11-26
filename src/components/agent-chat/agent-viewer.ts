@@ -5,9 +5,9 @@
 //   - 「发给助理」走会话上下文的 onSendFeedback（与「微调」同一条预填路径，只预填、不自动送出）；
 //   - Provider 缺席（useViewer().available===false）时退回在新标签打开资源 URL，点击不会没反应。
 
-import type { AgentImageItem } from "@/lib/agent-chat-types";
-import { agentHistoryEntryForMedia } from "@/lib/agent-media-history";
-import { canHistoryEntryRerun } from "@/lib/history-rerun";
+import type { AgentImageItem } from "@/lib/agent/agent-chat-types";
+import { agentHistoryEntryForMedia } from "@/lib/agent/agent-media-history";
+import { canHistoryEntryRerun } from "@/lib/media/history-rerun";
 import {
   stableAssetId,
   viewAssetFromAudioItem,

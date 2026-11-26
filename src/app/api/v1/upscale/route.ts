@@ -31,10 +31,10 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
-import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { declaredUpscaleTiers } from "@/lib/generation-model-catalog";
-import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { declaredUpscaleTiers } from "@/lib/generation-core/generation-model-catalog";
+import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import {
   UPSCALE_AWAIT_MS,
   UPSCALE_POLL_INTERVAL_MAX_MS,
@@ -52,21 +52,21 @@ import {
   pixaiError,
   pixaiRequestError,
   proxyPixai,
-} from "@/lib/pixai-proxy";
-import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
+} from "@/lib/generation-core/pixai-proxy";
+import { EditInputError, resolveEditReference } from "@/lib/generation-core/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { getGenerationJobForTenant, hasGenerationCapability } from "@/lib/generation-core/job-repository";
 import { taskStatus } from "@/lib/generation-core/task-response";
 import type { GenerationArtifactResult, GenerationReference } from "@/lib/generation-core/types";
-import type { BizApiKey } from "@/lib/biz-api-keys";
+import type { BizApiKey } from "@/lib/accounts/biz-api-keys";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge, type SyncCharge } from "@/lib/generation-core/sync-charge";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
-import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { upscaleFourKUpstreamEnabled } from "@/lib/generation-core/upscale-4k-flag";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import {
   checkOrReserveSyncIdempotency,
   commitSyncIdempotency,

@@ -16,7 +16,7 @@ import {
   normalizeProjectStyleId,
   resolveProjectStyle,
 } from "./project-style";
-import { getStyleById, STYLE_LIBRARY } from "../style-library";
+import { getStyleById, STYLE_LIBRARY } from "../media/style-library";
 import { normalizeProject } from "./project-store";
 import { canvasProjectMeta, normalizeProjectMetaPatch } from "./layout";
 

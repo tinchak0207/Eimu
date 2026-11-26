@@ -1,7 +1,7 @@
 // 定价页首充卡（plan id `first-charge`）的资格查询：这张卡要不要显示。
 //
 // 登入态从 napi_token cookie 反查 userId（控面稳定令牌表，与 checkout 同一条路），
-// 再经 HMAC 通道问控面「这个帐号还有没有首充资格」（判准唯一权威在 src/lib/first-charge.ts：
+// 再经 HMAC 通道问控面「这个帐号还有没有首充资格」（判准唯一权威在 src/lib/billing/first-charge.ts：
 // 帐本从无 recharge 行、且从未买过本档）。
 //
 // 只读、不碰钱路。通道不可用／未登入一律回 eligible:false（保守：优惠卡不给，
@@ -9,8 +9,8 @@
 // 回应不含 userId，也不含任何凭证。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
-import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
+import { readFirstChargeEligibilityViaRelay } from "@/lib/billing/first-charge";
+import { lookupUserIdByTokenViaRelay } from "@/lib/accounts/newapi-session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

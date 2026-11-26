@@ -11,7 +11,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentAudioItem } from "@/lib/agent-chat-types";
+import type { AgentAudioItem } from "@/lib/agent/agent-chat-types";
 import { viewAssetFromAudioItem } from "@/lib/viewer/from-items";
 import { Viewer } from "@/components/viewer/Viewer";
 import { AgentRerunMenu } from "./AgentRerunMenu";

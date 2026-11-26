@@ -1,4 +1,4 @@
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import type { UsageAssetKind } from "../usage-asset-kind";
 
 /** 比率的最小样本门槛：与 routing-telemetry 的 latencyP80（<3 样本回 null）同一把尺。 */

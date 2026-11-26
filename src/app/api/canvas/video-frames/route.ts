@@ -13,13 +13,13 @@
 //
 // 认证：requireVerifiedUser（上游 /api/user/self 验证身份，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   MAX_SEQUENCE_FRAMES,
   formatFrameTime,
   frameFileName,
   planFrameExtraction,
-} from "@/lib/video-frames";
+} from "@/lib/media/video-frames";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

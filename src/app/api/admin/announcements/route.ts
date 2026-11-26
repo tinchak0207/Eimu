@@ -13,14 +13,14 @@
 // 三者都由管理端显式设定，缺省＝立即生效、不限受众。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import {
   createAnnouncement,
   listAnnouncements,
   updateAnnouncement,
   type AnnouncementInput,
   type AnnouncementPatch,
-} from "@/lib/notification-store";
+} from "@/lib/accounts/notification-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

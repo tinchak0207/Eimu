@@ -15,7 +15,7 @@
 //      执行后结果回流 gateway；run_generation 由本层代跑
 //   D  提示词库/云端素材库面板接线；编辑器角度重绘/AI 重绘回调接生成管线
 //
-// 2026-08-22 域拆分（docs/plans/2026-08-22-large-file-refactor.md Task 7）：
+// 2026-08-22 域拆分（docs/archive/plans/2026-08-22-large-file-refactor.md Task 7）：
 // 纯函数/类型 → embed/embed-helpers.ts、交互域 → embed/use-canvas-interaction.ts、
 // 生成编排 → embed/use-canvas-generation.ts、键盘/剪贴簿 → embed/use-canvas-shortcuts.ts、
 // 右键选单 → embed/context-menu-items.ts、浮层+样式 → embed/CanvasEmbedOverlays.tsx。
@@ -56,11 +56,11 @@ import {
 } from "@/components/assets/AssetReviewPanel";
 import { ShotReviewPanel, reviewShotsFromNodes, shotApprovalFor } from "@/components/assets/ShotReviewPanel";
 // 批准状态（路 1 落地的真源）：写入走 setApproval、分镜侧清洗走 shotApprovalFor（内部即 normalizeApprovalState）。
-import { setApproval } from "@/lib/character-cards";
-import type { ApprovalState } from "@/lib/character-cards";
-import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent-chat-client";
-import type { AgentInteractionMode } from "@/lib/agent-chat-client";
-import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { setApproval } from "@/lib/media/character-cards";
+import type { ApprovalState } from "@/lib/media/character-cards";
+import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent/agent-chat-client";
+import type { AgentInteractionMode } from "@/lib/agent/agent-chat-client";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ import { useCanvasGeneration } from "./embed/use-canvas-generation";
 import { useCanvasShortcuts } from "./embed/use-canvas-shortcuts";
 import { buildCanvasEmbedMenuItems } from "./embed/context-menu-items";
 import { CanvasEmbedOverlays } from "./embed/CanvasEmbedOverlays";
-import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
+import { CHARACTER_CARD_KIND_LABEL } from "@/lib/media/character-cards";
 import { shotEntityCardIdsFromMetadata } from "./CanvasNodePromptPanel";
 import {
   centerViewport,

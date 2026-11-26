@@ -1,0 +1,153 @@
+/**
+ * run.ts — 「裸 YuE2」配对臂产生器（轮子源档：deploy-staging/yue2-modal/out_local/service/e2e_client_runner.ts）
+ *
+ * 存在理由（2026-10-05）：A/B 的 2×2 表缺一格。已有 raw FlowMusic（arm A）、
+ * Beast ON→FlowMusic、Beast ON→YuE2，缺 **裸 YuE2**（同一句题面、不插 harness）。
+ * 没有它就无法回答「Beast ON + YuE2 是否打得过 YuE2」。
+ *
+ * 与轮子源档的差异（白名单，其余逐行等价）：
+ *   ① import 路径深度重定位；② 题面来源改为 wsb-prompts.jsonl 的确定性变换
+ *   （删 `Generate music from the given user prompt.` 与 `[start_of_user_prompt]` 行，
+ *   其余逐字；首行 `[Tags] X` 的 X 作 style，其余作 lyrics —— 与 arm A 同源同题面）；
+ *   ③ 落盘目录与命名；④ 加 take 循环（seed 递增）与逐 take receipt。
+ * **不改任何契约**：仍用真 client generateYue2Track，仍只做呼叫与落盘。
+ *
+ * env：YUE2_MODAL_ENDPOINT=http://127.0.0.1:8788、YUE2_HMAC_SECRET=...
+ * 用法（repo 根）：npx tsx bench/music-bench/arms/raw-yue2-pilot/run.ts
+ */
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { resolve, join } from "node:path"
+
+import { generateYue2Track, yue2ModalUrl } from "../../../../src/lib/music-yue2"
+
+const ROW = Number(process.env.RAW_YUE2_ROW ?? 0)
+const TAKES = Number(process.env.RAW_YUE2_TAKES ?? 4)
+const SEED0 = Number(process.env.RAW_YUE2_SEED0 ?? 12345)
+const outDir = resolve(process.cwd(), process.env.RAW_YUE2_OUT ?? "bench/music-bench/arms/raw-yue2-pilot")
+
+/** 与 arm A / arm B 逐字一致的确定性题面变换。 */
+function renderPrompt(row: number): { style: string; lyrics: string; raw: string } {
+  const lines = readFileSync(resolve(process.cwd(), "bench/music-bench/suite/wsb-prompts.jsonl"), "utf8").split("\n")
+  const rec = JSON.parse(lines[row]) as { prompt: string }
+  // 只删那两行标记，**其余逐字保留**（含空行与半角空格行）——
+  // 与 arm A / arm B 的确定性变换必须字节级一致，否则配对不成立。
+  const kept = rec.prompt
+    .split("\n")
+    .filter((l) => l.trim() !== "Generate music from the given user prompt." && l.trim() !== "[start_of_user_prompt]")
+  const raw = kept.join("\n")
+  const first = kept[0] ?? ""
+  const style = first.replace(/^\[Tags\]\s*/, "").trim()
+  const lyrics = kept.slice(1).join("\n").trim()
+  if (!style || !lyrics) throw new Error(`row ${row} 变换后 style/lyrics 为空，拒绝发车`)
+  return { style, lyrics, raw }
+}
+
+function sha256(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex")
+}
+
+/**
+ * 本机 YuE2 服务是**一次一歌**：忙碌时对 /generate 直接回 429（不排队）。
+ * 所以每次发车前必须等到 state==="idle"，否则 4 个 take 会全部 429 失败。
+ */
+async function waitIdle(maxMs = 1_200_000): Promise<void> {
+  const t0 = Date.now()
+  for (;;) {
+    try {
+      const r = await fetch(`${yue2ModalUrl()}/health`, { signal: AbortSignal.timeout(10_000) })
+      const j = (await r.json()) as { state?: string }
+      if (j.state === "idle") return
+      console.log(`[raw-yue2] service state=${j.state}，等它空閒`)
+    } catch {
+      console.log("[raw-yue2] health 探活失败，重试")
+    }
+    if (Date.now() - t0 > maxMs) throw new Error("等服務空閒超時")
+    await new Promise((r) => setTimeout(r, 15_000))
+  }
+}
+
+/**
+ * 从服务的 run 目录回收产物（2026-10-05 实锤的必要动作）。
+ *
+ * 真因：本机服务的回包把整首 flac 放进 JSON 的 `audio_b64`（30–40MB → base64 约
+ * 40–55MB）。客户端经隧道收这个大响应体会 **`fetch failed`**（网络层），
+ * 而**服务端的 run 目录里 audio.flac 已经完整落盘**。所以客户端报错不等于生成失败——
+ * 必须按 (style, lyrics 长度, seed) 精确匹配 run 目录把产物捞回来。
+ * 这也是 harness 那条「YuE2 请求失败（网络层）… The operation timed out」的真实成因之一。
+ */
+function harvestFromRuns(t0: number, style: string, lyricsLen: number, seed: number): Buffer | null {
+  const runsDir = resolve(process.cwd(), "deploy-staging/yue2-modal/out_local/service/runs")
+  if (!existsSync(runsDir)) return null
+  const entries = readdirSync(runsDir)
+    .map((d) => ({ d, m: statSync(join(runsDir, d)).mtimeMs }))
+    .filter((e) => e.m >= t0)
+    .sort((a, b) => b.m - a.m)
+  for (const { d } of entries) {
+    const full = join(runsDir, d)
+    const reqPath = join(full, "service_request.json")
+    const flacPath = join(full, "audio.flac")
+    if (!existsSync(reqPath) || !existsSync(flacPath)) continue
+    try {
+      const rq = JSON.parse(readFileSync(reqPath, "utf8")) as { style?: string; lyrics?: string; seed?: number }
+      if (rq.style === style && (rq.lyrics ?? "").length === lyricsLen && rq.seed === seed) {
+        console.log(`[raw-yue2] 回收自 run 目录 ${d}`)
+        return readFileSync(flacPath)
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+async function main(): Promise<void> {
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+  const { style, lyrics, raw } = renderPrompt(ROW)
+  console.log(`[raw-yue2] endpoint=${yue2ModalUrl()} row=${ROW} takes=${TAKES} style=${JSON.stringify(style)} lyrics_chars=${lyrics.length} raw_sha256=${sha256(Buffer.from(raw, "utf8"))}`)
+
+  const summary: unknown[] = []
+  for (let i = 0; i < TAKES; i += 1) {
+    const seed = SEED0 + i
+    const name = `idx${ROW}-take${i + 1}`
+    const flacOut = resolve(outDir, `${name}.flac`)
+    if (existsSync(flacOut)) {
+      console.log(`[raw-yue2] ${name} 已存在，跳过`)
+      continue
+    }
+    let flac: Buffer | null = null
+    let lastErr = ""
+    for (let attempt = 1; attempt <= 3 && flac === null; attempt += 1) {
+      const t0 = Date.now()
+      try {
+        await waitIdle()
+        const r = await generateYue2Track({ style, lyrics, cot: "full", seed })
+        flac = Buffer.from(r.audioBase64, "base64")
+        console.log(`[raw-yue2] ${name} attempt=${attempt} 客户端直收成功 用时 ${Date.now() - t0} ms`)
+      } catch (e) {
+        lastErr = (e as Error).message
+        console.log(`[raw-yue2] ${name} attempt=${attempt} 客户端报错：${lastErr.slice(0, 140)}`)
+        if (/429|busy/.test(lastErr)) continue // 服务忙：等下一轮 waitIdle
+        // 网络层大响应体失败：服务端产物仍在，尝试回收
+        await new Promise((r2) => setTimeout(r2, 5_000))
+        flac = harvestFromRuns(t0, style, lyrics.length, seed)
+        if (flac) console.log(`[raw-yue2] ${name} attempt=${attempt} 已从 run 目录回收`)
+      }
+    }
+    if (!flac) {
+      summary.push({ name, seed, ok: false, error: lastErr })
+      console.log(`[raw-yue2] ${name} 最终失败：${lastErr.slice(0, 160)}`)
+      continue
+    }
+    const sha = sha256(flac)
+    writeFileSync(flacOut, flac)
+    const rec = { name, seed, ok: true, audio_bytes: flac.length, sha256: sha, harvest_fallback: lastErr !== "" }
+    writeFileSync(resolve(outDir, `${name}.receipt.json`), JSON.stringify(rec, null, 2) + "\n")
+    summary.push(rec)
+    console.log(`[raw-yue2] ${name} OK seed=${seed} bytes=${flac.length} sha=${sha.slice(0, 16)}`)
+  }
+  writeFileSync(resolve(outDir, `summary-row${ROW}.json`), JSON.stringify(summary, null, 2) + "\n")
+  console.log("[raw-yue2] DONE")
+}
+
+void main()

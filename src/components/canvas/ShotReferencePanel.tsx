@@ -12,8 +12,8 @@
 // 纯展示：零 API、零 hook 副作用。条目与未解析清单由宿主用下列纯函式推导（useMemo），
 // 本档不读 DOM、不发请求、不订阅。
 
-import type { CharacterCardKind } from "@/lib/character-cards";
-import { parseEntityTokens, resolveEntityTokenKind, serializeEntityToken } from "@/lib/entity-tokens";
+import type { CharacterCardKind } from "@/lib/media/character-cards";
+import { parseEntityTokens, resolveEntityTokenKind, serializeEntityToken } from "@/lib/media/entity-tokens";
 import { cn } from "@/lib/utils";
 
 export interface ShotReferenceEntry {

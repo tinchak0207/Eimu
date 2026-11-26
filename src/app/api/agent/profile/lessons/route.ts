@@ -9,10 +9,10 @@
 // 身份：复用 resolveAgentCaller（与 messages 路由一致的登录用户解析）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { addAgentLesson, listAgentLessons } from "@/lib/agent-profile-store";
-import { callAgentGateway } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
-import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
+import { addAgentLesson, listAgentLessons } from "@/lib/agent/agent-profile-store";
+import { callAgentGateway } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
+import type { AgentTranscriptItem } from "@/lib/agent/agent-chat-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -120,7 +120,7 @@ test("the model picker is wired into the left prompt panel", () => {
   const prompt = read("src/components/PromptInput.tsx") + "\n" + read("src/components/prompt-input/GenerateControls.tsx");
 
   // 2026-10-05 红队修复（5e46b701 入库）：渠道键改中性值 "primary"
-  // （src/lib/provider-key.ts 单一真源），不再把内部渠道名带进客户端 bundle。
+  // （src/lib/generation-core/provider-key.ts 单一真源），不再把内部渠道名带进客户端 bundle。
   assert.match(source, /models=\{PROVIDERS\.primary\.models\}/);
   assert.match(source, /modelId=\{selectedModels\.primary\}/);
   assert.match(source, /onModelChange=\{userSetModel\}/);

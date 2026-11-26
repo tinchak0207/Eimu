@@ -1,6 +1,6 @@
 // `/openai/v1/*` 三条路由共用的**错误出口**。
 //
-// 形状刻意沿用既有 B 端 OpenAI 信封（`src/lib/biz-openai-error.ts`）：
+// 形状刻意沿用既有 B 端 OpenAI 信封（`src/lib/generation-core/biz-openai-error.ts`）：
 // `{ error: { message, type, code, param: null, trace_id } }` + `X-Request-Id` 头。
 // 官方 openai SDK 与聚合平台只读 message/type/code/param，多带的 trace_id 不影响解析；
 // 抽这一层的唯一目的是让三条路由回同一个形状，不再各写一份 NextResponse.json。
@@ -13,8 +13,8 @@ import {
   bizErrorResponse,
   guardBizApiKey,
   type BizOpenAIErrorType,
-} from "@/lib/biz-openai-error";
-import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
+} from "@/lib/generation-core/biz-openai-error";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/upstream-sanitizer";
 
 export { guardBizApiKey };
 export type OpenAICompatErrorType = BizOpenAIErrorType;

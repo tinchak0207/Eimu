@@ -6,7 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
+import { UNATTRIBUTED_SOURCE } from "@/lib/accounts/first-touch-attribution";
 import {
   FUNNEL_STEP_ORDER,
   buildFunnelSourceRows,

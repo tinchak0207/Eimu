@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
 import { generationTaskResponse, resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

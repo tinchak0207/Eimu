@@ -10,7 +10,7 @@
 //
 // 本档案 = 前端与后端共用的契约。任何改动必须同步两端。
 
-import type { ReferenceImageRole } from "../image-types";
+import type { ReferenceImageRole } from "../media/image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
 import type { StoryboardShotCandidateSet } from "./storyboard-shots";
 import type { TaskVersionSet } from "./task-versions";
@@ -19,7 +19,7 @@ import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enum
 import { type CanvasScriptType } from "./project-narration";
 // 批准状态形状的单一真源（type-only：执行期零依赖，不成环——`storyboard-contract.ts`
 // 已用同一写法 type-only import 本档，本档反向 type-only 取 `ApprovalState` 是同构先例）。
-import type { ApprovalState } from "../character-cards";
+import type { ApprovalState } from "../media/character-cards";
 
 // ─────────────────────────────────────────── 作品形态值域
 
@@ -307,6 +307,10 @@ export interface CanvasNodeMetadata {
    * `audio_anchor_present`/`dialogue_alignment` 逐镜读它。白名单规则同 `dialogueAudioId`。
    */
   audioAnchorId?: string;
+  /** 对白音轨的合成指纹（音色＋台词文本）；与当前台词一致才允许续做时复用该音轨。 */
+  dialogueAudioSig?: string;
+  /** 旁白音轨的合成指纹（同上）。 */
+  narrationAudioSig?: string;
   // ── 分镜实体（2026-09-15 刀 2；AID 21 栏契约，MIT）──
   /**
    * 一镜（AID 21 栏契约，`src/lib/storyboard-contract.ts`）：挂在 Group 节点的子节点。
@@ -336,9 +340,9 @@ export interface CanvasNodeMetadata {
   // ── 模板交付自动落卡（WS11 收口，2026-09-24；保留键，型别层具名）──
   /**
    * 本节点交付物自动落成的实体标记（保留键）。真源＝gateway 模板节点的
-   * `defaults.emitsEntity`（`deploy-staging/gateway/workflow-templates/*`），
+   * `defaults.emitsEntity`（`services/gateway/workflow-templates/*`），
    * `expandTemplate` spread 进节点 metadata 后随 SSE `canvas.node.created/updated` 落地；
-   * 画布侧据此自动建卡（`src/lib/agent-output-cards.ts` 的 `emittedEntityOf`）。
+   * 画布侧据此自动建卡（`src/lib/agent/agent-output-cards.ts` 的 `emittedEntityOf`）。
    *
    * ⚠️ 这个键必须**同时**存在于两处 metadata 白名单，否则**一进前端就被剥掉**
    *（不是重载才消失，是当下就没了）：

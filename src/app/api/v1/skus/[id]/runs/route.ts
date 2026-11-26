@@ -10,10 +10,10 @@
 //  2. 表格批量：{ "inputs": [输入物件, ...] }（或直接顶层数组），每项一轮 run。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
-import { isSupportedImageModel, resolveGenerationModelId } from "@/lib/generation-model-catalog";
+import { readBearerToken, isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
+import { isSupportedImageModel, resolveGenerationModelId } from "@/lib/generation-core/generation-model-catalog";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { getSkuById } from "@/lib/sku/catalog";
 import { expandSkuShots } from "@/lib/sku/expand";
@@ -25,9 +25,9 @@ import {
   normalizeRunId,
   resolveSkuDispatcher,
 } from "@/lib/sku/run-service";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

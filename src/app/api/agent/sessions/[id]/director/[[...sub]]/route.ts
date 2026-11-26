@@ -7,8 +7,8 @@
 // GET 只透传 state 与 schematic；POST 其余按子路径白名单转发，非白名单 404。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

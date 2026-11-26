@@ -1,0 +1,498 @@
+import { memo, useEffect, useRef, useState } from "react";
+import { ScrollView, Text, View } from "@tarojs/components";
+import Taro from "@tarojs/taro";
+import { Icon } from "./icons";
+import { ApiError } from "../../lib/request";
+import { cn } from "../../lib/cn";
+import type {
+  AgentItem,
+  AgentSubagentRunSummary,
+  AgentSubagentToolEntry,
+  AgentSubagentTranscriptEntry,
+} from "./types";
+import {
+  listAgentSubagents,
+  readAgentSubagentTranscript,
+  stopAgentSubagent,
+} from "../../lib/agent";
+import { toolDisplayName } from "./tool-names";
+
+type SubagentItem = Extract<AgentItem, { kind: "subagent" }>;
+
+// 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
+// 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁）。0921 契约：
+// turn.done 收尾**不清 running 条目**（异步子代理跨回合在跑，终态由
+// subagent.done 独占裁决），所以回合结束后在跑的子任务照常渲染在此，
+// 本组件不看 turnActive、也不该看。
+// 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
+//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 6px 圆点。
+// 2026-09-19 暴君裁定（子任务 UI 去重）：
+//   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
+//   可收合（SubagentMenu 弹层整体下线）；G3 R2 起默认折叠降噪。
+// 2026-09-10 暴君裁定（子任务卡视觉迭代）：
+//   running 态的末行摘要换跑马灯（marquee）——流式吐字观感＝快。
+
+// 圆点着色是本行的展示层。色彩纪律（0920）：ios-blue＝运行、深灰＝完成、
+// 灰＝停止/等待、红＝失败。停≠失败：stopped 中性灰。
+export const STATUS_DOT: Record<SubagentItem["status"], string> = {
+  running: "bg-ios-blue",
+  ok: "bg-foreground/60",
+  error: "bg-ios-red",
+  // 人工停止成功＝中性灰，不是失败（0920 款定）。
+  stopped: "bg-muted-foreground",
+};
+
+// 行尾状态词 + 状态点 aria（2026-10-27 收口）：可见字与 aria 同文。
+// 字面以 AgentToolCard STATUS_META 为 UI 真源（「运行中…／完成／失败」）；
+// 此处仅镜射。不读 agent-task-status 工单词「已完成／运行中」。
+// 工单标签双表已删——aria 直接用本表。
+export const STATUS_WORD: Record<SubagentItem["status"], string> = {
+  running: "运行中…",
+  ok: "完成",
+  error: "失败",
+  stopped: "已停止",
+};
+
+// 状态词着色：运行＝ios-blue，其余灰；只有失败用红（色彩纪律：红仅失败）。
+export const STATUS_WORD_TONE: Record<SubagentItem["status"], string> = {
+  running: "text-ios-blue",
+  ok: "text-foreground/45",
+  error: "text-ios-red",
+  stopped: "text-foreground/45",
+};
+
+// 子代理工具活动细行（2026-10-05 subagent.tool 帧）：沿用本档色彩纪律——
+// 状态点与状态词同款字面（运行中…／完成／失败），点比父行（1.5）小一档以体现层级。
+const TOOL_STATUS_DOT: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "bg-ios-blue",
+  ok: "bg-foreground/40",
+  failed: "bg-ios-red",
+};
+
+const TOOL_STATUS_WORD: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "运行中…",
+  ok: "完成",
+  failed: "失败",
+};
+
+const TOOL_STATUS_WORD_TONE: Record<AgentSubagentToolEntry["status"], string> = {
+  running: "text-ios-blue",
+  ok: "text-foreground/45",
+  failed: "text-ios-red",
+};
+
+/**
+ * DOM 上限（字元）：内容超过 HARD_CAP 才整块裁到 KEEP 字（见 marqueeText）。
+ * 为什么是「整块裁」而不是「尾段窗」：尾段窗等于每次更新都把一个全新的字串塞进
+ * DOM（换行压平后的尾段 + 前缀省略号），使用者看到的是一次次「整行清掉重填」。
+ * 整块裁只在跨越门槛的那一刻发生一次，两次裁之间内容只追加、不替换。
+ */
+export const MARQUEE_HARD_CAP = 6000;
+export const MARQUEE_KEEP = 3000;
+
+/**
+ * 跑马灯文字（纯函数，可测）：换行／连续空白压成单一空格、去前后空白（「一直在吐」
+ * 是连续的，不因换行整行跳掉）；只有长度 > MARQUEE_HARD_CAP 时才一次裁到最后
+ * MARQUEE_KEEP 字。**不补任何省略号**——使用者要的是「最左边的拿走」，省略号只是
+ * 占位；左缘渐隐遮罩负责暗示「左边还有」。
+ */
+export function marqueeText(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= MARQUEE_HARD_CAP) return flat;
+  return flat.slice(-MARQUEE_KEEP);
+}
+
+/**
+ * 跑马灯末行：running 态专用。**逐字滑窗**——内容是单一 nowrap 文字节点、只追加
+ * 不替换；每次更新后把 scrollLeft 立即钉到最右（useLayoutEffect，无 rAF／无插值／
+ * 无平滑滚动）。于是「每多一个字」自然就是「最左边被挤出去、最新的补进来」——
+ * 这是浏览器排版的自然结果，不需要我们做动画（做动画反而与文字增长两套运动打架，
+ * 看起来就像「满了就整行清掉」）。
+ * 内容不足一屏时 scrollWidth - clientWidth = 0 → scrollLeft 恒为 0＝静态，
+ * 文字自然从左往右长；满了才开始滑窗。
+ * 量测用的 scroller／track 两个节点**恒常挂载**（只有一条渲染路径）。
+ */
+function MarqueeLine({ text }: { text: string }) {
+  const content = marqueeText(text);
+  return <ScrollView scrollX scrollLeft={Math.max(0, content.length * 16)} className="relative min-w-0 flex-1 whitespace-nowrap"><Text className="inline-block w-max whitespace-nowrap text-ios-footnote text-muted-foreground">{content}</Text></ScrollView>;
+}
+
+interface SubagentCardProps {
+  item: SubagentItem;
+  /** 该子代理的整屏视图正在显示（折叠头 aria-expanded 由它决定）。 */
+  isViewing: boolean;
+  /** 打开整屏视图；未接线时行不可点（不崩溃）。 */
+  onOpen: () => void;
+}
+
+/** 转录区距底的贴合阈值（px）：用户向上翻看时不抢滚动位置。 */
+export const STICK_BOTTOM_PX = 24;
+/** 运行中续拉间隔：2s 是「看起来实时」与请求量之间的折中。 */
+const TRANSCRIPT_POLL_MS = 2000;
+/** 远端列表的刷新间隔：只在列表里仍有 running 时启用，终态即停。 */
+const REMOTE_LIST_POLL_MS = 5000;
+/**
+ * 「刚结束」窗口（10 分钟）：这个栏的定位是当前进度，不是历史墙——刷新后仍要
+ * 看得见刚完成的这一路，但更早的终态 run（列表最多 30 条）不再进 UI。
+ */
+const REMOTE_FRESH_MS = 10 * 60 * 1000;
+
+/** 远端列表 → 上栏白名单：运行中，或 10 分钟内结束；其余丢弃。 */
+function isPourableRemoteRun(run: AgentSubagentRunSummary): boolean {
+  return run.status === "running" || run.silent_ms < REMOTE_FRESH_MS;
+}
+
+/**
+ * 远端列表行 → 与帧内行同构的展示条目。只活在渲染层，不写回 reducer；
+ * id 加 remote: 前缀避免与帧内条目撞 key，同一次运行的 subagentId 仍指向网关 id。
+ */
+function remoteRunToSubagentItem(run: AgentSubagentRunSummary): SubagentItem {
+  return {
+    kind: "subagent",
+    id: `remote:${run.id}`,
+    subagentId: run.id,
+    label: run.label,
+    lastLine: run.summary ?? (run.tool ? `${run.tool} 运行中` : "运行中…"),
+    status: run.status,
+    ...(run.summary ? { summary: run.summary } : {}),
+    tools: (run.tools ?? []).map((tool) => ({
+      callId: tool.call_id,
+      tool: tool.tool,
+      status: tool.status,
+    })),
+  };
+}
+
+/** 渲染块：连续正文（含续块）合成一段；其余 entry 原样一项。 */
+type TranscriptBlock =
+  | { key: string; text: string }
+  | { key: string; entry: Exclude<AgentSubagentTranscriptEntry, { k: "text" }> };
+
+/** 转录行渲染：顺序即网关 entries 顺序，不重排；仅把 cont 续块并回同一段正文。 */
+export function SubagentTranscriptLines({ entries }: { entries: AgentSubagentTranscriptEntry[] }) {
+  // 网关会把长正文切成多条 text，续块带 cont:true。先归并成块再渲染：
+  // 一段正文只出一个 <Text>，否则每个切块各成一段，段落被硬生生拆开。
+  const blocks: TranscriptBlock[] = [];
+  entries.forEach((entry, index) => {
+    if (entry.k === "text") {
+      const last = blocks[blocks.length - 1];
+      // 只并入紧邻的上一个正文块；中间夹了工具/备注等就另起一段。
+      if (entry.cont === true && last && "text" in last) {
+        last.text += entry.s;
+        return;
+      }
+      blocks.push({ key: `${index}-text`, text: entry.s });
+      return;
+    }
+    blocks.push({ key: `${index}-${entry.k}`, entry });
+  });
+
+  return (
+    <>
+      {blocks.map((block) => {
+        if ("text" in block) {
+          return (
+            <Text key={block.key} className="whitespace-pre-wrap break-words text-ios-footnote text-muted-foreground">
+              {block.text}
+            </Text>
+          );
+        }
+        const entry = block.entry;
+        switch (entry.k) {
+          case "tool":
+            return (
+              <View
+                key={block.key}
+                className="flex min-w-0 items-center gap-1.5 text-ios-footnote text-muted-foreground"
+              >
+                <Text className={cn("h-1 w-1 shrink-0 rounded-full", TOOL_STATUS_DOT[entry.status])} aria-hidden="true" />
+                <Text className="min-w-0 flex-1 [overflow-wrap:anywhere]">{toolDisplayName(entry.name)}</Text>
+                <Text className={cn("shrink-0 whitespace-nowrap", TOOL_STATUS_WORD_TONE[entry.status])}>
+                  {TOOL_STATUS_WORD[entry.status]}
+                </Text>
+              </View>
+            );
+          case "artifact":
+            return (
+              <Text key={block.key} onClick={() => { if (/^https?:\/\//i.test(entry.url)) void Taro.setClipboardData({ data: entry.url }); }} className="min-w-0 break-all text-ios-footnote text-ios-blue">{entry.kind ? `附件（${entry.kind}）` : "附件"}</Text>
+            );
+          case "note":
+            return (
+              <View key={block.key} className="flex min-w-0 gap-1.5 text-ios-footnote text-muted-foreground">
+                <Text className="shrink-0 text-foreground/45">备注·{entry.name}</Text>
+                <Text className="min-w-0 whitespace-pre-wrap break-words">{entry.s}</Text>
+              </View>
+            );
+          case "end":
+            return (
+              <View
+                key={block.key}
+                className="flex min-w-0 flex-wrap items-center gap-1.5 text-ios-footnote text-muted-foreground"
+              >
+                <Text className="shrink-0">运行结束</Text>
+                <Text className={cn("shrink-0 whitespace-nowrap", STATUS_WORD_TONE[entry.status])}>
+                  {STATUS_WORD[entry.status]}
+                </Text>
+                {entry.summary && <Text className="min-w-0 whitespace-pre-wrap break-words">{entry.summary}</Text>}
+              </View>
+            );
+          case "meta":
+          default:
+            return null;
+        }
+      })}
+    </>
+  );
+}
+
+/**
+ * 子代理转录取数（轮询／offset／停止）的唯一实现。
+ * 行内面板与整屏视图共用这一份，禁止另写第二套轮询。
+ * 约束：sessionId 缺失不发请求；只在运行中续拉；终态／停止成功／卸载即停；
+ * 拉取失败把 loadError 交给视图降级成「本地记录」，不弹错。
+ */
+export function useSubagentTranscript(
+  sessionId: string | null | undefined,
+  runId: string,
+  running: boolean,
+) {
+  const [entries, setEntries] = useState<AgentSubagentTranscriptEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [stopState, setStopState] = useState<"idle" | "stopping" | "stopped" | "failed">("idle");
+  const offsetRef = useRef(0);
+  useEffect(() => {
+    offsetRef.current = 0;
+    setEntries([]);
+    setLoaded(false);
+    setLoadError(false);
+    setStopState("idle");
+  }, [sessionId, runId]);
+  // 停止成功后立刻停表：帧里的 status 可能滞后，不能只等 item.status 翻面。
+  const terminalEntry = [...entries].reverse().find((entry): entry is Extract<AgentSubagentTranscriptEntry, { k: "end" }> => entry.k === "end" && entry.status !== "running");
+  const transcriptStatus = terminalEntry?.status;
+  const active = running && stopState !== "stopped" && !transcriptStatus;
+
+  // 轮询启停只由 active 决定：eof 是「本页读完了」的单次语义，不是调度信号——
+  // 运行中的子代理每页都可能 eof:true，用它停表会让日志冻结在第一页。
+  useEffect(() => {
+    if (!sessionId || !runId) return;
+    let cancelled = false;
+    let pulling = false;
+    const pull = async () => {
+      if (pulling) return;
+      pulling = true;
+      try {
+        while (!cancelled) {
+          const offset = offsetRef.current;
+          const page = await readAgentSubagentTranscript(sessionId, runId, offset);
+          if (cancelled) return;
+          const advanced = page.next_offset > offset;
+          offsetRef.current = page.next_offset;
+          if (page.entries.length > 0) setEntries((prev) => [...prev, ...page.entries]);
+          setLoadError(false);
+          // 终态也必须读完积压的分页；运行态 eof 只结束本次读取，不停止后续轮询。
+          if (page.eof || !advanced) break;
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        pulling = false;
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    void pull();
+    if (!active) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = setInterval(() => {
+      void pull();
+    }, TRANSCRIPT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sessionId, runId, active]);
+
+  const handleStop = async () => {
+    if (!sessionId || !runId || stopState === "stopping" || stopState === "stopped" || transcriptStatus) return;
+    setStopState("stopping");
+    try {
+      await stopAgentSubagent(sessionId, runId);
+      setStopState("stopped");
+    } catch (err) {
+      // 409 not_running＝网关说它已经结束，与停止成功同义。
+      if (err instanceof ApiError && err.status === 409 && err.code === "not_running") {
+        setStopState("stopped");
+        return;
+      }
+      setStopState("failed");
+    }
+  };
+
+  return { entries, loaded, loadError, stopState, handleStop, transcriptStatus };
+}
+
+/**
+ * 子代理工具活动区（2026-10-05）：只在子代理运行中渲染，让用户看到「它在跑什么」。
+ * 可见行 = 所有 running 条目；一条都没有时取最后一条 settled（「刚做完 X，正在想」）。
+ * 行数上限 3，避免长卡；不发明「还有 N 条」这类控件。
+ */
+function SubagentToolLines({ entries }: { entries: AgentSubagentToolEntry[] }) {
+  const running = entries.filter((t) => t.status === "running");
+  const visible = (running.length > 0 ? running : entries.slice(-1)).slice(0, 3);
+  if (visible.length === 0) return null;
+  return (
+    <View className="flex min-w-0 flex-col gap-0.5 pb-1 pl-7">
+      {visible.map((t) => (
+        <View key={t.callId} className="flex min-w-0 items-center gap-1.5 text-ios-footnote text-muted-foreground">
+          <Text className={cn("h-1 w-1 shrink-0 rounded-full", TOOL_STATUS_DOT[t.status])} aria-hidden="true" />
+          <Text className="min-w-0 flex-1 truncate">{toolDisplayName(t.tool)}</Text>
+          <Text className={cn("shrink-0 whitespace-nowrap", TOOL_STATUS_WORD_TONE[t.status])}>
+            {TOOL_STATUS_WORD[t.status]}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function SubagentCard({ item, isViewing, onOpen }: SubagentCardProps) {
+  return (
+    <View className="flex min-w-0 w-full flex-col">
+      {/* 整行即按钮：点开的是整屏子代理视图（不再在行内展开转录面板）。 */}
+      <View
+        onClick={onOpen}
+        aria-expanded={isViewing}
+        className="agent-rise flex min-h-11 min-w-0 w-full cursor-pointer touch-manipulation items-center gap-2 rounded-[12px] px-2 -mx-2 text-left select-none transition-colors hover:bg-white/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
+      >
+        <Icon name="bot-a40" className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+        {/* 标签（闸道给的短标签）：旧写法 shrink-0 没有任何宽度上限＝长标签
+           既不缩也不截，直接把整行撑出面板宽度（2026-09-20 根因清剿）。
+            这里刻意用「让位 + 换行」而不是省略号：running 行的活动流必须是
+            完整逐字滑窗（测试钉著 running 标记不得出现省略号截断），标签若也走
+            截断语汇会与活动流的「全文可见」语义打架；max-w-[45%] + min-w-0 +
+            overflow-wrap:anywhere 保证它永远不会撑破宽度。 */}
+        <Text className="min-w-0 max-w-[45%] text-ios-footnote font-medium text-foreground/80 [overflow-wrap:anywhere]">
+          {item.label}
+        </Text>
+        {/* running：跑马灯末行（活动流＝含 reasoning 的所有增量，尾巴跟随快吐字观感）；
+            settled：静态摘要。 */}
+        {item.status === "running" ? (
+          <MarqueeLine text={item.activity || item.text || item.lastLine || "正在输出…"} />
+        ) : (
+          <Text className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]">
+            {item.summary ?? item.lastLine}
+          </Text>
+        )}
+        {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
+            （工具名那一侧自己 truncate 让位）。 */}
+        <Text
+          className={cn(
+            "shrink-0 whitespace-nowrap text-ios-footnote tabular-nums",
+            STATUS_WORD_TONE[item.status],
+          )}
+        >
+          {STATUS_WORD[item.status]}
+        </Text>
+        {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
+        <Text
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
+          aria-label={STATUS_WORD[item.status]}
+        />
+      </View>
+      {item.status === "running" && <SubagentToolLines entries={item.tools ?? []} />}
+    </View>
+  );
+}
+
+function AgentSubagentBarComponent({
+  items: frameItems,
+  initialOpen = false,
+  sessionId = null,
+  viewingRunId = null,
+  onOpenRun,
+}: {
+  items: SubagentItem[];
+  /** 测试／调试可强制初开；生产默认折叠（G3 R2 降噪）。 */
+  initialOpen?: boolean;
+  /** 缺失时不拉远端列表（离线／测试可用）。 */
+  sessionId?: string | null;
+  /** 当前正在整屏查看的子代理 runId（行尾 aria-expanded 与高亮由它决定）。 */
+  viewingRunId?: string | null;
+  /** 点行 → 打开整屏视图；未接线时点击不做事。 */
+  onOpenRun?: (item: SubagentItem) => void;
+}) {
+  // G3（2026-10-10）：默认折叠——用户默认面靠 turn.status「进行中／本路刚完成」，
+  // 展开才见跑马灯细节；手动展开优先于任何自动行为（新 started 不把收起的摊回去）。
+  const [open, setOpen] = useState(initialOpen);
+  // 帧外的运行（刷新/回放窗口之外）：只有列表端点还能证明它们存在。
+  const [remoteState, setRemoteState] = useState<{ sessionId: string | null; runs: AgentSubagentRunSummary[] }>({ sessionId: null, runs: [] });
+  const remoteRuns = remoteState.sessionId === sessionId ? remoteState.runs : [];
+
+  // 拉一次列表；只有列表里仍有 running 才每 5s 续拉，全部终态即停。
+  // 失败静默：远端列表只负责补入口，绝不阻塞或打扰帧内条目。
+  useEffect(() => {
+    if (!sessionId) {
+      setRemoteState({ sessionId: null, runs: [] });
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const rows = await listAgentSubagents(sessionId);
+        if (cancelled) return;
+        setRemoteState({ sessionId, runs: rows.filter(isPourableRemoteRun) });
+        // 续拉判据看原始 rows：过滤只影响展示，不改变「是否还有 running」。
+        if (rows.some((row) => row.status === "running")) {
+          timer = setTimeout(load, REMOTE_LIST_POLL_MS);
+        }
+      } catch {
+        // 静默：列表不可用不等于子代理不存在，帧内条目照常显示。
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [sessionId]);
+
+  // 帧内优先：同一 run 同时在两边时只保留帧内那一行（不重复、不写回 reducer）。
+  const localIds = new Set(frameItems.map((item) => item.subagentId));
+  const items = [
+    ...frameItems,
+    ...remoteRuns.filter((run) => !localIds.has(run.id)).map(remoteRunToSubagentItem),
+  ];
+  if (items.length === 0) return null;
+
+  return (
+    <View className="relative flex flex-col gap-0.5" role="status" aria-label="子任务进度">
+      <View
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 rounded-[12px] px-2 -mx-2 text-left text-ios-footnote font-medium text-muted-foreground transition-colors hover:bg-white/55 hover:text-foreground/70 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
+      >
+        <Icon name="bot-a40" className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
+        派出 {items.length} 个子代理
+        <Icon name="chevron-down-a60"
+          className={cn("lg-transition h-3.5 w-3.5 shrink-0 text-foreground/45", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </View>
+      {open && items.map((item) => (
+        <SubagentCard
+          key={item.id}
+          item={item}
+          isViewing={viewingRunId === item.subagentId}
+          onOpen={() => onOpenRun?.(item)}
+        />
+      ))}
+    </View>
+  );
+}
+
+export const AgentSubagentBar = memo(AgentSubagentBarComponent);

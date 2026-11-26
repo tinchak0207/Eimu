@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, Loader2, RotateCcw } from "lucide-react";
-import { PRICING_DECIMALS } from "@/lib/generation-model-catalog";
+import { PRICING_DECIMALS } from "@/lib/generation-core/generation-model-catalog";
 
 type CreditTable = Record<string, number>;
 

@@ -4,9 +4,9 @@
 // 避免 Blob cacheControlMaxAge 60s 下限造成的「刚存读不到」；单用户写入串行。
 // 与画布专案分开命名空间（canvas-assets/），互不影响。
 import { randomBytes } from "node:crypto";
-import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
-import { sanitizeBlobSegment } from "@/lib/history-types";
-import { normalizeProjectIds } from "@/lib/asset-scope";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/media/blob-backend";
+import { sanitizeBlobSegment } from "@/lib/media/history-types";
+import { normalizeProjectIds } from "@/lib/media/asset-scope";
 
 const ASSET_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;

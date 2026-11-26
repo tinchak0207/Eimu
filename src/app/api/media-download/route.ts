@@ -11,7 +11,7 @@
 // NEXT_PUBLIC_LOCAL_TEST_MODE=true 时按站内惯例放行）。骨架照 src/app/api/blender-artifact/route.ts。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { isAllowedMediaUrl } from "./media-url";
 
 export const runtime = "nodejs";

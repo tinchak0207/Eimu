@@ -2,7 +2,7 @@
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   deleteCreativeProjects,
   ensureLegacyProjectMigration,

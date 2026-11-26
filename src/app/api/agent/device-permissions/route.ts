@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import { callAgentGateway } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

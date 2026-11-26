@@ -30,6 +30,7 @@
 // 更不补假值（推导口径见函式上的注解）。
 
 import { creationStepMeta, type CreationStep } from "../creation-flow-steps";
+import { shotMediaReadiness } from "./storyboard-shots";
 import type { CanvasEpisode, CanvasNode, CanvasProjectType } from "./types";
 
 /** 剧集三态的中文标签（本站三态；AID 审核三态不进本站型别）。 */
@@ -83,6 +84,32 @@ export interface EpisodeRow {
   statusLabel: string;
   /** 该集是否有剧本原文（长文不进面板，只给指针）。 */
   hasScript: boolean;
+  /** 该集已落画布的分镜数（按 `metadata.episodeId` 归属，不按节点序切段）。 */
+  shots: number;
+  /** 该集分镜里已有可用图／视频／配音的镜数（口径＝`shotMediaReadiness`，含输入指纹过期判定）。 */
+  withImage: number;
+  withVideo: number;
+  withAudio: number;
+}
+
+/** 只留属于某一集的分镜节点（缺 `episodeId` 的分镜不归任何一集，选集视图里不出现）。 */
+export function scopeNodesToEpisode(nodes: readonly CanvasNode[], episodeId: string): CanvasNode[] {
+  return nodes.filter((node) => node.metadata?.storyboardShot && node.metadata?.episodeId === episodeId);
+}
+
+function episodeMediaCounts(nodes: readonly CanvasNode[], episodeId: string) {
+  let shots = 0;
+  let withImage = 0;
+  let withVideo = 0;
+  let withAudio = 0;
+  for (const node of scopeNodesToEpisode(nodes, episodeId)) {
+    shots += 1;
+    const r = shotMediaReadiness((node.metadata ?? {}) as Record<string, unknown>);
+    if (r.hasImage) withImage += 1;
+    if (r.hasVideo) withVideo += 1;
+    if (r.hasAudio) withAudio += 1;
+  }
+  return { shots, withImage, withVideo, withAudio };
 }
 
 export interface CreationFlowSummary {
@@ -117,6 +144,7 @@ export function summarizeCreationFlow(input: {
       status: e.status,
       statusLabel: EPISODE_STATUS_LABELS[e.status] ?? EPISODE_STATUS_LABELS.draft,
       hasScript: typeof e.script === "string" && e.script.length > 0,
+      ...episodeMediaCounts(Array.isArray(input.nodes) ? input.nodes : [], e.id),
     }))
     // 照集号升序：episodeNo 是集的唯一权威序（输入顺序可能是 agent 乱序写入的）。
     .sort((a, b) => a.episodeNo - b.episodeNo);

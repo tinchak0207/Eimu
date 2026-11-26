@@ -5,9 +5,9 @@
 // 聚合数学复用 batch 层的 computeBatchAggregate（同源，不抄第二份）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { buildSkuRunStatusView, getSkuRunJobs, normalizeRunId } from "@/lib/sku/run-service";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";

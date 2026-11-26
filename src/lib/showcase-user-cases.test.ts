@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { HistoryEntry } from "./history-types.ts";
+import type { HistoryEntry } from "./media/history-types.ts";
 import {
   buildRecipeFromHistoryEntry,
   buildUserShowcaseCase,
@@ -9,7 +9,7 @@ import {
   readUserShowcaseCases,
 } from "./showcase-user-cases.ts";
 import { SHOWCASE_CASES } from "./showcase-cases.ts";
-import { parseWorkflowRecallConfig } from "./workflow-recall.ts";
+import { parseWorkflowRecallConfig } from "./agent/workflow-recall.ts";
 
 /** 契约测试的内存 Storage 桩：node --test 无 window。 */
 class MemoryStorage implements Storage {

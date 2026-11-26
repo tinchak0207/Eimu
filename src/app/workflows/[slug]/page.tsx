@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowUpRight, CheckCircle2, ChevronRight, XCircle } from "lucide-react";
-import { AGENT_TEMPLATE_DOMAIN_LABELS } from "@/lib/agent-templates";
+import { AGENT_TEMPLATE_DOMAIN_LABELS } from "@/lib/agent/agent-templates";
 import { WORKFLOW_PAGES, getWorkflowCard, getWorkflowPage } from "@/lib/workflow-pages";
 import { getSiteUrl } from "@/lib/site-url";
 

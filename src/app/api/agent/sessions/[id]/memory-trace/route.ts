@@ -2,7 +2,7 @@
 //
 // 【路径决策】采「现成轮子逐行复用」，不建最小代理：repo→gateway 的 server-side
 // fetch 先例已在同目录存在——`[id]/transcript/route.ts` 与 `[id]/memory/route.ts`
-// 都用 `src/lib/agent-gateway.ts` 的 `callAgentGateway`（Bearer 换服务端 sk-biz- key、
+// 都用 `src/lib/agent/agent-gateway.ts` 的 `callAgentGateway`（Bearer 换服务端 sk-biz- key、
 // 10s 硬超时、JSON/文本透传）＋ `resolveAgentCaller`（既有 agent key 认证）。
 // 本档结构逐行复制自 transcript/route.ts，白名单只改一件事：上游路径
 // `/agent/v1/sessions/${id}/memory-trace`（transcript 的 ?limit 透传不属于
@@ -11,8 +11,8 @@
 // 真源是 gateway（它才知道本回合注入了哪些 doc id）：这里不做本地组装，原样透传。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

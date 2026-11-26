@@ -1,12 +1,12 @@
 // 管理员调额：一次写两层（上游 users.quota + account_ledger），按 Idempotency-Key 幂等。
-// 核心见 src/lib/admin-account-adjustment.ts；本路由只在控制面执行（control-plane-proxy-routes.mjs）。
+// 核心见 src/lib/billing/admin-account-adjustment.ts；本路由只在控制面执行（control-plane-proxy-routes.mjs）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 import {
   applyAdminAccountAdjustment,
   parseAdminAdjustmentRequest,
   productionAdminAdjustmentDeps,
-} from "@/lib/admin-account-adjustment";
+} from "@/lib/billing/admin-account-adjustment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

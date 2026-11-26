@@ -7,7 +7,7 @@ import {
   normalizeUserBizKeyLabel,
   USER_API_KEY_DEFAULT_LABEL,
   USER_API_KEY_LIMIT,
-} from "../../../../lib/biz-api-keys.ts";
+} from "../../../../lib/accounts/biz-api-keys.ts";
 
 const root = process.cwd();
 
@@ -97,10 +97,10 @@ test("吊销他人密钥不可能：归属不符按 404 处理，不泄露密钥
 // ─────────────────────────────────────────── 存储层复用
 
 test("个人密钥与 admin 共用同一套存储层，不发明新存储", () => {
-  assert.match(code(LIST), /from "@\/lib\/biz-api-key-store"/, "列表/创建必须复用存储层");
+  assert.match(code(LIST), /from "@\/lib\/accounts\/biz-api-key-store"/, "列表/创建必须复用存储层");
   assert.match(code(LIST), /listBizApiKeys/, "列表必须复用 store 的 listBizApiKeys");
   assert.match(code(LIST), /issueBizApiKey/, "创建必须复用 store 的 issueBizApiKey");
-  assert.match(code(ITEM), /from "@\/lib\/biz-api-key-store"/, "吊销必须复用存储层");
+  assert.match(code(ITEM), /from "@\/lib\/accounts\/biz-api-key-store"/, "吊销必须复用存储层");
   assert.match(code(ITEM), /revokeBizApiKey/, "吊销必须复用 store 的 revokeBizApiKey");
 });
 

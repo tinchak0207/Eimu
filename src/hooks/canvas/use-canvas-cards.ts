@@ -15,14 +15,14 @@ import {
   deleteCharacterCards as deleteCharacterCardsRemote,
   listCharacterCards as fetchCharacterCardsRemote,
   saveCharacterCard as saveCharacterCardRemote,
-} from "@/lib/character-card-client";
-import { listProjectSharesIn } from "@/lib/project-assets-client";
-import { applyCopyLockChange, filterLockedCardsForProjectUse } from "@/lib/asset-scope";
-import type { AssetShareRecord } from "@/lib/asset-scope";
-import type { CharacterCard } from "@/lib/character-cards";
+} from "@/lib/media/character-card-client";
+import { listProjectSharesIn } from "@/lib/media/project-assets-client";
+import { applyCopyLockChange, filterLockedCardsForProjectUse } from "@/lib/media/asset-scope";
+import type { AssetShareRecord } from "@/lib/media/asset-scope";
+import type { CharacterCard } from "@/lib/media/character-cards";
 import { CARD_NAME_KEYS, toCardMetadataName } from "@/lib/canvas/layout";
-import { emittedCardsForNodes, emittedEntityOf, entityCardIdForNode } from "@/lib/agent-output-cards";
-import type { AgentOutputNodeRef, EmittedCardsResult, ShotEntityBackfill } from "@/lib/agent-output-cards";
+import { emittedCardsForNodes, emittedEntityOf, entityCardIdForNode } from "@/lib/agent/agent-output-cards";
+import type { AgentOutputNodeRef, EmittedCardsResult, ShotEntityBackfill } from "@/lib/agent/agent-output-cards";
 import { invalidateEntityCardIndex } from "@/components/entities/entity-chip";
 
 export interface UseCanvasCardsInput {

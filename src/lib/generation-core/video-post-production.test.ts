@@ -14,8 +14,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generationCapabilities, generationModel } from "../generation-model-catalog";
-import type { VideoGenerationType } from "../generation-model-catalog";
+import { generationCapabilities, generationModel } from "./generation-model-catalog";
+import type { VideoGenerationType } from "./generation-model-catalog";
 import {
   VIDEO_POST_PRODUCTION_MODES,
   VIDEO_POST_PRODUCTION_UPSTREAM_FIELD,

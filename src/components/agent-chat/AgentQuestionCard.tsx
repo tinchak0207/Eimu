@@ -3,7 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentPendingQuestion } from "@/lib/agent-chat-types";
+import type { AgentPendingQuestion } from "@/lib/agent/agent-chat-types";
 import { INPUT_CLASS } from "./MySkillsDialog";
 
 export interface AgentQuestionCardProps {

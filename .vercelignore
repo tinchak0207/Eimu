@@ -10,11 +10,11 @@
 /.agent-notes/
 /.agent-runs/
 /.agents-fix/
-/.asset-cache/
+/.asset-cache
 /.av-implementation-spec.md
 /.batch-e2e-body.json
 /.batch-too-big.json
-/.blender-work/
+/.blender-work
 /.build-final-p3.log
 /.build-p2.log
 /.build-phase1.log
@@ -37,7 +37,7 @@
 /.github/
 /.gitignore
 # 微信小程序子工程（独立 Taro 应用，与站点建置无关）
-/miniapp/
+/apps/miniapp/
 # 小程序打包产物（129MB，单档超 Vercel 100MB 上限会让整个部署失败）
 /miniapp.zip
 # 本地补丁暂存与记忆队列（工具产物，站点零引用）
@@ -100,8 +100,8 @@
 /chat-history-export-v2.zip
 /deploy/
 /deploy-staging/
-/design-system/
-/desktop/
+/docs/design-system/
+/apps/desktop/
 /diag-desktop-height.mjs
 /diag-desktop-height2.mjs
 /diag-desktop-height3.mjs
@@ -129,14 +129,14 @@
 /eval-studio-minute-0928/
 /eval-template-art-curation/
 /eval-video-incident-0830/
-/eval-visual-replay/
+/tools/qa/visual-replay/
 /eval-yuri-op-mv-0930/
 /fix-system.sh
 /gh_repo.json
 /interact-test.mjs
 /light-shot.mjs
 /marketing-battle-pack/
-/mcp-server/
+/services/mcp/
 /mob-deeplink.mjs
 /mob-deeplink2.mjs
 /mob-hydration.mjs
@@ -150,12 +150,12 @@
 /pelican.svg
 /pixai-pool/
 /pixai-pool-new.json
-/plugins/
+/tools/plugins/
 /probe.mjs
 /prod-mobile.mjs
 /prod-mobile2.mjs
 /prod-verify.mjs
-/promo-video/
+/tools/promo-video/
 /reddit-miner-output.md
 /redteam-gen-payload.mjs
 /redteam-jitter-burst.mjs
@@ -188,7 +188,7 @@
 /tsconfig.tmp-typecheck-tests.tsbuildinfo
 /tsconfig.tsbuildinfo
 /tsconfig.verify-new.tsbuildinfo
-/vendor/
+/tools/vendor/
 /verification/
 /verify-bugfixes.mjs
 /vitest.config.mts
@@ -222,8 +222,8 @@ node_modules/@swc/*
 # Electron 桌面打包产物（AppImage 112MB + nsis 90MB）。它们是发行物不是站点
 # 资产，且单档超 Vercel 100MB 上限会让整个部署失败——desktop/.gitignore 早有
 # dist/，但 .vercelignore 存在时 Vercel 不读 .gitignore，必须在这里再列一次。
-/desktop/dist/
-/desktop/**/release/
+/apps/desktop/dist/
+/apps/desktop/**/release/
 
 # local scratch, diagnostics and captures
 /tmp/
@@ -260,7 +260,7 @@ node_modules/@swc/*
 
 # documentation & design assets (build-time only; no runtime code reads these)
 /docs/
-/design-system/
+/docs/design-system/
 /deploy/
 
 # tests are never executed on Vercel
@@ -277,26 +277,26 @@ node_modules/@swc/*
 /src/vendor-bridges/
 
 # Blender headless bridge runtime (live socket breaks CLI file collection)
-/.blender-work/
+/.blender-work
 
 # kunpeng 片R 预验收补漏（968K 噪音目录，主应用零引用）
 /bridge/
 /skills/
 /deploy-staging/
-/.asset-cache/
+/.asset-cache
 /eval-asset-packs/
 /eval-blender-director/
 /eval-anime-mv-0911/
-/eval-visual-replay/
+/tools/qa/visual-replay/
 
 # 200MB 级本机影片产物（promo-video 渲染中会被即时写入；eimu-promo.mp4 107MB
 # 超过 Vercel 100MB 单档上限，上传必失败）。.gitignore 已列但 .vercelignore
 # 存在时 Vercel 不读 .gitignore，必须在此再列一次。
 /artifacts/
-/promo-video/out/
+/tools/promo-video/out/
 
 # 宣传片渲染的 CJK 字型（23MB，站点完全用不到；.vercelignore 存在时 Vercel 不读 .gitignore）
-/promo-video/fonts/
+/tools/promo-video/fonts/
 
 # 开源发布素材包（2026-10-05）：未追踪目录，不得随站点部署上传／对外可下载
 open-source/
@@ -311,3 +311,30 @@ open-source/
 /eval-music-improved-1004/
 /eval-music-besteffort-1004/
 /eval-music-beast-1004/
+
+# Structured source packages; gateway/project/types.ts is imported by the web app.
+/.local/
+/apps/
+/services/blender-bridge-tunnel/
+/services/blender-director-persona/
+/services/blender-gateway/
+/services/blender-modal/
+/services/blender-nodes/
+/services/expert-gateway/
+/services/flowmusic2api/
+/services/laya-server/
+/services/opencode-runtime/
+/services/poller/
+/services/vps-tools/
+/services/blender-bridge/
+/services/mcp/
+/services/gateway/node_modules/
+
+# Canonical layout: local state and independent tools are never deployment input.
+/.local/
+/apps/
+/tools/promo-video/
+/tools/qa/
+/tools/plugins/
+/tools/vendor/
+/tools/generated/

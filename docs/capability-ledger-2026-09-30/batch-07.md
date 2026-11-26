@@ -125,9 +125,9 @@
 - 控面 DB＋env 上线 gway 渠道（seed 不当未知渠道）；V-03 起在 channels.config 带入已核单价与来源日期 ｜ ed47cb58, 64b2bf91
 - 控面 compose 模板同步 control-plane-compose.yml（补齐与 VPS 现役档的非 secret 差异并标明为模板）｜ c7788ee8
 - Runbook 更新 docs/runbooks/infra-debugging.md — 网关 session 已 SQLite 持久化；opencode SSE 悬挂根因与 30s 看门狗（VPS 实测重连 35s，原 5 分钟）｜ a7d81d8d
-- 双真相边界文件 docs/architecture/dual-truth-boundary.md（W5，纯文件） — world1（画布多步生产链）↔ world2（模板＋素材注入＋成片）；新事实：world2 自己有两份（VPS 活本 /opt/agent-harness/gateway/ 与 repo 镜像 deploy-staging/gateway/，2026-09-29 逐档 md5 全等但「一致」是当下状态不是契约）｜ 79e1f5a3
+- 双真相边界文件 docs/architecture/dual-truth-boundary.md（W5，纯文件） — world1（画布多步生产链）↔ world2（模板＋素材注入＋成片）；新事实：world2 自己有两份（VPS 活本 /opt/agent-harness/gateway/ 与 repo 镜像 services/gateway/，2026-09-29 逐档 md5 全等但「一致」是当下状态不是契约）｜ 79e1f5a3
 - AGENTS.md 规则：禁内联——任何动手环节一律派 subagent ｜ 1fdcafc0
-- staging 镜像同步 staging/music-tools/{music_tools,music_prompt_director}.ts（e75a2e8e／b68c0fdd 的 staging 侧）｜ aa729665
+- staging 镜像同步 tools/generated/music-tools/{music_tools,music_prompt_director}.ts（e75a2e8e／b68c0fdd 的 staging 侧）｜ aa729665
 
 ## 边界与拒绝
 
@@ -168,7 +168,7 @@
 
 ## 存疑
 
-- aa729665：staging 侧镜像同步（staging/music-tools/music_tools.ts）——讯息仅称「e75a2e8e 的 staging 侧」，无新能力；是否有 staging 独有差异需逐行 diff staging 与 src 才能断定 ｜ 缺：staging 执行环境与 diff 证据
+- aa729665：staging 侧镜像同步（tools/generated/music-tools/music_tools.ts）——讯息仅称「e75a2e8e 的 staging 侧」，无新能力；是否有 staging 独有差异需逐行 diff staging 与 src 才能断定 ｜ 缺：staging 执行环境与 diff 证据
 - 1fdcafc0：「站内 /api/uploads 尚未部署」为 commit 自陈；两段式上传目前只在 VPS 侧（presign 端点）端到端验证 ｜ 缺：站内部署与站内端到端证据
 - 1fdcafc0：P1-1（白模当生成参考）与其 11 条测试因与在飞的 canvas/types.ts 同档而暂不提交；下一颗 aa81b4b0 是否即为其落地需比对（两颗都写 P1-1，内容一致）｜ 缺：commit 父链外的在飞档状态
 - aa81b4b0：抽卡面板／集侧栏／批次按钮等 React 接线未做；episodeId 的写入端（谁在分镜产生时盖集指针）未做（commit 自陈）⇒ 「按集换模型」目前缺前端入口 ｜ 缺：前端接线证据

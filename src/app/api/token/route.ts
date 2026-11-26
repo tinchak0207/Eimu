@@ -1,6 +1,6 @@
 // GET /api/token/ — list user's API tokens
 // POST /api/token/ — create a new token
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

@@ -83,7 +83,7 @@ LEGACY_CUTOFF_MUSIC_OP = "2026-10-30T08:17:42Z"
 LEGACY_SRC_MUSIC_OP = "4af310238 撤下工程图 music-operation 回执写入方，网关 release 4af310238e8f-20261030T081715Z-176185 生效（history.log epoch 1793348262）"
 MUSIC_STUCK_GRACE_MIN = 30
 MUSIC_TERMINAL = {"succeeded", "failed", "cancelled", "canceled", "refunded"}
-# H61 截断 D（UTC）＝H17 poller 存量截止：886514909 deploy-staging/poller/index.ts:36 POLLER_STOCK_CUTOFF 默认
+# H61 截断 D（UTC）＝H17 poller 存量截止：886514909 services/poller/index.ts:36 POLLER_STOCK_CUTOFF 默认
 # 2026-11-04T05:00:00+08:00；生产 agent-poller 无该 env 覆盖，05:15:20 SGT 起动日志 stock_cutoff=2026-11-03T21:00:00.000Z。
 # poller 只对 created_at >= 截断 的回执 poll／回收，早于截断＝存量（left untouched … awaiting owner decision）。
 LEGACY_CUTOFF_GEN_STUCK = "2026-11-03T21:00:00Z"

@@ -7,7 +7,7 @@
 //   - 只认专案里真的存在的节点，猜不中的 id 忽略（不捏造节点）
 //   - 全都不存在 → 404，不写空更新
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 
 export const runtime = "nodejs";

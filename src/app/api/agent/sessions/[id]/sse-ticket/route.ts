@@ -9,8 +9,8 @@
 // gateway 的 resp.json 取值，key 只在 callAgentGateway 的参数里流转。
 
 import { NextRequest, NextResponse } from "next/server";
-import { agentGatewayOrigin, callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
+import { agentGatewayOrigin, callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

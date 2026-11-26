@@ -1,4 +1,4 @@
-import { listGatewayRedemptions, type GatewayRedemption } from "@/lib/gateway-admin";
+import { listGatewayRedemptions, type GatewayRedemption } from "@/lib/accounts/gateway-admin";
 import { parseSubscriptionCodeMarker } from "../subscription-sku";
 import { getGenerationSql, type GenerationSql } from "../database";
 import { ensureAccountOpening } from "./opening";

@@ -3,7 +3,7 @@
 // 做法：起一个本地假伺服器同时扮三个角色（全程 127.0.0.1，无外网、无真实支付）：
 //   ① 控面 /image-control/api/internal/mapay-credit —— 用真 HMAC 域验签（证明签名契约），
 //      再跑真实入帐核心 runMapayCreditOnce（占位表＋上游调额＋帐本都在假依赖上），
-//      并套用真实的首充额度裁决 resolveFirstChargeGrant（见 src/lib/first-charge.ts）。
+//      并套用真实的首充额度裁决 resolveFirstChargeGrant（见 src/lib/billing/first-charge.ts）。
 //   ② 控面 /image-control/api/internal/first-charge —— 只读资格（首充发码兜底用）。
 //   ③ new-api 网关 /api/redemption/* —— 旧流程发码（fallback）用，记录有没有被呼叫。
 //
@@ -19,26 +19,26 @@ import test from "node:test";
 import { createServer, type Server } from "node:http";
 import { NextRequest } from "next/server";
 
-import { BIZ_KEY_SYNC_SIGNATURE_HEADER, BIZ_KEY_SYNC_TIMESTAMP_HEADER, verifyBizKeySync } from "@/lib/biz-key-sync";
+import { BIZ_KEY_SYNC_SIGNATURE_HEADER, BIZ_KEY_SYNC_TIMESTAMP_HEADER, verifyBizKeySync } from "@/lib/accounts/biz-key-sync";
 import {
   MAPAY_CREDIT_RELAY_SIGNATURE_DOMAIN,
   runMapayCreditOnce,
   type MapayCreditDeps,
   type MapayCreditRecord,
   type MapayCreditStore,
-} from "@/lib/mapay-credit";
-import { MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN } from "@/lib/mapay-intake";
+} from "@/lib/billing/mapay-credit";
+import { MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN } from "@/lib/billing/mapay-intake";
 import {
   FIRST_CHARGE_FULL_QUOTA,
   FIRST_CHARGE_FALLBACK_QUOTA,
   FIRST_CHARGE_RELAY_SIGNATURE_DOMAIN,
   resolveFirstChargeGrant,
   type FirstChargeStore,
-} from "@/lib/first-charge";
-import { buildMapayOrderParam } from "@/lib/mapay-order-param";
-import { signMapayParams } from "@/lib/mapay";
-import { mapayPlanQuota } from "@/lib/mapay-redemption";
-import { FIRST_CHARGE_COINS, FIRST_CHARGE_FALLBACK_COINS, FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
+} from "@/lib/billing/first-charge";
+import { buildMapayOrderParam } from "@/lib/billing/mapay-order-param";
+import { signMapayParams } from "@/lib/billing/mapay";
+import { mapayPlanQuota } from "@/lib/billing/mapay-redemption";
+import { FIRST_CHARGE_COINS, FIRST_CHARGE_FALLBACK_COINS, FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/billing/plans";
 import { GET as notify } from "./route";
 
 const PID = "test-pid";

@@ -4,10 +4,10 @@ import { notFound } from "next/navigation";
 // tsx（仓库测试运行器）走 classic JSX 转译，renderToStaticMarkup 真渲染必须有 React 在作用域内
 // （同 src/app/mcp/page.tsx 的既有做法；Next 构建走自动 runtime，多的这行无害）。
 import * as React from "react";
-import { AGENT_SKILLS, AGENT_SKILL_FAMILY_LABELS, getAgentSkill } from "@/lib/agent-skills";
-import type { AgentSkillView } from "@/lib/agent-skills/registry";
+import { AGENT_SKILLS, AGENT_SKILL_FAMILY_LABELS, getAgentSkill } from "@/lib/agent/agent-skills";
+import type { AgentSkillView } from "@/lib/agent/agent-skills/registry";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
-import { OUTPUT_KIND_LABELS } from "@/lib/agent-skills/output-kinds";
+import { OUTPUT_KIND_LABELS } from "@/lib/agent/agent-skills/output-kinds";
 
 const SITE_URL = getSiteUrlFromEnv();
 

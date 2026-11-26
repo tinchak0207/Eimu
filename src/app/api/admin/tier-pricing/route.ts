@@ -9,21 +9,21 @@
 // normalize 之后、写入之前，检查原始 body 的 tier 币价，违规就回 400 并列出 modelId。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/admin-audit";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { diffJson, nextConfigVersion, recordConfigChange } from "@/lib/accounts/admin-audit";
 import {
   GENERATION_MODEL_CATALOG,
   PRICING_COIN_STEP,
   baseGenerationModel,
   generationCoins,
   type GenerationModelDefinition,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import {
   TIER_IDS,
   normalizeTierPricingDocument,
   type TierPricingDocument,
-} from "@/lib/tier-pricing";
-import { readTierPricingDocument, writeTierPricingDocument } from "@/lib/tier-pricing-store";
+} from "@/lib/billing/tier-pricing";
+import { readTierPricingDocument, writeTierPricingDocument } from "@/lib/billing/tier-pricing-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

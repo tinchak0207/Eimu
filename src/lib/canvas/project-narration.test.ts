@@ -20,7 +20,7 @@ import {
 } from "./project-narration";
 import { normalizeProject } from "./project-store";
 import { canvasProjectMeta, normalizeProjectMetaPatch, toCanvasProject, fromCanvasProject } from "./layout";
-import { VOICE_LIBRARY } from "@/lib/voice-library";
+import { VOICE_LIBRARY } from "@/lib/media/voice-library";
 
 /** AID `ScriptTypeEnum` 的值集合（逐字；键序＝AID 宣告序）。 */
 const AID_ORACLE = [

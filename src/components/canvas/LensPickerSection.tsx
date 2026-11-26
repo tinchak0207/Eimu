@@ -2,7 +2,7 @@
 
 // LensPickerSection —— 镜头语言词库选词区（2026-09-16，G7：词库的前端选词入口）。
 //
-// 修的是「资产已就绪但无消费端」：`src/lib/lens-language-library.ts` 的 142 条 / 12 类
+// 修的是「资产已就绪但无消费端」：`src/lib/media/lens-language-library.ts` 的 142 条 / 12 类
 // 此前只有 agent 侧 skill 通道（VPS `skills/lens-language/SKILL.md`），前端 0 引用。
 // 本区把词库接到**既有的插入通道**上——props 里的 `onInsertText` / `onUsePrompt` 就是
 // `CanvasLibraryPanel` 自有的两个回调（提示词卡 / 风格卡同款），不另造一套插入机制：
@@ -27,7 +27,7 @@
 import { useMemo, useState } from "react";
 import { Check, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LENS_LANGUAGE_SOURCE } from "@/lib/lens-language-library";
+import { LENS_LANGUAGE_SOURCE } from "@/lib/media/lens-language-library";
 import {
   LENS_PICKER_MAX_SELECTION,
   composeLensInsertion,

@@ -17,12 +17,12 @@ import {
   type DeviceBridgeController,
   type LocalFileMode,
   type LocalFileModeIcon,
-} from "@/lib/device-bridge-display";
-import { fetchAndPushDeviceCredential } from "@/lib/device-bridge-credential";
-import { getStoredToken } from "@/lib/new-api-client";
+} from "@/lib/accounts/device-bridge-display";
+import { fetchAndPushDeviceCredential } from "@/lib/accounts/device-bridge-credential";
+import { getStoredToken } from "@/lib/accounts/new-api-client";
 import { useGithubLoginHandoff } from "@/hooks/use-github-login-handoff";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
-import { syncDevicePermissionMode } from "@/lib/agent-chat-client";
+import { syncDevicePermissionMode } from "@/lib/agent/agent-chat-client";
 import { AnchoredMenuPanel, MenuOptionRow, useAnchoredPanel } from "./AgentComposer.menus";
 
 /**

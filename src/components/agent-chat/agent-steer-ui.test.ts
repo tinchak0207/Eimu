@@ -42,8 +42,8 @@ const hook = [
   .join("\n");
 const hookCode = readCode(hook);
 const client = [
-  "src/lib/agent-chat-client.ts",
-  ...["auth", "session", "settings", "transport", "types"].map((m) => `src/lib/agent-chat-client/${m}.ts`),
+  "src/lib/agent/agent-chat-client.ts",
+  ...["auth", "session", "settings", "transport", "types"].map((m) => `src/lib/agent/agent-chat-client/${m}.ts`),
 ]
   .map((rel) => read(rel))
   .join("\n");
@@ -181,9 +181,9 @@ test("D2-2 409 契约落地：引导端点回 409 时落回正常送出腿（讯
 test("D2-3 逾时收口接线：TTL 两端镜像、排队时排定清扫、存档还原带 savedAt", () => {
   const gatewayCore = read("deploy-staging/gateway/steer-core.ts");
   const types = [
-    "src/lib/agent-chat-types.ts",
+    "src/lib/agent/agent-chat-types.ts",
     ...["sse-parse", "types-agent", "types-core", "types-events"].map(
-      (m) => `src/lib/agent-chat-types/${m}.ts`,
+      (m) => `src/lib/agent/agent-chat-types/${m}.ts`,
     ),
   ]
     .map((rel) => read(rel))

@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
-import { __resetAgentMemoryStoreForTests } from "@/lib/agent-memory-store";
+import { __resetAgentMemoryStoreForTests } from "@/lib/agent/agent-memory-store";
 import { DELETE } from "./[id]/route.ts";
 import { GET as MINE_GET, POST } from "./route.ts";
 import { GET as PUBLIC_GET } from "../route.ts";

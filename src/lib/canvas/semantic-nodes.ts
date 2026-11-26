@@ -10,8 +10,8 @@
 // 角色枚举 owner 是 image-types.ReferenceImageRole；这里只做纯函式，不建第二套。
 import { CanvasNodeType } from "./types";
 import type { CanvasConnection, CanvasNode } from "./types";
-import { toReferenceImageRole } from "../image-types";
-import type { ReferenceImageRole } from "../image-types";
+import { toReferenceImageRole } from "../media/image-types";
+import type { ReferenceImageRole } from "../media/image-types";
 import { sceneCardGenerationReferences } from "./scene-3d-reference";
 
 /** 画布参考图的传输形状（CanvasEmbed → /api/canvas/generate）。 */

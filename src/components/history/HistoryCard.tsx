@@ -2,17 +2,17 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { AlertTriangle, AudioLines, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
-import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/history-media";
+import { historyThumbnailProps, retryOriginalHistoryImage } from "@/lib/media/history-media";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ShareDialog } from "@/components/history/ShareDialog";
-import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
-import { deliverableKindLabel } from "@/lib/deliverable-kind";
-import { canHistoryEntryRerun } from "@/lib/history-rerun";
-import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
-import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
-import { firstShareableIndex } from "@/lib/share-remix";
-import type { HistoryEntry } from "@/lib/history-types";
+import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/media/history-types";
+import { deliverableKindLabel } from "@/lib/media/deliverable-kind";
+import { canHistoryEntryRerun } from "@/lib/media/history-rerun";
+import { assetPackPayloadFromHistoryEntry } from "@/lib/media/history-card-anchor";
+import { workflowDagThumbnailUrl } from "@/lib/media/history-workflow-view";
+import { firstShareableIndex } from "@/lib/media/share-remix";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 export interface HistoryCardProps {
   entry: HistoryEntry;
@@ -259,7 +259,7 @@ function HistoryCardComponent({
             />
             {/*
               视频记录的缩略图是静态首帧，没有任何东西告诉用户「这能播」。
-              角标用 lg-float 二级材质（design-system/MASTER.md 的材料层级），
+              角标用 lg-float 二级材质（docs/design-system/MASTER.md 的材料层级），
               和操作条上的 32px 圆钮同族，压在缩略图左上角不挡操作条。
             */}
             {isVideo && (

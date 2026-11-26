@@ -9,7 +9,7 @@ function read(relPath: string) {
 
 test("admin page requires a dedicated admin session", () => {
   const page = read("src/app/admin/page.tsx");
-  const auth = read("src/lib/admin-auth.ts");
+  const auth = read("src/lib/accounts/admin-auth.ts");
 
   assert.match(page, /getAdminSession/);
   assert.match(page, /AdminLogin/);

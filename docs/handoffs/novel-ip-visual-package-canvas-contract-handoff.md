@@ -4,7 +4,7 @@
 
 ## 已落地
 
-`src/lib/novel-ip-visual-tools.ts` 已新增七项小说/IP 视觉工具的声明式契约。每项均包含 input、output、gate、unsupported、Canvas artifact metadata、现有 harness owner 与研究来源。`docs/skills/novel-ip-visual-package.md` 已按 `docs/skills/README.md` 的 skill 标准落档。
+`src/lib/agent/novel-ip-visual-tools.ts` 已新增七项小说/IP 视觉工具的声明式契约。每项均包含 input、output、gate、unsupported、Canvas artifact metadata、现有 harness owner 与研究来源。`docs/skills/novel-ip-visual-package.md` 已按 `docs/skills/README.md` 的 skill 标准落档。
 
 ## 共用契约缺口
 
@@ -21,7 +21,7 @@
 
 由 Canvas owner 在下一次共用契约变更中，将 `NovelIpCanvasArtifactMetadata` 以兼容扩展方式纳入 `CanvasNodeMetadata`，或建立明确的 `metadata.domainArtifact` 命名空间。整合时必须继续复用：
 
-- `ReferenceImageRole` / `referenceRole` 的唯一 owner：`src/lib/image-types.ts`
+- `ReferenceImageRole` / `referenceRole` 的唯一 owner：`src/lib/media/image-types.ts`
 - Canvas 状态与持久化：`src/app/api/agent/sessions/[id]/canvas-state/route.ts`、`src/lib/canvas/project-store.ts`
 - 生成任务与计费：`src/app/api/generation-jobs/route.ts`、`src/lib/generation-core/command-service.ts`
 - 产物校验与 sha256：`src/lib/generation-core/artifact-service.ts`

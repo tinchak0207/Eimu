@@ -7,11 +7,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IdCard, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { saveCharacterCard } from "@/lib/character-card-client";
-import { cardFromHistoryEntry, anchorSuccessMessage } from "@/lib/history-card-anchor";
-import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/character-cards";
-import type { CharacterCardKind } from "@/lib/character-cards";
-import type { HistoryEntry } from "@/lib/history-types";
+import { saveCharacterCard } from "@/lib/media/character-card-client";
+import { cardFromHistoryEntry, anchorSuccessMessage } from "@/lib/media/history-card-anchor";
+import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/media/character-cards";
+import type { CharacterCardKind } from "@/lib/media/character-cards";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 export interface SaveCardDialogProps {
   entry: HistoryEntry;

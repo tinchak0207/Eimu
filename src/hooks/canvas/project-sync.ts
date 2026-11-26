@@ -2,7 +2,7 @@
 
 // ===== S10b — 画布人手改动 → 工程图（设计文档 §3.4「人手改动回写」；§10 S10b）=====
 //
-// 方向：画布 → 工程图，**只走人手**。S10a（`deploy-staging/gateway/project/bridge-canvas.ts`）
+// 方向：画布 → 工程图，**只走人手**。S10a（`services/gateway/project/bridge-canvas.ts`）
 // 是反方向（工程事件 → 既有 `canvas.node.created/updated/connected`）。
 //
 // 回环抑制的唯一判据＝dispatch 的 action 来源（`CanvasAction` 的判别栏位）：

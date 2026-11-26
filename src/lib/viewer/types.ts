@@ -7,7 +7,7 @@
 //
 // 零 React 依赖（types only + 纯函式在 review.ts），任何层可 import。
 
-import type { DeliverableKind } from "@/lib/deliverable-kind";
+import type { DeliverableKind } from "@/lib/media/deliverable-kind";
 
 /**
  * 可查看的种类。交付物种类（image/video/audio）以 deliverable-kind 注册表为真源；

@@ -1,10 +1,10 @@
 // 画布专案 API：云端持久化（list / save / delete）。
 // 认证：requireVerifiedUser（上游 /api/user/self 验证，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { filterCardIdsForProject } from "@/lib/asset-library";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { filterCardIdsForProject } from "@/lib/media/asset-library";
 import { deleteCanvasProjects, deleteTeamCanvasProjects } from "@/lib/canvas/project-store";
-import { lookupTeamMembershipViaRelay } from "@/lib/team-membership-lookup";
+import { lookupTeamMembershipViaRelay } from "@/lib/accounts/team-membership-lookup";
 import {
   listCanvasProjectsForCaller,
   readTeamCanvasProjectsForCaller,

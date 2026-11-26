@@ -1,0 +1,160 @@
+/**
+ * armD-bare-yue2.ts — 自主设计 Bench 的对照臂：**裸 YuE2**，同一句 brief，不插 harness。
+ * （cp 自 arms/raw-yue2-pilot/run.ts，即轮子源档 deploy-staging/yue2-modal/out_local/service/e2e_client_runner.ts）
+ *
+ * 存在理由（2026-10-05）：A/B 的 2×2 表缺一格。已有 raw FlowMusic（arm A）、
+ * Beast ON→FlowMusic、Beast ON→YuE2，缺 **裸 YuE2**（同一句题面、不插 harness）。
+ * 没有它就无法回答「Beast ON + YuE2 是否打得过 YuE2」。
+ *
+ * 与 raw-yue2-pilot/run.ts 的差异（白名单，其余逐行等价）：
+ *   ① 题面来源改为 suite/genre-briefs.jsonl 的 brief 栏（「生成X风格的音乐」），**原样不变换**；
+ *   ② style = brief 原文、lyrics = ""（空）——即「只给一句曲风词，其余全交给模型」；
+ *   ③ 落盘目录与命名（gb-XX-takeN）。
+ * **不改任何契约**：仍用真 client generateYue2Track，仍只做呼叫与落盘。
+ *
+ * env：YUE2_MODAL_ENDPOINT=http://127.0.0.1:8788、YUE2_HMAC_SECRET=...
+ * 用法（repo 根）：npx tsx bench/music-bench/arms/raw-yue2-pilot/run.ts
+ */
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { resolve, join } from "node:path"
+
+import { generateYue2Track, yue2ModalUrl } from "../../../../src/lib/music-yue2"
+
+const IDS = (process.env.RAW_YUE2_IDS ?? "").trim()
+  ? process.env.RAW_YUE2_IDS!.trim().split(",")
+  : ["gb-01","gb-02","gb-03","gb-04","gb-05","gb-06","gb-07","gb-08","gb-09","gb-10"]
+const TAKES = Number(process.env.RAW_YUE2_TAKES ?? 1)
+const SEED0 = Number(process.env.RAW_YUE2_SEED0 ?? 12345)
+const outDir = resolve(process.cwd(), process.env.RAW_YUE2_OUT ?? "bench/music-bench/arms/design-bench/bare-yue2")
+
+/** 题面：suite/genre-briefs.jsonl 的 brief 栏，原样（不做任何变换）。lyrics 留空——
+ *  本项目要量的正是「把一句曲风词交给模型、其余设计工作它自己做不做得到」。 */
+function renderGenrePrompt(id: string): { style: string; lyrics: string; raw: string } {
+  const lines = readFileSync(resolve(process.cwd(), "bench/music-bench/suite/genre-briefs.jsonl"), "utf8").split("\n")
+  for (const l of lines) {
+    if (!l.trim()) continue
+    const rec = JSON.parse(l) as { id: string; brief?: string; word?: string }
+    if (rec.id !== id) continue
+    const style = (rec.brief ?? rec.word ?? "").trim()
+    if (!style) throw new Error(`${id} 的 brief 为空，拒绝发车`)
+    return { style, lyrics: "", raw: style }
+  }
+  throw new Error(`genre-briefs.jsonl 里没有 ${id}`)
+}
+
+function sha256(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex")
+}
+
+/**
+ * 本机 YuE2 服务是**一次一歌**：忙碌时对 /generate 直接回 429（不排队）。
+ * 所以每次发车前必须等到 state==="idle"，否则 4 个 take 会全部 429 失败。
+ */
+async function waitIdle(maxMs = 1_200_000): Promise<void> {
+  const t0 = Date.now()
+  for (;;) {
+    try {
+      const r = await fetch(`${yue2ModalUrl()}/health`, { signal: AbortSignal.timeout(10_000) })
+      const j = (await r.json()) as { state?: string }
+      if (j.state === "idle") return
+      console.log(`[raw-yue2] service state=${j.state}，等它空閒`)
+    } catch {
+      console.log("[raw-yue2] health 探活失败，重试")
+    }
+    if (Date.now() - t0 > maxMs) throw new Error("等服務空閒超時")
+    await new Promise((r) => setTimeout(r, 15_000))
+  }
+}
+
+/**
+ * 从服务的 run 目录回收产物（2026-10-05 实锤的必要动作）。
+ *
+ * 真因：本机服务的回包把整首 flac 放进 JSON 的 `audio_b64`（30–40MB → base64 约
+ * 40–55MB）。客户端经隧道收这个大响应体会 **`fetch failed`**（网络层），
+ * 而**服务端的 run 目录里 audio.flac 已经完整落盘**。所以客户端报错不等于生成失败——
+ * 必须按 (style, lyrics 长度, seed) 精确匹配 run 目录把产物捞回来。
+ * 这也是 harness 那条「YuE2 请求失败（网络层）… The operation timed out」的真实成因之一。
+ */
+function harvestFromRuns(t0: number, style: string, lyricsLen: number, seed: number): Buffer | null {
+  const runsDir = resolve(process.cwd(), "deploy-staging/yue2-modal/out_local/service/runs")
+  if (!existsSync(runsDir)) return null
+  const entries = readdirSync(runsDir)
+    .map((d) => ({ d, m: statSync(join(runsDir, d)).mtimeMs }))
+    .filter((e) => e.m >= t0)
+    .sort((a, b) => b.m - a.m)
+  for (const { d } of entries) {
+    const full = join(runsDir, d)
+    const reqPath = join(full, "service_request.json")
+    const flacPath = join(full, "audio.flac")
+    if (!existsSync(reqPath) || !existsSync(flacPath)) continue
+    try {
+      const rq = JSON.parse(readFileSync(reqPath, "utf8")) as { style?: string; lyrics?: string; seed?: number }
+      if (rq.style === style && (rq.lyrics ?? "").length === lyricsLen && rq.seed === seed) {
+        console.log(`[raw-yue2] 回收自 run 目录 ${d}`)
+        return readFileSync(flacPath)
+      }
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+async function main(): Promise<void> {
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+  console.log(`[bare-yue2] endpoint=${yue2ModalUrl()} ids=${IDS.join(",")} takes=${TAKES}`)
+  for (const ID of IDS) {
+    const { style, lyrics, raw } = renderGenrePrompt(ID)
+    console.log(`[bare-yue2] ${ID} style=${JSON.stringify(style)} lyrics_chars=${lyrics.length} raw_sha256=${sha256(Buffer.from(raw, "utf8"))}`)
+    const summary: unknown[] = []
+    for (let i = 0; i < TAKES; i += 1) {
+      const seed = SEED0 + i
+      const name = `${ID}-take${i + 1}`
+      const flacOut = resolve(outDir, `${name}.flac`)
+      if (existsSync(flacOut)) {
+        console.log(`[bare-yue2] ${name} 已存在，跳过`)
+        continue
+      }
+      let flac: Buffer | null = null
+      let lastErr = ""
+      for (let attempt = 1; attempt <= 3 && flac === null; attempt += 1) {
+        const t0 = Date.now()
+        try {
+          await waitIdle()
+          const r = await generateYue2Track({ style, lyrics, cot: "full", seed })
+          flac = Buffer.from(r.audioBase64, "base64")
+          console.log(`[bare-yue2] ${name} attempt=${attempt} 客户端直收成功 用时 ${Date.now() - t0} ms`)
+        } catch (e) {
+          lastErr = (e as Error).message
+          console.log(`[bare-yue2] ${name} attempt=${attempt} 客户端报错：${lastErr.slice(0, 140)}`)
+          if (/429|busy/.test(lastErr)) continue
+          await new Promise((r2) => setTimeout(r2, 5_000))
+          flac = harvestFromRuns(t0, style, lyrics.length, seed)
+          if (flac) console.log(`[bare-yue2] ${name} attempt=${attempt} 已从 run 目录回收`)
+        }
+      }
+      if (!flac) {
+        summary.push({ name, seed, ok: false, error: lastErr })
+        console.log(`[bare-yue2] ${name} 最终失败：${lastErr.slice(0, 160)}`)
+        continue
+      }
+      const sha = sha256(flac)
+      writeFileSync(flacOut, flac)
+      const rec = { name, seed, ok: true, audio_bytes: flac.length, sha256: sha, harvest_fallback: lastErr !== "" }
+      writeFileSync(resolve(outDir, `${name}.receipt.json`), JSON.stringify(rec, null, 2) + "\n")
+      summary.push(rec)
+      console.log(`[bare-yue2] ${name} OK seed=${seed} bytes=${flac.length} sha=${sha.slice(0, 16)}`)
+    }
+    writeFileSync(resolve(outDir, `summary-${ID}.json`), JSON.stringify(summary, null, 2) + "\n")
+  }
+  console.log("[bare-yue2] DONE")
+}
+
+void main()
+// ── ANNOTATED CHANGES（对 arms/raw-yue2-pilot/run.ts 的白名单改动）
+// 1. 题面来源：wsb-prompts.jsonl 的确定性变换  →  suite/genre-briefs.jsonl 的 brief 栏（原样）
+// 2. 入参：style=brief、lyrics=""（空），cot="full"
+// 3. 驱动：单 ROW  →  IDS 列表（默认 gb-01..gb-10），take 数 4 → 1
+// 4. 输出目录 / 命名：raw-yue2-pilot 的 idx{ROW}  →  design-bench/bare-yue2 的 gb-XX
+// waitIdle() / harvestFromRuns() / generateYue2Track 调用与重试逻辑：一行未动。

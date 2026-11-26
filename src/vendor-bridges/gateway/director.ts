@@ -1,7 +1,7 @@
 /**
  * director.ts — 3D 导演台服务端生命周期层（施工片3，2026-09-02）。
  *
- * 需求源：docs/director-console-integration-spec.md §3（HTTP 路由契约）§4（director.done 事件契约）。
+ * 需求源：docs/archive/proposals/director-console-integration-spec.md §3（HTTP 路由契约）§4（director.done 事件契约）。
  * 存储范式：./timeline.ts（$WORKSPACE_DIR/director/<sid>/current.json + versions/ last 20
  * + 每第 10 里程碑 + log.jsonl + withSessionLock + pruneVersions），逐段照搬。
  * 语义真源：kunpeng-vendor @872a58b src/stores/directorStore.ts（mutation 逐一对齐：

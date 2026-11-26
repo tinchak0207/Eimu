@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getSkillByIdPublic } from "@/lib/agent-skills/registry";
+import { getSkillByIdPublic } from "@/lib/agent/agent-skills/registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

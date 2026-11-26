@@ -11,7 +11,7 @@
 //   动作与提示词卡对齐（插入画布 / 填入当前节点 / 存入素材）。
 // - 我的素材：登入用户的资产包（GET /api/assets）；未登入诚实显示
 //   登入提示，不假装可用。
-// - 镜头词库（2026-09-16 G7）：本地静态词库 src/lib/lens-language-library.ts
+// - 镜头词库（2026-09-16 G7）：本地静态词库 src/lib/media/lens-language-library.ts
 //   （AID MIT 逐字 142 条 / 12 类）多选插入，走与提示词卡同一对插入回调。
 //
 // 视觉沿用 CanvasNodePromptPanel 的白底/暗色语汇；data-canvas-interactive +
@@ -23,15 +23,15 @@ import { Loader2, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/canvas/client";
 import { nodeToAssetPackItems } from "@/lib/canvas/node-to-asset-items";
-import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
+import type { AssetPack, AssetPackItem } from "@/lib/media/asset-pack-store";
 import {
   KUNPENG_STYLE_ASSETS,
   KUNPENG_STYLE_CATEGORY_LABELS,
   KUNPENG_SOURCE,
   buildKunpengStylePrompt,
   kunpengStyleSummary,
-} from "@/lib/kunpeng-style-assets";
-import { KUNPENG_PROMPT_TEMPLATES } from "@/lib/kunpeng-prompt-templates";
+} from "@/lib/agent/kunpeng-style-assets";
+import { KUNPENG_PROMPT_TEMPLATES } from "@/lib/agent/kunpeng-prompt-templates";
 import { RecipeTemplateSection } from "@/components/canvas-workstation/panels/RecipeTemplateSection";
 import { useRecipeTemplates } from "@/components/canvas-workstation/panels/use-recipe-templates";
 import { LensPickerSection } from "./LensPickerSection";

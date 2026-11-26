@@ -1,4 +1,4 @@
-import { fuseSceneVideo } from "../scene3d-video-fusion";
+import { fuseSceneVideo } from "../generation-core/scene3d-video-fusion";
 import { claimScriptEpisode, scriptBindsParents, storyboardBindsItems, type ChildAssetItem, type ParentAsset } from "./asset-levels";
 import { sliceAllows, type ShortDramaActor } from "./slices";
 
@@ -149,7 +149,7 @@ export interface VideoChainOutput {
    * cameraDirective 真源 = camera-trajectory-to-prompt（六槽 Camera 槽描述词）。
    * VPS handler 消费：cameraDirective 并进视频生成请求 prompt；references 交通道
    * （站点 B 端 /v1/videos/generations 无帧栏位——registry 已锤，直调站点 /api/generate-videos
-   * 的 scene_card/camera_trajectory 栏可全生效，见 deploy-staging/blender-gateway/ac-video-scene-stitch.md）。
+   * 的 scene_card/camera_trajectory 栏可全生效，见 services/blender-gateway/ac-video-scene-stitch.md）。
    */
   sceneDirector?: {
     referenceDirective: string;

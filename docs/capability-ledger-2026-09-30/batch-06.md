@@ -111,7 +111,7 @@
 - [帐号与增长] 生命周期邮件三个产品时刻重做 — 首图 / 未出图提醒 / 额度用完（新增 depleted：出过图、余额不足一张标准图、从未充值、最后出图已过 1h → 一次）；正文给出已做张数与最低一档价格/可做张数，CTA 去充值 ｜ 证据: 350ef376
 - [帐号与增长] 邮件品牌版式与真实示例一点即填 — 表格布局＋preheader＋品牌色（DESIGN.md：#2d3142 CTA、金币色）＋logo；示例＝同一句 prompt 以 gpt-image-2 真实生成的图，点击走 /?agent=1&q= 交接通道（提示词填进助理输入框） ｜ 证据: 350ef376
 - [帐号与增长] key_idle 召回信 — 建第一把 biz key 满 24h、却没有任何 source=biz 的 job、未退订、有已验证 email → 发一次；curl 直接复用 dev-quickstart 的 gpt-image-2 范例，CTA 指向实际存在的 /settings/api-keys 路由 ｜ 证据: a4be1a00
-- [帐号与增长] 自签邀请码 — src/lib/referral-code.ts 形状 `<id 36进位>-<hmac8>`／`<userId>-<8hex>`；解码零查表、签名防伪（乱填 id 只会被拒），密钥复用 GENERATION_BILLING_RELAY_SECRET 以域前缀分隔；前端 looksLikeInviteCode 只挡畸形，验签一律在服务端 ｜ 证据: e33571e9
+- [帐号与增长] 自签邀请码 — src/lib/billing/referral-code.ts 形状 `<id 36进位>-<hmac8>`／`<userId>-<8hex>`；解码零查表、签名防伪（乱填 id 只会被拒），密钥复用 GENERATION_BILLING_RELAY_SECRET 以域前缀分隔；前端 looksLikeInviteCode 只挡畸形，验签一律在服务端 ｜ 证据: e33571e9
 - [帐号与增长] 分享即邀请 — share-remix.ts 分享连结首位带作者邀请码，看图的人注册并出首图＝作者邀请成功 ｜ 证据: e33571e9
 - [帐号与增长] 邀请绑定时机 — 只在被邀请人尚未出图时绑，首个邀请胜出；码不合法／自邀／已出图都回 ok（免得每次登录重送）；Vercel 侧 auth/me 并入 applyInviteBinding（带记忆避免重试风暴，永不挡登录） ｜ 证据: e33571e9
 - [帐号与增长] 邀请奖励挂「出第一张图」 — 被邀请人首图成功后双方各发一次；金额口径＝plans.ts 的 INVITER/INVITEE_REWARD_IMAGES × STANDARD_IMAGE_COINS（与新人礼同一把尺）；每人上限 MAX_REWARDED_INVITES 防小号农场；帐本幂等键按角色分开、沿用五态状态机；上游调额失败＝整轮停且 quota 未动记 failed 可重试；worker 维护轮接上 ｜ 证据: e33571e9
@@ -155,7 +155,7 @@
 - AGENTS.md 付费上游呼叫硬闸规则 — 规则落进工作规则档（model 白名单为唯一真源、resolution ≤720p、seconds ≤5、提交前先核价、一次授权一次呼叫、花暴君的钱先问） ｜ 证据: e33571e9
 - biz-api 「两种接法」文档 — 开篇并列 A 标准 OpenAI 同步 base https://eimu.dev/openai/v1（images/generations、chat/completions 含 stream:true、models）与 B 异步 base https://eimu.dev/v1（202+task_id 轮询／callback／Idempotency-Key），并给 new-api/one-api 加渠道 9 步填法 ｜ 证据: dffaef5b
 - openapi／biz-api 契约文档校正 — response_format 预设改 b64_json、size enum 补 2048x2048、data[0].b64_json 叙述改为 202 异步 + 轮询取图、错误表改码、SDK 段落诚实说明 ｜ 证据: a9ceb2f0
-- S2 OpenAI 兼容核对报告 — docs/specs-0928/S2-compat-report.md 逐维度差异（异步 202 vs 同步 200、data[] 为 TaskArtifact 无 b64_json、response_format 预设 b64_json、n 1-4、size 固定 4 值）＋三家客户端接入判定 ｜ 证据: 0cbd7c0c
+- S2 OpenAI 兼容核对报告 — docs/archive/specs-0928/S2-compat-report.md 逐维度差异（异步 202 vs 同步 200、data[] 为 TaskArtifact 无 b64_json、response_format 预设 b64_json、n 1-4、size 固定 4 值）＋三家客户端接入判定 ｜ 证据: 0cbd7c0c
 - /openai/v1 控面部署依赖 runbook — 部署配置必须加 OPENAI_COMPAT_GENERATION_ORIGIN: http://127.0.0.1:3000（兼容层预设打 origin + /api/v1/*，但控面 app 路径在 /image-control/api/v1/* 底下会落不到 route，真单撞 503 control_plane_unreachable） ｜ 证据: ea31d305
 - 决策分界工作规则 — ops／口径问题自行拍板并在回报写判准，只有不可逆且偏好因人而异的产品／审美题才回报待裁 ｜ 证据: 8f2eaac2
 - DB 迁移 023–031 — 023_team_governance／024_welcome_gift_grant／025_user_attribution／026_welcome_gift_modal_seen／027_lifecycle_email／028_referral／029_api_rejection／030_mapay_credit／031_first_charge_claim（现 repo db/migrations/ 已存在至 033） ｜ 证据: 2447c874 / 629b4ae5 / 86fb664b / 586d83bd / 9f883c61 / e33571e9 / af6c6a49 / e27e3697 / 1b592d5d

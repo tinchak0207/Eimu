@@ -12,10 +12,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryCard } from "./HistoryCard";
 import { HistoryFilterBar } from "./HistoryFilterBar";
 import { HistoryGrid } from "./HistoryGrid";
-import { DELIVERABLE_KIND_IDS, deliverableKindLabel, filterableDeliverableKinds } from "@/lib/deliverable-kind";
-import { inferEntryKind, hasImage, NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
+import { DELIVERABLE_KIND_IDS, deliverableKindLabel, filterableDeliverableKinds } from "@/lib/media/deliverable-kind";
+import { inferEntryKind, hasImage, NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/media/history-types";
 import { ENTRY_KIND_VALUES, parseEntryKind } from "./history-kind-filter";
-import type { HistoryEntry } from "@/lib/history-types";
+import type { HistoryEntry } from "@/lib/media/history-types";
 
 const AUDIO_URL = "https://cdn.test/track.mp3";
 const IMAGE_URL = "https://cdn.test/pic.png";

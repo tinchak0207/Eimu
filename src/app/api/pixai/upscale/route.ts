@@ -12,15 +12,15 @@
 
 import { NextResponse } from "next/server";
 import { after } from "next/server";
-import { authenticateImageUser } from "@/lib/image-billing";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
 import { refundSyncCharge, commitSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
-import { QUOTA_PER_COIN } from "@/lib/new-api-client";
-import { declaredUpscaleTiers, generationCoins, resolutionFromImageSize } from "@/lib/generation-model-catalog";
+import { QUOTA_PER_COIN } from "@/lib/accounts/new-api-client";
+import { declaredUpscaleTiers, generationCoins, resolutionFromImageSize } from "@/lib/generation-core/generation-model-catalog";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
-import { upscaleFourKUpstreamEnabled } from "@/lib/upscale-4k-flag";
-import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { sanitizeUpstreamBody } from "@/lib/proxy";
+import { upscaleFourKUpstreamEnabled } from "@/lib/generation-core/upscale-4k-flag";
+import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { sanitizeUpstreamBody } from "@/lib/generation-core/proxy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

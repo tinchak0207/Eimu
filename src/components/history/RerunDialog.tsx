@@ -15,12 +15,12 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Coins, Layers, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
-import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
-import { formatModelLabel, coinsFromQuota, primaryModelId } from "@/lib/history-types";
-import type { HistoryEntry } from "@/lib/history-types";
-import { extractPromptSection } from "@/lib/workflow-recall";
-import { IMAGE_MODEL_IDS } from "@/lib/generation-model-catalog";
+import { getStoredToken, getStoredUser } from "@/lib/accounts/new-api-client";
+import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-core/generation-request-headers";
+import { formatModelLabel, coinsFromQuota, primaryModelId } from "@/lib/media/history-types";
+import type { HistoryEntry } from "@/lib/media/history-types";
+import { extractPromptSection } from "@/lib/agent/workflow-recall";
+import { IMAGE_MODEL_IDS } from "@/lib/generation-core/generation-model-catalog";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import { ModelPicker } from "@/components/ModelPicker";
 import {
@@ -29,7 +29,7 @@ import {
   buildHistoryRerunPlan,
   historyRerunCoinsPerImage,
   historyRerunEstimate,
-} from "@/lib/history-rerun";
+} from "@/lib/media/history-rerun";
 
 export type HistoryRerunMode = "rerun" | "variant";
 

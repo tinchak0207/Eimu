@@ -7,7 +7,7 @@
 // **最左边永远有一格微缩图**（有参考图就放图、没有就放该种类的图示占位），
 // 右边依序是种类字与卡名——一眼看得出「这一段指名的是一个实体」。
 //
-// 契约（与 src/lib/entity-tokens.ts 同一份语义，禁在此另立第二套解析）：
+// 契约（与 src/lib/media/entity-tokens.ts 同一份语义，禁在此另立第二套解析）：
 //   - 命中卡库 → 胶囊 + 该卡第一张参考图的微缩图
 //   - 未命中   → 胶囊但**虚线红框**（诚实标示「这张卡不存在」），原文照样显示，不吞内容
 //   - 卡库未载入/未登入 → 种类图示占位（**宽度与有图时相同，零 layout shift**）
@@ -16,10 +16,10 @@
 
 import { useEffect, useState } from "react";
 import { AudioLines, Box, HelpCircle, Mountain, Palette, UserRound } from "lucide-react";
-import { listCharacterCards } from "@/lib/character-card-client";
-import { bumpCharacterCardIndexRevision, getCharacterCardIndexRevision } from "@/lib/character-card-index";
-import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/character-cards";
-import { parseEntityTokens, resolveEntityTokenKind } from "@/lib/entity-tokens";
+import { listCharacterCards } from "@/lib/media/character-card-client";
+import { bumpCharacterCardIndexRevision, getCharacterCardIndexRevision } from "@/lib/media/character-card-index";
+import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/media/character-cards";
+import { parseEntityTokens, resolveEntityTokenKind } from "@/lib/media/entity-tokens";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────── 卡库索引（模组级一次载入，跨元件共用）

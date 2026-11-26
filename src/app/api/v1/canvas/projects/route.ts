@@ -22,8 +22,8 @@
 //      同一份摘要形状，只挑 id/title/createdAt/updatedAt/nodeCount，不回节点内容）。
 // 不区分「不存在/无权」：此端点本就只回自己的，没有可枚举的他人物件。
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
 import { listCanvasProjects } from "@/lib/canvas/project-store";
 import { saveCanvasProjectWithTeamGate } from "@/lib/canvas/team-canvas-gate";
 import { toCanvasProjectSummaryWire } from "@/lib/canvas/project-summary";

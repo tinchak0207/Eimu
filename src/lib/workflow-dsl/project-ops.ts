@@ -2,7 +2,7 @@
 //
 // 角色：网关不 import src/，DSL 在站点端编译；本档把 ProjectDslSource（schema.ts）对着工程里
 // 已有节点的摘要（current，来自 project_get / ProjectGraph.nodes）diff 成 PatchOp，再交
-// project_patch 工具送网关。契约真源 = deploy-staging/gateway/project/types.ts（只 import type）。
+// project_patch 工具送网关。契约真源 = services/gateway/project/types.ts（只 import type）。
 //
 // 语义与 compile.ts 的 patchForExisting（P0）逐项对齐：
 //   · 增量：current 里没有的 id → add_node；已有 → 只对「有差异」的字段发 set（幂等，重编译零 op）。
@@ -15,7 +15,7 @@
 
 import type {
   FileRef, ForEach, Json, NewNode, NodeId, NodeType, OnFail, PatchOp, TakesSpec,
-} from "../../../deploy-staging/gateway/project/types";
+} from "../../../services/gateway/project/types";
 import {
   PROJECT_KIND_ALIASES,
   PROJECT_NODE_KINDS,

@@ -16,8 +16,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { findMemberByUserId } from "@/lib/generation-core/member-quota";
 import { listTeamRoster, readTeamSettings, resolveActorTeam } from "@/lib/generation-core/team-governance";
 import {

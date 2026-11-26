@@ -15,9 +15,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { AdminPoolKind, EnvironmentEndpointSummary, PublicAdminPool } from "@/lib/admin-pools";
-import { DEFAULT_IMAGE_MODEL_ID, NANO_BANANA_PRO_MODEL_ID, modelDisplayName } from "@/lib/provider-config";
-import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids.js";
+import type { AdminPoolKind, EnvironmentEndpointSummary, PublicAdminPool } from "@/lib/generation-core/admin-pools";
+import { DEFAULT_IMAGE_MODEL_ID, NANO_BANANA_PRO_MODEL_ID, modelDisplayName } from "@/lib/generation-core/provider-config";
+import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/generation-core/image-model-ids.js";
 
 interface PoolDraft {
   kind: AdminPoolKind;

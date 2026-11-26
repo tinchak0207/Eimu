@@ -14,8 +14,8 @@
 // 因此「A 用户的 key 改不到 B 用户的画布」是**结构性**成立的（找不到即 404，不区分
 // 「不存在/无权」以防枚举）。B 端 key 只代表「允许的服务身分」，不代表可跨越 user 边界。
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
 import { mutateCanvasProject } from "@/lib/canvas/project-store";
 import {
   appendNodeVersion,

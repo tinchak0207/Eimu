@@ -1,5 +1,5 @@
-import { isAssetApproved } from "../character-cards";
-import type { AgentInteractionMode } from "../agent-chat-client";
+import { isAssetApproved } from "../media/character-cards";
+import type { AgentInteractionMode } from "../agent/agent-chat-client";
 import { cleanField, isRecord } from "./validate";
 import { STORYBOARD_SHOT_FIELDS, STORYBOARD_SNAPSHOT_FIELD_CHARS } from "./types";
 import type { StoryboardQcCardRef, StoryboardReferenceAssets, StoryboardSceneRef, StoryboardScriptShot, StoryboardShotField } from "./types";

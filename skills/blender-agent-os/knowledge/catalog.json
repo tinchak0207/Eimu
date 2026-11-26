@@ -3460,7 +3460,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "The camera is sampled at start/mid/end of each event only; matrix agreement and framing are not insertion, retention or physical evidence.",
-        "effects": "Read-only screen of final transforms, held camera poses and on-screen arrival; writes reports/scene-check.json.",
+        "effects": "Read-only screen of final transforms, held camera poses and on-screen arrival; writes docs/reports/scene-check.json.",
         "reviewed_sha256": "b023698fd6377698c20d2d41ee9724308af728756e9fe1b101de8a482ecbb1af",
         "runtime": "bpy"
       },
@@ -3482,7 +3482,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Sampled surface-intersection screen at chosen frames plus projected camera boxes: not continuous collision, solid containment or force.",
-        "effects": "Builds BVH trees from evaluated geometry at two frames, writes reports/overlap-before.json and asserts no waiting-fork/servo intersection.",
+        "effects": "Builds BVH trees from evaluated geometry at two frames, writes docs/reports/overlap-before.json and asserts no waiting-fork/servo intersection.",
         "reviewed_sha256": "7a6806f685935680bfdfa79fb4e158fb0a521a1420b2ecaa16ccd8af426ff0e4",
         "runtime": "bpy"
       },
@@ -3504,7 +3504,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Hardcoded /opt/homebrew ffmpeg/ffprobe paths and this build frame identity; the script itself records visual_review as PENDING, so an encode/decode pass is never the human review.",
-        "effects": "Verifies every rendered frame, encodes video/arm-step-by-step-refined.mp4, decodes sample frames, writes reports/media-check.json.",
+        "effects": "Verifies every rendered frame, encodes video/arm-step-by-step-refined.mp4, decodes sample frames, writes docs/reports/media-check.json.",
         "reviewed_sha256": "d7294274a154bbdf173bac8adaf31182db5ddf5382d56d342d161c208c3a1d0f",
         "runtime": "Python + ffmpeg/PIL"
       },
@@ -3526,7 +3526,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Motion plan computed as data before any scene edit; the ordering and camera policy are authoring choices for this asset, not physical constraints.",
-        "effects": "Reads the reviewed group/unit reports and rewrites reports/timing.json and reports/units.json.",
+        "effects": "Reads the reviewed group/unit reports and rewrites docs/reports/timing.json and docs/reports/units.json.",
         "reviewed_sha256": "aca90dee6c9af7656d46ea8b67bfaa21659f4ea8eb7441aa27979a674cade881",
         "runtime": "Python (no bpy)"
       },
@@ -3623,7 +3623,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Object copies share the source mesh data; copy the mesh before editing geometry. Names, step classes and the 402-object assert are specific to this build.",
-        "effects": "Copies frozen-source objects into a new A3-Step-assembly scene, keys arrival per step, writes reports/assembly-timeline.json and arm-step-assembly.blend.",
+        "effects": "Copies frozen-source objects into a new A3-Step-assembly scene, keys arrival per step, writes docs/reports/assembly-timeline.json and arm-step-assembly.blend.",
         "reviewed_sha256": "3659ea2a7f943c1ba94e687cc766d435120d24cf0f6528de25c310fcdb15452d",
         "runtime": "bpy"
       },
@@ -3645,7 +3645,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Closed edges, positive volume, no collapsed triangle and plate bounds are read back from the actual files rather than the source meshes; no printer profile, supports or G-code, and no fit or load release.",
-        "effects": "Re-reads the exported STL bytes, verifies the manifest hashes, writes one 3MF and one STL package per plate plus reports/export-check.json.",
+        "effects": "Re-reads the exported STL bytes, verifies the manifest hashes, writes one 3MF and one STL package per plate plus docs/reports/export-check.json.",
         "reviewed_sha256": "d5b760146c3f952e29f05c7cb0acd58bdf98af5c2d3b092fe612b6ca0bb37f15",
         "runtime": "Python (no bpy)"
       },
@@ -3736,7 +3736,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "5-degree steps and every third visor vertex against an obstacle KD-tree: sampled digital geometry, declared in the file as not a continuous-collision proof.",
-        "effects": "Poses lid and rotor through a sampled sweep, restores the closed pose, writes reports/phase1-lid-sweep.json.",
+        "effects": "Poses lid and rotor through a sampled sweep, restores the closed pose, writes docs/reports/phase1-lid-sweep.json.",
         "reviewed_sha256": "dd54fba4583ca01fbc05ade1afab08e2152052ab8da9179be8149848ebfae342",
         "runtime": "bpy"
       },
@@ -3767,7 +3767,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Isolated re-verification of saved artifacts only; its own status block records manufacture as NOT_REQUESTED_NOT_VERIFIED and lists the exclusions.",
-        "effects": "Reopens the delivered blend, re-measures the gates from evaluated geometry, hashes scripts/parameters/renders and writes reports/acceptance.json.",
+        "effects": "Reopens the delivered blend, re-measures the gates from evaluated geometry, hashes scripts/parameters/renders and writes docs/reports/acceptance.json.",
         "reviewed_sha256": "a2c03652076d1c7f721065986e47e474933edc2f46c15eda46be23820aa53248",
         "runtime": "bpy (separate headless process)"
       },
@@ -3789,7 +3789,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Asserts a background factory-startup process with no file loaded; never run it into a GUI session. The inventory comparison detects drift between build routes, it does not certify the geometry.",
-        "effects": "Executes passes 01-18 in the running process and writes reports/rebuild-isolated.json.",
+        "effects": "Executes passes 01-18 in the running process and writes docs/reports/rebuild-isolated.json.",
         "reviewed_sha256": "6437d849e1b776ae89346cbc83d62d0c1f0fffd6924c2a1192b9bb2f896d6487",
         "runtime": "bpy (headless, factory startup)"
       },
@@ -3811,7 +3811,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Postconditions read the values back from fcurves and sampled frames; a keyed attachment is animation, not a physical hold. Object names and frame anchors are asset-specific.",
-        "effects": "Keys insert/lid/rotor/orbit motion in the live scene, saves watch-winder-capsule-anim.blend (GUI run only) and writes reports/animation-keys.json.",
+        "effects": "Keys insert/lid/rotor/orbit motion in the live scene, saves watch-winder-capsule-anim.blend (GUI run only) and writes docs/reports/animation-keys.json.",
         "reviewed_sha256": "d711dae91ca8419a2ec9e0282e21238ffec96c13af72f835788222653043ed29",
         "runtime": "bpy"
       },
@@ -3862,7 +3862,7 @@
       "annotation": {
         "basis": "static scout 2026-09-06: file read before describing it (public example re-point)",
         "caution": "Asserts background mode so it never writes into the GUI session. Print orientations and expected heights are this asset design input; packing and numeric checks are not slicing, support or printability proof.",
-        "effects": "Builds a new WW_plates scene from the baked print blend, exports one millimetre STL per plate with sha256, re-imports one to prove the scale, renders plate previews, saves watch-winder-capsule-plates.blend and writes plates/manifest.json plus reports/print-plates.json.",
+        "effects": "Builds a new WW_plates scene from the baked print blend, exports one millimetre STL per plate with sha256, re-imports one to prove the scale, renders plate previews, saves watch-winder-capsule-plates.blend and writes plates/manifest.json plus docs/reports/print-plates.json.",
         "reviewed_sha256": "cc60c2e8c62c32f91d9bfcecaa664e4ddf7af17f2bb7003de04bbe7ac322c95c",
         "runtime": "bpy (headless only)"
       },

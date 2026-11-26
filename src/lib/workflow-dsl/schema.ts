@@ -36,7 +36,7 @@ export interface WorkflowDslStep {
   count?: number;
   /** 门禁步（人工批准后才续跑）。 */
   gate?: boolean;
-  /** 必须 ∈ HARNESS_TOOL_IDS（src/lib/harness-tool-registry.ts；在校验顺序的 tool 段检查，见 compile.ts）。 */
+  /** 必须 ∈ HARNESS_TOOL_IDS（src/lib/agent/harness-tool-registry.ts；在校验顺序的 tool 段检查，见 compile.ts）。 */
   tool?: string;
   /** 透传进节点 metadata 的自由栏位；序列化 ≤4KB。 */
   meta?: Record<string, unknown>;
@@ -284,7 +284,7 @@ function describeValueKind(value: unknown): string {
 // 旧画布 DSL（WorkflowDslStep / validateWorkflowDsl）一字不动；v2 是并列新路径：
 // kind 扩到工程图 NodeType，并新增 intent/params/inputs/refs/forEach/takes/onFail/pinned。
 // 编译落点 = project-ops.ts 的 compileProjectDsl（输出强类型 PatchOp[]）。
-// 字段取值范围取自契约 deploy-staging/gateway/project/types.ts（LIMITS 与 ForEach/TakesSpec/OnFail）。
+// 字段取值范围取自契约 services/gateway/project/types.ts（LIMITS 与 ForEach/TakesSpec/OnFail）。
 
 /** 契约 NodeType 的 13 个值（types.ts NodeType）。 */
 export const PROJECT_NODE_KINDS = [

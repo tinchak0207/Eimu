@@ -20,12 +20,12 @@
  * hover 只换底色不动尺寸（零 layout shift）。
  */
 
-import { SKILL_OUTPUT_KIND_OPTIONS } from "@/lib/agent-skills/output-kinds";
+import { SKILL_OUTPUT_KIND_OPTIONS } from "@/lib/agent/agent-skills/output-kinds";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { tryAuthHeaders } from "@/lib/agent-chat-client";
+import { tryAuthHeaders } from "@/lib/agent/agent-chat-client";
 import { useAuth } from "@/hooks/use-auth";
 import { useGithubLoginHandoff } from "@/hooks/use-github-login-handoff";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";

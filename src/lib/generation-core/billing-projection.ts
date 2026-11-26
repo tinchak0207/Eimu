@@ -1,9 +1,9 @@
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { adjustGatewayUserQuotaExact } from "@/lib/gateway-admin";
-import { imageGenerationCoins } from "@/lib/provider-config";
-import { generationCoins } from "@/lib/generation-model-catalog/pricing";
-import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { adjustGatewayUserQuotaExact } from "@/lib/accounts/gateway-admin";
+import { imageGenerationCoins } from "@/lib/generation-core/provider-config";
+import { generationCoins } from "@/lib/generation-core/generation-model-catalog/pricing";
+import { ttsQuotaForChars } from "@/lib/generation-core/generation-model-catalog/tts-pricing";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { ensureAccountBaselines, recordConsumption } from "./account-ledger";
 import { emitJobEvent } from "./job-events";

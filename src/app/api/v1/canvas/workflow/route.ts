@@ -22,8 +22,8 @@
 // 不存在 ⇒ 404（不区分「不存在/无权」，防枚举）。B 端 key 只代表允许的服务身分，
 // 不得让 A 用户的 key 改到 B 用户的画布。
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
 import { mutateCanvasProject, readCanvasProject } from "@/lib/canvas/project-store";
 import { fromCanvasProject, toCanvasProject } from "@/lib/canvas/layout";
 import { canvasReducer } from "@/hooks/canvas/canvas-reducer-adapter";

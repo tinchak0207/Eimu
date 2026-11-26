@@ -3,7 +3,7 @@
 // P0-W3：项目/聊天的**全局单例**客户端状态。
 //
 // 侧栏与聊天面是两个不同元件，必须看到同一份状态 ⇒ 模块级 store +
-// useSyncExternalStore（照抄 src/lib/history-client-store.ts 的形态）。
+// useSyncExternalStore（照抄 src/lib/media/history-client-store.ts 的形态）。
 // 各调一次 hook 各自 useState 会产生两份不一致的状态，这是本刀最容易埋的雷。
 //
 // 标题真源（对齐 ZCode 的 title_source 语义，custom 粘性）：
@@ -20,8 +20,8 @@ import {
   upsertChat as apiUpsertChat,
   removeChat as apiRemoveChat,
 } from "@/lib/creative-project/client";
-import { listAgentSessions } from "@/lib/agent-chat-client";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
+import { listAgentSessions } from "@/lib/agent/agent-chat-client";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
 import type { CreativeProject, ProjectChat, ProjectTitleSource } from "@/lib/creative-project/types";
 
 // ─────────────────────────────────────────────────────────── 对外型别（冻结）

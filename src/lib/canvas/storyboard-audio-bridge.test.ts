@@ -44,7 +44,7 @@ test("6 镜旁白 → 6 行（不折成 1 行），source 逐行对回镜号", (
   );
   assert.deepEqual(
     plan.source,
-    ["S01", "S02", "S03", "S04", "S05", "S06"].map((shotNumber) => ({ shotNumber, field: "narration" })),
+    ["S01", "S02", "S03", "S04", "S05", "S06"].map((shotNumber, shotIndex) => ({ shotNumber, field: "narration", shotIndex })),
   );
   // 镜号**不得**出现在送去合成的 role/text 上。
   assert.ok(rows.every((r) => !r.text.includes("S0") && r.role === "narration"));
@@ -54,8 +54,8 @@ test("同一镜对白＋旁白 → 各一行（对白先于旁白），source.fi
   const plan = shotsToAudioScript([shot("S01", { dialogue: "站住！", narration: "夜色沉沉" })]);
   assert.equal(plan.source.length, 2);
   assert.deepEqual(plan.source, [
-    { shotNumber: "S01", field: "dialogue" },
-    { shotNumber: "S01", field: "narration" },
+    { shotNumber: "S01", field: "dialogue", shotIndex: 0 },
+    { shotNumber: "S01", field: "narration", shotIndex: 0 },
   ]);
   const rows = JSON.parse(plan.script) as Array<{ role: string; text: string }>;
   assert.deepEqual(rows, [
@@ -72,7 +72,7 @@ test("空／纯空白栏位不产生行（不送空行）；无镜号项略过",
     shot("S03", { dialogue: "" }),
   ]);
   assert.equal(plan.source.length, 1);
-  assert.deepEqual(plan.source, [{ shotNumber: "S02", field: "narration" }]);
+  assert.deepEqual(plan.source, [{ shotNumber: "S02", field: "narration", shotIndex: 2 }]);
 });
 
 test("对白中的 [角色]：「…」 标记逐字照送（本层不切分、不改写）", () => {
@@ -270,4 +270,19 @@ test("漂移：时长未实测 → actualSec/deltaSec 皆 null，不冒充", () 
   assert.equal(drift[0].deltaSec, null);
   assert.equal(drift[0].overThreshold, false);
   assert.match(drift[0].note ?? "", /未实测/);
+});
+test("两集都从第 1 镜起：带 shotIndex 回写各归各镜，不互相覆盖；缺 shotIndex 则具名拒", () => {
+  const shots = [shot("1", { dialogue: "第一集台词" }), shot("1", { dialogue: "第二集台词" })];
+  const { source } = shotsToAudioScript(shots);
+  const timeline: AudioTimelineEntry[] = [
+    { index: 0, role: "dialogue", audio_url: "https://cdn.example.com/ep1.mp3", duration_ms: 1000 },
+    { index: 1, role: "dialogue", audio_url: "https://cdn.example.com/ep2.mp3", duration_ms: 1000 },
+  ];
+  const ok = applyAudioTimelineToShots(shots, timeline, source);
+  assert.equal(ok.applied, true);
+  assert.equal(ok.shots[0].dialogueAudioId, "https://cdn.example.com/ep1.mp3");
+  assert.equal(ok.shots[1].dialogueAudioId, "https://cdn.example.com/ep2.mp3");
+  const legacy = applyAudioTimelineToShots(shots, timeline, source.map(({ shotNumber, field }) => ({ shotNumber, field })));
+  assert.equal(legacy.applied, false);
+  assert.equal(legacy.refused?.code, "duplicate_shot_number");
 });

@@ -15,8 +15,8 @@
 // 诚实纪律：伺服器亲自 `get` 回位元组、串流算 sha256；物件不存在即 404，不写纪录、
 // 不入库（不宣称未验证的成功）。objectKey 不属呼叫者即 403。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { UploadSignError, commitUploadedObject } from "@/lib/two-phase-upload";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { UploadSignError, commitUploadedObject } from "@/lib/media/two-phase-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

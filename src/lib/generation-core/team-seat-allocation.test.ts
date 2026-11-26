@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import type { GenerationSql } from "./database.ts";
 import type { TeamLock } from "./member-quota.ts";
 import { applySeatAllocation } from "./team-seat-allocation.ts";
@@ -59,7 +59,7 @@ function fakeNewApi(seed: {
     const current = users.get(userId);
     if (!current) return null;
     return { id: userId, username: `user-${userId}`, quota: current.quota, used_quota: current.used };
-  }) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser;
+  }) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser;
 
   const adjustUserQuota = (async (userId: number, deltaQuota: number) => {
     if (!Number.isFinite(deltaQuota) || deltaQuota === 0) return;
@@ -71,7 +71,7 @@ function fakeNewApi(seed: {
     }
     current.quota += delta;
     adjustments.push({ userId, delta });
-  }) as unknown as typeof import("@/lib/gateway-admin").adjustGatewayUserQuotaExact;
+  }) as unknown as typeof import("@/lib/accounts/gateway-admin").adjustGatewayUserQuotaExact;
 
   function consume(userId: number, quota: number): void {
     const current = users.get(userId);

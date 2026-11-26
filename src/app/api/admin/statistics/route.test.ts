@@ -11,7 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { NextRequest } from "next/server";
-import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "@/lib/admin-auth";
+import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "@/lib/accounts/admin-auth";
 import { STATISTICS_CSV_BOM } from "@/lib/generation-core/statistics-csv";
 import { GET } from "./route";
 

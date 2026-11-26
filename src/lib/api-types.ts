@@ -1,7 +1,7 @@
-import { ModelMode, ProviderKey } from "./provider-config";
-import type { GenerationWorkflowMetadata } from "./image-types";
-import type { AspectRatio, OutputResolution } from "./generation-model-catalog";
-import type { ControlNetSpec } from "./pixai-controlnets";
+import { ModelMode, ProviderKey } from "./generation-core/provider-config";
+import type { GenerationWorkflowMetadata } from "./media/image-types";
+import type { AspectRatio, OutputResolution } from "./generation-core/generation-model-catalog";
+import type { ControlNetSpec } from "./generation-core/pixai-controlnets";
 
 export interface GenerateImageRequest {
   prompt: string;

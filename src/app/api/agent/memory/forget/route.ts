@@ -4,8 +4,8 @@
 // 只作用于该 owner 的 private 条目（store 层再校一次 scope／ownerKey）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { deleteUserMemories } from "@/lib/agent-memory-store";
-import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/memory-hmac";
+import { deleteUserMemories } from "@/lib/agent/agent-memory-store";
+import { MEMORY_SIGNATURE_HEADER, verifyMemorySignature } from "@/lib/accounts/memory-hmac";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

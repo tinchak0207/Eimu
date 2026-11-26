@@ -18,7 +18,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { ScanLine, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { errorDetailsText, type CanvasNode } from "@/lib/canvas/types";
-import type { GenerationTaskProjection } from "@/lib/generation-task-types";
+import type { GenerationTaskProjection } from "@/lib/generation-core/generation-task-types";
 import { tokenizeJson, type JsonTokenKind } from "@/lib/canvas/json-tokens";
 import { buildAuthHeaders } from "./embed/embed-helpers";
 

@@ -706,7 +706,7 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
   );
 
   const glassBtn =
-    "flex h-11 w-11 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/12 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] disabled:opacity-40";
+    "flex h-11 w-11 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.12] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] disabled:opacity-40";
 
   const downloadBtn = (light = false) => (
     <button type="button" onClick={() => void onDownload()} disabled={!hasSource || dl === "loading"} aria-label={dl === "failed" ? "下载失败，点击重试" : "下载"} title={dl === "failed" ? "下载失败，点击重试" : "下载这首歌"} className={cn(light ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/65 transition-colors hover:bg-foreground/[0.08] hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 [touch-action:manipulation]" : glassBtn, dl === "failed" && (light ? "text-destructive" : "text-[#ff8a80]"))}>
@@ -842,7 +842,7 @@ function AudioSurfaceInner({ asset, density, controllerRef, active }: ViewerSurf
                 type="button"
                 onClick={() => setLyricsView(false)}
                 aria-label="回到封面"
-                className="mb-2 flex h-10 items-center gap-2 self-start rounded-full bg-white/12 px-4 text-[14px] font-medium text-white/90 backdrop-blur-xl md:hidden"
+                className="mb-2 flex h-10 items-center gap-2 self-start rounded-full bg-white/[0.12] px-4 text-[14px] font-medium text-white/90 backdrop-blur-xl md:hidden"
               >
                 <Music2 className="h-4 w-4" aria-hidden="true" />
                 <span className="max-w-[60vw] truncate">{title}</span>

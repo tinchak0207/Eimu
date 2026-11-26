@@ -6,8 +6,8 @@
 // 本路由只交付机制，不含任何运营文案。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { dismissBanner } from "@/lib/notification-store";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { dismissBanner } from "@/lib/accounts/notification-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

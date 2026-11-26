@@ -4,7 +4,7 @@
 // 无供给诊断（diagnoseSupplierUnavailability）与 /admin「模型路由」面板全部经
 // resolveModelRoute 取同一份结果——输入相同则输出相同，后台看到的就是调度实际用的。
 
-import { MODEL_ROUTES, modelRoute, routeSupplierId } from "../model-routes.config";
+import { MODEL_ROUTES, modelRoute, routeSupplierId } from "./model-routes.config";
 import { getGenerationSql, type GenerationSql } from "./database";
 
 export type ModelRouteSource = "config" | "override";

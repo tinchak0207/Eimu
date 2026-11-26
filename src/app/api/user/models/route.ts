@@ -1,5 +1,5 @@
 // GET /api/user/models — models available to this user
-import { makeProxy } from "@/lib/proxy";
+import { makeProxy } from "@/lib/generation-core/proxy";
 
 export const preferredRegion = "sfo1";
 

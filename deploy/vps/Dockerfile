@@ -22,7 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY . .
 # 开机先迁移再播种，然后才进 worker 循环。缺了这一步，pixai 模型没有
-# supplier_capability，生图会一直回 overloaded —— 详见 tools/control-plane-bootstrap.ts。
+# supplier_capability，生图会一直回 overloaded —— 详见 tools/ops/database/control-plane-bootstrap.ts。
 CMD ["npm", "run", "generation:bootstrap"]
 
 FROM node:22-alpine AS runner

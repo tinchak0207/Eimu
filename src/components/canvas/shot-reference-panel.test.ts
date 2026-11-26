@@ -10,8 +10,8 @@ import {
   type ShotReferenceCandidate,
   type ShotReferenceEntry,
 } from "./ShotReferencePanel";
-import { expandEntityTokens, parseEntityTokens } from "@/lib/entity-tokens";
-import type { CharacterCard } from "@/lib/character-cards";
+import { expandEntityTokens, parseEntityTokens } from "@/lib/media/entity-tokens";
+import type { CharacterCard } from "@/lib/media/character-cards";
 
 /**
  * WS3（行内 @ 素材卡引用）行为验收。

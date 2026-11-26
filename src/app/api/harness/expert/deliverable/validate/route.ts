@@ -7,13 +7,13 @@
 //   通过（ok:true）只代表「契约形状合格」，不代表成品可用（成品品质请走 /api/harness/media/quality）。
 //
 // 契约真源＝静态 import 的 src/lib/mcp/expert-delivery-contracts.json。
-//   **为何是这份而非 deploy-staging/ 的？** deploy-staging/ 同时被 .vercelignore（`/deploy-staging/`）
-//   与 .gitignore（`/deploy-staging/*`）排除、且完全未被 git 追踪，所以它**永远上不了 Vercel**
+//   **为何是这份而非 services/ 的？** services/ 同时被 .vercelignore（`/services/`）
+//   与 .gitignore（`/services/*`）排除、且完全未被 git 追踪，所以它**永远上不了 Vercel**
 //   （远端 webpack 会因静态 import 而 `Module not found` 直接炸 build；本地有档故 `next build` 验不出）。
 //   因此把契约档镜像一份到 `src/lib/mcp/expert-delivery-contracts.json`（会被打包上传）。
-//   权威真源仍是 `deploy-staging/expert-gateway/expert-delivery-contracts.json`（与 VPS 活本对齐的那份），
+//   权威真源仍是 `services/expert-gateway/expert-delivery-contracts.json`（与 VPS 活本对齐的那份），
 //   两份必须**逐位元组一致**，由 `src/lib/mcp/expert-delivery-contracts.test.ts` 的同步棘轮守住。
-//   内部同名闸门 deploy-staging/gateway/delivery-gate.ts 的 checkDelivery 读同一份 deploy-staging 原档，
+//   内部同名闸门 services/gateway/delivery-gate.ts 的 checkDelivery 读同一份 deploy-staging 原档，
 //   但**判据不同、不等价**：它是在交付**自由文本**里做「栏位名子字串命中」（其档头自承
 //   lyrics:"" 也算命中、不验值）；本 route 的输入是**结构化物件**，因此做更强检查——
 //   requiredFields 每一栏必须在 payload 里存在**且值非空**（undefined／null／空串／空白串／
@@ -27,7 +27,7 @@
 //   整包代理给控制面（`/image-control/api/v1/**`），控面没有本 route ⇒ 直打 404。harness
 //   前缀未被代理，由本部署直接服务；MCP 工具目标路由漂移由 tools.test.ts 守门。
 //
-// 栏位层 / evidence / qc 签名的规则真源＝`src/lib/expert-contract.ts` 的
+// 栏位层 / evidence / qc 签名的规则真源＝`src/lib/agent/expert-contract.ts` 的
 //   `validateExpertDeliverable` 与 `computeQcSignature`（本路由只做 HTTP 包装、body 白名单
 //   与契约必填栏检查，**绝不重写它已有的规则**）。本档不呼叫任何模型、不呼叫任何付费上游、
 //   不扣费、不写账本。
@@ -38,8 +38,8 @@
 //   `{ ok, errors[], qc_signature }`。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import {
   EXPERT_IDS,
@@ -48,10 +48,10 @@ import {
   type ExpertDeliverable,
   type ExpertId,
   type ExpertTaskContract,
-} from "@/lib/expert-contract";
+} from "@/lib/agent/expert-contract";
 
 // 契约真源（resolveJsonModule 静态载入）。`src/lib/mcp/expert-delivery-contracts.json` 是为能被
-// 建置打包而放在 src/ 的**镜像**；`deploy-staging/expert-gateway/expert-delivery-contracts.json`
+// 建置打包而放在 src/ 的**镜像**；`services/expert-gateway/expert-delivery-contracts.json`
 // 才是与 VPS 活本对齐的那一份，两者必须逐位元组一致（有同步测试守住）。
 import contractSource from "@/lib/mcp/expert-delivery-contracts.json";
 
@@ -99,7 +99,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * 为何存在：对外 MCP inputSchema（tools.ts 的 check_delivery_contract）宣告的 evidence
  * 指针是 **snake_case**（`artifact_path` / `duration_sec`），因为交付物 payload 本身用的是
  * snake_case 字段（见契约档 requiredFields）；但底层规则真源 `ExpertDeliverable.evidence`
- * （src/lib/expert-contract.ts:80）是 **camelCase**（`artifactPath` / `durationSec`）。
+ * （src/lib/agent/expert-contract.ts:80）是 **camelCase**（`artifactPath` / `durationSec`）。
  * 若不在这一层映射，外部 agent 照工具说明书只给 `{"duration_sec": 12}` 会**必然失败**——
  * 2026-10-03 生产实测错误原文：
  *   `evidence 至少需要一项可核验指针：url（可访问地址）、artifactPath（档案路径）、bytes（字节数）或 durationSec（时长秒）任一非空。`

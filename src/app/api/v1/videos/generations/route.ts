@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { readBearerToken, isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import {
   aspectRatioFromImageSize,
   generationCoins,
@@ -9,7 +9,7 @@ import {
   isSupportedVideoModel,
   normalizeGenerationConfig,
   resolveGenerationModelId,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
@@ -23,13 +23,13 @@ import {
   parseVideoPostProduction,
   videoPostProductionGeneratedSeconds,
 } from "@/lib/generation-core/video-post-production";
-import { EditInputError, parseReferenceImageSpecs, resolveEditReference } from "@/lib/biz-image-references";
-import { directVideoPrompt } from "@/lib/invisible-prompt-director";
-import { publicObjectUrl } from "@/lib/two-phase-upload";
+import { EditInputError, parseReferenceImageSpecs, resolveEditReference } from "@/lib/generation-core/biz-image-references";
+import { directVideoPrompt } from "@/lib/generation-core/invisible-prompt-director";
+import { publicObjectUrl } from "@/lib/media/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { sanitizeUpstreamBody } from "@/lib/proxy";
+import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-core/generation-request-headers";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { sanitizeUpstreamBody } from "@/lib/generation-core/proxy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NextRequest } from "next/server";
 
-import { hashBizApiKey } from "@/lib/biz-api-keys";
-import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
+import { hashBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { __resetBizKeyStoreForTests } from "@/lib/accounts/biz-api-key-store";
 
 import { POST } from "./route";
 

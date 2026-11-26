@@ -4,7 +4,7 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 // new-api 原生视频任务内核封装（P1「任务语义归一 new-api」核心刀，2026-08-28）。
 //
 // new-api v1.0.0-rc.21 原生异步视频 relay（路由与回应形状对照上游源码实测，
-// 见 surgery/newapi-kernel-intel.md；渠道 8 metaso-hailuo-bridge 已 relay 出真片）：
+// 见 .local/tmp/surgery/newapi-kernel-intel.md；渠道 8 metaso-hailuo-bridge 已 relay 出真片）：
 //   POST {base}/video/generations            提交 → OpenAI video 形状 {id, task_id, ...}
 //   GET  {base}/video/generations/{task_id}  查询 → {code:"success", data:{status, fail_reason, result_url, ...}}
 // 提交经 new-api 后，上游轮询/取消/配额退款由 new-api task 框架内核承担；控制面只做

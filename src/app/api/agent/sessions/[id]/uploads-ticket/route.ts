@@ -7,8 +7,8 @@
 // 票不落盘、不进 log（照抄相邻 attachments 路由的透传模式，只换网关路径）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

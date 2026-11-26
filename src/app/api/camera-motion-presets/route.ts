@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   listCameraMotionPresetTags,
   listCameraMotionPresets,
-} from "@/lib/camera-motion-presets";
+} from "@/lib/generation-core/camera-motion-presets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

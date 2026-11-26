@@ -11,8 +11,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { REGISTRY_CHANNELS } from "../supplier-channels.config.ts";
-import { describeEnvChannels, registryChannelToDescriptor } from "../sub2api.ts";
+import { REGISTRY_CHANNELS } from "./supplier-channels.config.ts";
+import { describeEnvChannels, registryChannelToDescriptor } from "./sub2api.ts";
 import { hasGenerationCapability } from "./job-repository.ts";
 import {
   HARNESS_TTS_PATH,

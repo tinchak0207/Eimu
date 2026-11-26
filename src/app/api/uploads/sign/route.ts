@@ -16,8 +16,8 @@
 //
 // 鉴权：requireVerifiedUser（授权走上游 /api/user/self，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { UploadSignError, issueDirectUploadCredential } from "@/lib/two-phase-upload";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { UploadSignError, issueDirectUploadCredential } from "@/lib/media/two-phase-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

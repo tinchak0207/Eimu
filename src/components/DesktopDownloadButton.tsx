@@ -31,7 +31,7 @@ export interface DesktopDownloadButtonProps {
   className?: string;
 }
 
-/** 封面画布 1920×1080——与 `PromoIntroOverlay`／`promo-video/cover.html` 同一份真源。 */
+/** 封面画布 1920×1080——与 `PromoIntroOverlay`／`tools/promo-video/cover.html` 同一份真源。 */
 const COVER_W = 1920;
 const COVER_H = 1080;
 const pct = (value: number, total: number): string => `${((value / total) * 100).toFixed(4)}%`;

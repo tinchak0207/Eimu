@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { ImageResult } from "@/lib/image-types";
+import type { ImageResult } from "@/lib/media/image-types";
 
 /**
  * 成片 src 的统一解析入口（普通模式与专业模式共用）。

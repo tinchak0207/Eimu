@@ -7,8 +7,8 @@
 // 才发现纯属浪费 —— 本地 400 更快，也让前端拿到同一个站内错误格式。
 
 import { NextRequest, NextResponse } from "next/server";
-import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
-import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent-session-guard";
+import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent/agent-gateway";
+import { agentCallerFailureCode, resolveAgentCaller, SESSION_ID_PATTERN } from "@/lib/agent/agent-session-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -25,7 +25,7 @@
 // 退回原本的 users.quota 读法——C 端显示不因本次权威搬迁而断（生产路径在控制面，
 // 那里有帐本，回答的是我方口径）。
 
-import { fetchGatewayUser, type GatewayAdminUser } from "@/lib/gateway-admin";
+import { fetchGatewayUser, type GatewayAdminUser } from "@/lib/accounts/gateway-admin";
 import {
   accountLedgerStoreEnabled,
   ensureAccountOpening,

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect } from "react";
-import type { AgentTemplate } from "@/lib/agent-templates";
+import type { AgentTemplate } from "@/lib/agent/agent-templates";
 
 export interface AgentTemplateCarouselProps {
   templates: AgentTemplate[];

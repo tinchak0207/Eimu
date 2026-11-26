@@ -6,20 +6,20 @@
 
 import { NextRequest } from "next/server";
 import { after } from "next/server";
-import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { generationCoins } from "@/lib/generation-model-catalog";
-import { PIXAI_TEMPLATE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/accounts/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { generationCoins } from "@/lib/generation-core/generation-model-catalog";
+import { PIXAI_TEMPLATE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import {
   jsonWithTrace,
   pixaiAuthError,
   pixaiError,
   pixaiRequestError,
   proxyPixai,
-} from "@/lib/pixai-proxy";
+} from "@/lib/generation-core/pixai-proxy";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";

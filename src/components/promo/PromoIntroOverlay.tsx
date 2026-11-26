@@ -20,7 +20,7 @@ import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
  * （`public/promo/eimu-promo-cover.jpg`，1920×1080），封面里那个输入框
  * **换成真的能打字的输入框**：打一句、按送出，就开新对话把那句送进产线。
  *
- * 座标逐字取自封面渲染源 `promo-video/cover.html` 的 `.prompt`
+ * 座标逐字取自封面渲染源 `tools/promo-video/cover.html` 的 `.prompt`
  * （left 294 / top 690 / width 700 / height 112，皆在 1920×1080 画布上），
  * 所以真输入框会精准盖住封面里那个画上去的框、不会露字。整个封面容器做
  * `container-type: size`，框内尺寸全用 cqh 表达 → 任何视窗尺寸下都与画面等比。
@@ -53,7 +53,7 @@ const VIDEO_SRC = "/promo/eimu-promo.mp4";
 const POSTER_SRC = "/promo/eimu-promo-poster.jpg";
 const COVER_SRC = "/promo/eimu-promo-cover.jpg";
 
-/** 封面画布：1920×1080（见 promo-video/cover.html）。 */
+/** 封面画布：1920×1080（见 tools/promo-video/cover.html）。 */
 const COVER_W = 1920;
 const COVER_H = 1080;
 /**
@@ -266,7 +266,7 @@ export function PromoIntroOverlay({
               className="pointer-events-none h-full w-full select-none object-cover"
             />
 
-            {/* 真输入框：pt-2 那组玻璃样式逐字沿用 promo-video/cover.html 的 .prompt。
+            {/* 真输入框：pt-2 那组玻璃样式逐字沿用 tools/promo-video/cover.html 的 .prompt。
                 它会精准盖住封面里画上去的框（座标同源），所以看不到两层字。 */}
             <form
               onSubmit={submit}

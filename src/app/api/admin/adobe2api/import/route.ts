@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

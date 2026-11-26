@@ -11,7 +11,7 @@
 | V-01 | ✅ 已修 | `generation-core/cancel-service.ts` `cancelGenerationJobWithRefund` |
 | V-02 | ✅ 已修（未套用到 DB） | `db/migrations/032_supplier_adapter_type_open.sql` |
 | V-03 | ✅ 已修 | 价格进 claim（`unitPriceCny/priceSource`）；闸移到 `worker-service.submitWithSupplyCostGate`；openai_video fail-closed，其他协议只审白名单内模型 |
-| V-04 | ✅ 已修（需重新 seed） | `tools/seed-generation-suppliers.ts` `CHANNEL_MODEL_ALIASES` → `configuration.modelAliases` |
+| V-04 | ✅ 已修（需重新 seed） | `tools/ops/suppliers/seed-generation-suppliers.ts` `CHANNEL_MODEL_ALIASES` → `configuration.modelAliases` |
 | V-05 | ⏸ 未动 | — |
 | V-06 | ✅ 已修 | `generation-core/supply-registry.ts`；假协议实测 N=2（adapter 档＋config 条目） |
 | V-07 | ✅ 已修 | `generation-core/sync-charge.ts` 帐本门面；`pixai-proxy.ts` 不再碰钱 |
@@ -48,7 +48,7 @@
 
 ## V-02 ⚑ DB `adapter_type` CHECK 与程式码漂移（S）
 - `db/migrations/014_cangyuansuanli_supplier.sql:3` CHECK 列举只到 `'openai_video'`，**没有 `blender_bridge`**
-- `src/lib/generation-core/types.ts:167` 与 `src/lib/supplier-channels.config.ts:184` 已宣告 `blender_bridge`
+- `src/lib/generation-core/types.ts:167` 与 `src/lib/generation-core/supplier-channels.config.ts:184` 已宣告 `blender_bridge`
 - **[I]** 以 repo 内 migration 从零建库时，seed `blender_bridge` 供给会撞 CHECK；线上库若可用，代表曾有 repo 外手改（未验证）。每新增一种协议都要再写一次 migration——这是 N=8 的其中一档。
 - 修法：CHECK 改为 `adapter_type <> ''`（或直接 DROP），合法性由程式码 adapter registry 判定。
 - `grep -rn "supplier_adapter_type_check" db/migrations`
@@ -56,7 +56,7 @@
 ## V-03 ⚑ 成本闸住在供给层，价格按模型名全域一价（S–M）
 - `src/lib/generation-core/openai-video-upstream.ts:2` import、`:158` 呼叫 `assertPaidVideoSubmissionAllowed`——**只有** `openai_video` 走闸（`paid-video-cost-gate` 唯一 importer）；metaso／filmera／newapi_video／adobe2api 视频不经此闸。
 - `src/lib/generation-core/paid-video-cost-gate.ts:101-109` `PAID_VIDEO_UNIT_PRICE_CNY` 以 `supplierModelId` 为键，来源固定 xiaoyxiao（`:111`）。
-- `src/lib/supplier-channels.config.ts:83-85` gway 同名模型核价 0.6／0.8／1.5／1.0，闸内记的是 0.7／0.9／1.6／1.1 ⇒ **gway 的提交在闸与回报里用错单价**。
+- `src/lib/generation-core/supplier-channels.config.ts:83-85` gway 同名模型核价 0.6／0.8／1.5／1.0，闸内记的是 0.7／0.9／1.6／1.1 ⇒ **gway 的提交在闸与回报里用错单价**。
 - 为何必先修：战略就是持续加便宜供给；价格不下沉到（供给, 模型），每加一条同名更便宜的供给，闸就多说一次错的价。
 - 修法：价格移到 `SupplyClaim.unitPriceCny/priceSource`；闸移到 `worker-service` 取得租约后、`adapter.submit` 前，对所有视频协议生效。
 - `grep -rn "paid-video-cost-gate\"" src --include=*.ts | grep -v test`
@@ -82,7 +82,7 @@
 - `grep -n "case \"metaso\"" src/lib/generation-core/*.ts`
 
 ## V-07 ⚑ `pixai-proxy` 在供给模组内扣退款；B 端三条同步路由不经 job（M）
-- `src/lib/pixai-proxy.ts:43` 直连 `PIXAI_BASE_URL`；同档 `:152 chargeBizRequest` → `:172` `configuredGenerationBillingAdapter().reserve`、`:195 refundBizRequest` → `:198` `.refund`——**绕过 `billing-ledger`，不留 billing_operation 列**。
+- `src/lib/generation-core/pixai-proxy.ts:43` 直连 `PIXAI_BASE_URL`；同档 `:152 chargeBizRequest` → `:172` `configuredGenerationBillingAdapter().reserve`、`:195 refundBizRequest` → `:198` `.refund`——**绕过 `billing-ledger`，不留 billing_operation 列**。
 - 呼叫者：
   - `src/app/api/v1/images/edits/route.ts:170` charge、`:178` `proxyPixai("images/edits")`、`:195` refund
   - `src/app/api/v1/upscale/route.ts:102` charge、`:110` `proxyPixai("upscale")`、`:137` refund
@@ -106,8 +106,8 @@
 - `grep -n "/api/generate-images" src/app/api/canvas/generate/route.ts`
 
 ## V-10 `/v1/images/generations` 控面关闭分支（M）
-- `src/app/api/v1/images/generations/route.ts:11` import `generateBizImage, resolveBizEndpoints`（`src/lib/biz-image-pipeline.ts:59` `buildModelQueue`、`:103` `resolveAdobe2ApiModelId`、`:124` 直连 `fetch`）
-- 同档 `:376` `reserveImageQuota`、`:446` `refundImageQuota`、`:408` `generateViaExternalChannel`（`src/lib/external-channel-adapter.ts:94`）
+- `src/app/api/v1/images/generations/route.ts:11` import `generateBizImage, resolveBizEndpoints`（`src/lib/generation-core/biz-image-pipeline.ts:59` `buildModelQueue`、`:103` `resolveAdobe2ApiModelId`、`:124` 直连 `fetch`）
+- 同档 `:376` `reserveImageQuota`、`:446` `refundImageQuota`、`:408` `generateViaExternalChannel`（`src/lib/generation-core/external-channel-adapter.ts:94`）
 - 触发条件：`!generationControlPlaneEnabled()`（`:263` 起的 `if` 之后）。**[I]** 生产控面常开，此分支实际只在控面故障时执行——正是最需要帐本的时候却没有帐本；外部渠道（`external-channels.ts`）也因此只在这条分支可用。
 - 修法：删分支，控面关闭时回 503（`:333` 已有 `control_plane_unavailable` 错误码）；外部渠道改写成 `SupplyDeclaration`（按 key 白名单路由的能力移到 scheduler）。
 - `grep -n "reserveImageQuota(\|refundImageQuota(\|generateViaExternalChannel(" src/app/api/v1/images/generations/route.ts`
@@ -120,12 +120,12 @@
 - `grep -n "buildModelQueue(\|reserveImageQuota(\|fetch(\`\${endpoint.baseURL}" src/app/api/generate-images/route.ts src/app/api/generate-videos/route.ts`
 
 ## V-12 音乐工具直连上游（L）
-- `src/lib/music-tools.ts:46-64` import `music-flowmusic`／`music-lyria`／`music-yue2`
-- `src/lib/music-tools.ts:577`、`:584`、`:585` 依序 `generateYue2Track`／`generateFlowMusicTrack`／`generateLyriaTrack`（回落链＝生产平面的「换供给」逻辑写在工具里；commit `e75a2e8e`「音乐全链回落 Lyria」）
-- 上游 `fetch`：`src/lib/music-lyria.ts:237`、`src/lib/music-yue2.ts:245`／`:376`、`src/lib/music-flowmusic.ts:175`
+- `src/lib/agent/music-tools.ts:46-64` import `music-flowmusic`／`music-lyria`／`music-yue2`
+- `src/lib/agent/music-tools.ts:577`、`:584`、`:585` 依序 `generateYue2Track`／`generateFlowMusicTrack`／`generateLyriaTrack`（回落链＝生产平面的「换供给」逻辑写在工具里；commit `e75a2e8e`「音乐全链回落 Lyria」）
+- 上游 `fetch`：`src/lib/generation-core/music-lyria.ts:237`、`src/lib/generation-core/music-yue2.ts:245`／`:376`、`src/lib/generation-core/music-flowmusic.ts:175`
 - 计费：`music-tools.ts` 与三个 `music-*.ts` 内没有 reserve/refund/billing 字样。**[H]** 音乐是否刻意免费、或在 agent 会话层另计，未查证。
 - 修法：三路音乐各成一条 `SupplyDeclaration`（`modality: "audio"`），`music_gen` 工具改 `submit()`＋等 job；回落链交给 scheduler 的 priority。依赖 planes.md §2.2 的 [H]（yue2 transcribe 是否另立 kind）。
-- `grep -n "await generate\(Yue2\|FlowMusic\|Lyria\)Track" src/lib/music-tools.ts`
+- `grep -n "await generate\(Yue2\|FlowMusic\|Lyria\)Track" src/lib/agent/music-tools.ts`
 
 ---
 
@@ -135,7 +135,7 @@
 - `/api/v1/videos/generations`：控面开走 `submitGenerationCommand`（`route.ts:232`），关则转发控面（`:172`），不自扣费。
 - `generation-core/*-upstream.ts`：无帐本／job／blob import；`openai-video-upstream.ts:271`、`:375` 提到 `persistOutputArtifact` 仅为注解。
 - `src/app/api/admin/**` 使用 `channel-registry`／`sub2api`：运维面，不属分发管道。
-- `src/app/api/{token,topup,usage,models,pricing,log/self,user/*,data/self}` 的 `makeProxy`（`src/lib/proxy.ts`）：代理 new-api 帐户 API，是帐户自助面，不是生成供给。
+- `src/app/api/{token,topup,usage,models,pricing,log/self,user/*,data/self}` 的 `makeProxy`（`src/lib/generation-core/proxy.ts`）：代理 new-api 帐户 API，是帐户自助面，不是生成供给。
 
 ## 修复顺序（必先修的 4 条，按依赖）
 

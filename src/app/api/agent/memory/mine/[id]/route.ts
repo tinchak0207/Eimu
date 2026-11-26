@@ -2,7 +2,7 @@
 // 删除是硬删（正文＋历史世代＋目录＋索引），不是撤回留证。id 不属于该用户一律 404。
 
 import { NextRequest, NextResponse } from "next/server";
-import { deleteUserMemories, updateUserMemory } from "@/lib/agent-memory-store";
+import { deleteUserMemories, updateUserMemory } from "@/lib/agent/agent-memory-store";
 import { noStore, resolveSkillOwner } from "@/app/api/skills/mine/owner";
 import { notifyGatewayMemoryChanged } from "../notify";
 import { toMineView } from "../view";

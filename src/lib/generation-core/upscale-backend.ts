@@ -26,10 +26,10 @@
  * handler 与 config；多余汇出会让 `next build` 的型别检查直接失败，2026-09-30 实锤）。
  */
 
-import { generationCoins, generationModel, imageSizeForAspectRatio } from "../generation-model-catalog";
-import { aspectRatioValue, nearestAspectRatio } from "../generation-model-catalog/resolution";
-import type { AspectRatio, UpscaleTier } from "../generation-model-catalog/types";
-import { DEFAULT_IMAGE_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "../image-model-ids.js";
+import { generationCoins, generationModel, imageSizeForAspectRatio } from "./generation-model-catalog";
+import { aspectRatioValue, nearestAspectRatio } from "./generation-model-catalog/resolution";
+import type { AspectRatio, UpscaleTier } from "./generation-model-catalog/types";
+import { DEFAULT_IMAGE_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "./image-model-ids.js";
 import {
   DURABLE_IMAGE_SIZES,
   DURABLE_TIER_SCALE,

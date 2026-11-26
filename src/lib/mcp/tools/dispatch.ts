@@ -1,4 +1,4 @@
-import { buildGenerationRequestHeaders, mcpGenerationIdempotencyKey } from "@/lib/generation-request-headers";
+import { buildGenerationRequestHeaders, mcpGenerationIdempotencyKey } from "@/lib/generation-core/generation-request-headers";
 import { DISPATCH_TIMEOUT_MS } from "./constants";
 import type { McpDispatcher } from "./types";
 

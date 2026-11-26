@@ -10,8 +10,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { markClosedForLoggedOutOwner } from "@/hooks/use-agent-chat/logged-out-start";
 import { useAuth } from "@/hooks/use-auth";
-import { getStoredUser } from "@/lib/new-api-client";
-import { AGENT_STEER_QUEUE_TTL_MS, EMPTY_AGENT_CHAT_STATE } from "@/lib/agent-chat-types";
+import { getStoredUser } from "@/lib/accounts/new-api-client";
+import { AGENT_STEER_QUEUE_TTL_MS, EMPTY_AGENT_CHAT_STATE } from "@/lib/agent/agent-chat-types";
 import {
   abortAgentSession,
   createAgentSession,
@@ -24,11 +24,11 @@ import {
   patchAgentSessionMemory,
   requestSseTicket,
   type DirectSendCapability,
-} from "@/lib/agent-chat-client";
-import { normalizeOpenCodeMessages } from "@/lib/agent-chat-history-normalize";
-import type { FrameBatcher } from "@/lib/agent-chat-frame-batch";
-import { clearPersisted, loadLegacyPersisted, loadPersisted, savePersisted, type PersistedAgentChat } from "@/lib/agent-chat-persistence";
-import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
+} from "@/lib/agent/agent-chat-client";
+import { normalizeOpenCodeMessages } from "@/lib/agent/agent-chat-history-normalize";
+import type { FrameBatcher } from "@/lib/agent/agent-chat-frame-batch";
+import { clearPersisted, loadLegacyPersisted, loadPersisted, savePersisted, type PersistedAgentChat } from "@/lib/agent/agent-chat-persistence";
+import type { AgentTranscriptItem } from "@/lib/agent/agent-chat-types";
 import { INITIAL_BACKOFF_MS, MAX_BACKOFF_MS, SAVE_THROTTLE_MS, chatReducer, isSessionReclaimed } from "./use-agent-chat/core";
 import type { ResumableAgentChat, UseAgentChatOptions, UseAgentChatReturn } from "./use-agent-chat/types";
 import { useAgentChatConnection } from "./use-agent-chat/connection";

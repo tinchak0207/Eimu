@@ -1,6 +1,6 @@
 /**
  * OpenUI 富展示示范程序（2026-10-18）——唯一真源：
- *   - tools/gen-openui-prompt.mts 把 TASK_ID 占位版写进网关提示词；
+ *   - tools/codegen/gen-openui-prompt.mts 把 TASK_ID 占位版写进网关提示词；
  *   - src/app/openui-demo 用 demo task_id 版做演示；
  *   - 单测逐条断言 repair 恒等 + 解析 0 错误。
  * `{{ID1}}`…`{{ID4}}` 为占位符，由 fillRichExample 替换。

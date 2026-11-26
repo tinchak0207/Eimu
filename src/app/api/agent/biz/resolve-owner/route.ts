@@ -12,9 +12,9 @@
 // - 鉴权失败原样回 authenticateBizApiKey 的 status/message/code。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent-user-key";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent/agent-user-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -15,8 +15,8 @@ const carouselSource = [
 ]
   .map((rel) => readFileSync(new URL(rel, import.meta.url), "utf8"))
   .join("\n");
-const plansSource = readFileSync(new URL("../lib/plans.ts", import.meta.url), "utf8");
-const mapaySource = readFileSync(new URL("../lib/mapay.ts", import.meta.url), "utf8");
+const plansSource = readFileSync(new URL("../lib/billing/plans.ts", import.meta.url), "utf8");
+const mapaySource = readFileSync(new URL("../lib/billing/mapay.ts", import.meta.url), "utf8");
 const copy = [pricingSource, carouselSource, plansSource, mapaySource].join("\n");
 
 test("pricing surfaces use coins plus GPT Image 2 equivalents instead of legacy image-count wording", () => {

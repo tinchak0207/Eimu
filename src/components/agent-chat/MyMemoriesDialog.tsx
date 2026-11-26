@@ -19,7 +19,7 @@ import {
   saveAgentSettings,
   tryAuthHeaders,
   type AgentSettings,
-} from "@/lib/agent-chat-client";
+} from "@/lib/agent/agent-chat-client";
 
 interface MemoryRow {
   id: string;

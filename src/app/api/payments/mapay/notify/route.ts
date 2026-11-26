@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FIRST_CHARGE_FALLBACK_COINS, FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
+import { FIRST_CHARGE_FALLBACK_COINS, FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/billing/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
   mapayMoneyAcceptable,
   verifyMapaySignature,
   type MapayFields,
-} from "@/lib/mapay";
-import { fulfillMapayRedemption, type MapayRedemptionPlan } from "@/lib/mapay-redemption";
-import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
-import { markMapayIntakeFulfilledViaRelay, recordMapayIntakeViaRelay, type MapayIntakeDelivery } from "@/lib/mapay-intake";
-import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
-import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
-import { parseSeatOrderParam } from "@/lib/team-seat-order";
-import { fulfillSeatOrder } from "@/lib/team-seat-fulfillment";
+} from "@/lib/billing/mapay";
+import { fulfillMapayRedemption, type MapayRedemptionPlan } from "@/lib/billing/mapay-redemption";
+import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/billing/mapay-credit";
+import { markMapayIntakeFulfilledViaRelay, recordMapayIntakeViaRelay, type MapayIntakeDelivery } from "@/lib/billing/mapay-intake";
+import { readFirstChargeEligibilityViaRelay } from "@/lib/billing/first-charge";
+import { resolveMapayOrderBinding } from "@/lib/billing/mapay-order-param";
+import { parseSeatOrderParam } from "@/lib/billing/team-seat-order";
+import { fulfillSeatOrder } from "@/lib/billing/team-seat-fulfillment";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

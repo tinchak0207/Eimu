@@ -36,7 +36,7 @@
 - [Agent助理] 闸道节点生成认得实体 tag — workflow-gw 节点提交处展开最终 prompt 并把卡参考图并进 `reference_images`（去重截 5），既有单张 reference 逐字保留；key 用呼叫端传入的使用者 key，快取键含 apiKey 且守卫在查快取之前（防跨租户共用卡参考图）｜ 证据: 7f9dbe4e
 - [Agent助理] 133 条内建 Skill 条目层（10 家族）— 电影美学 40／商业广告 27／短剧 20／特效动画 12／剧本 8／分镜 8／选角 5／UGC 5／MV 4／旅拍 4；公开列举＝builtin+recipe+template＝151，私有列举以 ownerKey 隔离 ｜ 证据: 513462a5
 - [Agent助理] 对话框斜线直呼 Skill — 输入框打 `/` 出 SkillSlashMenu（debounce 160ms＋双路 AbortController＋「我的技能」分区），选中写回输入框不自动送出 ｜ 证据: 513462a5
-- [Agent助理] 私有技能管理面 — 设置弹层内 MySkillsDialog 管理自订技能（交付形态标签收敛到 `src/lib/agent-skills/output-kinds.ts` 单真源）｜ 证据: 513462a5, 2d5dbeac
+- [Agent助理] 私有技能管理面 — 设置弹层内 MySkillsDialog 管理自订技能（交付形态标签收敛到 `src/lib/agent/agent-skills/output-kinds.ts` 单真源）｜ 证据: 513462a5, 2d5dbeac
 - [Agent助理] 思维链结算后收合 — 串流中展开、结算后自动收合成「已思考 · N 秒」一行；使用者手动点过 summary 后自动收合不再介入（reasoningTouched ref）｜ 证据: 92a2a698
 - [Agent助理] 顶栏精简为直接入口 — 常态状态文字回空串（第二行消失），资产／历史从 ⋯ 选单提出直接站在标题右侧，⋯ 选单退役换齿轮触发 `openSettings()`；reconnecting／closed／connecting 三个异常态文字保持唯一出口 ｜ 证据: 397571a2
 - [Agent助理] 顶栏改纯图示列（零文字）— 拆掉「AI 助理」h2 与星芒图标，五颗入口（资产／历史／新会话／直接生成／设置）图示即 logo；连线异常态文字不再由顶栏承担（下沉对话区）｜ 证据: c5f89542
@@ -114,23 +114,23 @@
 
 ## 非程式码能力
 
-- VPS／部署：`.vercelignore` 排除 200MB 影片产物（promo-video/out、artifacts 等）与 `promo-video/fonts/`（23MB 本机渲染输入）｜ 证据: 0651e7cd, 36ba61a2, e4c16950
-- VPS／部署：`.gitignore` 把 200MB 级影片产物（artifacts／promo-video/out）排除，让工作区回到可辨识状态 ｜ 证据: e4c16950
+- VPS／部署：`.vercelignore` 排除 200MB 影片产物（tools/promo-video/out、artifacts 等）与 `tools/promo-video/fonts/`（23MB 本机渲染输入）｜ 证据: 0651e7cd, 36ba61a2, e4c16950
+- VPS／部署：`.gitignore` 把 200MB 级影片产物（artifacts／tools/promo-video/out）排除，让工作区回到可辨识状态 ｜ 证据: e4c16950
 - VPS／部署：`deploy/vps/gateway-release.sh` 收进版控 ｜ 证据: e4c16950
 - 外部服务：new-api 管理面改走 TLS vhost `store.tinchak0207.xyz/newapi` 前缀（bare-IP 明文已 444 关闭）｜ 证据: 432ae6c8
 - 外部服务：上游 new-api 自助注册端点 `/api/user/register` 可由 RegisterEnabled 关闭；站点 OAuth 建号改走管理员 API 即为此准备 ｜ 证据: 1129196a
-- 运营流程：宣传片渲染链（`promo-video/`：audio.py、render.mjs、index.html、film.js、lib/shaders|ui|util、assets 26 素材）与三版封面（cover.html／cover-b／cover-c）；字型为本机渲染输入不入库 ｜ 证据: 36ba61a2
+- 运营流程：宣传片渲染链（`tools/promo-video/`：audio.py、render.mjs、index.html、film.js、lib/shaders|ui|util、assets 26 素材）与三版封面（cover.html／cover-b／cover-c）；字型为本机渲染输入不入库 ｜ 证据: 36ba61a2
 - 运营流程：站点展示资产进版控 — `public/showcase/cards`（768×1024 展示卡＝3D 卡堆贴图来源）、`cards-thumb`、`mascot` ｜ 证据: e4c16950
 - 运营流程：README 首屏宣传片展示（加片→双片并排→换新片只留一条全宽）｜ 证据: 8897511b, 64d404b1, 696cec9a, 6eb5e08d
 - 运营流程：宣传片片源换 1080p 分享版（1920x1080／30fps／6.76Mbps／43.2MB，faststart moov 在 mdat 前），海报重抽；代价＝未登入访客多下 33MB ｜ 证据: 47c80991
-- 运营流程：投放素材链接带渠道参数（promo-video/out/bilibili.md、wechat.md）｜ 证据: 639bd737
+- 运营流程：投放素材链接带渠道参数（tools/promo-video/out/bilibili.md、wechat.md）｜ 证据: 639bd737
 - 运营流程：通知机制**不交付**运营配套（无 seed／cron，不 create 即永远空清单，落地后系统行为与交付前等价）｜ 证据: ee89433b
 - 运营流程：SEO 交付面 — 20 条 301、sitemap 62 条真源、IndexNow 金钥档、robots 放行九个 AI 爬虫、llms.txt 页面清单 ｜ 证据: dc16ff3d, e7917b3b, d58eba66
 - 运营流程：技能库与 MCP 的页面清单同步进 sitemap 与 llms.txt ｜ 证据: eca25f27, 017cbc0b, b49c7401
 
 ## 边界与拒绝
 
-- 闸道实体解析 fail-open 硬契约 — `deploy-staging/gateway/entity-resolve.ts` 薄客户端：零 token 零 HTTP、TTL 30s、timeout 6s，任何失败回原文、永不阻断生成；warn 只印长度与 status ｜ 证据: 7f9dbe4e
+- 闸道实体解析 fail-open 硬契约 — `services/gateway/entity-resolve.ts` 薄客户端：零 token 零 HTTP、TTL 30s、timeout 6s，任何失败回原文、永不阻断生成；warn 只印长度与 status ｜ 证据: 7f9dbe4e
 - 实体解析不自动锁卡 — `mergeTokenReferencedCards` 不自动锁任何卡，锁定语义不动；`CanvasEmbed` 明确关闭注入的呼叫端（传 `{cards:[]}`）保持关闭不并入 ｜ 证据: 7f9dbe4e
 - 畸形 token 只诊断不改写 — `findMalformedEntityTokens` 只回报空名称／缺右括号／未知种类；`ENTITY_TOKEN_PATTERN` 与 `parseEntityTokens` 逐字未动，原文照留 ｜ 证据: 7f9dbe4e
 - 模板落卡有明确不标清单 — 分镜／影片／剪辑／门禁／工具卡一律不标 `emitsEntity`（免落重复卡）｜ 证据: 7f9dbe4e

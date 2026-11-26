@@ -20,14 +20,14 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
-import { getMapayConfig } from "@/lib/mapay";
+} from "@/lib/accounts/biz-key-sync";
+import { getMapayConfig } from "@/lib/billing/mapay";
 import {
   MAPAY_ORDERS_RELAY_SIGNATURE_DOMAIN,
   MapayOrdersError,
   fetchMapayOrder,
   fetchMapayOrders,
-} from "@/lib/mapay-orders";
+} from "@/lib/billing/mapay-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

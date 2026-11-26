@@ -7,7 +7,7 @@ import { ArrowLeft, Check, RotateCcw } from "lucide-react";
 import { AgentMarkdown } from "@/components/agent-chat/AgentMarkdown";
 import { AgentArtifactsProvider } from "@/components/agent-chat/agent-artifacts-context";
 import { AgentChatSendProvider } from "@/components/agent-chat/agent-chat-send-context";
-import type { AgentChatState } from "@/lib/agent-chat-types";
+import type { AgentChatState } from "@/lib/agent/agent-chat-types";
 import { fillRichExample, RICH_EXAMPLES } from "@/lib/openui/rich-examples";
 
 /**

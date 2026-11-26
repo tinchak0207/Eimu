@@ -61,7 +61,7 @@ test("计费主体只来自密钥记录，不来自请求体", () => {
 
 test("持久化的记录结构里没有明文密钥字段", () => {
   // 只看 BizApiKey 接口本体 —— 函数参数叫 rawKey 是正常的，那不落盘。
-  const types = read("src/lib/biz-api-keys.ts");
+  const types = read("src/lib/accounts/biz-api-keys.ts");
   const iface = /export interface BizApiKey \{([\s\S]*?)\n\}/.exec(types);
   assert.ok(iface, "应能定位 BizApiKey 接口");
 
@@ -80,7 +80,7 @@ test("明文密钥只在签发响应里出现一次，列表接口永不返回�
   assert.match(admin, /toPublicBizApiKey/);
   assert.doesNotMatch(admin, /data:\s*keys(?!\.map)/, "列表不得直接把原始记录发出去");
 
-  const types = read("src/lib/biz-api-keys.ts");
+  const types = read("src/lib/accounts/biz-api-keys.ts");
   assert.match(types, /Omit<BizApiKey,\s*"keyHash">/, "公开视图必须摘掉 keyHash");
 });
 
@@ -113,7 +113,7 @@ test("预留的配额按 n 张计算，不是按一张", () => {
 
 test("配额换算复用同一个常量来源", () => {
   const source = code(GENERATIONS);
-  assert.match(source, /from "@\/lib\/quota-constants"/);
+  assert.match(source, /from "@\/lib\/billing\/quota-constants"/);
   assert.doesNotMatch(source, /500_000|500000/, "不得再写一份魔数");
 });
 
@@ -218,7 +218,7 @@ test("B 端管线的预算常量与 /api/generate-images 保持一致，冷却�
   // 预算常量仍各持一份字面量（各自的循环真在用），数值必须钉死一致；
   // 冷却/熔断则升级为「同一个模块」——channel-registry 里只有一份 Map，
   // 一条管线撞到的坏端点另一条不必再撞，比数值一致更强。
-  const pipeline = read("src/lib/biz-image-pipeline.ts");
+  const pipeline = read("src/lib/generation-core/biz-image-pipeline.ts");
   const mainRoute = read("src/app/api/generate-images/route.ts");
 
   const pairs: Array<[string, string]> = [
@@ -241,15 +241,15 @@ test("B 端管线的预算常量与 /api/generate-images 保持一致，冷却�
   // 熔断同源：两个文件都必须从 channel-registry 引入同一份实现，
   // 谁在本地重新养一份 Map 谁就在制造「两条链路各自为战」的回归。
   for (const [name, source] of [["biz-image-pipeline.ts", pipeline], ["generate-images/route.ts", mainRoute]] as const) {
-    assert.match(source, /from "(?:@\/lib\/|\.\/)channel-registry"/, `${name} 必须从 channel-registry 取熔断`);
+    assert.match(source, /from "(?:@\/lib\/generation-core\/|\.\/)channel-registry"/, `${name} 必须从 channel-registry 取熔断`);
   }
-  const registry = read("src/lib/channel-registry.ts");
+  const registry = read("src/lib/generation-core/channel-registry.ts");
   assert.match(registry, /ENDPOINT_FAILURE_THRESHOLD = 2/);
   assert.match(registry, /ENDPOINT_COOLDOWN_MS = 60_000/);
 });
 
 test("B 端管线与主链路同源取队列，而不是自己另写一套", () => {
-  const pipeline = code("src/lib/biz-image-pipeline.ts");
+  const pipeline = code("src/lib/generation-core/biz-image-pipeline.ts");
   // buildModelQueue 是唯一队列入口（含 /admin overrides）；
   // 直接调 buildGatewayEndpointsWithPools 会绕过 admin 的启停与优先级覆写。
   assert.match(pipeline, /buildModelQueue/, "必须与 /admin 路由调度面板同源");
@@ -273,7 +273,7 @@ test("/v1 对外路径通过重写指向 /api/v1，客户填的 Base URL 不带 
   assert.match(config, /destination:\s*"\/api\/v1\/:path\*"/);
 
   // 文档里给客户的 Base URL 必须与重写规则一致
-  const doc = read("docs/biz-api.md");
+  const doc = read("docs/runbooks/biz-api.md");
   assert.match(doc, /https:\/\/eimu\.dev\/v1/);
   assert.doesNotMatch(doc, /eimu\.dev\/api\/v1/, "对外文档不应暴露 /api/v1");
 });
@@ -347,7 +347,7 @@ test("开户端点要求管理员会话，且不把上游凭证发给客户端",
 
   // 上游管理凭证只能留在服务端。
   assert.doesNotMatch(source, /GATEWAY_ADMIN_ACCESS_TOKEN/, "路由不该直接接触凭证，交给 gateway-admin");
-  const admin = code("src/lib/gateway-admin.ts");
+  const admin = code("src/lib/accounts/gateway-admin.ts");
   assert.doesNotMatch(admin, /"use client"/, "gateway-admin 必须是服务端模块");
 });
 
@@ -358,26 +358,26 @@ test("开户对额度与用户名都有上限和白名单，防手滑多打一�
 });
 
 test("开户是幂等的：同名账户复用而不是重复创建", () => {
-  const admin = code("src/lib/gateway-admin.ts");
+  const admin = code("src/lib/accounts/gateway-admin.ts");
   assert.match(admin, /findGatewayUserByUsername/);
   assert.match(admin, /if \(existing\)/, "已存在时应复用");
 });
 
 test("查用户名做精确比对，避免前缀误命中", () => {
   // New API 的 search 只做关键词匹配，`biz-a` 会命中 `biz-abc`。
-  const admin = code("src/lib/gateway-admin.ts");
+  const admin = code("src/lib/accounts/gateway-admin.ts");
   assert.match(admin, /items\.find\(\(user\) => user\.username === username\)/);
 });
 
 test("额度调整复用生产扣费同一个上游端点与参数", () => {
-  const admin = code("src/lib/gateway-admin.ts");
-  const billing = code("src/lib/image-billing.ts");
+  const admin = code("src/lib/accounts/gateway-admin.ts");
+  const billing = code("src/lib/billing/image-billing.ts");
   for (const source of [admin, billing]) {
     assert.match(source, /\/api\/user\/manage/);
     assert.match(source, /action:\s*"add_quota"/);
   }
   // 换算常量必须来自同一处
-  assert.match(admin, /from "\.\/quota-constants"/);
+  assert.match(admin, /from "(?:@\/lib\/billing|\.\.\/billing)\/quota-constants"/);
 });
 
 test("签发界面在绑定前会显示计费账户余额", () => {
@@ -408,7 +408,7 @@ test("开户用的字段长度限制与上游 New API 的 validate 标签一致"
 
   assert.ok(limits.Username && limits.Password && limits.DisplayName, "应能从上游源码解析出长度限制");
 
-  const admin = read("src/lib/gateway-admin.ts");
+  const admin = read("src/lib/accounts/gateway-admin.ts");
   // 用字符串精确比对而不是拼正则：模板字面量里的 `\b` 会被解析成退格符而不是词边界，
   // 这个坑本身就让这条测试先假绿了一次。
   assert.ok(

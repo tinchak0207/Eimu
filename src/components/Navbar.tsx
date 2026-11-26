@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, History, KeyRound, LogOut, Users } from "lucide-react";
+import { BookOpen, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -14,10 +14,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { SplitLoginButton } from "@/components/SplitLoginButton";
 import { useAuth } from "@/hooks/use-auth";
-import { getStoredToken } from "@/lib/new-api-client";
+import { getStoredToken } from "@/lib/accounts/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
-import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/accounts/github-login";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 import { WindowControls } from "@/components/WindowControls";
 import { ShellUpdatePrompt } from "@/components/ShellUpdatePrompt";
@@ -439,27 +439,18 @@ export default function Navbar({ className }: NavbarProps) {
                     导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
-                {/* Nav links — icons only, text stays hidden for screen readers.
-                    「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
-                <Link
-                  href="/history"
-                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
-                  aria-label="历史"
-                >
-                  <History className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">历史</span>
-                </Link>
-                {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
-                    AI 助理是首页卡片上的一个 toggle，不是一个去处。
-                    导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
+                {/* 作品库／对话历史／资产已并入助理面板左上角「资料库」按钮（2026-11-25 暴君裁定），header 不再单设入口；文档独立。 */}
                 <Link
                   href="/docs"
                   className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex sm:h-9 sm:w-8 ${FLAT_CHROME}`}
                   aria-label="文档"
+                  title="文档"
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="sr-only">文档</span>
                 </Link>
+                {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
+                    AI 助理是首页卡片上的一个 toggle，不是一个去处。 */}
 
                 {/* 钥匙（2026-08-27 暴君裁定）：专属小菜单只放 key 相关动作。 */}
                 <DropdownMenu>

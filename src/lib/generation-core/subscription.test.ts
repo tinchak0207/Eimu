@@ -11,8 +11,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import type { GatewayAdminUser, GatewayRedemption } from "@/lib/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import type { GatewayAdminUser, GatewayRedemption } from "@/lib/accounts/gateway-admin";
 import type { GenerationSql } from "./database.ts";
 import {
   computeAccountBalance,
@@ -44,7 +44,9 @@ import { grantSubscriptionTermFromRedemption, ingestSubscriptionRedemptions, rea
 import { checkQuotaAvailable, enforceQuotaGate, SURGERY_QUOTA_PRECHECK_ENV } from "./quota-precheck.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const T0 = Date.UTC(2026, 8, 23, 0, 0, 0); // 开通时刻（假时钟起点）
+// 开通时刻（假时钟起点）：取「今天 UTC 零点」。写路径用真实 Date.now() 判期次是否过期，
+// 固定日期会随时间推移让 30 天期自然过期，测试在 2026-10-23 之后全红（时间炸弹，非生产回归）。
+const T0 = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000;
 const CONTROL_PLANE_ENV = {
   GENERATION_DATABASE_URL: "postgres://fake:fake@127.0.0.1:1/fake",
   GENERATION_CONTROL_PLANE_ENABLED: "true",
@@ -977,7 +979,7 @@ test("发码端：产生的码名带 SKU 标记，且先搜后建（重复履约
     );
   }) as unknown as typeof fetch;
 
-  const { fulfillSubscriptionRedemption } = await import("@/lib/subscription-redemption");
+  const { fulfillSubscriptionRedemption } = await import("@/lib/billing/subscription-redemption");
   const first = await withEnv({}, () =>
     fulfillSubscriptionRedemption({ plan: { sku: "pro-monthly", orderId: "ord-7", quota: 750_000_000 } }, adminEnv, fetcher),
   );

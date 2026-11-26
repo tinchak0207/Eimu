@@ -11,7 +11,7 @@
  *      .source_scene_code`），本站无场次编码表，场景归属一律走 Group 节点的 `storyboardScene.sceneName`。
  *   2. AID 用 DB 表承载（`aid_storyboard` + `script_params` JSON）；本站**不建表、不建 migration**，
  *      改用既有 `CanvasNode.metadata`（Group 节点 = 场景外壳，子节点 = 一镜一 shot）——
- *      PRD `docs/symdiff-aid-swallow-prd.md` §刀 2「白名单改写」。
+ *      PRD `docs/proposals/symdiff-aid-swallow-prd.md` §刀 2「白名单改写」。
  *   3. AID 的 `image_prompt` / `video_prompt*` / `final_*_id` 不在 21 栏内，属**成片阶段**产物
  *      （画师 agent / 视觉导演 / 后端选片），本站由后续刀（分镜→成片）补，本档不冒充。
  *

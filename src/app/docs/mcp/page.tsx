@@ -52,7 +52,7 @@ const REMOTE_MCP_CONFIG = `{
 const MCP_CONFIG = `  "mcpServers": {
     "image-studio": {
       "command": "node",
-      "args": ["/absolute/path/to/你的仓库副本/mcp-server/dist/index.js"],
+      "args": ["/absolute/path/to/你的仓库副本/services/mcp/dist/index.js"],
       "env": {
         "IMAGE_STUDIO_API_BASE": "https://eimu.dev/api/v1",
         "IMAGE_STUDIO_BIZ_KEY": "sk-biz-你的密钥"
@@ -62,7 +62,7 @@ const MCP_CONFIG = `  "mcpServers": {
 
 // 公开源码中的本机 stdio server；与官方远端 MCP 的工具范围不同。
 const MCP_BUILD = `git clone https://github.com/tinchak0207/Eimu.git
-cd Eimu/mcp-server
+cd Eimu/services/mcp
 npm install
 npm run build`;
 
@@ -137,14 +137,14 @@ export default function DocsMcpPage() {
           进阶：本机自架 MCP server（公开源码）
         </h3>
         <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
-          本机 stdio（仓库 mcp-server/）不是对外主路径；远端 HTTP MCP 才是。本机路线要自己跑一个 stdio MCP server：
-          <a href="https://github.com/tinchak0207/Eimu/tree/main/mcp-server" className="font-semibold text-ios-blue lg-transition hover:underline">源码已在 GitHub 公开</a>
+          本机 stdio（仓库 services/mcp/）不是对外主路径；远端 HTTP MCP 才是。本机路线要自己跑一个 stdio MCP server：
+          <a href="https://github.com/tinchak0207/Eimu/tree/main/services/mcp" className="font-semibold text-ios-blue lg-transition hover:underline">源码已在 GitHub 公开</a>
           。这里只启动本机 MCP 客户端适配层，仍调用官方生成 API 并使用你的密钥计费；不等于自建完整生成服务。
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <KeyCard icon={TerminalSquare} title="本机自架：构建与配置">
             <p>
-              拿到密钥后，克隆公开源码并构建 <InlineCode>mcp-server/</InlineCode>：
+              拿到密钥后，克隆公开源码并构建 <InlineCode>services/mcp/</InlineCode>：
             </p>
             <div className="mt-3">
               <CodeBlock>{MCP_BUILD}</CodeBlock>

@@ -65,7 +65,7 @@ const {
   AgentBackToBottomButton: (props: { scrolledUp: boolean; onClick: () => void }) => React.ReactElement;
   AgentChatPanel: React.ComponentType<Record<string, unknown>>;
 };
-import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent-chat-reducer";
+import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent/agent-chat-reducer";
 import {
   EMPTY_AGENT_CHAT_STATE,
   type AgentAssistantTextItem,
@@ -74,7 +74,7 @@ import {
   type AgentSubagentItem,
   type AgentSubagentReportItem,
   type AgentVideoItem,
-} from "../../lib/agent-chat-types";
+} from "../../lib/agent/agent-chat-types";
 
 const root = process.cwd();
 
@@ -143,9 +143,9 @@ const agentRoute = read("src/app/agent/page.tsx");
 // <1000 行重构把传输层拆成 src/lib/agent-chat-client/{auth,session,settings,transport,types}.ts，
 // 顶层档只剩 re-export。源码断言必须读到子模组本体，否则「barrel 全绿」是假绿。
 const agentChatClientSource = [
-  "src/lib/agent-chat-client.ts",
+  "src/lib/agent/agent-chat-client.ts",
   ...["auth", "session", "settings", "transport", "types"].map(
-    (m) => `src/lib/agent-chat-client/${m}.ts`,
+    (m) => `src/lib/agent/agent-chat-client/${m}.ts`,
   ),
 ]
   .map((rel) => read(rel))
@@ -222,7 +222,7 @@ test("composer is disabled only when the panel says so, and trims before sending
   // 空消息必须被拒绝：发送前 trim。
   assert.match(composer, /\.trim\(\)/);
   // 决策卡在场的新提示：composer 上缘 2px 蓝提示条（不锁输入的替代回馈）。
-  assert.match(panel, /decisionPending \? \(/);
+  assert.match(panel, /decisionPending && !viewingLive \? \(/);
   assert.match(panel, /h-\[2px\] rounded-full bg-ios-blue\/70/);
 });
 
@@ -279,10 +279,9 @@ test("video action buttons are disabled when no callback is wired", () => {
   );
   // 影片查看器不得抄图片的捏合/滚轮缩放手势（对播放中的影片无语义）。
   assert.doesNotMatch(videoCard, /pinch|wheel|clampPan/);
-  // 查看器仍走图片 Lightbox 的关闭三件套：Esc + history 弹层 + 背景点击。
-  assert.match(videoCard, /pushState\(\{ agentVideoLightbox: true \}, ""\)/);
-  assert.match(videoCard, /event\.key === "Escape"/);
-  assert.match(videoCard, /addEventListener\("popstate"/);
+  // 全屏查看器已并入赏阅（Viewer）：Esc / 返回键 / 背景点击由壳承担，卡片只挂 <Viewer> 不自带关闭逻辑。
+  assert.match(videoCard, /<Viewer\b/);
+  assert.doesNotMatch(videoCard, /pushState|addEventListener\("popstate"/);
   // transcript 把 video 条目渲染成 AgentVideoCard，动作走 videoActions。
   assert.match(transcript, /case "video":/);
   assert.match(transcript, /<AgentVideoCard item=\{item\} \{\.\.\.videoActions\} \/>/);
@@ -305,11 +304,8 @@ test("audio card plays via native <audio> and keeps the disabled action contract
     /audioActions: AgentTranscriptProps\["audioActions"\] = \{\s*onSaveToLibrary,/,
     "音频存图库必须在 audioActions 接线（解禁的关键）",
   );
-  // 播放面：原生 <audio controls preload="metadata">，src 照旧绑 item.url。
-  assert.match(audioCard, /<audio/);
-  assert.match(audioCard, /controls/);
-  assert.match(audioCard, /preload="metadata"/);
-  assert.match(audioCard, /src=\{item\.url\}/);
+  // 播放面：已并入赏阅（Viewer）的音频面（AudioSurface 承担原生 <audio>），卡片只挂 <Viewer>。
+  assert.match(audioCard, /<Viewer\b/);
   // 音频卡不得残留影片专属资产（全屏灯箱 / history 弹层 / 捏合缩放）。
   assert.doesNotMatch(audioCard, /createPortal|pushState|pinch|wheel|clampPan/);
   // transcript 把 audio 条目渲染成 AgentAudioCard，动作走 audioActions。
@@ -325,8 +321,8 @@ test("audio card plays via native <audio> and keeps the disabled action contract
     mediaKind: "music",
   };
   const markup = renderToStaticMarkup(createElement(AgentAudioCard, { item: rendered }));
-  assert.match(markup, /<audio/, "SSR 渲染必须真的产出 <audio> 元素");
-  assert.match(markup, /src="https:\/\/example\.invalid\/audio\/1\.m4a"/, "播放源绑定条目 url");
+  // 播放面已并入赏阅（Viewer）：SSR 只产出音频面占位（data-viewer-kind="audio"，客户端懒载入后才有 <audio>）。
+  assert.match(markup, /data-viewer-kind="audio"/, "SSR 渲染必须产出赏阅音频面容器");
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
@@ -399,7 +395,7 @@ test("closed session surfaces its reason", () => {
 test("empty open session shows a prompt to start, not a blank void", () => {
   // 第二轮就绪优化刀A：空态不等 SSE open——idle/connecting/open 都显示，
   // 只排除 reconnecting/closed（没坏就先给欢迎语）。
-  assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
+  assert.match(panel, /items\.length === 0 && !viewingLive && connection !== "reconnecting" && connection !== "closed"/);
   // 2026-09-20 空态重构：邀问语「想做点什么？」，旧「和智能体聊聊」连同 hint
   // （说一句话，它自动选好模型、风格和比例）一起下线。
   assert.match(panel, /想做点什么？/);
@@ -455,7 +451,7 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /if \(P\.initialSessionId\) return;/);
   // 存档信息收进一颗默认折起来的按钮，想看的人自己点。
   assert.match(surface, /对话历史/);
-  assert.match(surface, /aria-expanded=\{showHistory\}/);
+  assert.match(surface, /aria-expanded=\{showHistory \|\| showAssets\}/);
   // 2026-08-21（第三版）：Header 重排——拖拽手柄 + 「AI 助理」+ 呼吸绿点 +
   // 右侧图标组（历史记录/开新对话/收起）。对话流里不再有散落的「对话历史」
   // 文字链接和常驻「已连接」状态行；开新对话留在历史里可切回（留旧开新）。
@@ -484,12 +480,12 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.doesNotMatch(surfaceCode, /随时待命/, "常态描述不得回魂");
   assert.doesNotMatch(surfaceCode, /正在重新连接…|会话已结束|连接中…/, "状态文案不再挂在顶栏");
   assert.doesNotMatch(surfaceCode, /更多选项/, "⋯ 选单已退役");
-  // 五颗直接入口：资产／历史在左（原标题位），新会话／直接生成／设置在右。
-  assert.match(surface, /aria-label="我的资产"/);
+  // 2026-11-25 暴君裁定：作品／对话历史／资产并入左上角「资料库」单钮；新会话／临时对话／设置在右。
+  assert.match(surface, /aria-label="资料库"/);
+  assert.match(surface, /title="资料库：对话 · 作品 · 资产"/);
   assert.match(surface, /aria-label="对话历史"/);
-  assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
-  assert.match(surface, /aria-label="直接生成"/);
+  assert.match(surface, /aria-label="临时对话"/);
   assert.match(surface, /aria-label="设置"/);
   assert.match(surface, /onClick=\{openSettings\}/);
   // 右簇要自己顶到最右——中间已没有 flex-1 的标题块可以撑。
@@ -920,13 +916,13 @@ test("the agent transport sends token and user id together, never half", () => {
   assert.doesNotMatch(code, /headers: \{ Authorization/);
 
   // 服务端那侧的前提，一起钉住：少了 id 就是 401，不是 500 也不是放行。
-  const billing = readCode(read("src/lib/image-billing.ts"));
+  const billing = readCode(read("src/lib/billing/image-billing.ts"));
   assert.match(billing, /headers\.get\("x-user-id"\) \?\? headers\.get\("New-Api-User"\)/);
   assert.match(billing, /if \(!auth \|\| !userId\) \{\s*return \{ ok: false, status: 401/);
 });
 
 test("a 401 says which kind of 401 it is", () => {
-  const guard = readCode(read("src/lib/agent-session-guard.ts"));
+  const guard = readCode(read("src/lib/agent/agent-session-guard.ts"));
 
   // 没送凭证 → 自己的 code，不跟「凭证被拒」共用一句话。
   assert.match(guard, /code: "agent_not_signed_in"/);
@@ -1350,9 +1346,9 @@ test("subagent bar：running 逐字滑窗（append-only + 立即钉右缘）、�
 
 // ───────────────────── 资产入库：recipe 分支（E1 白名单） ────────────────
 
-import { buildChatSaveItem } from "../../lib/agent-chat-asset-builders";
-import { normalizeAssetPack } from "../../lib/asset-pack-store";
-import type { AgentImageItem } from "../../lib/agent-chat-types";
+import { buildChatSaveItem } from "../../lib/agent/agent-chat-asset-builders";
+import { normalizeAssetPack } from "../../lib/media/asset-pack-store";
+import type { AgentImageItem } from "../../lib/agent/agent-chat-types";
 
 function imageItem(overrides: Partial<AgentImageItem>): AgentImageItem {
   return {

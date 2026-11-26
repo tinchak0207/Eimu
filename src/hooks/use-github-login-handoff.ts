@@ -10,7 +10,7 @@ import {
   isElectronShell,
   isStandalonePwa,
   type HandoffProvider,
-} from "@/lib/github-login";
+} from "@/lib/accounts/github-login";
 
 export function useGithubLoginHandoff(): {
   handoffUrl: string | null;

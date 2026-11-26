@@ -11,7 +11,7 @@
 
 // 与仓库其余测试一致走 node:test（npm test = tsx --test）；vitest.config.mts 开了
 // globals，这里以 globalThis.* 优先、fallback node:test.*，让同一份测试在两种
-// 执行器下都能注册（范式抄 src/lib/video-frames.test.ts）。
+// 执行器下都能注册（范式抄 src/lib/media/video-frames.test.ts）。
 
 import assert from "node:assert/strict";
 import * as nodeTest from "node:test";
@@ -39,7 +39,7 @@ import {
   __resetNotificationStoreForTests,
   createAnnouncement,
   createNotification,
-} from "../../../lib/notification-store";
+} from "../../../lib/accounts/notification-store";
 
 /** 假网关的令牌 → 用户映射。 */
 const TOKENS: Record<string, { id: number; username: string }> = {

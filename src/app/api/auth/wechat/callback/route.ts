@@ -4,7 +4,7 @@ import {
   getWechatLoginState,
   loginWechatPeer,
   verifyWechatCallbackSecret,
-} from "@/lib/wechat-login";
+} from "@/lib/accounts/wechat-login";
 
 export const preferredRegion = "sfo1";
 

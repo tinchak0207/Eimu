@@ -1,27 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
-import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
+import { readBearerToken, isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
 import {
   authenticateBizApiKey,
   flushBizApiKeyUsage,
   recordBizApiKeyUsage,
-} from "@/lib/biz-api-key-store";
-import { generateBizImage, resolveBizEndpoints } from "@/lib/biz-image-pipeline";
-import { refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
-import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
-import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/provider-config";
-import { aspectRatioFromImageSize, resolveGenerationModelId, resolveSubmitResolution } from "@/lib/generation-model-catalog";
+} from "@/lib/accounts/biz-api-key-store";
+import { generateBizImage, resolveBizEndpoints } from "@/lib/generation-core/biz-image-pipeline";
+import { refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
+import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/generation-core/provider-config";
+import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/generation-core/provider-config";
+import { aspectRatioFromImageSize, resolveGenerationModelId, resolveSubmitResolution } from "@/lib/generation-core/generation-model-catalog";
 import { DURABLE_IMAGE_SIZES } from "@/lib/generation-core/durable-image-sizes";
-import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
-import { listCharacterCards } from "@/lib/character-card-store";
+import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/generation-core/pixai-controlnets";
+import { listCharacterCards } from "@/lib/media/character-card-store";
 import {
   EditInputError,
   generationWorkflowField,
   planBizGenerationInput,
   type BizGenerationInputPlan,
-} from "@/lib/biz-image-references";
+} from "@/lib/generation-core/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
@@ -30,11 +30,11 @@ import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { syncModelPricing } from "@/lib/pricing-runtime";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
-import { getRuntimeExternalChannelDocument } from "@/lib/external-channels-store";
-import { resolveExternalChannelForKey } from "@/lib/external-channels";
-import { generateViaExternalChannel } from "@/lib/external-channel-adapter";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
+import { getRuntimeExternalChannelDocument } from "@/lib/generation-core/external-channels-store";
+import { resolveExternalChannelForKey } from "@/lib/generation-core/external-channels";
+import { generateViaExternalChannel } from "@/lib/generation-core/external-channel-adapter";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";

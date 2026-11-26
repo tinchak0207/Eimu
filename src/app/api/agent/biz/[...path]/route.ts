@@ -14,11 +14,11 @@
 // - 网关的 404（session not found，防枚举语义）原样透传，不改写、不吞掉。
 
 import { NextRequest, NextResponse } from "next/server";
-import { agentGatewayOrigin } from "@/lib/agent-gateway";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent-user-key";
-import { sanitizeUpstreamBody } from "@/lib/upstream-sanitizer";
+import { agentGatewayOrigin } from "@/lib/agent/agent-gateway";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent/agent-user-key";
+import { sanitizeUpstreamBody } from "@/lib/generation-core/upstream-sanitizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

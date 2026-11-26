@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { BizApiKey } from "@/lib/biz-api-keys";
+import type { BizApiKey } from "@/lib/accounts/biz-api-keys";
 import { listCompatibleImageModelIds, openAICompatModelList, resolveCompatibleImageModelId } from "./models";
 
 function keyWith(allowedModels: string[]): BizApiKey {

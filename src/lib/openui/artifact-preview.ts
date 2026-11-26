@@ -7,8 +7,8 @@
  * 与媒体卡「下载」同一条通道）；仍失败就不显示。
  * 结果按 URL 缓存在内存，同一首歌多处渲染只请求一次。
  */
-import { stationAuthHeaders } from "@/lib/agent-image-share";
-import { LYRIC_PLAYER_BASE_URL } from "@/lib/lyric-player-url";
+import { stationAuthHeaders } from "@/lib/agent/agent-image-share";
+import { LYRIC_PLAYER_BASE_URL } from "@/lib/media/lyric-player-url";
 
 /** 先直连（主机允许跨域时最快），失败再经同源代理。 */
 async function fetchReadable(url: string, init?: RequestInit): Promise<Response | null> {

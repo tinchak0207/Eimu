@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { setStoredToken, type NewApiUser } from "@/lib/new-api-client";
+import { setStoredToken, type NewApiUser } from "@/lib/accounts/new-api-client";
 
 /**
  * 微信「扫码即登入」（2026-09-30 暴君裁定：取消验证码，检测到扫码的用户直接登入）。

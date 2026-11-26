@@ -13,8 +13,8 @@ import {
   setHistorySession,
   subscribeHistoryStore,
   toggleHistoryStar,
-} from "@/lib/history-client-store";
-import type { HistoryQuery } from "@/lib/history-types";
+} from "@/lib/media/history-client-store";
+import type { HistoryQuery } from "@/lib/media/history-types";
 
 /**
  * 订阅共享的历史 store。

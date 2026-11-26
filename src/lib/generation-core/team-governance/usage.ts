@@ -1,4 +1,4 @@
-import type { fetchGatewayUser } from "@/lib/gateway-admin";
+import type { fetchGatewayUser } from "@/lib/accounts/gateway-admin";
 
 import { readAccountLedger, type LedgerEntry } from "../account-ledger";
 import type { GenerationSql } from "../database";

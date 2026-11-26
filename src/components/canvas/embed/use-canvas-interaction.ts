@@ -15,7 +15,7 @@ import {
   type Scene3dCardMetadata,
 } from "@/lib/canvas/types";
 import { authHeaders } from "@/lib/canvas/client";
-import { DirectUploadError, uploadDirect } from "@/lib/direct-upload-client";
+import { DirectUploadError, uploadDirect } from "@/lib/media/direct-upload-client";
 import {
   MAX_SCENE_3D_BYTES,
   SCENE_3D_MAGIC_BYTES,
@@ -33,9 +33,9 @@ import {
   type AlignMode,
   type WorldRect,
 } from "@/lib/canvas/interaction";
-import { toReferenceImageRole } from "@/lib/image-types";
-import type { ReferenceImageRole } from "@/lib/image-types";
-import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/character-cards";
+import { toReferenceImageRole } from "@/lib/media/image-types";
+import type { ReferenceImageRole } from "@/lib/media/image-types";
+import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/media/character-cards";
 import {
   IMPORT_STAGGER,
   fileToDataUrl,

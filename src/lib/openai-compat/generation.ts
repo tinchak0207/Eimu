@@ -10,13 +10,13 @@
 //   POST /api/v1/images/generations  → 202 { id, status:"queued", … }
 //   GET  /api/v1/images/{id}         → { status, data:[{url,mimeType,…}] }（succeeded 才有 data）
 //
-// b64_json 也复用同一条交付 URL：先问既有取件后端（`src/lib/blob-backend.ts` 的
+// b64_json 也复用同一条交付 URL：先问既有取件后端（`src/lib/media/blob-backend.ts` 的
 // `get()`，Vercel Blob 或 VPS blob adapter），取不到再直接 HTTP 取——不另造第二套储存。
 //
 // 等待上限：见 `MAX_WAIT_MS`。超时不取消任务（任务仍在控制面后台跑），由呼叫端回 504
 // 并把 task id 交给客户。
-import { get as blobGet } from "@/lib/blob-backend";
-import { sanitizeUpstreamMessage } from "@/lib/upstream-sanitizer";
+import { get as blobGet } from "@/lib/media/blob-backend";
+import { sanitizeUpstreamMessage } from "@/lib/generation-core/upstream-sanitizer";
 import { type OpenAICompatErrorType, type OpenAIErrorFields, readUpstreamError } from "./errors";
 
 /** 站内 durable 提交入口（控制面代理路径）。 */
@@ -37,7 +37,7 @@ export function taskPath(taskId: string): string {
  * 得 240s 等待上限。超过＝回 504，任务继续在后台跑。
  *
  * **这条路由跑在哪里决定了 240s 是否真的可用**：本专案的 Vercel 是 Hobby
- * （`docs/ARCHITECTURE.md` 记「Hobby 限每日一次」），Hobby 的函数硬上限是 60s——
+ * （`docs/presentation/architecture/overview.md` 记「Hobby 限每日一次」），Hobby 的函数硬上限是 60s——
  * `maxDuration=300` 会被平台夹到 60s，等待中的函数直接硬杀（连 504 都送不出去）。
  * 因此 `/openai/v1/*` 的目标承载是**控制面**（VPS 上的 standalone node server，无函数
  * 时长概念，且持有 GENERATION_DATABASE_URL 让熔断闸真的生效）：加一条

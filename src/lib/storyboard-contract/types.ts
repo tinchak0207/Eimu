@@ -1,6 +1,6 @@
-import type { ApprovalState } from "../character-cards";
-import type { AgentInteractionMode } from "../agent-chat-client";
-import type { AssetScope, AssetShareRecord } from "../asset-scope";
+import type { ApprovalState } from "../media/character-cards";
+import type { AgentInteractionMode } from "../agent/agent-chat-client";
+import type { AssetScope, AssetShareRecord } from "../media/asset-scope";
 
 /**
  * 21 栏名称，**顺序即 AID 契约顺序**（逐字取自 `doc/提示词开发指南.md` §分镜脚本 输出栏位表）。
@@ -265,7 +265,7 @@ export interface StoryboardQcShotNodeMetadata {
  *
  * - `production`：呼叫端已有的成片阶段栏位（最高优先，覆盖一切推导）
  * - `cards`：卡实体清单（唯一真源 = `character-card-store.listCharacterCards`，
- *   `src/lib/character-card-store.ts:122`）。**只用于名称→id 解析**，不背书卡的存在性判定
+ *   `src/lib/media/character-card-store.ts:122`）。**只用于名称→id 解析**，不背书卡的存在性判定
  * - `shotMetadata`：每镜节点 metadata（键 = `shotNumber`）。用两族栏位：
  *   `size` 一栏推 `aspectRatio`（③）；`characterCardIds`/`sceneCardIds`/`propCardIds` 三栏推
  *   同名成片栏位（⑤，**只在 `production` 与 `referenceAssets` 都没供给时才生效**）；
@@ -280,7 +280,7 @@ export interface StoryboardQcContext {
   lockedSceneCardIds?: readonly string[];
   segmentDurationSeconds?: number;
   /**
-   * 互动档位（型别真源 = `AgentInteractionMode`，`src/lib/agent-chat-client.ts:749`）。
+   * 互动档位（型别真源 = `AgentInteractionMode`，`src/lib/agent/agent-chat-client.ts:749`）。
    * **只有 `"collaborate"` 会让批准闸（第 ⑥ 条）生效**；未给 = `preset`/`auto` 待遇 =
    * 既有行为逐位不变（决策 2：全自动档零改动、不停不阻塞＝护城河）。
    */

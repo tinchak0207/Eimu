@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
+import { readBearerToken } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
 import { clampPagination } from "@/lib/generation-core/status-query";
 import {
   countMasterArtifacts,

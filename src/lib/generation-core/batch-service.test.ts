@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QUOTA_PER_COIN } from "../quota-constants";
-import { imageGenerationCoins } from "../provider-config";
-import { generationCoins } from "../generation-model-catalog";
-import type { BizApiKey } from "../biz-api-keys";
+import { QUOTA_PER_COIN } from "../billing/quota-constants";
+import { imageGenerationCoins } from "./provider-config";
+import { generationCoins } from "./generation-model-catalog";
+import type { BizApiKey } from "../accounts/biz-api-keys";
 import {
   batchItemIdempotencyKey,
   batchRequestHash,

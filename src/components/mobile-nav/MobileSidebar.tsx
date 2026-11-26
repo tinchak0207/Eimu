@@ -32,25 +32,24 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BadgeDollarSign,
+  Clapperboard,
   History,
-  Images,
   Menu,
   Search,
   Settings,
-  SlidersHorizontal,
   SquarePen,
   X,
 } from "lucide-react";
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
-import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
-import { loadPersisted } from "@/lib/agent-chat-persistence";
-import { getCurrentAgentSession } from "@/lib/agent-current-session";
+import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent/agent-chat-client";
+import { loadPersisted } from "@/lib/agent/agent-chat-persistence";
+import { getCurrentAgentSession } from "@/lib/agent/agent-current-session";
 import {
   requestAgentSurfaceAction,
   type AgentSurfaceAction,
-} from "@/lib/agent-surface-actions";
+} from "@/lib/agent/agent-surface-actions";
 import { cn } from "@/lib/utils";
 import "./mobile-sidebar.css";
 
@@ -142,9 +141,7 @@ export interface MobileSidebarNavItem {
  *   定价     /pricing      — src/app/pricing/page.tsx；纯连结
  */
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
-  { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
-  { href: "/history", label: "生成历史", icon: History },
-  { href: "/?agent=1", label: "我的资产", icon: Images, action: "assets" },
+  { href: "/works", label: "作品库", icon: Clapperboard },
   { href: "/pricing", label: "定价", icon: BadgeDollarSign },
 ];
 

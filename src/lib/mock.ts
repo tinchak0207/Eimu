@@ -4,7 +4,7 @@
  * Activated when ENABLE_MOCK_MODE=true in .env.local
  */
 
-import type { NewApiUser } from "./new-api-client";
+import type { NewApiUser } from "./accounts/new-api-client";
 
 export const MOCK_MODE = process.env.ENABLE_MOCK_MODE === "true";
 

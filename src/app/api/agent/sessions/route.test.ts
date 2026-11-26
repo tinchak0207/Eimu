@@ -1,7 +1,7 @@
 // REQ-B2-2 agent 资产包注入闸的接线守门件（**源码层变更探针，不计入「已验证」**，口径见 TG-02）。
 //
 // 为何只能走源码层：本路由用 resolveAgentCaller（要打网关验身分），离线测不起来。
-// 真正的**行为**断言在 `src/lib/asset-library.test.ts`（isAssetUsable 逐条实测：
+// 真正的**行为**断言在 `src/lib/media/asset-library.test.ts`（isAssetUsable 逐条实测：
 // 跨 project／无项目上下文／跨 owner 一律不可用；个人包零回归）。本档只钉住
 // 「getActiveAssetPack 的结果确实先过 isAssetUsable 才注入」——防接线被无声拆掉。
 import { test } from "node:test";

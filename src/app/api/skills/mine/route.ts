@@ -21,8 +21,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { listMySkills, registerUserSkillSource } from "@/lib/agent-skills/registry";
-import { saveMySkill, userSkillLoader, type UserSkillDraft } from "@/lib/agent-skills/user-skill";
+import { listMySkills, registerUserSkillSource } from "@/lib/agent/agent-skills/registry";
+import { saveMySkill, userSkillLoader, type UserSkillDraft } from "@/lib/agent/agent-skills/user-skill";
 import { noStore, resolveSkillOwner } from "./owner";
 
 export const runtime = "nodejs";

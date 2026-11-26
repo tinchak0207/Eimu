@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { normalizeChannelOverrides } from "../../../../lib/channel-overrides.ts";
-import { overridableChannelIds } from "../../../../lib/channel-registry.ts";
+import { normalizeChannelOverrides } from "../../../../lib/generation-core/channel-overrides.ts";
+import { overridableChannelIds } from "../../../../lib/generation-core/channel-registry.ts";
 
 const root = process.cwd();
 
@@ -45,7 +45,7 @@ test("channels route derives channels and queues from the shared registry", () =
 
   // Same-source invariant: what /admin displays must come from the exact functions
   // production routing uses, fed with one shared pools+overrides read.
-  assert.match(code, /from "@\/lib\/channel-registry"/);
+  assert.match(code, /from "@\/lib\/generation-core\/channel-registry"/);
   assert.match(code, /buildModelQueue\(/);
   assert.match(code, /describeChannels\(/);
   assert.match(code, /readAdminPools\(\)/);

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminSession } from "@/lib/admin-session";
-import { normalizeBizKeyDraft, toPublicBizApiKey } from "@/lib/biz-api-keys";
-import { revokeBizApiKey, updateBizApiKey } from "@/lib/biz-api-key-store";
-import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
+import { normalizeBizKeyDraft, toPublicBizApiKey } from "@/lib/accounts/biz-api-keys";
+import { revokeBizApiKey, updateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/generation-core/image-model-ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

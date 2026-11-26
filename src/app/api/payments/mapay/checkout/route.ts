@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
+import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/billing/plans";
 import {
   buildMapayCheckoutFields,
   createMapayOrderId,
@@ -7,12 +7,12 @@ import {
   getMapaySubmitUrl,
   normalizeMapayPaymentType,
   renderMapaySubmitPage,
-} from "@/lib/mapay";
-import { buildMapayOrderParam, mapayOrderSecret } from "@/lib/mapay-order-param";
-import { buildSeatPendingOrder, parseSeatOrderParam, seatOrderEntitlementCoins, type SeatOrderIdentity } from "@/lib/team-seat-order";
-import { quoteSeatOrder } from "@/lib/team-seat-pricing";
-import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
-import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
+} from "@/lib/billing/mapay";
+import { buildMapayOrderParam, mapayOrderSecret } from "@/lib/billing/mapay-order-param";
+import { buildSeatPendingOrder, parseSeatOrderParam, seatOrderEntitlementCoins, type SeatOrderIdentity } from "@/lib/billing/team-seat-order";
+import { quoteSeatOrder } from "@/lib/billing/team-seat-pricing";
+import { readFirstChargeEligibilityViaRelay } from "@/lib/billing/first-charge";
+import { lookupUserIdByTokenViaRelay } from "@/lib/accounts/newapi-session-token";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

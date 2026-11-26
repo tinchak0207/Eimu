@@ -10,7 +10,7 @@ import {
   quickstartCurlExamples,
   quickstartExampleSize,
 } from "./dev-quickstart.ts";
-import { GENERATION_MODEL_CATALOG, IMAGE_MODEL_IDS, generationModel } from "./generation-model-catalog";
+import { GENERATION_MODEL_CATALOG, IMAGE_MODEL_IDS, generationModel } from "./generation-core/generation-model-catalog";
 
 /** 占位金钥：测试与回报一律不入真实凭证。 */
 const PLACEHOLDER_KEY = "sk-biz-placeholder";

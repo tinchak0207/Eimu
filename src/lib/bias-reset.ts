@@ -6,7 +6,7 @@
 // （无台账、不可复现）。这里给出机制：一条可审计的水位，让「修好之前的证据」不再
 // 计入判定；历史证据本身保留（不破坏、可反查）。
 //
-// 谁写：`tools/refresh-channel-bias.ts`（带 reason/actor，同一入口复位调度态）。
+// 谁写：`tools/ops/suppliers/refresh-channel-bias.ts`（带 reason/actor，同一入口复位调度态）。
 // 谁读：`/v1/model-status`、`/api/internal/model-status`（24h 统计 + 欠费信号）、
 //       `model-availability-gate`（72h 断路器）。
 //

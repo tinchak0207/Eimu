@@ -5,7 +5,7 @@ import {
   SEEDANCE_20_MODEL_ID,
   SEEDREAM_50_PRO_MODEL_ID,
   SEEDREAM_50_LITE_MODEL_ID,
-} from "../image-model-ids.js";
+} from "./image-model-ids.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { SupplierRequestError } from "./failure-classifier";
 import { cleanFilmeraWatermark, isFilmeraMediaUrl } from "./filmera-cleaner";

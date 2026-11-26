@@ -4,14 +4,14 @@ import { Fragment, useRef, useState } from "react";
 import {
   modelBaseName,
   modelPromotionTag,
-} from "@/lib/provider-config";
+} from "@/lib/generation-core/provider-config";
 import {
   generationModel,
   modelPriceLabel,
   type ModelKnowledge,
   type ModelUsageTipParams,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
+} from "@/lib/generation-core/generation-model-catalog";
 import { Check, ChevronDown, ImageIcon, Video } from "lucide-react";
 import { VendorIcon } from "./brand-icons";
 import { buildLoraTourDescription, LORA_TOUR_CONTENT, LORA_TOUR_STORAGE_KEY } from "@/lib/lora-tour-content";

@@ -15,9 +15,9 @@
 
 | 平面 | 职责 | 今天的程式码真源 | 不准知道什么 |
 |---|---|---|---|
-| **分发**（Distribution） | 形态转换（OpenAI 同步／B 端 202 异步／MCP／Web UI）、鉴权、配额与限流、把 job 状态投影成管道形状 | `src/app/api/v1/**`、`src/app/openai/v1/**` + `src/lib/openai-compat/**`、`src/app/api/generation-jobs/**`、`src/lib/mcp/**`、`src/lib/biz-api-keys.ts`、`src/lib/biz-openai-error.ts` | 任何供给名、上游模型名、上游 base URL、adapterType；帐本表；重试与换供给的策略 |
+| **分发**（Distribution） | 形态转换（OpenAI 同步／B 端 202 异步／MCP／Web UI）、鉴权、配额与限流、把 job 状态投影成管道形状 | `src/app/api/v1/**`、`src/app/openai/v1/**` + `src/lib/openai-compat/**`、`src/app/api/generation-jobs/**`、`src/lib/mcp/**`、`src/lib/accounts/biz-api-keys.ts`、`src/lib/generation-core/biz-openai-error.ts` | 任何供给名、上游模型名、上游 base URL、adapterType；帐本表；重试与换供给的策略 |
 | **生产**（Production） | job 生命周期（`pending_billing → queued → leased → submitting → running → succeeded/failed/cancelled/refunded`）、供给选择与租约、重试／补偿／deadline、失败分类、产物落地、**计费 reserve/commit/refund**、成本闸、对帐 | `src/lib/generation-core/{command-service,job-repository,scheduler,worker-service,billing-ledger,billing-relay,failure-classifier,artifact-service,provider-reconciliation,model-availability-gate,paid-video-cost-gate}.ts` | 管道形状（OpenAI JSON、Next `NextResponse`、同步等待）；任何上游的 HTTP 细节（路径、payload、轮询格式） |
-| **供给**（Supply） | 把一条「已选定供给 + 已归一请求」变成上游呼叫：提交、轮询、取消、把上游回应还原成产物位址 | `src/lib/generation-core/*-upstream.ts`、`newapi-adapter.ts`、`supplier-adapter.ts`（分派）、`src/lib/supplier-channels.config.ts`（宣告） | 用户、租户、金额、帐本、job 状态机、其他供给的存在、管道形状 |
+| **供给**（Supply） | 把一条「已选定供给 + 已归一请求」变成上游呼叫：提交、轮询、取消、把上游回应还原成产物位址 | `src/lib/generation-core/*-upstream.ts`、`newapi-adapter.ts`、`supplier-adapter.ts`（分派）、`src/lib/generation-core/supplier-channels.config.ts`（宣告） | 用户、租户、金额、帐本、job 状态机、其他供给的存在、管道形状 |
 
 **[F]** 生产核心内部已经是干净的单向依赖：`generation-core/{command-service,worker-service,scheduler,job-repository,billing-ledger}.ts` 没有 import 任何 `biz-api-*`／`openai-compat`／`pixai-proxy`／`next/server`；`*-upstream.ts` 与 `newapi-adapter.ts` 没有 import `billing-*`／`job-repository`／`database`／`image-billing`（2026-09-28 grep，零命中）。
 **[F]** 违例全部集中在「绕过生产核心」的旁路上（legacy 同步引擎、pixai 同步代理、音乐工具）。见 violations。
@@ -162,7 +162,7 @@ export interface SupplyAdapter {
 ### 2.3 gway 走契约（验收 1-a）
 
 gway 是同协议（`openai_video`）的新供给。
-- **今天** **[F]**：commit `ed47cb58` 只改 `src/lib/supplier-channels.config.ts`（+25 行）；另有 repo 外的控面 DB seed + `GWAY_*` env。成本闸「零改动」是因为上游模型名与 xiaoyxiao 同名（`supplier-channels.config.ts:72`）——**代价是 gway 的真实单价没进闸**（上条 FACT）。
+- **今天** **[F]**：commit `ed47cb58` 只改 `src/lib/generation-core/supplier-channels.config.ts`（+25 行）；另有 repo 外的控面 DB seed + `GWAY_*` env。成本闸「零改动」是因为上游模型名与 xiaoyxiao 同名（`supplier-channels.config.ts:72`）——**代价是 gway 的真实单价没进闸**（上条 FACT）。
 - **冻结后**：只写一个 `SupplyDeclaration`（在 `supplier-channels.config.ts`），`adapter: openaiVideoAdapter`，四条 claim 各带 `unitPriceCny/priceSource`。成本闸读 claim 的价；worker 经 `declaration.adapter.submit/poll` 呼叫；对帐经 `adapter.poll`。
 - **碰到的档**：`supplier-channels.config.ts`（1 档）。第二个档只在协议是新的时才出现：`src/lib/supply/adapters/<protocol>.ts`。**不存在第三个档**：分派（`supplier-adapter.ts`）、协议映射（`worker-service.ts:62`）、轮询分派（`provider-reconciliation.ts:247`）、型别联集（`types.ts:167,214`）、DB CHECK（`db/migrations/014_*.sql:3`）、价目表（`paid-video-cost-gate.ts:101`）在冻结后都改为**读 registry**，不再随供给增长。
 
@@ -194,7 +194,7 @@ listCapabilities(tenant): Promise<Array<{ modelId; kinds; available }>>
 ### 3.3 同步／异步在分发平面收敛
 
 - **生产只认一种形状：异步 job。** **[F]** `submitGenerationCommand` 只回 job；`/api/v1/*` 回 202。
-- **同步＝管道在自己那层等 job。** **[F]** `/openai/v1` 就是这样做的：`openai-compat/generation.ts:1-26` 提交到 `/api/v1/images/generations`、轮询 `/api/v1/images/{id}`、超时回 504 且不取消任务；它**没有 import 任何 generation-core 或供给模组**（`8cb16aea` 的 14 档全在 `src/app/openai/**`、`src/lib/openai-compat/**`、`src/lib/biz-openai-error.ts`）。这是冻结后的**范本管道**。
+- **同步＝管道在自己那层等 job。** **[F]** `/openai/v1` 就是这样做的：`openai-compat/generation.ts:1-26` 提交到 `/api/v1/images/generations`、轮询 `/api/v1/images/{id}`、超时回 504 且不取消任务；它**没有 import 任何 generation-core 或供给模组**（`8cb16aea` 的 14 档全在 `src/app/openai/**`、`src/lib/openai-compat/**`、`src/lib/generation-core/biz-openai-error.ts`）。这是冻结后的**范本管道**。
 - **[F]** 反例：`/v1/images/edits`、`/v1/upscale`、`/v1/template-generations` 是「同步直通上游」，不经 job（`pixai-proxy.ts:33-43`），也因此需要一份生产目录里的同步幂等快取 `generation-core/sync-idempotency.ts:1-4`。冻结后这三条也走 job，`sync-idempotency.ts` 随之退役。
 - **[F]** 传输：`/openai/v1` 走 HTTP 回自己的 `/api/v1` 而不是 in-process 呼叫，原因是 Vercel 不持有 `GENERATION_DATABASE_URL`（`openai-compat/generation.ts:3-8`）。现在它已被代理到控面执行（`next.config.mjs:93`，commit `1b49771a`）。**[I]** HTTP 回环在控面上已非必要，但它守住了「管道只碰门面」，不列违例。
 
@@ -222,9 +222,9 @@ new-api 站长新增一个 OpenAI 类型渠道：`base_url = https://image.tinch
 
 | 情境 | 今天 N／M（档名） | 冻结后 |
 |---|---|---|
-| 新增一条**同协议**供给（例 gway） | **N=1**：`src/lib/supplier-channels.config.ts` **[F]** `ed47cb58`；若上游模型名是新的，另加 `src/lib/generation-core/paid-video-cost-gate.ts`（白名单 `:74` + 价目 `:101`）→ **N=2** | **N=1**：`supplier-channels.config.ts` |
-| 新增一条**新协议**异步供给 | **N=8**：`src/lib/generation-core/<x>-upstream.ts`（新）、`supplier-adapter.ts`（分派 `:105-131`）、`types.ts`（`:167` adapterType、`:214` ProviderProtocol）、`worker-service.ts`（`:62` protocolOfAdapter）、`provider-reconciliation.ts`（`:247` pollProviderTask）、`src/lib/supplier-channels.config.ts`（`:28` 型别联集 + 条目）、`db/migrations/0xx_*.sql`（`supplier_adapter_type_check`，最新定义在 `014_cangyuansuanli_supplier.sql:3`）、`paid-video-cost-gate.ts`（视频时）**[I]**（逐一由分派点 grep 推出，未以一次真实新增验证） | **N=2**：`src/lib/supply/adapters/<x>.ts`（新）+ `supplier-channels.config.ts` |
-| 新增一条**管道**（例 `/openai/v1`） | **M=9**（非测试）：`src/app/openai/v1/{images/generations,chat/completions,models}/route.ts`、`src/lib/openai-compat/{generation,models,errors,chat-messages}.ts`、`src/lib/biz-openai-error.ts`、`next.config.mjs`（`:93`）**[F]** `8cb16aea` + `1b49771a`；其中 **管道目录外 2 档**（`biz-openai-error.ts`、`next.config.mjs`），**生产／供给平面 0 档** | 管道自有目录 + **管道目录外 ≤1 档**（`next.config.mjs` 代理行；部署拓扑所迫）；生产／供给 0 档 |
+| 新增一条**同协议**供给（例 gway） | **N=1**：`src/lib/generation-core/supplier-channels.config.ts` **[F]** `ed47cb58`；若上游模型名是新的，另加 `src/lib/generation-core/paid-video-cost-gate.ts`（白名单 `:74` + 价目 `:101`）→ **N=2** | **N=1**：`supplier-channels.config.ts` |
+| 新增一条**新协议**异步供给 | **N=8**：`src/lib/generation-core/<x>-upstream.ts`（新）、`supplier-adapter.ts`（分派 `:105-131`）、`types.ts`（`:167` adapterType、`:214` ProviderProtocol）、`worker-service.ts`（`:62` protocolOfAdapter）、`provider-reconciliation.ts`（`:247` pollProviderTask）、`src/lib/generation-core/supplier-channels.config.ts`（`:28` 型别联集 + 条目）、`db/migrations/0xx_*.sql`（`supplier_adapter_type_check`，最新定义在 `014_cangyuansuanli_supplier.sql:3`）、`paid-video-cost-gate.ts`（视频时）**[I]**（逐一由分派点 grep 推出，未以一次真实新增验证） | **N=2**：`src/lib/supply/adapters/<x>.ts`（新）+ `supplier-channels.config.ts` |
+| 新增一条**管道**（例 `/openai/v1`） | **M=9**（非测试）：`src/app/openai/v1/{images/generations,chat/completions,models}/route.ts`、`src/lib/openai-compat/{generation,models,errors,chat-messages}.ts`、`src/lib/generation-core/biz-openai-error.ts`、`next.config.mjs`（`:93`）**[F]** `8cb16aea` + `1b49771a`；其中 **管道目录外 2 档**（`biz-openai-error.ts`、`next.config.mjs`），**生产／供给平面 0 档** | 管道自有目录 + **管道目录外 ≤1 档**（`next.config.mjs` 代理行；部署拓扑所迫）；生产／供给 0 档 |
 | 同一管道再接一个中转站租户（new-api 站） | **M=0** **[I]**（只需签 biz key） | M=0 |
 
 ---

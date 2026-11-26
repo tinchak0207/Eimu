@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { buildGatewayEndpoints, describeEnvChannels, shouldBypassAuthForLocalTest } from "../../../lib/sub2api.ts";
-import { ADOBE2API_MODEL_IDS } from "../../../lib/image-model-ids.js";
+import { buildGatewayEndpoints, describeEnvChannels, shouldBypassAuthForLocalTest } from "../../../lib/generation-core/sub2api.ts";
+import { ADOBE2API_MODEL_IDS } from "../../../lib/generation-core/image-model-ids.js";
 
 const root = process.cwd();
 
@@ -227,7 +227,7 @@ test("generate image route refunds reserved quota on every path that fails to de
 
 test("generate image route remembers failing endpoints instead of re-walking a dead queue", () => {
   const source = read("src/app/api/generate-images/route.ts");
-  const registry = read("src/lib/channel-registry.ts");
+  const registry = read("src/lib/generation-core/channel-registry.ts");
 
   // The breaker now lives in channel-registry, shared by the user and biz pipelines —
   // one pipeline's observed failure cools the endpoint for both. The route must consume
@@ -235,7 +235,7 @@ test("generate image route remembers failing endpoints instead of re-walking a d
   assert.match(source, /recordEndpointFailure\(endpoint\)/);
   assert.match(source, /recordEndpointSuccess\(endpoint\)/);
   assert.match(source, /prioritizeHealthyEndpoints\(/);
-  assert.match(source, /from "@\/lib\/channel-registry"/);
+  assert.match(source, /from "@\/lib\/generation-core\/channel-registry"/);
   assert.doesNotMatch(readCode("src/app/api/generate-images/route.ts"), /new Map<string, \{ failures/);
 
   assert.match(registry, /ENDPOINT_FAILURE_THRESHOLD/);
@@ -309,13 +309,13 @@ test("generate image route overlaps pool loading with authentication", () => {
 });
 
 test("server history reads go through the blob sdk instead of a hand-built api url", () => {
-  const source = read("src/lib/server-history-store.ts");
+  const source = read("src/lib/media/server-history-store.ts");
 
   // Reads once hand-built `https://blob.vercel-storage.com/<path>` — that is the API
   // host, not the public read host (`<storeId>.public.blob.vercel-storage.com`), so every
   // read 404'd: history was overwritten down to a single entry and /api/history stayed
   // empty. Only the bare API host is forbidden; matching on the public host is correct.
-  assert.doesNotMatch(readCode("src/lib/server-history-store.ts"), /https:\/\/blob\.vercel-storage\.com/);
+  assert.doesNotMatch(readCode("src/lib/media/server-history-store.ts"), /https:\/\/blob\.vercel-storage\.com/);
   assert.match(source, /get\(urlOrPath, \{ access: "public" \}\)/);
   assert.match(source, /statusCode !== 200/);
   assert.match(source, /export async function persistGeneratedImage/);
@@ -323,7 +323,7 @@ test("server history reads go through the blob sdk instead of a hand-built api u
 });
 
 test("admin pool store caches pools and pages through every stored config", () => {
-  const source = read("src/lib/admin-pool-store.ts");
+  const source = read("src/lib/generation-core/admin-pool-store.ts");
 
   // Read on every generation before: list() + get() per image, sixteen for copies: 8.
   assert.match(source, /POOL_CACHE_TTL_MS/);
@@ -332,7 +332,7 @@ test("admin pool store caches pools and pages through every stored config", () =
   // list() pages by pathname; ignoring hasMore meant the newest config fell off page one
   // once the prefix held more than 100 saves, silently freezing admin edits.
   assert.match(source, /page\.hasMore \? page\.cursor : undefined/);
-  assert.doesNotMatch(readCode("src/lib/admin-pool-store.ts"), /limit: 100/);
+  assert.doesNotMatch(readCode("src/lib/generation-core/admin-pool-store.ts"), /limit: 100/);
   // Superseded configs were never deleted, so the prefix grew without bound.
   assert.match(source, /del\(stale\.map/);
 });
@@ -393,7 +393,7 @@ test("generate image route bills authenticated users server-side", () => {
 });
 
 test("image billing helper adjusts the server-calculated quota for each request", () => {
-  const source = read("src/lib/image-billing.ts");
+  const source = read("src/lib/billing/image-billing.ts");
 
   assert.match(source, /export const IMAGE_GENERATION_QUOTA = QUOTA_PER_COIN/);
   assert.match(source, /requiredQuota/);
@@ -430,7 +430,7 @@ test("generate image route reports every upstream failure after fallback attempt
 
 test("generate image route runs deterministic quality gates before dispatching providers", () => {
   const source = read("src/app/api/generate-images/route.ts");
-  const gates = read("src/lib/generation-gates.ts");
+  const gates = read("src/lib/generation-core/generation-gates.ts");
 
   // 门必须真的挂在主链路上：解析参数之后、扣费/派发之前。
   assert.match(source, /runPreGenerationGates\(\{/);

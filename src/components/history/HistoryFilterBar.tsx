@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { Boxes, ChevronDown, FileJson, Filter, Image as ImageIcon, Music, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { text } from "@/lib/ui-strings";
-import { filterableDeliverableKinds } from "@/lib/deliverable-kind";
-import type { DeliverableKind } from "@/lib/deliverable-kind";
-import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
-import type { HistoryEntryKind, HistoryFacets, HistoryQuery, NonDeliverableEntryKind } from "@/lib/history-types";
+import { filterableDeliverableKinds } from "@/lib/media/deliverable-kind";
+import type { DeliverableKind } from "@/lib/media/deliverable-kind";
+import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/media/history-types";
+import type { HistoryEntryKind, HistoryFacets, HistoryQuery, NonDeliverableEntryKind } from "@/lib/media/history-types";
 
 export interface HistoryFilterBarProps {
   query: HistoryQuery;

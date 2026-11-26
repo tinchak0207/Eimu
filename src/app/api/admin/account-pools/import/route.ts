@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildAccountImportRequest, normalizeAccountImportResult, sanitizeSub2APIError, sub2APIAdminFetch } from "@/lib/sub2api-admin";
-import { requireAdminSession } from "@/lib/admin-session";
+import { buildAccountImportRequest, normalizeAccountImportResult, sanitizeSub2APIError, sub2APIAdminFetch } from "@/lib/generation-core/sub2api-admin";
+import { requireAdminSession } from "@/lib/accounts/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

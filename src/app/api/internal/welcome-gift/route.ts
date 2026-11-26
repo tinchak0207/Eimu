@@ -1,5 +1,5 @@
 // 控制面侧的新人礼端点。调用方：
-//   - Vercel 上 /api/auth/me（src/lib/welcome-gift-login.ts）：op=grant 发放；
+//   - Vercel 上 /api/auth/me（src/lib/billing/welcome-gift-login.ts）：op=grant 发放；
 //     站内通知写完后 op=noticed 回执（占位表 noticed_at）
 //   - Vercel 上 POST /api/auth/me：首登弹窗展示后 op=modal_seen 回执（modal_seen_at）
 //   - 运维回溯（在控制面容器内签名后打本端点）：op=backfill，可带 dryRun
@@ -12,15 +12,16 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import { generationDatabaseConfigured } from "@/lib/generation-core/database";
 import {
   WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN,
+  MINIAPP_WELCOME_GIFT_QUOTA,
   backfillWelcomeGifts,
   grantWelcomeGift,
   createPostgresWelcomeGiftStore,
   productionWelcomeGiftDeps,
-} from "@/lib/welcome-gift";
+} from "@/lib/billing/welcome-gift";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     const userId = typeof body.userId === "number" ? body.userId : Number.NaN;
     const op = body.op ?? "grant";
-    if ((op !== "grant" && op !== "noticed" && op !== "modal_seen") || !Number.isInteger(userId) || userId <= 0) {
+    if ((op !== "grant" && op !== "grant_miniapp" && op !== "noticed" && op !== "modal_seen") || !Number.isInteger(userId) || userId <= 0) {
       return NextResponse.json({ ok: false, message: "缺少合法的 op 或 userId。" }, { status: 400 });
     }
     if (op === "noticed") {
@@ -78,7 +79,9 @@ export async function POST(req: NextRequest) {
       const updated = await createPostgresWelcomeGiftStore().markModalSeen(userId);
       return NextResponse.json({ ok: true, updated });
     }
-    const result = await grantWelcomeGift(userId, productionWelcomeGiftDeps());
+    const deps = productionWelcomeGiftDeps();
+    // 只认 HMAC 已验证的服务端操作，绝不采信 body.amount/body.source。
+    const result = await grantWelcomeGift(userId, op === "grant_miniapp" ? { ...deps, amountQuota: MINIAPP_WELCOME_GIFT_QUOTA } : deps);
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     console.error("[internal/welcome-gift] failed", error);

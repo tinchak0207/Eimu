@@ -30,8 +30,8 @@ test("image-upstream-probe probes the exact production queue (buildModelQueue + 
   // 同源不变量：队列只能来自 channel-registry，覆写只能来自 channel-overrides。
   assert.match(code, /buildModelQueue/);
   assert.match(code, /getRuntimeChannelOverrides/);
-  assert.match(code, /from "@\/lib\/channel-registry"/);
-  assert.match(code, /from "@\/lib\/channel-overrides"/);
+  assert.match(code, /from "@\/lib\/generation-core\/channel-registry"/);
+  assert.match(code, /from "@\/lib\/generation-core\/channel-overrides"/);
 
   // 防回退：不得再自行拼装 env 端点 + 池合并——那会无视 admin 的调度启停。
   assert.doesNotMatch(code, /buildGatewayEndpointsWithPools\(/);
@@ -44,7 +44,7 @@ test("account-pools routing diagnosis honors admin channel overrides", () => {
   // 诊断必须读 runtime 覆写，且针对的正是可覆写渠道 id「env:sub2api」。
   assert.match(code, /getRuntimeChannelOverrides/);
   assert.match(code, /env:sub2api/);
-  assert.match(code, /from "@\/lib\/channel-overrides"/);
+  assert.match(code, /from "@\/lib\/generation-core\/channel-overrides"/);
 
   // 停用时要对 admin 明说，而不是沉默地继续宣称路由生效。
   assert.match(code, /sub2api 已在路由调度中被停用/);

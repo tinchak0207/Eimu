@@ -9,7 +9,7 @@
 // 不直连资料库，提交/轮询都走被 beforeFiles 代理的 HTTP 入口（见 lib/openai-compat/generation.ts）。
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { isModelAllowedForKey } from "@/lib/biz-api-keys";
+import { isModelAllowedForKey } from "@/lib/accounts/biz-api-keys";
 import {
   guardBizApiKey,
   openAICompatError,

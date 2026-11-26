@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { directImagePrompt } from "../../../../lib/invisible-prompt-director";
+import { directImagePrompt } from "../../../../lib/generation-core/invisible-prompt-director";
 
 const source = readFileSync(
   join(process.cwd(), "src/app/api/agent/optimize-prompt/route.ts"),

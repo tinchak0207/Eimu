@@ -22,8 +22,8 @@
 
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@/lib/blob-backend";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { put } from "@/lib/media/blob-backend";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { AD_SIZE_OPTIONS, normalizeSizeSelection, type AdSizeOption } from "@/lib/ad-formats";
 import { summarizeFormatCrops, type FormatCropPlan } from "@/lib/canvas/format-crops";
 import { cropImage, readSourceImageInfo } from "@/lib/canvas/format-crops-exec";

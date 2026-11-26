@@ -10,6 +10,7 @@ import {
   applyVoiceoverShotsToNodes,
   estimateVoiceoverCoins,
   planVoiceoverBatches,
+  planStoryboardVoiceoverDryRun,
   projectStoryboardShots,
   resolveVoiceoverVoice,
   runStoryboardVoiceover,
@@ -191,24 +192,66 @@ test("真跑：6 行全成 → 每镜 narrationAudioId／audioAnchorId 生效，
   assert.equal(execution.result.costCoins, 0.006);
 });
 
-test("真跑：某行 TTS 失败 → 立即停手、整批拒写、分镜原样", async () => {
+test("真跑：第 4 行失败 → 立即停手，前 3 行已成功的音轨保留；续做只补第 4–6 行，前 3 行不重配不重复计费", async () => {
   const nodes = sixNarrationNodes();
   const client = fakeClient((request) =>
-    request.index === 2 ? { error: "上游 503" } : { audioUrl: MP3(request.index + 1), durationMs: 10_000 },
+    request.index === 3 ? { error: "上游 503" } : { audioUrl: MP3(request.index + 1), durationMs: 10_000, costCoins: 0.01 },
   );
   const execution = await runStoryboardVoiceover(project(nodes), { client });
 
   assert.equal(execution.result.ok, false);
   assert.equal(execution.result.applied, false);
   assert.equal(execution.result.refused?.code, "tts_line_failed");
-  assert.match(execution.result.refused?.note ?? "", /第 3 行/);
+  assert.match(execution.result.refused?.note ?? "", /第 4 行/);
   // 立即停手：失败行之后的行一次都没送（不续花钱）。
-  assert.equal(client.calls.length, 3);
-  assert.deepEqual(client.calls.map((call) => call.index), [0, 1, 2]);
-  // 分镜原样（未部分写入）。
-  assert.deepEqual(execution.shots, projectStoryboardShots(project(nodes)).entries.map((entry) => entry.shot));
-  const merged = applyVoiceoverShotsToNodes(nodes, execution.entries, execution.shots);
-  assert.ok(merged.nodes.every((node) => node.metadata?.narrationAudioId === undefined));
+  assert.deepEqual(client.calls.map((call) => call.index), [0, 1, 2, 3]);
+  assert.equal(execution.partial, true);
+  assert.equal(execution.ledger.length, 3);
+  // 已成功的 3 行落盘；失败行及其后无音轨。
+  const saved = applyVoiceoverShotsToNodes(nodes, execution.entries, execution.shots, execution.ledger);
+  assert.deepEqual(saved.staleRows, []);
+  assert.deepEqual(
+    saved.nodes.map((node) => node.metadata?.narrationAudioId ?? null),
+    [MP3(1), MP3(2), MP3(3), null, null, null],
+  );
+
+  // 续做：前 3 行指纹一致 → 沿用；只送第 4–6 行。
+  const resumed = fakeClient((request) => ({ audioUrl: MP3(request.index + 1), durationMs: 10_000, costCoins: 0.01 }));
+  const second = await runStoryboardVoiceover(project(saved.nodes), { client: resumed });
+  assert.deepEqual(resumed.calls.map((call) => call.index), [3, 4, 5]);
+  assert.equal(second.result.reusedLines, 3);
+  assert.equal(second.result.synthesizedLines, 3);
+  assert.equal(second.result.ok, true);
+  // 报价口径：续做的 dryRun 只算待合成行。
+  const quote = planStoryboardVoiceoverDryRun(project(saved.nodes));
+  assert.equal(quote.reusedLines, 3);
+  assert.equal(quote.lines.filter((line) => !line.reuse).length, 3);
+});
+
+test("写回时台词已被改：该行音轨不绑（旧音轨不盖新台词），其余行照写", async () => {
+  const nodes = sixNarrationNodes();
+  const execution = await runStoryboardVoiceover(project(nodes), { client: fakeClient() });
+  const edited = nodes.map((node, i) =>
+    i === 1 ? { ...node, metadata: { ...node.metadata, narration: "合成期间被改掉的新旁白" } } : node,
+  );
+  const merged = applyVoiceoverShotsToNodes(edited, execution.entries, execution.shots, execution.ledger);
+  assert.equal(merged.staleRows.length, 1);
+  assert.equal(merged.nodes[1].metadata?.narrationAudioId, undefined);
+  assert.equal(merged.nodes[0].metadata?.narrationAudioId, MP3(1));
+});
+
+test("两集都从第 1 镜起：全专案配音各归各镜，第二集不覆盖第一集", async () => {
+  const a = shotNode("001", { narration: "第一集旁白" });
+  const b = shotNode("001", { narration: "第二集旁白" });
+  const nodes = [
+    { ...a, id: "ep1-s1" },
+    { ...b, id: "ep2-s1" },
+  ] as CanvasNode[];
+  const execution = await runStoryboardVoiceover(project(nodes), { client: fakeClient() });
+  assert.equal(execution.result.applied, true);
+  const merged = applyVoiceoverShotsToNodes(nodes, execution.entries, execution.shots, execution.ledger);
+  assert.equal(merged.nodes[0].metadata?.narrationAudioId, MP3(1));
+  assert.equal(merged.nodes[1].metadata?.narrationAudioId, MP3(2));
 });
 
 test("真跑：任务成功但回不可用音频 URL（图 URL）→ 整批拒写", async () => {

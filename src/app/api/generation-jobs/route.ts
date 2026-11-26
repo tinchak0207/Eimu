@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@/lib/blob-backend";
+import { put } from "@/lib/media/blob-backend";
 import {
   generationCapabilities,
   generationCoins,
   imageSizeForAspectRatio,
   normalizeGenerationConfig,
-} from "@/lib/generation-model-catalog";
-import { syncModelPricing } from "@/lib/pricing-runtime";
+} from "@/lib/generation-core/generation-model-catalog";
+import { syncModelPricing } from "@/lib/billing/pricing-runtime";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
@@ -30,15 +30,15 @@ import {
   videoPostProductionGeneratedSeconds,
 } from "@/lib/generation-core/video-post-production";
 import type { CreateGenerationReferenceArtifactInput, GenerationReference } from "@/lib/generation-core/types";
-import { publicObjectUrl } from "@/lib/two-phase-upload";
-import { authenticateImageUser } from "@/lib/image-billing";
+import { publicObjectUrl } from "@/lib/media/two-phase-upload";
+import { authenticateImageUser } from "@/lib/billing/image-billing";
 import {
   composeWebTaskPrompt,
   displayGenerationPrompt,
   readRequestWorkflow,
   withOriginalPrompt,
-} from "@/lib/web-task-prompt";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+} from "@/lib/agent/web-task-prompt";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

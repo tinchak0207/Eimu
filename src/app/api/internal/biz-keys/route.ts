@@ -1,7 +1,7 @@
 // 控制面侧的密钥写入端点。只接受 HMAC 签名请求，不接受管理员会话 ——
 // 这个端点的调用方是 Vercel 上的 admin 路由，不是浏览器。
 //
-// 对应关系见 src/lib/biz-key-sync.ts 的头注释：权威源 Postgres 在这台机器上，
+// 对应关系见 src/lib/accounts/biz-key-sync.ts 的头注释：权威源 Postgres 在这台机器上，
 // 但 Vercel 连不上它的端口，于是走这条签名通道。
 
 import { NextRequest, NextResponse } from "next/server";
@@ -10,16 +10,16 @@ import {
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
   type BizKeySyncOperation,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import {
   bizKeyDatabaseEnabled,
   deleteBizKeyFromDatabase,
   insertBizKeyIntoDatabase,
   listBizKeysFromDatabase,
   updateBizKeyInDatabase,
-} from "@/lib/biz-api-key-repository";
-import type { BizApiKey } from "@/lib/biz-api-keys";
-import { gatherLocalDiagnostics } from "@/lib/control-plane-diagnostics";
+} from "@/lib/accounts/biz-api-key-repository";
+import type { BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { gatherLocalDiagnostics } from "@/lib/generation-core/control-plane-diagnostics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -54,7 +54,7 @@ import {
   type WorkflowDslSource,
   type WorkflowDslStep,
 } from "./schema";
-import { HARNESS_TOOL_IDS } from "../harness-tool-ids";
+import { HARNESS_TOOL_IDS } from "../agent/harness-tool-ids";
 import { workflowNodeId, type WorkflowNodeMetadata } from "./compile";
 import type { ProjectCompileInput } from "./project-ops";
 import {

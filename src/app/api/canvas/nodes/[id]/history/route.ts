@@ -3,7 +3,7 @@
 // 认证：requireVerifiedUser（同 /api/canvas/projects；只读自己的专案）。
 // 回传该节点的版本清单（升序）＋当前快照指标（含软删状态），供版本面板/回退确认用。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import { readCanvasProject } from "@/lib/canvas/project-store";
 import { listNodeVersions } from "@/lib/canvas/node-versions";
 

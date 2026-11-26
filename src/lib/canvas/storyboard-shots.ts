@@ -26,7 +26,7 @@
 // `compactMetadataForAgent` 两处白名单（真源＝`node-metadata-fields.ts`），漏一端＝
 // 刷新/回旧会话后候选集与星标凭空消失且不报错（同 sceneCard / storyboardShot 家族病灶）。
 
-import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
 import { normalizeTaskVersions } from "./task-versions";
 import type { CanvasNode, CanvasNodeMetadata, CanvasNodeStatus } from "./types";
 
@@ -467,12 +467,112 @@ export function shotMediaReadiness(metadata: Record<string, unknown>): ShotMedia
     hasNonEmptyText(bag.audioAnchorId);
 
   const versions = normalizeTaskVersions(bag.taskVersions);
+  // 输入指纹（AID 采用稿＋输入指纹语义）：版本带 `inputSig` 时，必须与**当前**输入一致才算交付；
+  // 不一致＝旧稿（仍留在 taskVersions 供回看，但不再被默认当成「这一镜已完成」）。
+  // 缺 `inputSig`＝历史版本（尚未绑定输入），按旧口径计；`patch_metadata` 会在输入变更前把它盖章。
+  const currentSig: Record<"main_image" | "main_video", string> = {
+    main_image: shotInputSignature(bag, "image"),
+    main_video: shotInputSignature(bag, "video"),
+  };
   const hasDeliveredVersion = (tag: "main_image" | "main_video"): boolean =>
-    !!versions?.items.some((entry) => entry.tags.includes(tag) && hasNonEmptyText(entry.url));
+    !!versions?.items.some(
+      (entry) =>
+        entry.tags.includes(tag) &&
+        hasNonEmptyText(entry.url) &&
+        (!entry.inputSig || entry.inputSig === currentSig[tag]),
+    );
 
   const hasImage = hasDeliveredVersion("main_image") || !!selectedShotCandidate(normalizeShotCandidates(bag.shotCandidates));
 
   return { hasImage, hasVideo: hasDeliveredVersion("main_video"), hasAudio };
+}
+
+// ─────────────────────────────────────────── 输入指纹（旧稿不再默认算交付）
+
+/** 影响**出图**的输入栏（改了＝旧图稿过期）。 */
+const IMAGE_INPUT_FIELDS = ["visualDescription", "prompt"] as const;
+/** 影响**出片**的输入栏＝出图输入 ＋ 镜头语言／动作（「推镜改横移」只让视频过期，图仍有效）。 */
+const VIDEO_INPUT_FIELDS = [
+  ...IMAGE_INPUT_FIELDS,
+  "actionState",
+  "shotSize",
+  "cameraAngle",
+  "focalLength",
+  "cameraMovement",
+  "composition",
+  "lighting",
+] as const;
+
+function readInputField(bag: Record<string, unknown>, field: string): string {
+  const nested = bag.storyboardShot;
+  if (nested && typeof nested === "object" && field in (nested as Record<string, unknown>)) {
+    const v = (nested as Record<string, unknown>)[field];
+    return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
+  }
+  const v = bag[field];
+  return typeof v === "string" ? v.trim() : v == null ? "" : String(v);
+}
+
+/** FNV-1a 32 位（非密码学；只做「输入是否变过」的稳定指纹）。 */
+export function stableSig(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/** 一镜在某类产物（图／片）上的当前输入指纹。读法与 `storyboard-invalidation` 一致（先巢状后摊平）。 */
+export function shotInputSignature(
+  metadata: Record<string, unknown>,
+  kind: "image" | "video",
+): string {
+  const fields = kind === "image" ? IMAGE_INPUT_FIELDS : VIDEO_INPUT_FIELDS;
+  const bag = metadata ?? {};
+  return stableSig(fields.map((field) => `${field}=${readInputField(bag, field)}`).join("\u0001"));
+}
+
+/**
+ * 给 `taskVersions` 里**尚无指纹**的版本盖章（纯函式，回新集合；全都有指纹＝回 `undefined` 表示无需改）。
+ * 盖的是传入 `metadata` 当前的输入指纹——呼叫端在「输入即将变更**之前**」用旧 metadata 盖，
+ * 或在「新版本刚生成之后」用新 metadata 盖。
+ */
+export function stampTaskVersionSignatures(
+  metadata: Record<string, unknown>,
+): ReturnType<typeof normalizeTaskVersions> | undefined {
+  const set = normalizeTaskVersions(metadata?.taskVersions);
+  if (!set || set.items.every((entry) => entry.inputSig)) return undefined;
+  const sig = {
+    main_image: shotInputSignature(metadata, "image"),
+    main_video: shotInputSignature(metadata, "video"),
+  };
+  return {
+    ...set,
+    items: set.items.map((entry) => {
+      if (entry.inputSig) return entry;
+      // 一版带多个标签时取最严（video 指纹包含 image 指纹的全部输入）。
+      const kind = entry.tags.includes("main_video") ? "main_video" : "main_image";
+      return { ...entry, inputSig: sig[kind] };
+    }),
+  };
+}
+
+/** 一镜里已过期（指纹不再匹配当前输入）的版本号清单，分图／片（给 UI「旧稿」标记与回执用）。 */
+export function staleShotVersions(metadata: Record<string, unknown>): { image: string[]; video: string[] } {
+  const set = normalizeTaskVersions(metadata?.taskVersions);
+  const out = { image: [] as string[], video: [] as string[] };
+  if (!set) return out;
+  const image = shotInputSignature(metadata, "image");
+  const video = shotInputSignature(metadata, "video");
+  for (const entry of set.items) {
+    if (!entry.inputSig) continue;
+    if (entry.tags.includes("main_video") && entry.inputSig !== video) out.video.push(entry.version);
+    else if (entry.tags.includes("main_image") && !entry.tags.includes("main_video") && entry.inputSig !== image) {
+      out.image.push(entry.version);
+    }
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────── 分镜增删复制重排
@@ -621,4 +721,14 @@ export function cloneShotNode(node: CanvasNode, options: CloneShotNodeOptions): 
     ...(options.position ? { position: { ...options.position } } : {}),
     ...(metadata ? { metadata } : {}),
   };
+}
+/** 导演台白模（scene_3d 节点 sceneCard）的指纹：机位／舞台任一变化都会变。无 sceneCard＝undefined（没有白模就没有绑定）。 */
+export function motionReferenceSig(stageNode: CanvasNode | undefined): string | undefined {
+  const card = stageNode?.metadata?.sceneCard;
+  if (!card) return undefined;
+  try {
+    return stableSig(JSON.stringify(card));
+  } catch {
+    return undefined;
+  }
 }

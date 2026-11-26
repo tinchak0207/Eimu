@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { optimizeVideoPromptWithAgent } from "@/lib/agent-prompt-optimizer";
-import { directImagePrompt, directVideoPrompt } from "@/lib/invisible-prompt-director";
+import { optimizeVideoPromptWithAgent } from "@/lib/agent/agent-prompt-optimizer";
+import { directImagePrompt, directVideoPrompt } from "@/lib/generation-core/invisible-prompt-director";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

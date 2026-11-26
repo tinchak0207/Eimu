@@ -33,7 +33,7 @@ import {
   AgentSessionList,
   formatSessionRelativeTime,
 } from "@/components/agent-chat/AgentSessionList";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
 import {
   useCreativeProjects,
   type ProjectChatView,

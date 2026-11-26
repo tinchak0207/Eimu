@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ArrowUpRight, Bot, Pencil, X, ZoomIn } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
+import { STYLE_PRESETS, type StylePreset } from "@/lib/generation-core/prompt-enhancer";
 import { cn } from "@/lib/utils";
 import type { PromptInputMode } from "@/components/PromptInput";
 import type { PixaiStage } from "@/components/prompt-input/use-pixai-tools-panel";

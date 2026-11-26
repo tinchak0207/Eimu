@@ -14,21 +14,21 @@ import {
   toAgentAttachmentRef,
   uploadAgentAttachments,
   type AgentAttachment,
-} from "@/lib/agent-chat-client";
-import { MAX_VIDEO_BYTES, UploadAbortedError, uploadAudioDirect, uploadVideoDirect } from "@/lib/agent-uploads";
+} from "@/lib/agent/agent-chat-client";
+import { MAX_VIDEO_BYTES, UploadAbortedError, uploadAudioDirect, uploadVideoDirect } from "@/lib/agent/agent-uploads";
 import {
   FRAME_COUNT,
   extractFramesFromFile,
   formatFrameTime,
   isVideoFile,
   type FrameTimestamp,
-} from "@/lib/video-frames";
+} from "@/lib/media/video-frames";
 import {
   ingestMediaLocally,
   isIngestUsable,
   toDerivedFiles,
   type LocalMediaIngest,
-} from "@/lib/local-media-ingest";
+} from "@/lib/media/local-media-ingest";
 import {
   SkillSlashMenu,
   shouldOpenSlashMenu,

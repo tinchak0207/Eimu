@@ -1,0 +1,68 @@
+[
+  {
+    "original_path": "bench/music-bench/arms/raw-yue2-pilot/run.ts",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/raw-yue2-pilot/run.ts.txt",
+    "sha256": "b34c77b3a52fef781c1f9a0f15c4681711ed974dbf4674a1508562e82b1c6a46",
+    "bytes": 7505
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/armD-bare-yue2.ts",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/armD-bare-yue2.ts.txt",
+    "sha256": "0962fdef6ef5db7ccc2e01cfd25fb0ff4861503ca6fe06a183cbbd76c6e3738a",
+    "bytes": 8104
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/run-idx0.ts",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/run-idx0.ts.txt",
+    "sha256": "247d3df5241f69e3f75225c2fc67d9eb2a31a66dbdece07575740e3819233943",
+    "bytes": 33599
+  },
+  {
+    "original_path": "bench/music-bench/arms/beast-on-pilot/run-idx0.ts",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/beast-on-pilot/run-idx0.ts.txt",
+    "sha256": "247d3df5241f69e3f75225c2fc67d9eb2a31a66dbdece07575740e3819233943",
+    "bytes": 33599
+  },
+  {
+    "original_path": "deploy-staging/yue2-modal/out_local/service/e2e_client_runner.ts",
+    "archived_path": "docs/archive/audio-bench-scripts/deploy-staging/yue2-modal/out_local/service/e2e_client_runner.ts.txt",
+    "sha256": "7950e187049db9526f0605e37e75d6625829457d51664e59d54fa6ad7b1c608a",
+    "bytes": 3249
+  },
+  {
+    "original_path": "bench/music-bench/_armA-work/batch_armA.py",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/_armA-work/batch_armA.py.txt",
+    "sha256": "f1c158f0b31541519de1698eccafbb55bcd3bb82566b05d933d84ca16134fac2",
+    "bytes": 5714
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/armA-bare-lyria.py",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/armA-bare-lyria.py.txt",
+    "sha256": "5cea856fac744c1e620fcfd76cb6342a1d806b1ac2f7891f2de3da3dc7839426",
+    "bytes": 6359
+  },
+  {
+    "original_path": "bench/music-bench/arms/beast-on-pilot/run-one.sh",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/beast-on-pilot/run-one.sh.txt",
+    "sha256": "2757f22b8072151c0fdb65ce45f7ea22e212299a753977f96073925695f00336",
+    "bytes": 1285
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/run-brief.sh",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/run-brief.sh.txt",
+    "sha256": "8b27fde4e27158c53242af6b29a87d6fc370aa44a7f5d7e62084bbae10cba637",
+    "bytes": 1632
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/answer-and-run.sh",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/answer-and-run.sh.txt",
+    "sha256": "6e929c4f8564a96e2e7cd81510ef99174d2a8222d2d66a00d21f213706b50161",
+    "bytes": 1305
+  },
+  {
+    "original_path": "bench/music-bench/arms/design-bench/drive-to-song.sh",
+    "archived_path": "docs/archive/audio-bench-scripts/bench/music-bench/arms/design-bench/drive-to-song.sh.txt",
+    "sha256": "8fe91674f90cc324856eb1d46c934904ad6d461be695bc9775bf1ee0649f8689",
+    "bytes": 1953
+  }
+]

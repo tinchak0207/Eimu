@@ -3,9 +3,9 @@
 // 存在的意义：证明「commit 之后在清单可见」——没有这条，第二段就只是写了一张看不见的纸。
 // 消费路径另有 `GET /api/assets`（资产库包 `uploaded-assets`）。
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
-import { listUploadedObjects } from "@/lib/upload-record-store";
-import { resolveDirectUploadBackend, publicObjectUrl } from "@/lib/two-phase-upload";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
+import { listUploadedObjects } from "@/lib/media/upload-record-store";
+import { resolveDirectUploadBackend, publicObjectUrl } from "@/lib/media/two-phase-upload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

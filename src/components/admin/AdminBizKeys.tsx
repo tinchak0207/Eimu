@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { PublicBizApiKey } from "@/lib/biz-api-keys";
+import type { PublicBizApiKey } from "@/lib/accounts/biz-api-keys";
 import { AdminAccountAdjustment } from "@/components/admin/AdminAccountAdjustment";
 
 interface Notice {

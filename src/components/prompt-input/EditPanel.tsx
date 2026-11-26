@@ -2,9 +2,9 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Check, Copy, ImagePlus, Loader2, X } from "lucide-react";
-import { generationCoins } from "@/lib/generation-model-catalog";
-import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
-import { imageHelpers } from "@/lib/image-helpers";
+import { generationCoins } from "@/lib/generation-core/generation-model-catalog";
+import { PIXAI_EDIT_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
+import { imageHelpers } from "@/lib/media/image-helpers";
 import { cn } from "@/lib/utils";
 import type { PickedImage } from "@/components/pixai-tools/shared";
 import { PIXAI_RATIO_CHIPS, pickSourceFile, type PixaiRatioKey, type PixaiStage } from "@/components/prompt-input/use-pixai-tools-panel";

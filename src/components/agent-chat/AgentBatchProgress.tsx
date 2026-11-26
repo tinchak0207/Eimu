@@ -2,8 +2,8 @@
 
 import { memo } from "react";
 import { Loader2 } from "lucide-react";
-import type { AgentChatState } from "@/lib/agent-chat-types";
-import { resolveWaitingProgress } from "@/lib/waiting-contract";
+import type { AgentChatState } from "@/lib/agent/agent-chat-types";
+import { resolveWaitingProgress } from "@/lib/agent/waiting-contract";
 
 export interface AgentBatchProgressProps {
   items: AgentChatState["items"];
@@ -66,7 +66,7 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
   if (images === 0 && coins === 0) return null;
 
   // 有真实分母才谈百分比：分母未知时进度条退成流动指示条，绝不显示假的「X%」。
-  // 契约真源：src/lib/waiting-contract.ts（与粒子海等待同一口径）。
+  // 契约真源：src/lib/agent/waiting-contract.ts（与粒子海等待同一口径）。
   const waiting = resolveWaitingProgress(images, total);
   const hasTotal = waiting.kind === "determinate";
   const totalCount = hasTotal ? waiting.total : 0;

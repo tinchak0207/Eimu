@@ -90,7 +90,7 @@
 - [前端与UI] 文字帧并批渲染 — 每 delta 一次全面板重渲染收敛到每帧一次；中止成功合成 turn.done；IME Enter 不再误送出 ｜ 证据: c86dd01d
 - [前端与UI] 聊天气泡样式 — 用户灰底气泡＋助理无底气泡 ｜ 证据: eb1dcede
 - [前端与UI] AgentPlanCard 计画卡 — agent 计画以卡片呈现，reducer／types／契约同步 ｜ 证据: 75c25e24
-- [前端与UI] 桌面 Electron 薄壳 — desktop/ 薄壳 AppImage 可用（node_modules/dist 已 ignore） ｜ 证据: 75c25e24
+- [前端与UI] 桌面 Electron 薄壳 — apps/desktop/ 薄壳 AppImage 可用（node_modules/dist 已 ignore） ｜ 证据: 75c25e24
 - [前端与UI] 历史三档位筛选＋DAG 缩图 — 图片／影片／工作流筛选、workflow 卡取 dagThumbnailUrl、影片卡补 videoUrl 与 Play 标示（原本纯影片记录在历史隐形） ｜ 证据: 06baf18e
 - [前端与UI] RerunDialog 费用显示 — 「上次实付 X 币／本次预估 Y 币」，实付缺时只显预估并明确标「预估」不冒充实付 ｜ 证据: 06baf18e
 - [前端与UI] HistoryLightbox DAG 展开 — 展开工作流 DAG 节点清单＋节点合计币数 ｜ 证据: 06baf18e
@@ -108,7 +108,7 @@
 - [运维与观测] opencode 接缝统一 — opencodeFetch／opencodeJson helper，批次 1+2 共 8 档 33 呼叫点机械迁移（timeout／错误处理结构逐点保留） ｜ 证据: 5a7b9a90
 - [运维与观测] serverless 中文字型随程式码部署 — Noto Sans CJK SC 子集化 18.6MB→5MB 放 public/fonts/，首次渲染把 dag-fonts.conf 的 __FONT_DIR__ 替换写 /tmp 并设 FONTCONFIG_FILE ｜ 证据: 8a3a6728
 - [运维与观测] sharp 隔离 — 拆出 dag-png-server.ts 隔离 sharp，workflow-png.ts 回归零依赖，避免把 sharp 拖进 browser bundle 炸整包 build ｜ 证据: 5881aff6
-- [运维与观测] 部署体积守卫 — .vercelignore 排除 .next/（847MB）与 desktop/dist/，避免单档超 Vercel 100MB 上限 ｜ 证据: 5881aff6
+- [运维与观测] 部署体积守卫 — .vercelignore 排除 .next/（847MB）与 apps/desktop/dist/，避免单档超 Vercel 100MB 上限 ｜ 证据: 5881aff6
 - [运维与观测] Laya ONNX 服务可入 VPS — 无 torch（onnxruntime＋tokenizers）、RSS 1.61GB、同契约 POST /predict 与 GET /healthz、三型 choice/score/noul 校准与 torch 逐位吻合 ｜ 证据: f1d5dd98
 - [运维与观测] gateway 无损切割 — index.ts 10029→8225→272 行组合根（共 32 个新模组），行多重集 7804=7804、missing 0 extra 0 审计证明零损 ｜ 证据: c8bfe4eb, bcd57a72
 

@@ -1,0 +1,72 @@
+/**
+ * e2e_client_runner.ts — 片 E 端到端证据产生器（**只做呼叫与落盘，不改任何契约**）。
+ *
+ * 用「真 client」src/lib/music-yue2.ts 的 generateYue2Track（不是另写 HTTP 呼叫），
+ * env: YUE2_MODAL_ENDPOINT=http://127.0.0.1:8788、YUE2_HMAC_SECRET=...
+ * 用法（repo 根）：npx tsx deploy-staging/yue2-modal/out_local/service/e2e_client_runner.ts
+ */
+import { readFileSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { join, resolve } from "node:path"
+
+import { generateYue2Track, yue2ModalUrl } from "../../../../src/lib/music-yue2"
+
+// 以 repo 根为 cwd 执行（npx tsx deploy-staging/...）；避免 import.meta（本档可能被当 CJS 转译）
+const outDir = resolve(process.cwd(), "deploy-staging/yue2-modal/out_local/service")
+
+async function main(): Promise<void> {
+  const t0 = Date.now()
+  console.log(`[e2e] endpoint=${yue2ModalUrl()} client=src/lib/music-yue2.ts (generateYue2Track)`)
+  const lyrics = readFileSync(
+    resolve(process.cwd(), "deploy-staging/yue2-modal/out_local/lyrics_song1.txt"),
+    "utf8",
+  )
+  const style =
+    "Mandarin city pop, warm electric piano, chorus guitar, 106 BPM, female vocal"
+  console.log(`[e2e] request id=auto(uuid) cot=full seed=12345 style=${style} lyrics_chars=${lyrics.length}`)
+
+  let result
+  try {
+    result = await generateYue2Track({ style, lyrics, cot: "full", seed: 12345 })
+  } catch (e) {
+    console.log(`[e2e] FAILED client-side error: ${(e as Error).message}`)
+    process.exitCode = 1
+    return
+  }
+  const wallMs = Date.now() - t0
+  const flac = Buffer.from(result.audioBase64, "base64")
+  const sha = createHash("sha256").update(flac).digest("hex")
+  const flacPath = join(outDir, "client_e2e.flac")
+  writeFileSync(flacPath, flac)
+  writeFileSync(join(outDir, "client_e2e.score.abc"), result.scoreAbc ?? "")
+
+  // 契约栏位透传自检（client 回传物件 → 落盘 JSON，供验收核对）
+  const receipt = {
+    wall_ms: wallMs,
+    mimeType: result.mimeType,
+    sample_rate_from_contract: 48000,
+    durationSeconds: result.durationSeconds,
+    audio_bytes: flac.length,
+    client_sha256: sha,
+    upstream_audioSha256: result.audioSha256 ?? null,
+    sha256_match: result.audioSha256 === sha,
+    scoreAbc_chars: result.scoreAbc?.length ?? 0,
+    scoreAbc_nonnull: result.scoreAbc !== null,
+    truncated: result.truncated,
+    model: result.model ?? null,
+    upstreamUrl: result.upstreamUrl,
+    artifacts: result.artifacts,
+    saved_flac: flacPath,
+    endpoint: yue2ModalUrl(),
+  }
+  writeFileSync(join(outDir, "client_e2e.receipt.json"), JSON.stringify(receipt, null, 2) + "\n")
+  console.log(`[e2e] OK wall_ms=${wallMs} audio_bytes=${flac.length} sha256=${sha}`)
+  console.log(`[e2e] mime=${result.mimeType} duration_s=${result.durationSeconds} sha256_match=${receipt.sha256_match} scoreAbc_chars=${receipt.scoreAbc_chars} model=${result.model}`)
+  console.log(`[e2e] artifacts=${JSON.stringify(result.artifacts)}`)
+  console.log(`[e2e] truncated=${JSON.stringify(result.truncated)}`)
+  console.log(`[e2e] saved=${flacPath}`)
+  console.log("[e2e] score_abc 前 10 行:")
+  console.log((result.scoreAbc ?? "(null)").split("\n").slice(0, 10).join("\n"))
+}
+
+void main()

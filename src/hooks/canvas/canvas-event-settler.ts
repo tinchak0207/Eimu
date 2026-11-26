@@ -7,7 +7,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import type { AgentAudioFailed, AgentImageDone, AgentImageFailed, AgentSseEvent, AgentVideoFailed } from "@/lib/agent-chat-types";
+import type { AgentAudioFailed, AgentImageDone, AgentImageFailed, AgentSseEvent, AgentVideoFailed } from "@/lib/agent/agent-chat-types";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { CanvasNodeType } from "@/lib/canvas/types";
 import type { CanvasNode } from "@/lib/canvas/types";

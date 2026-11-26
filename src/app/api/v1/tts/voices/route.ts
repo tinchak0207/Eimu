@@ -9,11 +9,11 @@
 // 认证与错误形状与其他 `/v1/*` 同一套（biz key → 401/403/429；不新造收口）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
-import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { readBearerToken, type BizApiKey } from "@/lib/accounts/biz-api-keys";
+import { authenticateBizApiKey } from "@/lib/accounts/biz-api-key-store";
+import { addRateLimitHeaders } from "@/lib/accounts/biz-rate-limit-response-headers";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
-import { DEFAULT_TTS_VOICE, listVoices } from "@/lib/voice-library";
+import { DEFAULT_TTS_VOICE, listVoices } from "@/lib/media/voice-library";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／闸道／image-data-api blob／控制面）都在矽谷，同区省一趟横跨美国（2026-10-01 效能审计）

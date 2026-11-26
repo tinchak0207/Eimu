@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AgentImageCard } from "./AgentImageCard";
 import { AgentVideoCard } from "./AgentVideoCard";
 import { AgentAudioCard } from "./AgentAudioCard";
-import type { AgentImageItem, AgentAudioItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentImageItem, AgentAudioItem, AgentVideoItem } from "@/lib/agent/agent-chat-types";
 
 const root = process.cwd();
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -153,8 +153,10 @@ test("图卡：放大改走卡片内全屏查看器，onUpscale 语义已撤除"
   assert.doesNotMatch(imageCardSrc, /onUpscale/);
   assert.doesNotMatch(surfaceSrc, /onUpscale/);
   assert.doesNotMatch(transcriptSrc, /onUpscale/);
-  // 放大＝setViewerOpen(true)，图标用既有家族的 Expand（不自绘、非 Maximize2 的「修改放大」语义）。
-  assert.match(imageCardSrc, /setViewerOpen\(true\)/);
+  // 放大＝openViewer()，图标用既有家族的 Expand（不自绘、非 Maximize2 的「修改放大」语义）。
+  // 放大已并入赏阅（Viewer）：由 useAgentMediaViewerOpen 打开，卡片不再自管 viewerOpen state。
+  assert.match(imageCardSrc, /const openViewer = \(\) => openMedia\(item, viewerSet\)/);
+  assert.match(imageCardSrc, /<ImageAction label="放大"/);
   assert.match(imageCardSrc, /\bExpand\b/);
   const markup = renderToStaticMarkup(createElement(AgentImageCard, { item: imageItem }));
   // 放大钮可点（未损坏），且真的渲染 lucide Expand 图标（不是 Maximize2）。

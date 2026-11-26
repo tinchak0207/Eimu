@@ -22,7 +22,7 @@
 //    与栏位名本身就是泄漏面，只洗值不洗键等于没洗（红队 2026-10-05 Hack 实测）。
 //    判据在 upstream-sanitizer 的 isErrorShapedPayload（含功能键正向白名单，不误伤成功体）。
 //    成功信封再补一道**栏位闸**：黑名单内的内部基础设施栏位名一并移除（只动键名、不动值），
-//    与 `src/lib/proxy.ts` 共用 `stripInternalSuccessKeys`；无命中时逐位透传原文
+//    与 `src/lib/generation-core/proxy.ts` 共用 `stripInternalSuccessKeys`；无命中时逐位透传原文
 //    （红队 2026-10-05 Hack 实测：成功信封的内部栏位名原样穿过，两条入口口径曾不一致）。
 //    键名匹配前先 canonicalize（NFKC／去零宽／分隔符归一／限定同形字折叠）——H9 独立复验
 //    反例②：零宽 `vendor\u200b_id`、全角 `model＿ratio`、中点 `model·price`、Cyrillic
@@ -37,7 +37,7 @@ import {
   sanitizeErrorShapedPayload,
   sanitizeUpstreamBody,
   stripInternalKeysFromJson,
-} from "@/lib/upstream-sanitizer";
+} from "@/lib/generation-core/upstream-sanitizer";
 
 // matcher 与内部判准的**大小写语义必须一致**（红队 2026-10-05 Hack 实测）：
 // Next 的 `beforeFiles` rewrite 由 path-to-regexp 编译，**大小写不敏感**；但 middleware 的

@@ -37,7 +37,7 @@
 //     （`@/lib/agent-output-cards`），`audioAnchorId` 的重算走既有轮子 `bindShotAudioTrack`
 //     （`./storyboard-shots`）——键名与锚规则只准一份。
 
-import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { usableAudioUrl } from "@/lib/agent/agent-output-cards";
 import { bindShotAudioTrack, type ShotAudioTrackRole } from "./storyboard-shots";
 import type { CanvasNodeMetadata } from "./types";
 
@@ -95,6 +95,10 @@ export interface StoryboardAudioShot {
   narrationAudioId?: string;
   /** 音轨锚（相容键）＝`dialogueAudioId || narrationAudioId`（回写时由轮子重算）。 */
   audioAnchorId?: string;
+  /** 对白音轨的合成指纹（音色＋文本）；与现行台词一致＝可复用，不重配。 */
+  dialogueAudioSig?: string;
+  /** 旁白音轨的合成指纹。 */
+  narrationAudioSig?: string;
 }
 
 /**
@@ -104,6 +108,12 @@ export interface StoryboardAudioShot {
 export interface AudioSourceRef {
   shotNumber: string;
   field: ShotAudioField;
+  /**
+   * 该行所属镜在**输入分镜阵列**里的索引（回写时的身份）。镜号只在集内唯一（两集都从第 1 镜起），
+   * 跨集合并回写时靠它对回原镜，镜号相同也不会互相覆盖。缺席＝旧调用方，退回镜号查找
+   * （此时输入里镜号重复会被具名拒 `duplicate_shot_number`）。
+   */
+  shotIndex?: number;
 }
 
 /** `shotsToAudioScript` 的结果：上游要吃的 `script` 字串 ＋ 本地溯源 `source`。 */
@@ -122,6 +132,7 @@ export type AudioApplyRefusalCode =
   | "missing_audio_url"
   | "unusable_audio_url"
   | "unknown_shot"
+  | "duplicate_shot_number"
   | "invalid_source";
 
 /** `applyAudioTimelineToShots` 的结果。 */
@@ -167,7 +178,8 @@ export interface AudioDurationDrift {
 export function shotsToAudioScript(shots: readonly StoryboardAudioShot[]): AudioScriptPlan {
   const rows: { role: ShotAudioField; text: string }[] = [];
   const source: AudioSourceRef[] = [];
-  for (const shot of shots) {
+  for (let shotIndex = 0; shotIndex < shots.length; shotIndex++) {
+    const shot = shots[shotIndex];
     const shotNumber = typeof shot?.shotNumber === "string" ? shot.shotNumber.trim() : "";
     if (!shotNumber) continue;
     for (const field of AUDIO_FIELD_ORDER) {
@@ -175,7 +187,7 @@ export function shotsToAudioScript(shots: readonly StoryboardAudioShot[]): Audio
       const text = typeof raw === "string" ? raw.trim() : "";
       if (!text) continue;
       rows.push({ role: field, text });
-      source.push({ shotNumber, field });
+      source.push({ shotNumber, field, shotIndex });
     }
   }
   const script = JSON.stringify(rows);
@@ -231,9 +243,12 @@ export function applyAudioTimelineToShots(
   }
 
   const indexByShotNumber = new Map<string, number>();
+  const duplicateShotNumbers = new Set<string>();
   copy.forEach((shot, index) => {
     const shotNumber = typeof shot.shotNumber === "string" ? shot.shotNumber.trim() : "";
-    if (shotNumber) indexByShotNumber.set(shotNumber, index);
+    if (!shotNumber) return;
+    if (indexByShotNumber.has(shotNumber)) duplicateShotNumbers.add(shotNumber);
+    else indexByShotNumber.set(shotNumber, index);
   });
 
   // 先全量验证（纯检查，**不动 copy**）——全部合规才落盘，杜绝部分写入。
@@ -248,7 +263,20 @@ export function applyAudioTimelineToShots(
       return refuse("invalid_source", `source[${i}].field 不是 dialogue/narration → 整批拒写。`);
     }
     const shotNumber = typeof ref?.shotNumber === "string" ? ref.shotNumber.trim() : "";
-    const index = indexByShotNumber.get(shotNumber);
+    let index: number | undefined;
+    if (typeof ref?.shotIndex === "number") {
+      // 带身份的回写：索引必须落在输入内且镜号对得上，否则整批拒（不信悬空索引）。
+      const candidate = ref.shotIndex;
+      const at = Number.isInteger(candidate) ? copy[candidate] : undefined;
+      if (at && typeof at.shotNumber === "string" && at.shotNumber.trim() === shotNumber) index = candidate;
+    } else if (duplicateShotNumbers.has(shotNumber)) {
+      return refuse(
+        "duplicate_shot_number",
+        `镜号「${shotNumber}」在输入分镜里出现多次（多集各自从第 1 镜起？）且 source[${i}] 没带 shotIndex → 无法判定写回哪一镜，整批拒写（不让后一集覆盖前一集）。`,
+      );
+    } else {
+      index = indexByShotNumber.get(shotNumber);
+    }
     if (index === undefined) {
       return refuse("unknown_shot", `source[${i}] 的镜号「${shotNumber || "(空)"}」不在输入分镜内 → 整批拒写。`);
     }

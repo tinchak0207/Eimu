@@ -1,5 +1,5 @@
 // 控制面侧的 PWA 登录交接（handoff）端点。调用方是 Vercel 上的
-// src/lib/pwa-handoff.ts：Vercel 无控制面 DB 直连（与 biz-keys 同一约束），
+// src/lib/accounts/pwa-handoff.ts：Vercel 无控制面 DB 直连（与 biz-keys 同一约束），
 // 于是经签名通道把 create/deliver/poll/claim 四个 op 转投到这里落库。
 //
 // 鉴权复用 biz-key-sync 的 HMAC 通道（signatureDomain "pwa-handoff"），
@@ -10,7 +10,7 @@ import {
   BIZ_KEY_SYNC_SIGNATURE_HEADER,
   BIZ_KEY_SYNC_TIMESTAMP_HEADER,
   verifyBizKeySync,
-} from "@/lib/biz-key-sync";
+} from "@/lib/accounts/biz-key-sync";
 import {
   claimHandoff,
   createHandoffTicket,
@@ -18,7 +18,7 @@ import {
   isValidHandoffChallenge,
   isValidHandoffVerifier,
   pollHandoff,
-} from "@/lib/pwa-handoff";
+} from "@/lib/accounts/pwa-handoff";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

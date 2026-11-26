@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { ImageBillingGatewayError, ImageBillingRevertedError, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
+import { ImageBillingGatewayError, ImageBillingRevertedError, refundImageQuota, reserveImageQuota } from "@/lib/billing/image-billing";
 
 export type BillingRelayOperation = "reserve" | "refund";
 

@@ -12,7 +12,7 @@
 
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
 
 /** 取本地时区当天 00:00 的时间戳（与 history-types 的自然日边界同款：
  *  「今天」是自然日，不是「距今 24 小时」）。 */

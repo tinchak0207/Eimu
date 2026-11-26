@@ -4,7 +4,7 @@
 // pricing 栏位如实标注 v1 的计费方式（per_shot：逐镜头按模型价，走既有
 // billing-ledger），per_sku 一口价是商业化定价的后续工作，不提前虚标。
 
-import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/generation-core/image-model-ids.js";
 import { fieldSchemaView } from "./expand";
 import type { MarketingSku, SkuShotTemplate } from "./types";
 

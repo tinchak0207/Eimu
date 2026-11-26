@@ -9,12 +9,12 @@
 // 本路由只交付机制，不含任何运营文案。
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireVerifiedUser } from "@/lib/server-user";
+import { requireVerifiedUser } from "@/lib/accounts/server-user";
 import {
   NOTIFICATION_PAGE_SIZE,
   listInboxForUser,
   unreadCountForUser,
-} from "@/lib/notification-store";
+} from "@/lib/accounts/notification-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

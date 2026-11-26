@@ -70,6 +70,8 @@ const TASK_ID_MAX = 200;
 const TASK_URL_MAX = 2048;
 /** kind 输入长度上限（推导标签时用）。 */
 const KIND_MAX = 64;
+/** 输入指纹长度上限（8 位十六进制×2 余裕）。 */
+const INPUT_SIG_MAX = 32;
 
 /** 任务状态值域＝节点四态（`types.ts:81` 的 `CanvasNodeStatus`），不另立第二套。 */
 const TASK_STATUSES: readonly CanvasNodeStatus[] = ["idle", "success", "loading", "error"];
@@ -92,6 +94,17 @@ export interface TaskVersionEntry {
   tags: TaskTag[];
   /** 本版任务的交付物 URL（＝D37 的素材；选中者就是采用稿）。 */
   url?: string;
+  /**
+   * 产出本版时该镜的输入指纹（`storyboard-shots.shotInputSignature`）。
+   * 就绪判定只认「指纹与当前输入一致」的版本；缺席＝历史版本（尚未绑定输入，按现状计）。
+   * 旧稿因此可回看、不会被默认当成交付（AID 采用稿＋输入指纹的语义）。
+   */
+  inputSig?: string;
+  /**
+   * 产出本版时所依据的 3D 白模（导演台 scene_3d 节点 sceneCard）指纹。
+   * 机位改了＝白模变了＝这一版对应旧白模：版本仍留着可看，但在审阅里标「旧稿」，不当成交付。
+   */
+  motionSig?: string;
 }
 
 /** 一格的任务版本史 ＋ 星标选中的那一版。 */
@@ -185,6 +198,8 @@ export function normalizeTaskVersionEntry(raw: unknown): TaskVersionEntry | null
   if (!version) return null;
   const taskId = trimmed(raw.taskId, TASK_ID_MAX);
   const url = trimmed(raw.url, TASK_URL_MAX);
+  const inputSig = trimmed(raw.inputSig, INPUT_SIG_MAX);
+  const motionSig = trimmed(raw.motionSig, INPUT_SIG_MAX);
   const status = TASK_STATUSES.includes(raw.status as CanvasNodeStatus)
     ? (raw.status as CanvasNodeStatus)
     : undefined;
@@ -194,6 +209,8 @@ export function normalizeTaskVersionEntry(raw: unknown): TaskVersionEntry | null
     ...(status ? { status } : {}),
     tags: normalizeTaskTags(raw.tags),
     ...(url ? { url } : {}),
+    ...(inputSig ? { inputSig } : {}),
+    ...(motionSig ? { motionSig } : {}),
   };
 }
 

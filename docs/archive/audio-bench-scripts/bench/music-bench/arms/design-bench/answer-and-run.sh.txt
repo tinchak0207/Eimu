@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# answer-and-run.sh <BRIEF_ID> [答复] —— 自主设计 Bench 第二阶段：补发出曲确认，让它真的出成品。
+#
+# 为什么需要两阶段：agent 的付费闸规定「音乐单价 >0.1 币须先报价确认」，
+# 而 --confirm yes 只在**已有 pending 请求**时生效——首次会话发起时还没有这个请求，
+# 所以必须跑完一轮、拿到 question.request/question，再 --resume 把答复补进去。
+# 这等同真实用户在界面上点「出整曲（推荐）」。
+set -uo pipefail
+REPO=/home/lenovo/Desktop/image-app
+D=$REPO/bench/music-bench/arms/design-bench
+ID="${1:?usage: answer-and-run.sh <BRIEF_ID> [答复]}"
+ANS="${2:-出整曲（推荐）}"
+EV="$D/${ID}-events2.json"
+LOG="$D/${ID}-run2.log"
+
+SID=$(python3 - "$D" "$ID" <<'PY'
+import json, sys, glob
+d, i = sys.argv[1], sys.argv[2]
+f = f"{d}/{i}-events.json"
+print(json.load(open(f, encoding="utf-8")).get("sessionId") or "")
+PY
+) || exit 9
+[ -n "$SID" ] || { echo "拿不到 $ID 的 session_id"; exit 9; }
+
+echo "resume id=$ID sid=$SID answer=$ANS"
+cd "$REPO" || exit 9
+timeout 1800 ./node_modules/.bin/tsx "$D/run-idx0.ts" --keep --resume "$SID" --answer "$ANS" \
+  --json "$EV" > "$LOG" 2>&1
+RC=$?
+echo "resume_exit=$RC id=$ID"
+node "$D/extract-all.mjs" "$EV" "$D/out" "$ID"

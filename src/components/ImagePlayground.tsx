@@ -7,7 +7,7 @@ import { PromptInput, type PromptInputMode } from "@/components/PromptInput";
 import { FaqSection } from "@/components/FaqSection";
 import { UseCaseLinks } from "@/components/UseCaseLinks";
 import { useCanvasChat, type UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import type { AgentSseEvent } from "@/lib/agent/agent-chat-types";
 import {
   FALLBACK_PROGRESS_DURATION_MS,
   NORMAL_PROGRESS_DURATION_MS,
@@ -23,7 +23,7 @@ import {
   PROVIDERS,
   PROVIDER_KEY,
   ProviderKey,
-} from "@/lib/provider-config";
+} from "@/lib/generation-core/provider-config";
 import {
   defaultGenerateAudio,
   defaultAspectRatio,
@@ -34,12 +34,12 @@ import {
   normalizeGenerationConfig,
   type AspectRatio,
   type OutputResolution,
-} from "@/lib/generation-model-catalog";
-import { enhancePrompt, type StylePreset } from "@/lib/prompt-enhancer";
-import { hasEnoughQuota } from "@/lib/new-api-client";
+} from "@/lib/generation-core/generation-model-catalog";
+import { enhancePrompt, type StylePreset } from "@/lib/generation-core/prompt-enhancer";
+import { hasEnoughQuota } from "@/lib/accounts/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
-import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/accounts/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
 import {
@@ -57,13 +57,13 @@ import {
 } from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import { WelcomeGiftDialog } from "@/components/welcome/WelcomeGiftDialog";
-import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
-import { ackWelcomeGiftModalSeen } from "@/lib/auth-client";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent/agent-example-prompts";
+import { ackWelcomeGiftModalSeen } from "@/lib/accounts/auth-client";
 import {
   markWelcomeGiftModalSeenLocally,
   welcomeGiftModalSeenLocally,
-} from "@/lib/welcome-gift-modal";
-import type { ReferenceImage } from "@/lib/image-types";
+} from "@/lib/billing/welcome-gift-modal";
+import type { ReferenceImage } from "@/lib/media/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
 import { ProjectSidebar } from "@/components/projects/ProjectSidebar";
@@ -73,8 +73,8 @@ import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/Direct
 // 执行 payload（initialPrompt/directive/slots/步骤文案）在 agent-templates-payload.ts，
 // 由 handleUseAgentTemplate 在使用处 await import() 动态载入（见下方回调）。
 // AgentTemplateFull 为纯型别 import（编译期擦除，不拉 payload 进 bundle）。
-import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
-import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
+import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent/agent-templates";
+import type { AgentTemplateFull } from "@/lib/agent/agent-templates-payload";
 import { fetchAgentCanvasSnapshotWithRev } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 import { useCreativeProjects } from "@/hooks/use-creative-projects";
@@ -316,7 +316,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     // 2026-09-12 首屏减重：执行 payload 点卡才动态载入（chunk 进快取，之后零开销）；
     // 载入失败（离线等）不收起画廊，模板不会凭空消失，可重试。
     void (async () => {
-      const { hydrateAgentTemplate, cropTemplate } = await import("@/lib/agent-templates-payload");
+      const { hydrateAgentTemplate, cropTemplate } = await import("@/lib/agent/agent-templates-payload");
       const template = hydrateAgentTemplate(card);
       const cropped = cropTemplate(template, selectedIndices);
       setAgentTemplateDismissed(true);

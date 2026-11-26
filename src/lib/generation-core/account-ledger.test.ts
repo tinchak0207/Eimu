@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { QUOTA_PER_COIN } from "@/lib/billing/quota-constants";
 import type { GenerationSql } from "./database.ts";
 import {
   computeAccountBalance,
@@ -28,7 +28,7 @@ import {
   type LedgerEntry,
   type LedgerEntryDraft,
 } from "./account-ledger.ts";
-import type { GatewayAdminUser, GatewayRedemption } from "@/lib/gateway-admin";
+import type { GatewayAdminUser, GatewayRedemption } from "@/lib/accounts/gateway-admin";
 
 /** 写入器注入：基线读法走假上游（生产默认 fetchGatewayUser）。 */
 function writerDeps(ledger: ReturnType<typeof fakeLedger>, baseline = 1_000_000) {
@@ -761,11 +761,11 @@ test("B1 分配（真转移）双写：我方帐本主帐 −Δ／成员 +Δ，�
   // 假上游 users.quota：主帐 40 = 5,000,000；成员 117 = 0。
   const quotas = new Map<number, number>([[40, 5_000_000], [117, 0]]);
   const adjustments: { userId: number; delta: number }[] = [];
-  const fetchUser = (async (id: number) => gatewayUser(id, quotas.get(id) ?? 0)) as unknown as typeof import("@/lib/gateway-admin").fetchGatewayUser;
+  const fetchUser = (async (id: number) => gatewayUser(id, quotas.get(id) ?? 0)) as unknown as typeof import("@/lib/accounts/gateway-admin").fetchGatewayUser;
   const adjustUserQuota = (async (id: number, delta: number) => {
     quotas.set(id, (quotas.get(id) ?? 0) + Math.round(delta));
     adjustments.push({ userId: id, delta: Math.round(delta) });
-  }) as unknown as typeof import("@/lib/gateway-admin").adjustGatewayUserQuotaExact;
+  }) as unknown as typeof import("@/lib/accounts/gateway-admin").adjustGatewayUserQuotaExact;
 
   // 假控制面：成员 key → user 117 的归属，加上真帐本表（UNIQUE + ON CONFLICT DO NOTHING）。
   const ledger = fakeLedger();

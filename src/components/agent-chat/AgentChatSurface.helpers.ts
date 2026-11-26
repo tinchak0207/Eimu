@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { AgentSessionSummary } from "@/lib/agent-chat-client";
-import { stationAuthHeaders } from "@/lib/agent-image-share";
+import type { AgentSessionSummary } from "@/lib/agent/agent-chat-client";
+import { stationAuthHeaders } from "@/lib/agent/agent-image-share";
 
 /** 登录类错误判定：客户端缺凭证（「尚未登录」）与服务端否定登入态的文案都算，
  *  这些不是重试能解决的，必须给登录按钮（2026-09-05：agent-session-guard 的

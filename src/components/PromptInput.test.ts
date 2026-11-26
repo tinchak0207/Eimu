@@ -34,7 +34,7 @@ test("prompt input appends example snippets and replaces the previous one on rep
 
 test("style selection immediately appends its prompt suffix without duplicating it on submit", () => {
   const prompt = PROMPT_INPUT_SURFACE;
-  const enhancer = read("src/lib/prompt-enhancer.ts");
+  const enhancer = read("src/lib/generation-core/prompt-enhancer.ts");
 
   assert.match(prompt, /const handleStyleChange/);
   assert.match(prompt, /STYLE_PRESETS\.find/);
@@ -255,7 +255,7 @@ test("the model picker groups models by vendor submenus and prices every option"
   assert.match(picker, /generationModel\(model\)\?\.vendor/);
   assert.match(picker, /DropdownMenuSubTrigger/);
   assert.match(picker, /DropdownMenuSubContent/);
-  const catalog = read("src/lib/generation-model-catalog/catalog.ts");
+  const catalog = read("src/lib/generation-core/generation-model-catalog/catalog.ts");
   assert.match(catalog, /vendor: "PixAI",/);
   const triggerBlock = picker.slice(picker.indexOf("<DropdownMenuTrigger"), picker.indexOf("</DropdownMenuTrigger>"));
   assert.doesNotMatch(triggerBlock, /modelPriceLabel|币\/张|币\/条/);
